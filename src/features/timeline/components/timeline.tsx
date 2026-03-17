@@ -8,9 +8,11 @@ import { KeyframeGraphPanel } from './keyframe-graph-panel';
 import { TrackRowFrame } from './track-row-frame';
 import { useTimelineTracks } from '../hooks/use-timeline-tracks';
 import { useSelectionStore } from '@/shared/state/selection';
+import { useEditorStore } from '@/shared/state/editor';
 import { useTimelineStore } from '../stores/timeline-store';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { HOTKEYS, HOTKEY_OPTIONS } from '@/config/hotkeys';
+import { useSettingsStore } from '@/features/timeline/deps/settings';
 
 import { Button } from '@/components/ui/button';
 import { Plus, Minus } from 'lucide-react';
@@ -18,9 +20,9 @@ import { CompositionBreadcrumbs } from './composition-breadcrumbs';
 import { useCompositionNavigationStore } from '../stores/composition-navigation-store';
 import type { TimelineTrack } from '@/types/timeline';
 import { trackDropIndexRef, trackDropGroupIdRef, trackDropParentIdRef, trackDragOffsetRef, trackDragJustDroppedRef } from '../hooks/use-track-drag';
-import { DEFAULT_TRACK_HEIGHT } from '@/features/timeline/constants';
 import { getVisibleTracks, getGroupDepth, getChildTrackIds } from '../utils/group-utils';
 import { createLogger } from '@/shared/logging/logger';
+import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/shared/ui/editor-layout';
 
 const logger = createLogger('Timeline');
 
@@ -33,8 +35,6 @@ interface TimelineProps {
   onGraphPanelOpenChange?: (isOpen: boolean) => void;
 }
 
-type TimelineEditorTab = 'keyframes' | 'scopes';
-
 /**
  * Complete Timeline Component
  *
@@ -46,6 +46,8 @@ type TimelineEditorTab = 'keyframes' | 'scopes';
  * Follows modular architecture with granular Zustand selectors
  */
 export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChange }: TimelineProps) {
+  const editorDensity = useSettingsStore((s) => s.editorDensity);
+  const editorLayout = getEditorLayout(editorDensity);
   const {
     tracks,
     addTrack,
@@ -109,7 +111,8 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
 
   // Bottom editor panel state (Keyframes / Scopes)
   const [isEditorPanelOpen, setIsEditorPanelOpen] = useState(false);
-  const [activeEditorTab, setActiveEditorTab] = useState<TimelineEditorTab>('keyframes');
+  const colorScopesOpen = useEditorStore((s) => s.colorScopesOpen);
+  const toggleColorScopesOpen = useEditorStore((s) => s.toggleColorScopesOpen);
 
   const setEditorPanelOpen = useCallback(
     (nextOpen: boolean) => {
@@ -123,16 +126,8 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   );
 
   const handleToggleKeyframeTab = useCallback(() => {
-    const shouldClose = isEditorPanelOpen && activeEditorTab === 'keyframes';
-    setActiveEditorTab('keyframes');
-    setEditorPanelOpen(!shouldClose);
-  }, [isEditorPanelOpen, activeEditorTab, setEditorPanelOpen]);
-
-  const handleToggleScopesTab = useCallback(() => {
-    const shouldClose = isEditorPanelOpen && activeEditorTab === 'scopes';
-    setActiveEditorTab('scopes');
-    setEditorPanelOpen(!shouldClose);
-  }, [isEditorPanelOpen, activeEditorTab, setEditorPanelOpen]);
+    setEditorPanelOpen(!isEditorPanelOpen);
+  }, [isEditorPanelOpen, setEditorPanelOpen]);
 
   const handleToggleEditorPanel = useCallback(() => {
     setEditorPanelOpen(!isEditorPanelOpen);
@@ -396,7 +391,7 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
     const newTrack: TimelineTrack = {
       id: `track-${Date.now()}`,
       name: getNextTrackName(),
-      height: DEFAULT_TRACK_HEIGHT,
+      height: editorLayout.timelineTrackHeight,
       locked: false,
       visible: true,
       muted: false,
@@ -498,10 +493,10 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
           onZoomIn={zoomHandlers?.handleZoomIn}
           onZoomOut={zoomHandlers?.handleZoomOut}
           onZoomToFit={zoomHandlers?.handleZoomToFit}
-          isKeyframePanelOpen={isEditorPanelOpen && activeEditorTab === 'keyframes'}
+          isKeyframePanelOpen={isEditorPanelOpen}
           onToggleKeyframePanel={handleToggleKeyframeTab}
-          isScopesPanelOpen={isEditorPanelOpen && activeEditorTab === 'scopes'}
-          onToggleScopesPanel={handleToggleScopesTab}
+          isScopesPanelOpen={colorScopesOpen}
+          onToggleScopesPanel={toggleColorScopesOpen}
         />
 
         {/* Composition Breadcrumbs - shown when inside a sub-composition */}
@@ -510,9 +505,15 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
       {/* Timeline Content */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Track Headers Sidebar */}
-        <div className="w-48 border-r border-border panel-bg flex-shrink-0 flex flex-col overflow-x-hidden">
+        <div
+          className="border-r border-border panel-bg flex-shrink-0 flex flex-col overflow-x-hidden"
+          style={{ width: EDITOR_LAYOUT_CSS_VALUES.timelineSidebarWidth }}
+        >
           {/* Tracks label with controls */}
-          <div className="h-11 flex items-center justify-between px-3 border-b border-border bg-secondary/20 flex-shrink-0">
+          <div
+            className="flex items-center justify-between px-3 border-b border-border bg-secondary/20 flex-shrink-0"
+            style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineTracksHeaderHeight }}
+          >
             <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider">
               Tracks
             </span>
@@ -627,7 +628,10 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
       </div>
 
       <div className="flex flex-shrink-0 overflow-hidden">
-        <div className="w-48 border-r border-border panel-bg flex-shrink-0" />
+        <div
+          className="border-r border-border panel-bg flex-shrink-0"
+          style={{ width: EDITOR_LAYOUT_CSS_VALUES.timelineSidebarWidth }}
+        />
         <div className="flex-1 min-w-0">
           <TimelineNavigator
             actualDuration={timelineMetrics.actualDuration}
@@ -640,8 +644,6 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
       {/* Keyframe Graph Panel */}
       <KeyframeGraphPanel
         isOpen={isEditorPanelOpen}
-        activeTab={activeEditorTab}
-        onSelectTab={setActiveEditorTab}
         onToggle={handleToggleEditorPanel}
         onClose={handleCloseEditorPanel}
       />

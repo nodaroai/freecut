@@ -31,6 +31,7 @@ import { SlipEditOverlay } from './slip-edit-overlay';
 import { SlideEditOverlay } from './slide-edit-overlay';
 import { useGizmoStore } from '../stores/gizmo-store';
 import { useCornerPinStore } from '../stores/corner-pin-store';
+import { useMaskEditorStore } from '../stores/mask-editor-store';
 import type { CompositionInputProps } from '@/types/export';
 import type { ItemEffect } from '@/types/effects';
 import type { ResolvedTransform } from '@/types/transform';
@@ -66,6 +67,7 @@ import { shouldPreferPlayerForStyledTextScrub as shouldPreferPlayerForStyledText
 import { useGpuEffectsOverlay } from '../hooks/use-gpu-effects-overlay';
 import { getBestDomVideoElementForItem } from '@/features/preview/deps/composition-runtime';
 import { createLogger } from '@/shared/logging/logger';
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 
 const logger = createLogger('VideoPreview');
 
@@ -658,6 +660,8 @@ export const VideoPreview = memo(function VideoPreview({
   const scrubPrewarmedSourcesRef = useRef<Set<string>>(new Set());
   const scrubPrewarmedSourceOrderRef = useRef<string[]>([]);
   const scrubPrewarmedSourceTouchFrameRef = useRef<Map<string, number>>(new Map());
+  const scrubOffscreenRenderedFrameRef = useRef<number | null>(null);
+  const captureCanvasSourceInFlightRef = useRef<Promise<OffscreenCanvas | HTMLCanvasElement | null> | null>(null);
   const captureInFlightRef = useRef<Promise<string | null> | null>(null);
   const captureImageDataInFlightRef = useRef<Promise<ImageData | null> | null>(null);
   const captureScaleCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -715,6 +719,7 @@ export const VideoPreview = memo(function VideoPreview({
   const hasSlide4Up = useSlideEditPreviewStore((s) => Boolean(s.itemId));
   const activeGizmoItemId = useGizmoStore((s) => s.activeGizmo?.itemId ?? null);
   const isGizmoInteracting = useGizmoStore((s) => s.activeGizmo !== null);
+  const isPenModeActive = useMaskEditorStore((s) => s.penMode);
   const isPlaying = usePlaybackStore((s) => s.isPlaying);
   const showGpuEffectsOverlay = useGpuEffectsOverlay(gpuEffectsCanvasRef, playerContainerRef, scrubOffscreenCanvasRef, scrubFrameDirtyRef);
   const zoom = usePlaybackStore((s) => s.zoom);
@@ -2024,6 +2029,8 @@ export const VideoPreview = memo(function VideoPreview({
     scrubPrewarmedSourcesRef.current.clear();
     scrubPrewarmedSourceOrderRef.current = [];
     scrubPrewarmedSourceTouchFrameRef.current.clear();
+    scrubOffscreenRenderedFrameRef.current = null;
+    captureCanvasSourceInFlightRef.current = null;
     previewPerfRef.current.fastScrubPrewarmedSources = 0;
     bypassPreviewSeekRef.current = false;
 
@@ -2092,6 +2099,7 @@ export const VideoPreview = memo(function VideoPreview({
 
         scrubOffscreenCanvasRef.current = offscreen;
         scrubOffscreenCtxRef.current = offscreenCtx;
+        scrubOffscreenRenderedFrameRef.current = null;
         scrubRendererRef.current = renderer;
         return renderer;
       } catch (error) {
@@ -2099,6 +2107,7 @@ export const VideoPreview = memo(function VideoPreview({
         scrubRendererRef.current = null;
         scrubOffscreenCanvasRef.current = null;
         scrubOffscreenCtxRef.current = null;
+        scrubOffscreenRenderedFrameRef.current = null;
         return null;
       } finally {
         scrubInitPromiseRef.current = null;
@@ -2107,6 +2116,24 @@ export const VideoPreview = memo(function VideoPreview({
 
     return scrubInitPromiseRef.current;
   }, [fastScrubInputProps, fps, getPreviewTransformOverride, getPreviewEffectsOverride, getPreviewCornerPinOverride, isResolving, renderSize.height, renderSize.width]);
+
+  const renderOffscreenFrame = useCallback(async (targetFrame: number): Promise<OffscreenCanvas | null> => {
+    const offscreen = scrubOffscreenCanvasRef.current;
+    if (offscreen && scrubOffscreenRenderedFrameRef.current === targetFrame) {
+      return offscreen;
+    }
+
+    const renderer = await ensureFastScrubRenderer();
+    const nextOffscreen = scrubOffscreenCanvasRef.current;
+    if (!renderer || !nextOffscreen) return null;
+
+    if (scrubOffscreenRenderedFrameRef.current !== targetFrame) {
+      await renderer.renderFrame(targetFrame);
+      scrubOffscreenRenderedFrameRef.current = targetFrame;
+    }
+
+    return nextOffscreen;
+  }, [ensureFastScrubRenderer]);
 
   // Dispose/recreate fast scrub renderer when composition inputs change.
   useEffect(() => {
@@ -2120,13 +2147,10 @@ export const VideoPreview = memo(function VideoPreview({
 
     const task = (async () => {
       try {
-        const renderer = await ensureFastScrubRenderer();
-        const offscreen = scrubOffscreenCanvasRef.current;
-        if (!renderer || !offscreen) return null;
-
         const playback = usePlaybackStore.getState();
         const targetFrame = playback.previewFrame ?? playback.currentFrame;
-        await renderer.renderFrame(targetFrame);
+        const offscreen = await renderOffscreenFrame(targetFrame);
+        if (!offscreen) return null;
 
         const format = options?.format ?? 'image/jpeg';
         const quality = options?.quality ?? 0.9;
@@ -2165,7 +2189,7 @@ export const VideoPreview = memo(function VideoPreview({
 
     captureInFlightRef.current = task;
     return task;
-  }, [ensureFastScrubRenderer]);
+  }, [renderOffscreenFrame]);
 
   const captureCurrentFrameImageData = useCallback(async (options?: CaptureOptions): Promise<ImageData | null> => {
     if (captureImageDataInFlightRef.current) {
@@ -2174,13 +2198,10 @@ export const VideoPreview = memo(function VideoPreview({
 
     const task = (async () => {
       try {
-        const renderer = await ensureFastScrubRenderer();
-        const offscreen = scrubOffscreenCanvasRef.current;
-        if (!renderer || !offscreen) return null;
-
         const playback = usePlaybackStore.getState();
         const targetFrame = playback.previewFrame ?? playback.currentFrame;
-        await renderer.renderFrame(targetFrame);
+        const offscreen = await renderOffscreenFrame(targetFrame);
+        if (!offscreen) return null;
 
         const targetWidth = Math.max(2, Math.round(options?.width ?? offscreen.width));
         const targetHeight = Math.max(2, Math.round(options?.height ?? offscreen.height));
@@ -2219,23 +2240,29 @@ export const VideoPreview = memo(function VideoPreview({
 
     captureImageDataInFlightRef.current = task;
     return task;
-  }, [ensureFastScrubRenderer]);
+  }, [renderOffscreenFrame]);
 
   const captureCanvasSource = useCallback(async (): Promise<OffscreenCanvas | HTMLCanvasElement | null> => {
-    try {
-      const renderer = await ensureFastScrubRenderer();
-      const offscreen = scrubOffscreenCanvasRef.current;
-      if (!renderer || !offscreen) return null;
-
-      const playback = usePlaybackStore.getState();
-      const targetFrame = playback.previewFrame ?? playback.currentFrame;
-      await renderer.renderFrame(targetFrame);
-      return offscreen;
-    } catch (error) {
-      logger.warn('Failed to capture canvas source:', error);
-      return null;
+    if (captureCanvasSourceInFlightRef.current) {
+      return captureCanvasSourceInFlightRef.current;
     }
-  }, [ensureFastScrubRenderer]);
+
+    const task = (async () => {
+      try {
+        const playback = usePlaybackStore.getState();
+        const targetFrame = playback.previewFrame ?? playback.currentFrame;
+        return await renderOffscreenFrame(targetFrame);
+      } catch (error) {
+        logger.warn('Failed to capture canvas source:', error);
+        return null;
+      } finally {
+        captureCanvasSourceInFlightRef.current = null;
+      }
+    })();
+
+    captureCanvasSourceInFlightRef.current = task;
+    return task;
+  }, [renderOffscreenFrame]);
 
   const setCaptureCanvasSource = usePlaybackStore((s) => s.setCaptureCanvasSource);
 
@@ -2534,6 +2561,7 @@ export const VideoPreview = memo(function VideoPreview({
           if (isPriorityFrame) {
             // Visible scrub targets still use full composition rendering.
             await renderer.renderFrame(frameToRender);
+            scrubOffscreenRenderedFrameRef.current = frameToRender;
           } else {
             // Background scrub prewarm only needs to advance decode state for
             // nearby sources. Avoid full composition work for non-visible frames.
@@ -2751,8 +2779,9 @@ export const VideoPreview = memo(function VideoPreview({
       void pumpRenderLoop();
     });
 
-    // During gizmo drags or live effect parameter changes, trigger re-renders
-    // even when frame is unchanged so previews stay on the fast-scrub render path.
+    // During gizmo drags or live preview changes, trigger re-renders even when
+    // the frame is unchanged so the fast-scrub overlay does not reuse a stale
+    // cached bitmap for the current frame.
     const unsubscribeGizmo = useGizmoStore.subscribe((state, prev) => {
       if (shouldPreferPlayerForPreview(usePlaybackStore.getState().previewFrame)) return;
       if (!forceFastScrubOverlay && !isGizmoInteractingRef.current) return;
@@ -2764,10 +2793,11 @@ export const VideoPreview = memo(function VideoPreview({
       const playbackState = usePlaybackStore.getState();
       const currentFrame = playbackState.currentFrame;
 
-      // Effect param changes don't change the frame number, so the frame cache
-      // would return the stale bitmap. Invalidate the current frame so the
-      // renderer re-composites with the updated effect params.
-      if (unifiedPreviewChanged && scrubRendererRef.current) {
+      // Preview-only changes don't advance the frame number, so the frame
+      // cache would otherwise return the stale bitmap for the current frame.
+      // Invalidate before requesting a repaint so gizmo resize/translate and
+      // live panel previews re-composite immediately.
+      if ((unifiedPreviewChanged || transformPreviewChanged) && scrubRendererRef.current) {
         scrubRendererRef.current.invalidateFrameCache([currentFrame]);
       }
 
@@ -3370,13 +3400,17 @@ export const VideoPreview = memo(function VideoPreview({
   // Handle click on background area to deselect items
   const backgroundRef = useRef<HTMLDivElement>(null);
   const handleBackgroundClick = useCallback((e: React.MouseEvent) => {
+    if (isPenModeActive) {
+      e.stopPropagation();
+      return;
+    }
     if (isMarqueeJustFinished()) return;
 
     const target = e.target as HTMLElement;
     if (target.closest('[data-gizmo]')) return;
 
     useSelectionStore.getState().clearItemSelection();
-  }, []);
+  }, [isPenModeActive]);
 
   // Handle frame change from player
   // Skip when in preview mode to keep primary playhead stationary
@@ -3469,7 +3503,8 @@ export const VideoPreview = memo(function VideoPreview({
       onClick={handleBackgroundClick}
     >
       <div
-        className="min-w-full min-h-full grid place-items-center p-6"
+        className="min-w-full min-h-full grid place-items-center"
+        style={{ padding: `calc(${EDITOR_LAYOUT_CSS_VALUES.previewPadding} / 2)` }}
         onClick={handleBackgroundClick}
       >
         <div className="relative">

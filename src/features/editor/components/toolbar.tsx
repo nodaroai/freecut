@@ -1,5 +1,16 @@
-import { useState, memo } from 'react';
+import { memo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import {
+  ArrowLeft,
+  ChevronDown,
+  Download,
+  FolderArchive,
+  Github,
+  Keyboard,
+  Save,
+  Settings,
+  Video,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -8,20 +19,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
-import {
-  ArrowLeft,
-  Download,
-  Save,
-  Video,
-  FolderArchive,
-  ChevronDown,
-  Github,
-  Keyboard,
-  Settings,
-} from 'lucide-react';
-import { UnsavedChangesDialog } from './unsaved-changes-dialog';
-import { ShortcutsDialog } from './shortcuts-dialog';
+import { LocalInferenceStatusPill } from './local-inference-status-pill';
 import { SettingsDialog } from './settings-dialog';
+import { ShortcutsDialog } from './shortcuts-dialog';
+import { UnsavedChangesDialog } from './unsaved-changes-dialog';
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 
 interface ToolbarProps {
   projectId: string;
@@ -38,7 +40,13 @@ interface ToolbarProps {
   onExportBundle?: () => void;
 }
 
-export const Toolbar = memo(function Toolbar({ project, isDirty = false, onSave, onExport, onExportBundle }: ToolbarProps) {
+export const Toolbar = memo(function Toolbar({
+  project,
+  isDirty = false,
+  onSave,
+  onExport,
+  onExportBundle,
+}: ToolbarProps) {
   const navigate = useNavigate();
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
@@ -59,22 +67,23 @@ export const Toolbar = memo(function Toolbar({ project, isDirty = false, onSave,
   };
 
   return (
-    <div className="panel-header h-14 border-b border-border flex items-center px-4 gap-3 flex-shrink-0">
-      {/* Project Info */}
-      <div className="flex items-center gap-3">
+    <div
+      className="panel-header flex flex-shrink-0 items-center gap-2.5 border-b border-border px-3"
+      style={{ height: EDITOR_LAYOUT_CSS_VALUES.toolbarHeight }}
+    >
+      <div className="flex items-center gap-2.5">
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9"
+          className="h-8 w-8"
           onClick={handleBackClick}
           data-tooltip="Back to Projects"
           data-tooltip-side="right"
           aria-label="Back to projects"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        {/* Unsaved Changes Dialog */}
         <UnsavedChangesDialog
           open={showUnsavedDialog}
           onOpenChange={setShowUnsavedDialog}
@@ -82,60 +91,59 @@ export const Toolbar = memo(function Toolbar({ project, isDirty = false, onSave,
           projectName={project?.name}
         />
 
-        <Separator orientation="vertical" className="h-6" />
+        <Separator orientation="vertical" className="h-5" />
 
         <div className="flex flex-col -space-y-0.5">
           <h1 className="text-sm font-medium leading-none">
             {project?.name || 'Untitled Project'}
           </h1>
-          <span className="text-xs text-muted-foreground font-mono">
-            {project?.width}×{project?.height} • {project?.fps}fps
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {project?.width}x{project?.height} | {project?.fps}fps
           </span>
         </div>
       </div>
 
       <div className="flex-1" />
 
-      {/* Shortcuts Dialog */}
+      <LocalInferenceStatusPill />
+
       <ShortcutsDialog
         open={showShortcutsDialog}
         onOpenChange={setShowShortcutsDialog}
       />
 
-      {/* Settings Dialog */}
       <SettingsDialog
         open={showSettingsDialog}
         onOpenChange={setShowSettingsDialog}
       />
 
-      {/* Save & Export */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <Button
           variant="outline"
           size="icon"
-          className="h-8 w-8"
+          className="h-7 w-7"
           onClick={() => setShowSettingsDialog(true)}
           data-tooltip="Settings"
           data-tooltip-side="left"
           aria-label="Settings"
         >
-          <Settings className="w-4 h-4" />
+          <Settings className="h-4 w-4" />
         </Button>
         <Button
           variant="outline"
           size="icon"
-          className="h-8 w-8"
+          className="h-7 w-7"
           onClick={() => setShowShortcutsDialog(true)}
           data-tooltip="Keyboard Shortcuts"
           data-tooltip-side="left"
           aria-label="Keyboard shortcuts"
         >
-          <Keyboard className="w-4 h-4" />
+          <Keyboard className="h-4 w-4" />
         </Button>
         <Button
           variant="outline"
           size="icon"
-          className="h-8 w-8"
+          className="h-7 w-7"
           asChild
         >
           <a
@@ -146,14 +154,20 @@ export const Toolbar = memo(function Toolbar({ project, isDirty = false, onSave,
             data-tooltip-side="left"
             aria-label="View on GitHub"
           >
-            <Github className="w-4 h-4" />
+            <Github className="h-4 w-4" />
           </a>
         </Button>
-        <Button variant="outline" size="sm" className="gap-2" onClick={handleSave} aria-label="Save project">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={handleSave}
+          aria-label="Save project"
+        >
           <div className="relative">
-            <Save className="w-4 h-4" />
+            <Save className="h-4 w-4" />
             {isDirty && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
+              <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
             )}
           </div>
           Save
@@ -161,19 +175,19 @@ export const Toolbar = memo(function Toolbar({ project, isDirty = false, onSave,
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" className="gap-2 glow-primary-sm">
-              <Download className="w-4 h-4" />
+            <Button size="sm" className="gap-1.5 glow-primary-sm">
+              <Download className="h-4 w-4" />
               Export
-              <ChevronDown className="w-3 h-3" />
+              <ChevronDown className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={onExport} className="gap-2">
-              <Video className="w-4 h-4" />
+              <Video className="h-4 w-4" />
               Export Video
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onExportBundle} className="gap-2">
-              <FolderArchive className="w-4 h-4" />
+              <FolderArchive className="h-4 w-4" />
               Download Project (.zip)
             </DropdownMenuItem>
           </DropdownMenuContent>
