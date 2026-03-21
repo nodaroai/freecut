@@ -71,6 +71,17 @@ interface ProjectDebugAPI {
   createFixtureProject: (type: FixtureType, options?: FixtureOptions) => Promise<Project>;
   listFixtures: () => Promise<Array<{ type: FixtureType; name: string; description: string }>>;
 
+  // Playback control (for debugging)
+  seekTo: (frame: number) => void;
+  play: () => void;
+  pause: () => void;
+
+  // Timeline inspection
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getItemsAtFrame: (frame: number) => Promise<any[]>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getUpcomingItems: (frame: number, lookahead: number) => Promise<any[]>;
+
   // Version info
   version: string;
 }
@@ -190,6 +201,70 @@ function createDebugAPI(): ProjectDebugAPI {
         '@/features/project-bundle/services/test-fixtures'
       );
       return getAvailableFixtures();
+    },
+
+    // Playback control (for debugging)
+    seekTo: async (frame) => {
+      const { usePlaybackStore } = await import('@/shared/state/playback');
+      usePlaybackStore.getState().setCurrentFrame(frame);
+    },
+    play: async () => {
+      const { usePlaybackStore } = await import('@/shared/state/playback');
+      usePlaybackStore.getState().play();
+    },
+    pause: async () => {
+      const { usePlaybackStore } = await import('@/shared/state/playback');
+      usePlaybackStore.getState().pause();
+    },
+
+    // Timeline item inspection
+    getItemsAtFrame: async (frame: number) => {
+      const { useItemsStore } = await import('@/features/timeline/stores/items-store');
+      const state = useItemsStore.getState();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const results: any[] = [];
+      for (const [trackId, trackItems] of Object.entries(state.itemsByTrackId)) {
+        if (!trackItems) continue;
+        for (const item of trackItems) {
+          const end = item.from + item.durationInFrames;
+          if (frame >= item.from && frame < end) {
+            results.push({
+              id: item.id.substring(0, 8),
+              type: item.type,
+              from: item.from,
+              dur: item.durationInFrames,
+              end,
+              speed: item.speed ?? 1,
+              trackId: trackId.substring(0, 8),
+              label: ('label' in item ? item.label : undefined),
+            });
+          }
+        }
+      }
+      return results;
+    },
+    getUpcomingItems: async (frame: number, lookahead: number) => {
+      const { useItemsStore } = await import('@/features/timeline/stores/items-store');
+      const state = useItemsStore.getState();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const results: any[] = [];
+      for (const [trackId, trackItems] of Object.entries(state.itemsByTrackId)) {
+        if (!trackItems) continue;
+        for (const item of trackItems) {
+          if (item.from > frame && item.from <= frame + lookahead) {
+            results.push({
+              id: item.id.substring(0, 8),
+              type: item.type,
+              from: item.from,
+              dur: item.durationInFrames,
+              speed: item.speed ?? 1,
+              trackId: trackId.substring(0, 8),
+              label: ('label' in item ? item.label : undefined),
+            });
+          }
+        }
+      }
+      return results;
     },
 
     // Version info

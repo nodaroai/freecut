@@ -10,17 +10,35 @@
  * of item.id, split clips reuse the same Sequence/video element.
  */
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Sequence, useSequenceContext } from '@/features/composition-runtime/deps/player';
+import { useVideoSourcePool } from '@/features/composition-runtime/deps/player';
+import {
+  DEFAULT_SPEED,
+  getSafeTrimBefore,
+} from '@/features/composition-runtime/deps/timeline';
 import { useVideoConfig } from '../hooks/use-player-compat';
+import { useTransitionParticipantSync } from '../hooks/use-transition-participant-sync';
 import type { TimelineItem, VideoItem } from '@/types/timeline';
 import type { ResolvedTransitionWindow } from '@/domain/timeline/transitions/transition-planner';
+import { VideoContent } from './video-content';
 import {
   findActiveVideoItemIndex,
   groupStableVideoItems,
   type StableVideoGroup,
 } from '../utils/video-scene';
-import { collectTransitionParticipantClipIds } from '../utils/transition-scene';
+import {
+  collectTransitionParticipantClipIds,
+} from '../utils/transition-scene';
+import { buildTransitionShadowWarmupRequests } from '../utils/transition-shadow-warmup';
+import { createLogger } from '@/shared/logging/logger';
+import { useMediaLibraryStore } from '@/features/composition-runtime/deps/stores';
+
+const warmupLog = createLogger('StableVideoWarmup');
+const SHADOW_MOUNT_LOOKAHEAD_FRAMES = 3;
+const SHADOW_UNMOUNT_COOLDOWN_FRAMES = 3;
+const TRANSITION_SYNC_COOLDOWN_FRAMES = 3;
+const TRANSITION_WARMUP_LOOKAHEAD_SECONDS = 0.5;
 
 /** Video item with additional properties added by MainComposition */
 export type StableVideoSequenceItem = VideoItem & {
@@ -30,6 +48,7 @@ export type StableVideoSequenceItem = VideoItem & {
   trackVisible: boolean;
   _sequenceFrameOffset?: number;
   _poolClipId?: string;
+  _sharedTransitionSync?: boolean;
 };
 
 interface StableVideoSequenceProps {
@@ -125,6 +144,43 @@ const SHADOW_STYLE: React.CSSProperties = {
   pointerEvents: 'none',
 };
 
+const HiddenShadowVideoBridge = React.memo(({ item }: { item: StableVideoSequenceItem }) => {
+  const { fps } = useVideoConfig();
+  const mediaSourceFps = useMediaLibraryStore((s) => (
+    item.mediaId ? s.mediaItems.find((media) => media.id === item.mediaId)?.fps : undefined
+  ));
+
+  if (!item.src) {
+    return null;
+  }
+
+  const trimBefore = item.sourceStart ?? item.trimStart ?? item.offset ?? 0;
+  const sourceFps = item.sourceFps ?? mediaSourceFps ?? fps;
+  const playbackRate = item.speed ?? DEFAULT_SPEED;
+  const safeTrimBefore = getSafeTrimBefore(
+    trimBefore,
+    item.durationInFrames,
+    playbackRate,
+    item.sourceDuration || undefined,
+    fps,
+    sourceFps,
+  );
+
+  return (
+    <div style={SHADOW_STYLE} data-shadow-bridge={item.id}>
+      <VideoContent
+        item={item}
+        muted={true}
+        safeTrimBefore={safeTrimBefore}
+        playbackRate={playbackRate}
+        sourceFps={sourceFps}
+      />
+    </div>
+  );
+});
+
+HiddenShadowVideoBridge.displayName = 'HiddenShadowVideoBridge';
+
 const GroupRenderer: React.FC<{
   group: StableVideoGroup<StableVideoSequenceItem>;
   transitionWindows?: ResolvedTransitionWindow<TimelineItem>[];
@@ -150,23 +206,32 @@ const GroupRenderer: React.FC<{
   const activeItem = activeItemIndex >= 0 ? group.items[activeItemIndex] : null;
 
   const { fps } = useVideoConfig();
+  const pool = useVideoSourcePool();
 
-  // Compute stable overlap key — only changes at transition boundaries.
-  // During overlap, non-primary items need hidden DOM video elements so
-  // domVideoElementProvider can find them for zero-copy decode.
-  //
-  // LOOKAHEAD: Shadows are mounted ~0.5s BEFORE the overlap actually starts.
-  // This gives the shadow's pool element time to load (src set, readyState → 2)
-  // before the transition begins. Without this, at transition start the left
-  // clip loses its primary pool element to the right clip and the new shadow
-  // element needs 100-300ms to load, causing mediabunny fallback (40-80ms/frame)
-  // for the first few transition frames.
+  const transitionWarmupClipIds = useMemo(() => {
+    if (isPremounted || activeItemIndex < 0 || group.items.length <= 1) return '';
+    const transitionClipIds = collectTransitionParticipantClipIds({
+      transitionWindows,
+      frame: globalFrame,
+      lookaheadFrames: Math.round(fps * TRANSITION_WARMUP_LOOKAHEAD_SECONDS),
+    });
+    return group.items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item, index }) => index !== activeItemIndex && transitionClipIds.has(item.id))
+      .map(({ index }) => index)
+      .join(',');
+  }, [activeItemIndex, fps, globalFrame, group.items, isPremounted, transitionWindows]);
+
+  // Mount hidden transition shadows only a few frames before the overlap.
+  // Pool lane warmup happens earlier; hidden DOM activation should stay late so
+  // normal playback keeps using the simple single-clip path until near the cut.
   const overlapKey = useMemo(() => {
     if (isPremounted || activeItemIndex < 0 || group.items.length <= 1) return '';
     const transitionClipIds = collectTransitionParticipantClipIds({
       transitionWindows,
       frame: globalFrame,
-      lookaheadFrames: Math.round(fps * 0.5),
+      lookaheadFrames: SHADOW_MOUNT_LOOKAHEAD_FRAMES,
+      lookbehindFrames: SHADOW_UNMOUNT_COOLDOWN_FRAMES,
     });
     return group.items
       .map((item, index) => ({ item, index }))
@@ -177,6 +242,21 @@ const GroupRenderer: React.FC<{
 
   // Build adjusted shadow items — only recalculated when overlap composition changes.
   // String comparison is by value, so stable overlapKey prevents rebuilds every frame.
+  const activeTransitionClipIds = useMemo(() => (
+    collectTransitionParticipantClipIds({
+      transitionWindows,
+      frame: globalFrame,
+      lookaheadFrames: 0,
+      lookbehindFrames: TRANSITION_SYNC_COOLDOWN_FRAMES,
+    })
+  ), [globalFrame, transitionWindows]);
+
+  const warmupShadows = useMemo(() => {
+    if (!transitionWarmupClipIds) return [];
+    const indices = transitionWarmupClipIds.split(',').map(Number);
+    return indices.map(idx => group.items[idx]!);
+  }, [group.items, transitionWarmupClipIds]);
+
   const adjustedShadows = useMemo(() => {
     if (!overlapKey) return [];
     const indices = overlapKey.split(',').map(Number);
@@ -187,11 +267,12 @@ const GroupRenderer: React.FC<{
         _sequenceFrameOffset: item.from - group.minFrom,
         // Separate pool ID so shadow gets its own video element (not shared with primary)
         _poolClipId: `shadow-${item.id}`,
+        _sharedTransitionSync: activeTransitionClipIds.has(item.id),
       };
     });
     // overlapKey is a string — React compares by value, so this only re-runs
     // when the set of overlapping items actually changes (transition boundaries)
-  }, [overlapKey, group.items, group.minFrom]);
+  }, [activeTransitionClipIds, group.items, group.minFrom, overlapKey]);
 
   // Memoize the adjusted item based on active item identity.
   // Only recalculates when crossing split boundaries or when item/group properties change.
@@ -212,8 +293,9 @@ const GroupRenderer: React.FC<{
       // Keep a stable pool identity across split boundaries so preview video
       // playback does not release/reacquire the element on item.id changes.
       _poolClipId: `group-${group.originKey}`,
+      _sharedTransitionSync: activeTransitionClipIds.has(activeItem.id),
     };
-  }, [activeItem, group.minFrom]);
+  }, [activeItem, activeTransitionClipIds, group.minFrom]);
 
   // CRITICAL: Also memoize the RENDERED OUTPUT.
   // This prevents calling renderItem (which creates new React elements) every frame.
@@ -226,12 +308,85 @@ const GroupRenderer: React.FC<{
   // Memoize shadow content — only changes at transition boundaries
   const shadowContent = useMemo(() => {
     if (adjustedShadows.length === 0) return null;
-    return adjustedShadows.map(shadow => (
-      <div key={shadow.id} style={SHADOW_STYLE}>
-        {renderItem(shadow)}
-      </div>
+    return adjustedShadows.map((shadow) => (
+      <HiddenShadowVideoBridge key={shadow.id} item={shadow} />
     ));
-  }, [adjustedShadows, renderItem]);
+  }, [adjustedShadows]);
+
+  const transitionWarmupRequests = useMemo(
+    () => buildTransitionShadowWarmupRequests(adjustedItem, warmupShadows),
+    [adjustedItem, warmupShadows],
+  );
+
+  const syncShadows = useMemo(
+    () => adjustedShadows.filter((item) => activeTransitionClipIds.has(item.id)),
+    [activeTransitionClipIds, adjustedShadows],
+  );
+
+  const transitionSyncParticipants = useMemo(() => {
+    if (!adjustedItem || syncShadows.length === 0 || !activeTransitionClipIds.has(adjustedItem.id)) {
+      return [];
+    }
+
+    const mediaItems = useMediaLibraryStore.getState().mediaItems;
+    const toParticipant = (
+      item: StableVideoSequenceItem,
+      role: 'leader' | 'follower',
+    ) => {
+      const trimBefore = item.sourceStart ?? item.trimStart ?? item.offset ?? 0;
+      const mediaSourceFps = item.mediaId
+        ? mediaItems.find((media) => media.id === item.mediaId)?.fps
+        : undefined;
+      const sourceFps = item.sourceFps ?? mediaSourceFps ?? fps;
+      const playbackRate = item.speed ?? DEFAULT_SPEED;
+      const safeTrimBefore = getSafeTrimBefore(
+        trimBefore,
+        item.durationInFrames,
+        playbackRate,
+        item.sourceDuration || undefined,
+        fps,
+        sourceFps,
+      );
+
+      return {
+        poolClipId: item._poolClipId ?? item.id,
+        safeTrimBefore,
+        sourceFps,
+        playbackRate,
+        sequenceFrameOffset: item._sequenceFrameOffset ?? 0,
+        role,
+      };
+    };
+
+    return [
+      toParticipant(adjustedItem, 'leader'),
+      ...syncShadows.map((item) => toParticipant(item, 'follower')),
+    ];
+  }, [activeTransitionClipIds, adjustedItem, fps, syncShadows]);
+
+  useTransitionParticipantSync(transitionSyncParticipants, group.minFrom, fps);
+
+  useEffect(() => {
+    if (transitionWarmupRequests.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    for (const request of transitionWarmupRequests) {
+      void pool.ensureReadyLanes(request.sourceUrl, request.minTotalLanes, {
+        targetTimeSeconds: request.targetTimeSeconds,
+        warmDecode: true,
+      }).catch((error) => {
+        if (cancelled) return;
+        warmupLog.debug('Transition shadow warmup failed:', request.sourceUrl, error);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pool, transitionWarmupRequests]);
 
   return (
     <>
