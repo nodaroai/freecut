@@ -8,7 +8,9 @@ Add embedded mode support to FreeCut so it can be loaded inside an iframe by the
 
 Nodaro is a visual workflow platform for AI video generation. Its "Manual Edit" node pauses workflow execution to let the user manually edit a video in FreeCut. The Nodaro side is already built (`freecut-editor-modal.tsx` with postMessage protocol). This spec covers the FreeCut side of that integration, plus Railway deployment.
 
-**Nodaro iframe sandbox**: The embedding iframe uses `sandbox="allow-scripts allow-same-origin allow-popups allow-forms"`. This means no `allow-downloads` (fine — embedded mode sends back via postMessage, not browser download). The `allow-scripts allow-same-origin` combination is sufficient for WebGPU, WebCodecs, and SharedArrayBuffer.
+**Nodaro iframe sandbox**: The embedding iframe uses `sandbox="allow-scripts allow-same-origin allow-popups allow-forms"`. This means no `allow-downloads` (fine — embedded mode sends back via postMessage, not browser download). The `allow-scripts allow-same-origin` combination is sufficient for WebGPU, WebCodecs, and Web Workers.
+
+**SharedArrayBuffer**: FreeCut does NOT use SharedArrayBuffer anywhere in the codebase. All worker communication uses standard `postMessage()` with structured cloning. This means `crossOriginIsolated` is not required for FreeCut to function — the COEP/COOP header changes are for future-proofing and allowing iframe embedding, not a strict functional requirement.
 
 ## postMessage Protocol
 
@@ -112,33 +114,37 @@ Initialized once at app startup (in `app.tsx`) when `isEmbedded()` is true. The 
 
 **Router access**: The TanStack Router instance is currently created as a local variable in `app.tsx` and not exported. To enable navigation from this service file, extract the router creation to a shared module (`src/app/router.ts`) that exports the instance. The message handler imports it and calls `router.navigate()`. This is a minimal change — just moving the `createRouter()` call to a separate file.
 
+**`FREECUT_READY` target origin**: Uses `'*'` since the parent origin is unknown at this point and the message has no sensitive payload. Nodaro does not currently listen for `FREECUT_READY` (it uses a 500ms delay) — this is a future optimization for Nodaro to adopt.
+
 On receiving `NODARO_LOAD_VIDEO`:
 
-1. **Validate origin** against allowlist. Reject if not allowed.
+1. **Guard against duplicates**: If `useEmbeddedStore.getState().pendingVideoImport !== null`, ignore the message and return. This prevents double-imports from network replays or Nodaro bugs, which would orphan OPFS storage.
 
-2. **Store origin** in `useEmbeddedStore` for outbound messages.
+2. **Validate origin** against allowlist. Reject if not allowed.
 
-3. **Fetch video**: `fetch(videoUrl)` → `Blob`. The video URL comes from Nodaro's R2 storage (CORS-enabled).
+3. **Store origin** in `useEmbeddedStore` for outbound messages.
 
-4. **Wrap as File**: `new File([blob], 'nodaro-edit.mp4', { type: blob.type })` — `processMedia()` requires a `File` object.
+4. **Fetch video**: `fetch(videoUrl)` → `Blob`. The video URL comes from Nodaro's R2 storage (CORS-enabled).
 
-5. **Extract metadata**: `mediaProcessorService.processMedia(file, blob.type)` — note: `mimeType` is the required second argument. Returns `{ metadata, thumbnail }` with duration, width, height, fps, codec, audioCodec, audioCodecSupported, and optional thumbnail Blob.
+5. **Wrap as File**: `new File([blob], 'nodaro-edit.mp4', { type: blob.type })` — `processMedia()` requires a `File` object.
 
-6. **Create project**: Use `createProject()` from the project store (accepts `ProjectFormData`, returns `Promise<Project>`, does NOT navigate):
+6. **Extract metadata**: `mediaProcessorService.processMedia(file, blob.type, { timeout: 60000 })` — note: `mimeType` is the required second argument. Use 60s timeout (default is 30s, which is tight for large H.265 videos). Returns `{ metadata, thumbnail }` with duration, width, height, fps, codec, audioCodec, audioCodecSupported, and optional thumbnail Blob.
+
+7. **Create project**: Use `createProject()` from the project store (accepts `ProjectFormData`, returns `Promise<Project>`, does NOT navigate):
    - Name: "Nodaro Edit"
    - Width/height: from video metadata
    - FPS: rounded to nearest allowed value via `roundToNearestAllowedFps()` — maps e.g. 29.97→30, 23.976→24, 59.94→60 against `[24, 25, 30, 50, 60, 120, 240]`
    - backgroundColor: `'#000000'`
 
-7. **Import to media library**: Use new `importMediaBlob()` method (see Section 6). Returns `MediaMetadata`.
+8. **Import to media library**: Use new `importMediaBlob()` method (see Section 6). Returns `MediaMetadata`.
 
-8. **Store pending import**: Set `pendingVideoImport: { mediaId: metadata.id }` in `useEmbeddedStore`.
+9. **Store pending import**: Set `pendingVideoImport: { mediaId: metadata.id }` in `useEmbeddedStore`.
 
-9. **Store input metadata**: Save codec, resolution, fps in `useEmbeddedStore.inputMetadata` for the "Send Back" export.
+10. **Store input metadata**: Save codec, resolution, fps in `useEmbeddedStore.inputMetadata` for the "Send Back" export.
 
-10. **Navigate**: `router.navigate({ to: '/editor/$projectId', params: { projectId: project.id } })` using the exported router instance.
+11. **Navigate**: `router.navigate({ to: '/editor/$projectId', params: { projectId: project.id } })` using the exported router instance.
 
-11. **On error**: Post `FREECUT_ERROR` to parent with `phase: 'import'` and message.
+12. **On error**: Post `FREECUT_ERROR` to parent with `phase: 'import'` and message.
 
 ### 3. Video Placement After Editor Mount
 
@@ -288,11 +294,11 @@ On "Send Back" click:
 The existing `importMediaWithHandle()` handles all media types but requires a `FileSystemFileHandle`. The existing `importGeneratedImage()` uses OPFS storage but explicitly rejects non-image types (`if (!mimeType.startsWith('image/'))` guard). A new method combines the strengths of both — full worker metadata extraction (like `importMediaWithHandle`) with OPFS storage (like `importGeneratedImage`):
 
 1. **Wrap blob**: `new File([blob], filename, { type: blob.type })`
-2. **Process via worker**: `mediaProcessorService.processMedia(file, blob.type)` — same worker as `importMediaWithHandle()`. Returns `{ metadata, thumbnail }` with all video-specific fields.
+2. **Process via worker**: `mediaProcessorService.processMedia(file, blob.type, { timeout: 60000 })` — same worker as `importMediaWithHandle()`. Returns `{ metadata, thumbnail }` with all video-specific fields. 60s timeout for large videos.
 3. **Generate media ID**: `crypto.randomUUID()`
 4. **Generate OPFS path**: `content/${mediaId.slice(0,2)}/${mediaId.slice(2,4)}/${mediaId}/data` (same pattern as `importGeneratedImage()`)
-5. **Convert blob to ArrayBuffer**: `await blob.arrayBuffer()`
-6. **Store in OPFS**: `opfsService.saveFile(opfsPath, arrayBuffer)` — saves the full video to Origin Private File System
+5. **Check OPFS quota**: `await opfsService.checkQuota(blob.size)` — the service already has this method. If `!canUpload`, throw an error before writing.
+6. **Store in OPFS via streaming**: Use `opfsService.saveUpload(file, opfsPath)` — writes in chunks instead of loading the entire blob into an ArrayBuffer. This avoids doubling memory usage for large videos (a 500MB video would otherwise spike to ~1.5GB peak with `saveFile(await blob.arrayBuffer())`). The streaming method keeps peak memory at ~100MB regardless of video size.
 7. **Save thumbnail** (if returned by worker): Call `saveThumbnail(thumbnailData)` with a full `ThumbnailData` object: `{ id: crypto.randomUUID(), mediaId, blob: thumbnail, timestamp: 1, width: 320, height: 180 }`. The function accepts the complete object, not just a blob.
 8. **Save metadata to IndexedDB**: Create `MediaMetadata` with:
    - `storageType: 'opfs'`, `opfsPath`
@@ -315,7 +321,11 @@ Per CLAUDE.md, cross-feature imports must go through `deps/` adapter modules. Th
 | `media-library` | `src/features/embedded/deps/media-library-contract.ts` | `importMediaBlob()`, `resolveMediaUrl()`, `mediaLibraryService.getMedia()`, `mediaLibraryService.getThumbnailBlobUrl()` |
 | `timeline` | `src/features/embedded/deps/timeline-contract.ts` | `addItem()`, `buildDroppedMediaTimelineItem()`, `getDroppedMediaDurationInFrames()`, `useItemsStore` |
 
-These follow the existing pattern (e.g., `src/features/export/deps/projects-contract.ts`) — simple re-exports with no adapter logic.
+The **editor** feature also needs an adapter to import from embedded (for `consumePendingEmbeddedImport`):
+
+| `editor → embedded` | `src/features/editor/deps/embedded-contract.ts` | `consumePendingEmbeddedImport()`, `isEmbedded()`, `useEmbeddedMode()` |
+
+All adapters follow the existing pattern (e.g., `src/features/export/deps/projects-contract.ts`) — simple re-exports in `*-contract.ts` files with no adapter logic. The boundary check (`check:boundaries`) enforces this via pre-push hook.
 
 Additionally, the export feature's public API (`src/features/export/index.ts`) must be extended to export `useClientRender`.
 
@@ -329,7 +339,7 @@ The current codebase uses `COEP: require-corp` + `COOP: same-origin` everywhere:
 
 `COOP: same-origin` breaks cross-origin iframe embedding — parent and iframe end up in different browsing context groups, breaking `postMessage`. `X-Frame-Options: DENY` blocks iframe embedding entirely.
 
-Solution: Use `COEP: credentialless` + `COOP: same-origin-allow-popups`. This preserves SharedArrayBuffer support while allowing cross-origin iframe embedding. Supported in Chrome 110+, Firefox 119+ — sufficient for FreeCut's target browsers (WebGPU/WebCodecs require modern browsers anyway).
+Solution: Use `COEP: credentialless` + `COOP: same-origin-allow-popups`. Since FreeCut doesn't use SharedArrayBuffer, `crossOriginIsolated` is not required — WebGPU, WebCodecs, and Web Workers all work in sandboxed iframes without it. These header values allow cross-origin iframe embedding while maintaining a reasonable security posture. Supported in Chrome 110+, Firefox 119+.
 
 **All three configs must be updated**: `vite.config.ts` (dev), `Caddyfile` (Railway production), and `vercel.json` (if kept for upstream compatibility).
 
@@ -365,7 +375,7 @@ Caddy is chosen because:
 ```
 
 Key headers:
-- **COEP `credentialless`**: Enables SharedArrayBuffer without breaking iframe embedding
+- **COEP `credentialless`**: Allows cross-origin resource loading without explicit CORP headers on each resource
 - **COOP `same-origin-allow-popups`**: Allows cross-origin parent access for postMessage
 - **CORP `cross-origin`**: Allows Nodaro's iframe to load FreeCut assets
 - **CSP `frame-ancestors`**: Whitelist Nodaro domains + localhost for dev
@@ -418,6 +428,7 @@ This keeps vercel.json consistent even though Railway/Caddy is the primary deplo
 | `src/features/embedded/deps/media-library-contract.ts` | Create | Cross-feature adapter for media library |
 | `src/features/embedded/deps/timeline-contract.ts` | Create | Cross-feature adapter for timeline |
 | `src/features/embedded/index.ts` | Create | Barrel exports |
+| `src/features/editor/deps/embedded-contract.ts` | Create | Cross-feature adapter: editor → embedded |
 | `src/features/media-library/services/media-library-service.ts` | Modify | Add `importMediaBlob()` method |
 | `src/features/export/index.ts` | Modify | Export `useClientRender` in public API |
 | `src/features/editor/components/toolbar.tsx` | Modify | Conditional UI for embedded mode |
