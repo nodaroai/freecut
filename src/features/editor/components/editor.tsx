@@ -141,9 +141,16 @@ export const Editor = memo(function Editor({ projectId, project }: EditorProps) 
 
     // Load timeline from IndexedDB - single source of truth for all timeline state
     const { loadTimeline } = useTimelineStore.getState();
-    loadTimeline(projectId).catch((error) => {
-      logger.error('Failed to load timeline:', error);
-    });
+    loadTimeline(projectId)
+      .then(async () => {
+        const { consumePendingEmbeddedImport } = await import(
+          '@/features/editor/services/embedded-import'
+        );
+        await consumePendingEmbeddedImport();
+      })
+      .catch((error) => {
+        logger.error('Failed to load timeline:', error);
+      });
 
     // Cleanup: clear project context, stop playback, and release blob URLs when leaving editor
     return () => {

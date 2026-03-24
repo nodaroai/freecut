@@ -2,13 +2,16 @@ import { memo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   Download,
   FolderArchive,
   Github,
   Keyboard,
+  Loader2,
   Save,
   Settings,
+  Upload,
   Video,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,6 +27,7 @@ import { SettingsDialog } from './settings-dialog';
 import { ShortcutsDialog } from './shortcuts-dialog';
 import { UnsavedChangesDialog } from './unsaved-changes-dialog';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { useEmbeddedMode, useSendBack } from '@/features/editor/deps/embedded-contract';
 
 interface ToolbarProps {
   projectId: string;
@@ -40,6 +44,40 @@ interface ToolbarProps {
   onExportBundle?: () => void;
 }
 
+function SendBackButton() {
+  const { sendBack, isExporting, progress, sendBackStatus } = useSendBack();
+
+  const label =
+    sendBackStatus === 'sent'
+      ? 'Sent!'
+      : sendBackStatus === 'exporting'
+        ? `Exporting... ${Math.round(progress)}%`
+        : sendBackStatus === 'error'
+          ? 'Error'
+          : 'Send Back';
+
+  const icon =
+    sendBackStatus === 'sent' ? (
+      <Check className="h-4 w-4" />
+    ) : isExporting ? (
+      <Loader2 className="h-4 w-4 animate-spin" />
+    ) : (
+      <Upload className="h-4 w-4" />
+    );
+
+  return (
+    <Button
+      size="sm"
+      className="gap-1.5 glow-primary-sm"
+      onClick={sendBack}
+      disabled={isExporting || sendBackStatus === 'sent'}
+    >
+      {icon}
+      {label}
+    </Button>
+  );
+}
+
 export const Toolbar = memo(function Toolbar({
   project,
   isDirty = false,
@@ -48,6 +86,7 @@ export const Toolbar = memo(function Toolbar({
   onExportBundle,
 }: ToolbarProps) {
   const navigate = useNavigate();
+  const embedded = useEmbeddedMode();
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
@@ -74,17 +113,19 @@ export const Toolbar = memo(function Toolbar({
       aria-label="Editor toolbar"
     >
       <div className="flex items-center gap-2.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={handleBackClick}
-          data-tooltip="Back to Projects"
-          data-tooltip-side="right"
-          aria-label="Back to projects"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
+        {!embedded && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={handleBackClick}
+            data-tooltip="Back to Projects"
+            data-tooltip-side="right"
+            aria-label="Back to projects"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        )}
 
         <UnsavedChangesDialog
           open={showUnsavedDialog}
@@ -93,7 +134,7 @@ export const Toolbar = memo(function Toolbar({
           projectName={project?.name}
         />
 
-        <Separator orientation="vertical" className="h-5" />
+        {!embedded && <Separator orientation="vertical" className="h-5" />}
 
         <div className="flex flex-col -space-y-0.5">
           <h1 className="text-sm font-medium leading-none">
@@ -120,80 +161,92 @@ export const Toolbar = memo(function Toolbar({
       />
 
       <div className="flex items-center gap-1.5">
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => setShowSettingsDialog(true)}
-          data-tooltip="Settings"
-          data-tooltip-side="left"
-          aria-label="Settings"
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => setShowShortcutsDialog(true)}
-          data-tooltip="Keyboard Shortcuts"
-          data-tooltip-side="left"
-          aria-label="Keyboard shortcuts"
-        >
-          <Keyboard className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7"
-          asChild
-        >
-          <a
-            href="https://github.com/walterlow/freecut"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-tooltip="View on GitHub"
+        {!embedded && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setShowSettingsDialog(true)}
+            data-tooltip="Settings"
             data-tooltip-side="left"
-            aria-label="View on GitHub"
+            aria-label="Settings"
           >
-            <Github className="h-4 w-4" />
-          </a>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={handleSave}
-          aria-label="Save project"
-        >
-          <div className="relative">
-            <Save className="h-4 w-4" />
-            {isDirty && (
-              <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
-            )}
-          </div>
-          Save
-        </Button>
+            <Settings className="h-4 w-4" />
+          </Button>
+        )}
+        {!embedded && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setShowShortcutsDialog(true)}
+            data-tooltip="Keyboard Shortcuts"
+            data-tooltip-side="left"
+            aria-label="Keyboard shortcuts"
+          >
+            <Keyboard className="h-4 w-4" />
+          </Button>
+        )}
+        {!embedded && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
+            asChild
+          >
+            <a
+              href="https://github.com/walterlow/freecut"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-tooltip="View on GitHub"
+              data-tooltip-side="left"
+              aria-label="View on GitHub"
+            >
+              <Github className="h-4 w-4" />
+            </a>
+          </Button>
+        )}
+        {!embedded && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={handleSave}
+            aria-label="Save project"
+          >
+            <div className="relative">
+              <Save className="h-4 w-4" />
+              {isDirty && (
+                <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
+              )}
+            </div>
+            Save
+          </Button>
+        )}
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" className="gap-1.5 glow-primary-sm">
-              <Download className="h-4 w-4" />
-              Export
-              <ChevronDown className="h-3 w-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onExport} className="gap-2">
-              <Video className="h-4 w-4" />
-              Export Video
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onExportBundle} className="gap-2">
-              <FolderArchive className="h-4 w-4" />
-              Download Project (.zip)
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {!embedded && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" className="gap-1.5 glow-primary-sm">
+                <Download className="h-4 w-4" />
+                Export
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onExport} className="gap-2">
+                <Video className="h-4 w-4" />
+                Export Video
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onExportBundle} className="gap-2">
+                <FolderArchive className="h-4 w-4" />
+                Download Project (.zip)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {embedded && <SendBackButton />}
       </div>
     </div>
   );

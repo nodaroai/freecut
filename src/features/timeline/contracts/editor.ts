@@ -20,6 +20,10 @@ export {
 } from '../utils/source-calculations';
 export { initTransitionChainSubscription } from '../stores/transition-chain-store';
 
+export { addItem } from '../stores/actions/item-actions';
+export { buildDroppedMediaTimelineItem, getDroppedMediaDurationInFrames } from '../utils/dropped-media';
+export { useItemsStore } from '../stores/items-store';
+
 export const importGifFrameCache = async () => ({ gifFrameCache });
 export const importFilmstripCache = async () => ({ filmstripCache });
 export const importWaveformCache = async () => ({ waveformCache });
