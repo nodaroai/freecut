@@ -110,6 +110,8 @@ A `useEmbeddedMode()` hook for React components that selects `isEmbedded` from t
 
 Initialized once at app startup (in `app.tsx`) when `isEmbedded()` is true. The listener is registered **synchronously** so it catches messages even before `FREECUT_READY` is sent. After registration, immediately posts `FREECUT_READY` to `window.parent`.
 
+**Router access**: The TanStack Router instance is currently created as a local variable in `app.tsx` and not exported. To enable navigation from this service file, extract the router creation to a shared module (`src/app/router.ts`) that exports the instance. The message handler imports it and calls `router.navigate()`. This is a minimal change — just moving the `createRouter()` call to a separate file.
+
 On receiving `NODARO_LOAD_VIDEO`:
 
 1. **Validate origin** against allowlist. Reject if not allowed.
@@ -134,7 +136,7 @@ On receiving `NODARO_LOAD_VIDEO`:
 
 9. **Store input metadata**: Save codec, resolution, fps in `useEmbeddedStore.inputMetadata` for the "Send Back" export.
 
-10. **Navigate**: Use TanStack Router to navigate to `/editor/{projectId}`.
+10. **Navigate**: `router.navigate({ to: '/editor/$projectId', params: { projectId: project.id } })` using the exported router instance.
 
 11. **On error**: Post `FREECUT_ERROR` to parent with `phase: 'import'` and message.
 
@@ -159,21 +161,21 @@ loadTimeline(projectId)
 `consumePendingEmbeddedImport()` checks `useEmbeddedStore.getState().pendingVideoImport` and if present:
 
 1. **Read mediaId** from `pendingVideoImport`.
-2. **Get MediaMetadata** from `useMediaLibraryStore.getState().mediaById[mediaId]`.
-3. **Get blob URL** via `resolveMediaUrl(mediaId)` from `media-resolver.ts` — this handles OPFS read → Blob creation → ref-counted `URL.createObjectURL()` via the existing `blobUrlManager`. No manual OPFS reads needed.
-4. **Get thumbnail URL** via `mediaLibraryService.getMediaBlobUrl(metadata.thumbnailId)` if thumbnailId exists, or derive from the thumbnail storage.
+2. **Get MediaMetadata** via `mediaLibraryService.getMedia(mediaId)` — queries IndexedDB directly. **Do NOT read from `useMediaLibraryStore.mediaById`** because the store is populated by `loadMediaItems()` which is triggered by the MediaLibrary sidebar component's `useEffect` and may not have completed yet. The service method reads from IndexedDB which is always up-to-date after `importMediaBlob()`.
+3. **Get blob URL** via `resolveMediaUrl(mediaId)` from `media-resolver.ts` — this also queries IndexedDB directly (not the store), handles OPFS read → Blob creation → ref-counted `URL.createObjectURL()` via the existing `blobUrlManager`. No manual OPFS reads needed.
+4. **Get thumbnail URL** via `mediaLibraryService.getThumbnailBlobUrl(mediaId)` — note: this takes the **media's ID** (not `thumbnailId`). It queries the `thumbnails` IndexedDB store by its `mediaId` index, creates a blob URL, and caches it in memory.
 5. **Get default track**: `useItemsStore.getState().tracks[0]` — created by `loadTimeline()` for new projects.
 6. **Calculate duration**: Use `getDroppedMediaDurationInFrames(metadata, 'video', timelineFps)` from `dropped-media.ts` — converts `metadata.duration` (seconds) to frames using project FPS.
 7. **Build video item**: Use `buildDroppedMediaTimelineItem()` with:
    ```ts
    buildDroppedMediaTimelineItem({
-     media: metadata,           // MediaMetadata from store
+     media: metadata,           // MediaMetadata from IndexedDB
      mediaId: metadata.id,
      mediaType: 'video',
      label: metadata.fileName,
      timelineFps: fps,          // from project.metadata.fps
      blobUrl,                   // from resolveMediaUrl()
-     thumbnailUrl,              // from thumbnail resolution
+     thumbnailUrl,              // from getThumbnailBlobUrl()
      canvasWidth: project.metadata.width,   // = input video width
      canvasHeight: project.metadata.height, // = input video height
      placement: {
@@ -291,13 +293,13 @@ The existing `importMediaWithHandle()` handles all media types but requires a `F
 4. **Generate OPFS path**: `content/${mediaId.slice(0,2)}/${mediaId.slice(2,4)}/${mediaId}/data` (same pattern as `importGeneratedImage()`)
 5. **Convert blob to ArrayBuffer**: `await blob.arrayBuffer()`
 6. **Store in OPFS**: `opfsService.saveFile(opfsPath, arrayBuffer)` — saves the full video to Origin Private File System
-7. **Save thumbnail** (if returned by worker): `saveThumbnailDB(thumbnail)` → `thumbnailId`
+7. **Save thumbnail** (if returned by worker): Call `saveThumbnail(thumbnailData)` with a full `ThumbnailData` object: `{ id: crypto.randomUUID(), mediaId, blob: thumbnail, timestamp: 1, width: 320, height: 180 }`. The function accepts the complete object, not just a blob.
 8. **Save metadata to IndexedDB**: Create `MediaMetadata` with:
    - `storageType: 'opfs'`, `opfsPath`
    - All fields from worker result: `duration`, `width`, `height`, `fps`, `codec`, `bitrate`, `audioCodec`, `audioCodecSupported`
    - `thumbnailId` from step 7
    - `fileName`, `fileSize: blob.size`, `mimeType: blob.type`
-9. **Associate with project**: `associateMediaWithProject(mediaId, projectId)`
+9. **Associate with project**: `associateMediaWithProject(projectId, mediaId)` — note: `projectId` is the first argument
 10. **Return** `MediaMetadata`
 
 **Error handling**: 3-level rollback following `importGeneratedImage()` pattern — if metadata save fails, clean up OPFS; if OPFS fails, clean up metadata.
@@ -310,7 +312,7 @@ Per CLAUDE.md, cross-feature imports must go through `deps/` adapter modules. Th
 |------------|-------------|-----------------|
 | `export` | `src/features/embedded/deps/export-contract.ts` | `useClientRender` hook |
 | `projects` | `src/features/embedded/deps/projects-contract.ts` | `useProjectStore` (for `createProject()`) |
-| `media-library` | `src/features/embedded/deps/media-library-contract.ts` | `importMediaBlob()`, `resolveMediaUrl()`, `useMediaLibraryStore` |
+| `media-library` | `src/features/embedded/deps/media-library-contract.ts` | `importMediaBlob()`, `resolveMediaUrl()`, `mediaLibraryService.getMedia()`, `mediaLibraryService.getThumbnailBlobUrl()` |
 | `timeline` | `src/features/embedded/deps/timeline-contract.ts` | `addItem()`, `buildDroppedMediaTimelineItem()`, `getDroppedMediaDurationInFrames()`, `useItemsStore` |
 
 These follow the existing pattern (e.g., `src/features/export/deps/projects-contract.ts`) — simple re-exports with no adapter logic.
@@ -405,6 +407,7 @@ This keeps vercel.json consistent even though Railway/Caddy is the primary deplo
 
 | File | Action | Purpose |
 |------|--------|---------|
+| `src/app/router.ts` | Create | Extract router instance from app.tsx for shared access |
 | `src/features/embedded/stores/embedded-store.ts` | Create | Zustand store for embedded state |
 | `src/features/embedded/hooks/use-embedded-mode.ts` | Create | `useEmbeddedMode()` hook + `isEmbedded()` utility |
 | `src/features/embedded/hooks/use-send-back.ts` | Create | Hook composing useClientRender + postMessage send |
@@ -419,7 +422,7 @@ This keeps vercel.json consistent even though Railway/Caddy is the primary deplo
 | `src/features/export/index.ts` | Modify | Export `useClientRender` in public API |
 | `src/features/editor/components/toolbar.tsx` | Modify | Conditional UI for embedded mode |
 | `src/features/editor/components/editor.tsx` | Modify | Chain `consumePendingEmbeddedImport()` after `loadTimeline().then()` |
-| `src/app.tsx` | Modify | Init embedded message listener on startup |
+| `src/app.tsx` | Modify | Init embedded message listener on startup; use extracted router |
 | `vite.config.ts` | Modify | Update COEP/COOP headers for iframe compat |
 | `vercel.json` | Modify | Update COEP/COOP/X-Frame-Options headers |
 | `Dockerfile` | Create | Multi-stage build with Caddy |
