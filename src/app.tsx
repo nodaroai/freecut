@@ -1,18 +1,10 @@
 import { useEffect } from 'react';
-import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { RouterProvider } from '@tanstack/react-router';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { GlobalTooltip } from '@/components/ui/global-tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { ErrorBoundary } from '@/components/error-boundary';
-import { routeTree } from './routeTree.gen';
-
-const router = createRouter({ routeTree });
-
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router;
-  }
-}
+import { router } from '@/app/router';
 
 export function App() {
   // Prevent default browser zoom application-wide
