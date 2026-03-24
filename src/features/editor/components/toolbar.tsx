@@ -2,11 +2,13 @@ import { memo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   Download,
   FolderArchive,
   Github,
   Keyboard,
+  Loader2,
   Save,
   Settings,
   Upload,
@@ -25,7 +27,7 @@ import { SettingsDialog } from './settings-dialog';
 import { ShortcutsDialog } from './shortcuts-dialog';
 import { UnsavedChangesDialog } from './unsaved-changes-dialog';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
-import { useEmbeddedMode } from '@/features/editor/deps/embedded-contract';
+import { useEmbeddedMode, useSendBack } from '@/features/editor/deps/embedded-contract';
 
 interface ToolbarProps {
   projectId: string;
@@ -40,6 +42,40 @@ interface ToolbarProps {
   onSave?: () => Promise<void>;
   onExport?: () => void;
   onExportBundle?: () => void;
+}
+
+function SendBackButton() {
+  const { sendBack, isExporting, progress, sendBackStatus } = useSendBack();
+
+  const label =
+    sendBackStatus === 'sent'
+      ? 'Sent!'
+      : sendBackStatus === 'exporting'
+        ? `Exporting... ${Math.round(progress)}%`
+        : sendBackStatus === 'error'
+          ? 'Error'
+          : 'Send Back';
+
+  const icon =
+    sendBackStatus === 'sent' ? (
+      <Check className="h-4 w-4" />
+    ) : isExporting ? (
+      <Loader2 className="h-4 w-4 animate-spin" />
+    ) : (
+      <Upload className="h-4 w-4" />
+    );
+
+  return (
+    <Button
+      size="sm"
+      className="gap-1.5 glow-primary-sm"
+      onClick={sendBack}
+      disabled={isExporting || sendBackStatus === 'sent'}
+    >
+      {icon}
+      {label}
+    </Button>
+  );
 }
 
 export const Toolbar = memo(function Toolbar({
@@ -210,12 +246,7 @@ export const Toolbar = memo(function Toolbar({
           </DropdownMenu>
         )}
 
-        {embedded && (
-          <Button size="sm" className="gap-1.5 glow-primary-sm">
-            <Upload className="h-4 w-4" />
-            Send Back
-          </Button>
-        )}
+        {embedded && <SendBackButton />}
       </div>
     </div>
   );
