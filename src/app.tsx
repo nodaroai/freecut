@@ -5,6 +5,16 @@ import { GlobalTooltip } from '@/components/ui/global-tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { router } from '@/app/router';
+import { isEmbedded } from '@/features/embedded/stores/embedded-store';
+import { initEmbeddedMessageHandler } from '@/features/embedded/services/embedded-message-handler';
+
+// Synchronous init — NOT dynamic import — because the message listener must be registered
+// before Nodaro's 500ms timeout sends NODARO_LOAD_VIDEO. Any async gap risks missing
+// the message. The bundle cost is acceptable since embedded mode is the primary use case
+// for this fork.
+if (isEmbedded()) {
+  initEmbeddedMessageHandler();
+}
 
 export function App() {
   // Prevent default browser zoom application-wide
