@@ -31,15 +31,16 @@ Sent by FreeCut once its message listener is active. Nodaro should wait for this
 ```
 
 Sent by Nodaro after receiving `FREECUT_READY` (or after 500ms fallback). FreeCut must:
-1. Validate `event.origin` against allowlist (see Security section)
-2. Store the origin for all outbound messages
-3. Fetch the video from the URL
-4. Extract metadata via worker
-5. Create a new project matching the video's native resolution and fps
-6. Import the video into the media library
-7. Store `mediaId` as pending import in embedded store
-8. Navigate to the editor
-9. After `loadTimeline()` completes in the editor, place video item on the default track
+1. Guard against duplicate messages (synchronous `isImporting` flag)
+2. Validate `event.origin` against allowlist (see Security section)
+3. Store the origin for all outbound messages
+4. Fetch the video from the URL
+5. Extract metadata via worker
+6. Create a new project matching the video's native resolution and fps
+7. Import the video into the media library
+8. Store `mediaId` as pending import in embedded store
+9. Navigate to the editor
+10. After `loadTimeline()` completes in the editor, place video item on the default track
 
 ### Outbound: `FREECUT_EXPORT_PROGRESS`
 
@@ -85,6 +86,7 @@ A Zustand store `useEmbeddedStore`:
 ```ts
 {
   isEmbedded: boolean              // window.self !== window.top
+  isImporting: boolean             // synchronous guard against duplicate NODARO_LOAD_VIDEO
   parentOrigin: string | null      // stored from first inbound message
   inputMetadata: {                 // from source video, used by Send Back export
     codec: string                  // raw codec from media processor (e.g. 'avc', 'hevc')
@@ -118,37 +120,41 @@ Initialized once at app startup (in `app.tsx`) when `isEmbedded()` is true. The 
 
 On receiving `NODARO_LOAD_VIDEO`:
 
-1. **Guard against duplicates**: If `useEmbeddedStore.getState().pendingVideoImport !== null`, ignore the message and return. This prevents double-imports from network replays or Nodaro bugs, which would orphan OPFS storage.
+1. **Guard against duplicates**: Check `useEmbeddedStore.getState().isImporting` — a boolean flag set synchronously at the start of this handler (before any async work). This prevents a second message from starting a parallel import while the first is still fetching/processing. The older `pendingVideoImport !== null` check alone is insufficient because it's set at step 9 (after several async operations).
 
-2. **Validate origin** against allowlist. Reject if not allowed.
+2. **Set importing flag**: `useEmbeddedStore.getState().setIsImporting(true)` — set synchronously before any async work. Reset to `false` in a `finally` block.
 
-3. **Store origin** in `useEmbeddedStore` for outbound messages.
+3. **Validate origin** against allowlist. Reject if not allowed.
 
-4. **Fetch video**: `fetch(videoUrl)` → `Blob`. The video URL comes from Nodaro's R2 storage (CORS-enabled).
+4. **Store origin** in `useEmbeddedStore` for outbound messages.
 
-5. **Wrap as File**: `new File([blob], 'nodaro-edit.mp4', { type: blob.type })` — `processMedia()` requires a `File` object.
+5. **Fetch video**: `fetch(videoUrl)` → `Blob`. The video URL comes from Nodaro's R2 storage (CORS-enabled).
 
-6. **Extract metadata**: `mediaProcessorService.processMedia(file, blob.type, { timeout: 60000 })` — note: `mimeType` is the required second argument. Use 60s timeout (default is 30s, which is tight for large H.265 videos). Returns `{ metadata, thumbnail }` with duration, width, height, fps, codec, audioCodec, audioCodecSupported, and optional thumbnail Blob.
+6. **Wrap as File**: `new File([blob], 'nodaro-edit.mp4', { type: blob.type })` — `processMedia()` requires a `File` object.
 
-7. **Create project**: Use `createProject()` from the project store (accepts `ProjectFormData`, returns `Promise<Project>`, does NOT navigate):
+7. **Extract metadata**: `mediaProcessorService.processMedia(file, blob.type)` — note: `mimeType` is the required second argument. The timeout is hardcoded at 30s in the service (the `options` parameter only supports `thumbnailMaxSize`, `thumbnailQuality`, `thumbnailTimestamp` — **not** timeout). For large videos this may be tight; if it becomes an issue, the `MediaProcessorService` timeout constant should be increased or made configurable as a separate change. Returns `{ metadata, thumbnail }` with duration, width, height, fps, codec, audioCodec, audioCodecSupported, and optional thumbnail Blob.
+
+8. **Create project**: Use `createProject()` from the project store (accepts `ProjectFormData`, returns `Promise<Project>`, does NOT navigate):
    - Name: "Nodaro Edit"
    - Width/height: from video metadata
    - FPS: rounded to nearest allowed value via `roundToNearestAllowedFps()` — maps e.g. 29.97→30, 23.976→24, 59.94→60 against `[24, 25, 30, 50, 60, 120, 240]`
    - backgroundColor: `'#000000'`
 
-8. **Import to media library**: Use new `importMediaBlob()` method (see Section 6). Returns `MediaMetadata`.
+9. **Import to media library**: Use new `importMediaBlob()` method (see Section 6). Returns `MediaMetadata`.
 
-9. **Store pending import**: Set `pendingVideoImport: { mediaId: metadata.id }` in `useEmbeddedStore`.
+10. **Store pending import**: Set `pendingVideoImport: { mediaId: metadata.id }` in `useEmbeddedStore`.
 
-10. **Store input metadata**: Save codec, resolution, fps in `useEmbeddedStore.inputMetadata` for the "Send Back" export.
+11. **Store input metadata**: Save codec, resolution, fps in `useEmbeddedStore.inputMetadata` for the "Send Back" export.
 
-11. **Navigate**: `router.navigate({ to: '/editor/$projectId', params: { projectId: project.id } })` using the exported router instance.
+12. **Navigate**: `router.navigate({ to: '/editor/$projectId', params: { projectId: project.id } })` using the exported router instance. By this point React has mounted (the 500ms+ delay from Nodaro ensures `RouterProvider` is active).
 
-12. **On error**: Post `FREECUT_ERROR` to parent with `phase: 'import'` and message.
+13. **On error**: Post `FREECUT_ERROR` to parent with `phase: 'import'` and message. Reset `isImporting` to `false` in `finally` block.
 
 ### 3. Video Placement After Editor Mount
 
-**File**: `src/features/editor/components/editor.tsx` (modify)
+**File**: `src/features/editor/services/embedded-import.ts` (new) + `src/features/editor/components/editor.tsx` (modify)
+
+The `consumePendingEmbeddedImport()` function lives in the **editor feature** (not embedded), because it orchestrates across media-library and timeline — both of which the editor already has deps adapters for. This follows the same pattern as `useCanvasMediaDrop` in the preview feature. The editor just needs one new adapter for the embedded store.
 
 **Timing constraint**: `loadTimeline(projectId)` is called in editor.tsx's useEffect but is **not awaited** — it fires asynchronously. The default "Track 1" is only available after `loadTimeline()` resolves. The pending video import must wait for this.
 
@@ -294,7 +300,7 @@ On "Send Back" click:
 The existing `importMediaWithHandle()` handles all media types but requires a `FileSystemFileHandle`. The existing `importGeneratedImage()` uses OPFS storage but explicitly rejects non-image types (`if (!mimeType.startsWith('image/'))` guard). A new method combines the strengths of both — full worker metadata extraction (like `importMediaWithHandle`) with OPFS storage (like `importGeneratedImage`):
 
 1. **Wrap blob**: `new File([blob], filename, { type: blob.type })`
-2. **Process via worker**: `mediaProcessorService.processMedia(file, blob.type, { timeout: 60000 })` — same worker as `importMediaWithHandle()`. Returns `{ metadata, thumbnail }` with all video-specific fields. 60s timeout for large videos.
+2. **Process via worker**: `mediaProcessorService.processMedia(file, blob.type)` — same worker as `importMediaWithHandle()`. Returns `{ metadata, thumbnail }` with all video-specific fields. Timeout is hardcoded at 30s in the service.
 3. **Generate media ID**: `crypto.randomUUID()`
 4. **Generate OPFS path**: `content/${mediaId.slice(0,2)}/${mediaId.slice(2,4)}/${mediaId}/data` (same pattern as `importGeneratedImage()`)
 5. **Check OPFS quota**: `await opfsService.checkQuota(blob.size)` — the service already has this method. If `!canUpload`, throw an error before writing.
@@ -428,6 +434,7 @@ This keeps vercel.json consistent even though Railway/Caddy is the primary deplo
 | `src/features/embedded/deps/media-library-contract.ts` | Create | Cross-feature adapter for media library |
 | `src/features/embedded/deps/timeline-contract.ts` | Create | Cross-feature adapter for timeline |
 | `src/features/embedded/index.ts` | Create | Barrel exports |
+| `src/features/editor/services/embedded-import.ts` | Create | `consumePendingEmbeddedImport()` orchestrator |
 | `src/features/editor/deps/embedded-contract.ts` | Create | Cross-feature adapter: editor → embedded |
 | `src/features/media-library/services/media-library-service.ts` | Modify | Add `importMediaBlob()` method |
 | `src/features/export/index.ts` | Modify | Export `useClientRender` in public API |
