@@ -41,16 +41,22 @@ async function handleLoadVideo(event: MessageEvent) {
     // Store parent origin for outbound messages
     store.setParentOrigin(event.origin);
 
-    const { videoUrl } = event.data.payload;
-    if (!videoUrl) {
-      throw new Error('Missing videoUrl in NODARO_LOAD_VIDEO payload');
+    const { videoUrl, videoBuffer } = event.data.payload;
+    if (!videoUrl && !videoBuffer) {
+      throw new Error('Missing videoUrl or videoBuffer in NODARO_LOAD_VIDEO payload');
     }
 
-    // Fetch video
-    log.info('Fetching video from:', videoUrl);
-    const response = await fetch(videoUrl);
-    if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-    const blob = await response.blob();
+    // Use pre-fetched buffer if provided (avoids CORS), otherwise fetch URL
+    let blob: Blob;
+    if (videoBuffer) {
+      log.info('Using pre-fetched video buffer', { size: videoBuffer.byteLength });
+      blob = new Blob([videoBuffer], { type: 'video/mp4' });
+    } else {
+      log.info('Fetching video from:', videoUrl);
+      const response = await fetch(videoUrl);
+      if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+      blob = await response.blob();
+    }
 
     // Extract metadata via worker
     const file = new File([blob], 'nodaro-edit.mp4', { type: blob.type || 'video/mp4' });

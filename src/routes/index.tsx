@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Layers, ArrowRight, Play, FolderOpen, Download, Star, ExternalLink } from 'lucide-react';
+import { Layers, ArrowRight, Play, FolderOpen, Download, Star, ExternalLink, Loader2 } from 'lucide-react';
 import { FreeCutLogo } from '@/components/brand/freecut-logo';
 import { Button } from '@/components/ui/button';
 import {
@@ -8,6 +8,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import { isEmbedded } from '@/features/embedded/stores/embedded-store';
 
 export const Route = createFileRoute('/')({
   component: LandingPage,
@@ -118,6 +119,17 @@ const showcaseItems = [
 ];
 
 function LandingPage() {
+  if (isEmbedded()) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <span className="text-sm">Loading video...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground select-text">
       {/* Hero Section */}
