@@ -1,5 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { useClientRender } from '../deps/export-contract';
+import { useProjectStore } from '../deps/projects-contract';
+import { exportProjectJson } from '../deps/project-bundle-contract';
 import { useEmbeddedStore } from '../stores/embedded-store';
 import { reverseMapCodec } from '../utils/codec-mapping';
 import { createLogger } from '@/shared/logging/logger';
@@ -34,20 +36,39 @@ export function useSendBack() {
   useEffect(() => {
     if (!parentOrigin || status !== 'completed' || !result?.blob) return;
 
-    result.blob.arrayBuffer().then((buffer) => {
+    (async () => {
+      const buffer = await result.blob.arrayBuffer();
+
+      // Export project JSON for persistence
+      let projectJson: unknown = null;
+      try {
+        const currentProject = useProjectStore.getState().currentProject;
+        if (currentProject) {
+          projectJson = await exportProjectJson(currentProject.id, {
+            includeMediaReferences: true,
+            stripVolatileFields: true,
+            includeChecksum: false,
+          });
+        }
+      } catch (e) {
+        log.warn('Failed to export project JSON for send-back', { error: e });
+      }
+
       window.parent.postMessage(
-        { type: 'FREECUT_EXPORT_COMPLETE', payload: { videoBuffer: buffer } },
+        { type: 'FREECUT_EXPORT_COMPLETE', payload: { videoBuffer: buffer, projectJson } },
         parentOrigin,
+        [buffer],
       );
       log.info('Export result sent to parent', {
         fileSize: result.fileSize,
         mimeType: result.mimeType,
+        hasProjectJson: !!projectJson,
       });
       useEmbeddedStore.getState().setSendBackStatus('sent');
       setTimeout(() => {
         useEmbeddedStore.getState().setSendBackStatus('idle');
       }, 3000);
-    });
+    })();
   }, [status, result, parentOrigin]);
 
   // Report errors to parent

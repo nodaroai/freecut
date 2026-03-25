@@ -3,6 +3,7 @@ import { useEmbeddedStore } from '../stores/embedded-store';
 import { roundToNearestAllowedFps } from '../utils/codec-mapping';
 import { useProjectStore } from '../deps/projects-contract';
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract';
+import { importProjectFromJsonString } from '../deps/project-bundle-contract';
 import { router } from '@/app/router';
 
 const log = createLogger('embedded-message-handler');
@@ -78,6 +79,44 @@ async function handleLoadVideo(event: MessageEvent) {
     // Import to media library
     const media = await mediaLibraryService.importMediaBlob(blob, project.id, 'nodaro-edit.mp4');
 
+    // Check if we have a project to restore
+    const { projectJson } = event.data.payload;
+    if (projectJson) {
+      try {
+        const jsonString = typeof projectJson === 'string' ? projectJson : JSON.stringify(projectJson);
+        const importResult = await importProjectFromJsonString(jsonString, {
+          generateNewIds: false,
+          matchMediaByHash: true,
+          matchMediaByName: true,
+          skipValidation: false,
+        });
+
+        // Associate the newly imported media with the restored project
+        store.setPendingVideoImport({ mediaId: media.id });
+        store.setInputMetadata({
+          codec: workerMeta.type === 'video' ? workerMeta.codec : '',
+          width,
+          height,
+          fps: workerMeta.type === 'video' ? workerMeta.fps : 30,
+        });
+
+        router.navigate({
+          to: '/editor/$projectId',
+          params: { projectId: importResult.project.id },
+        });
+
+        log.info('Project restored from snapshot', {
+          projectId: importResult.project.id,
+          matchedMedia: importResult.matchedMedia.length,
+          unmatchedMedia: importResult.unmatchedMedia.length,
+        });
+        return;
+      } catch (e) {
+        log.warn('Failed to restore project from snapshot, creating fresh', { error: e });
+        // Fall through to fresh project creation
+      }
+    }
+
     // Store pending import + input metadata
     store.setPendingVideoImport({ mediaId: media.id });
     store.setInputMetadata({
@@ -103,14 +142,32 @@ async function handleLoadVideo(event: MessageEvent) {
   }
 }
 
+function handleResetProject() {
+  const store = useEmbeddedStore.getState();
+
+  // Re-import with the original video but no project JSON
+  // The parent will re-send NODARO_LOAD_VIDEO without projectJson
+  log.info('Reset project requested, waiting for fresh NODARO_LOAD_VIDEO');
+
+  // Clear the importing flag so the next NODARO_LOAD_VIDEO is accepted
+  store.setIsImporting(false);
+}
+
 function handleMessage(event: MessageEvent) {
   if (event.data?.type === 'NODARO_LOAD_VIDEO') {
-    // Validate origin before any processing
     if (!isAllowedOrigin(event.origin)) {
       log.warn('Rejected message from disallowed origin:', event.origin);
       return;
     }
     handleLoadVideo(event);
+  }
+
+  if (event.data?.type === 'NODARO_RESET_PROJECT') {
+    if (!isAllowedOrigin(event.origin)) {
+      log.warn('Rejected NODARO_RESET_PROJECT from disallowed origin:', event.origin);
+      return;
+    }
+    handleResetProject();
   }
 }
 
