@@ -86,6 +86,7 @@ async function handleLoadVideo(event: MessageEvent) {
     const media = await mediaLibraryService.importMediaBlob(blob, project.id, 'nodaro-edit.mp4');
 
     // If we have a saved project snapshot, restore the timeline onto the fresh project
+    let timelineRestored = false;
     const { projectJson } = event.data.payload;
     if (projectJson) {
       try {
@@ -121,13 +122,18 @@ async function handleLoadVideo(event: MessageEvent) {
             });
           }
           log.info('Timeline restored from snapshot', { projectId: project.id, remappedMediaIds: oldMediaIds.size });
+          // Don't set pendingVideoImport — restored timeline already has the video
+          timelineRestored = true;
         }
       } catch (e) {
         log.warn('Failed to restore timeline from snapshot, using fresh project', { error: e });
       }
     }
 
-    store.setPendingVideoImport({ mediaId: media.id });
+    // Only add video to timeline for fresh projects (restored ones already have it)
+    if (!timelineRestored) {
+      store.setPendingVideoImport({ mediaId: media.id });
+    }
     store.setInputMetadata(inputMeta);
 
     router.navigate({
