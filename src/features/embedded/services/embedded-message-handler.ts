@@ -184,7 +184,7 @@ async function handleImportFiles(event: MessageEvent) {
   // Refresh the media library UI (lazy-import to avoid circular deps)
   try {
     const { useMediaLibraryStore } = await import(
-      '@/features/media-library/stores/media-library-store'
+      '../deps/media-library-contract'
     );
     await useMediaLibraryStore.getState().loadMediaItems();
   } catch (e) {
