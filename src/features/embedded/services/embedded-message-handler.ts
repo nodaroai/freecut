@@ -4,8 +4,7 @@ import { roundToNearestAllowedFps } from '../utils/codec-mapping';
 import { useProjectStore } from '../deps/projects-contract';
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract';
 import { router } from '@/app/router';
-import { createProject as createProjectDB, associateMediaWithProject } from '@/infrastructure/storage/indexeddb';
-// Note: importProjectFromJsonString not used — we do manual restore to control media remapping
+import { updateProject as updateProjectDB } from '@/infrastructure/storage/indexeddb';
 
 const log = createLogger('embedded-message-handler');
 
@@ -75,70 +74,7 @@ async function handleLoadVideo(event: MessageEvent) {
       fps: workerMeta.type === 'video' ? workerMeta.fps : 30,
     };
 
-    // Check if we have a project to restore
-    const { projectJson } = event.data.payload;
-    if (projectJson) {
-      try {
-        const snapshot = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson;
-        const savedProject = snapshot.project;
-        if (!savedProject?.id || !savedProject?.timeline) throw new Error('Invalid snapshot');
-
-        // Create a temporary project to import media into
-        const tempProject = await useProjectStore.getState().createProject({
-          name: 'Nodaro Edit',
-          width,
-          height,
-          fps,
-          backgroundColor: '#000000',
-        });
-        const media = await mediaLibraryService.importMediaBlob(blob, tempProject.id, 'nodaro-edit.mp4');
-
-        // Collect all old media IDs referenced in the saved timeline
-        const oldMediaIds = new Set<string>();
-        for (const item of savedProject.timeline.items ?? []) {
-          if (item.mediaId) oldMediaIds.add(item.mediaId);
-        }
-
-        // Remap all old media IDs to the new media ID and clear cached URLs
-        const restoredTimeline = {
-          ...savedProject.timeline,
-          items: (savedProject.timeline.items ?? []).map((item: Record<string, unknown>) => {
-            if (item.mediaId && oldMediaIds.has(item.mediaId as string)) {
-              return { ...item, mediaId: media.id, src: undefined, thumbnailUrl: undefined };
-            }
-            return item;
-          }),
-        };
-
-        // Save the restored project to DB using the original project ID
-        const restoredProject = {
-          ...savedProject,
-          timeline: restoredTimeline,
-          updatedAt: Date.now(),
-        };
-        await createProjectDB(restoredProject);
-        await associateMediaWithProject(restoredProject.id, media.id);
-
-        store.setPendingVideoImport({ mediaId: media.id });
-        store.setInputMetadata(inputMeta);
-
-        router.navigate({
-          to: '/editor/$projectId',
-          params: { projectId: restoredProject.id },
-        });
-
-        log.info('Project restored from snapshot', {
-          projectId: restoredProject.id,
-          remappedMediaIds: oldMediaIds.size,
-        });
-        return;
-      } catch (e) {
-        log.warn('Failed to restore project from snapshot, creating fresh', { error: e });
-        // Fall through to fresh project creation
-      }
-    }
-
-    // Create fresh project
+    // Always create fresh project and import media first
     const project = await useProjectStore.getState().createProject({
       name: 'Nodaro Edit',
       width,
@@ -148,6 +84,39 @@ async function handleLoadVideo(event: MessageEvent) {
     });
 
     const media = await mediaLibraryService.importMediaBlob(blob, project.id, 'nodaro-edit.mp4');
+
+    // If we have a saved project snapshot, restore the timeline onto the fresh project
+    const { projectJson } = event.data.payload;
+    if (projectJson) {
+      try {
+        const snapshot = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson;
+        const savedTimeline = snapshot.project?.timeline;
+        if (savedTimeline?.items) {
+          // Collect all old media IDs referenced in saved timeline
+          const oldMediaIds = new Set<string>();
+          for (const item of savedTimeline.items) {
+            if (item.mediaId) oldMediaIds.add(item.mediaId);
+          }
+
+          // Remap old media IDs to the new media ID
+          const restoredTimeline = {
+            ...savedTimeline,
+            items: savedTimeline.items.map((item: Record<string, unknown>) => {
+              if (item.mediaId && oldMediaIds.has(item.mediaId as string)) {
+                return { ...item, mediaId: media.id, src: undefined, thumbnailUrl: undefined };
+              }
+              return item;
+            }),
+          };
+
+          // Update the fresh project with restored timeline
+          await updateProjectDB(project.id, { timeline: restoredTimeline, updatedAt: Date.now() });
+          log.info('Timeline restored from snapshot', { projectId: project.id, remappedMediaIds: oldMediaIds.size });
+        }
+      } catch (e) {
+        log.warn('Failed to restore timeline from snapshot, using fresh project', { error: e });
+      }
+    }
 
     store.setPendingVideoImport({ mediaId: media.id });
     store.setInputMetadata(inputMeta);
