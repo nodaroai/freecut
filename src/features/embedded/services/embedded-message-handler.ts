@@ -4,7 +4,7 @@ import { roundToNearestAllowedFps } from '../utils/codec-mapping';
 import { useProjectStore } from '../deps/projects-contract';
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract';
 import { router } from '@/app/router';
-import { updateProject as updateProjectDB } from '@/infrastructure/storage/indexeddb';
+import { updateProject as updateProjectDB, getProject as getProjectDB } from '@/infrastructure/storage/indexeddb';
 
 const log = createLogger('embedded-message-handler');
 
@@ -109,8 +109,17 @@ async function handleLoadVideo(event: MessageEvent) {
             }),
           };
 
-          // Update the fresh project with restored timeline
+          // Update the fresh project with restored timeline in both DB and Zustand store
           await updateProjectDB(project.id, { timeline: restoredTimeline, updatedAt: Date.now() });
+          const updatedProject = await getProjectDB(project.id);
+          if (updatedProject) {
+            useProjectStore.setState({
+              currentProject: updatedProject,
+              projects: useProjectStore.getState().projects.map((p) =>
+                p.id === project.id ? updatedProject : p,
+              ),
+            });
+          }
           log.info('Timeline restored from snapshot', { projectId: project.id, remappedMediaIds: oldMediaIds.size });
         }
       } catch (e) {
