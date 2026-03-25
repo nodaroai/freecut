@@ -162,6 +162,36 @@ function handleResetProject() {
   store.setIsImporting(false);
 }
 
+async function handleImportFiles(event: MessageEvent) {
+  const { files } = event.data.payload;
+  if (!files?.length) return;
+
+  const projectId = useProjectStore.getState().currentProject?.id;
+  if (!projectId) {
+    log.warn('No current project for NODARO_IMPORT_FILES');
+    return;
+  }
+
+  for (const file of files) {
+    try {
+      const blob = new Blob([file.buffer], { type: file.type });
+      await mediaLibraryService.importMediaBlob(blob, projectId, file.name);
+    } catch (e) {
+      log.error(`Failed to import ${file.name}:`, e);
+    }
+  }
+
+  // Refresh the media library UI (lazy-import to avoid circular deps)
+  try {
+    const { useMediaLibraryStore } = await import(
+      '@/features/media-library/stores/media-library-store'
+    );
+    await useMediaLibraryStore.getState().loadMediaItems();
+  } catch (e) {
+    log.warn('Failed to refresh media library after import:', e);
+  }
+}
+
 function handleMessage(event: MessageEvent) {
   if (event.data?.type === 'NODARO_LOAD_VIDEO') {
     if (!isAllowedOrigin(event.origin)) {
@@ -177,6 +207,14 @@ function handleMessage(event: MessageEvent) {
       return;
     }
     handleResetProject();
+  }
+
+  if (event.data?.type === 'NODARO_IMPORT_FILES') {
+    if (!isAllowedOrigin(event.origin)) {
+      log.warn('Rejected NODARO_IMPORT_FILES from disallowed origin:', event.origin);
+      return;
+    }
+    handleImportFiles(event);
   }
 }
 
