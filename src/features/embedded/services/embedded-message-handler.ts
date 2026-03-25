@@ -3,8 +3,9 @@ import { useEmbeddedStore } from '../stores/embedded-store';
 import { roundToNearestAllowedFps } from '../utils/codec-mapping';
 import { useProjectStore } from '../deps/projects-contract';
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract';
-import { importProjectFromJsonString } from '../deps/project-bundle-contract';
 import { router } from '@/app/router';
+import { createProject as createProjectDB, associateMediaWithProject } from '@/infrastructure/storage/indexeddb';
+// Note: importProjectFromJsonString not used — we do manual restore to control media remapping
 
 const log = createLogger('embedded-message-handler');
 
@@ -63,52 +64,72 @@ async function handleLoadVideo(event: MessageEvent) {
     const file = new File([blob], 'nodaro-edit.mp4', { type: blob.type || 'video/mp4' });
     const { metadata: workerMeta } = await mediaProcessorService.processMedia(file, file.type);
 
-    // Create project using video dimensions/fps
     const fps = roundToNearestAllowedFps(workerMeta.type === 'video' ? workerMeta.fps : 30);
     const width = 'width' in workerMeta ? workerMeta.width : 1920;
     const height = 'height' in workerMeta ? workerMeta.height : 1080;
 
-    const project = await useProjectStore.getState().createProject({
-      name: 'Nodaro Edit',
+    const inputMeta = {
+      codec: workerMeta.type === 'video' ? workerMeta.codec : '',
       width,
       height,
-      fps,
-      backgroundColor: '#000000',
-    });
-
-    // Import to media library
-    const media = await mediaLibraryService.importMediaBlob(blob, project.id, 'nodaro-edit.mp4');
+      fps: workerMeta.type === 'video' ? workerMeta.fps : 30,
+    };
 
     // Check if we have a project to restore
     const { projectJson } = event.data.payload;
     if (projectJson) {
       try {
-        const jsonString = typeof projectJson === 'string' ? projectJson : JSON.stringify(projectJson);
-        const importResult = await importProjectFromJsonString(jsonString, {
-          generateNewIds: false,
-          matchMediaByHash: true,
-          matchMediaByName: true,
-          skipValidation: false,
-        });
+        const snapshot = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson;
+        const savedProject = snapshot.project;
+        if (!savedProject?.id || !savedProject?.timeline) throw new Error('Invalid snapshot');
 
-        // Associate the newly imported media with the restored project
-        store.setPendingVideoImport({ mediaId: media.id });
-        store.setInputMetadata({
-          codec: workerMeta.type === 'video' ? workerMeta.codec : '',
+        // Create a temporary project to import media into
+        const tempProject = await useProjectStore.getState().createProject({
+          name: 'Nodaro Edit',
           width,
           height,
-          fps: workerMeta.type === 'video' ? workerMeta.fps : 30,
+          fps,
+          backgroundColor: '#000000',
         });
+        const media = await mediaLibraryService.importMediaBlob(blob, tempProject.id, 'nodaro-edit.mp4');
+
+        // Collect all old media IDs referenced in the saved timeline
+        const oldMediaIds = new Set<string>();
+        for (const item of savedProject.timeline.items ?? []) {
+          if (item.mediaId) oldMediaIds.add(item.mediaId);
+        }
+
+        // Remap all old media IDs to the new media ID and clear cached URLs
+        const restoredTimeline = {
+          ...savedProject.timeline,
+          items: (savedProject.timeline.items ?? []).map((item: Record<string, unknown>) => {
+            if (item.mediaId && oldMediaIds.has(item.mediaId as string)) {
+              return { ...item, mediaId: media.id, src: undefined, thumbnailUrl: undefined };
+            }
+            return item;
+          }),
+        };
+
+        // Save the restored project to DB using the original project ID
+        const restoredProject = {
+          ...savedProject,
+          timeline: restoredTimeline,
+          updatedAt: Date.now(),
+        };
+        await createProjectDB(restoredProject);
+        await associateMediaWithProject(restoredProject.id, media.id);
+
+        store.setPendingVideoImport({ mediaId: media.id });
+        store.setInputMetadata(inputMeta);
 
         router.navigate({
           to: '/editor/$projectId',
-          params: { projectId: importResult.project.id },
+          params: { projectId: restoredProject.id },
         });
 
         log.info('Project restored from snapshot', {
-          projectId: importResult.project.id,
-          matchedMedia: importResult.matchedMedia.length,
-          unmatchedMedia: importResult.unmatchedMedia.length,
+          projectId: restoredProject.id,
+          remappedMediaIds: oldMediaIds.size,
         });
         return;
       } catch (e) {
@@ -117,16 +138,20 @@ async function handleLoadVideo(event: MessageEvent) {
       }
     }
 
-    // Store pending import + input metadata
-    store.setPendingVideoImport({ mediaId: media.id });
-    store.setInputMetadata({
-      codec: workerMeta.type === 'video' ? workerMeta.codec : '',
+    // Create fresh project
+    const project = await useProjectStore.getState().createProject({
+      name: 'Nodaro Edit',
       width,
       height,
-      fps: workerMeta.type === 'video' ? workerMeta.fps : 30,
+      fps,
+      backgroundColor: '#000000',
     });
 
-    // Navigate to editor
+    const media = await mediaLibraryService.importMediaBlob(blob, project.id, 'nodaro-edit.mp4');
+
+    store.setPendingVideoImport({ mediaId: media.id });
+    store.setInputMetadata(inputMeta);
+
     router.navigate({
       to: '/editor/$projectId',
       params: { projectId: project.id },
