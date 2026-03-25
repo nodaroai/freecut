@@ -49,12 +49,12 @@ function SendBackButton() {
 
   const label =
     sendBackStatus === 'sent'
-      ? 'Sent!'
+      ? 'Saved!'
       : sendBackStatus === 'exporting'
-        ? `Exporting... ${Math.round(progress)}%`
+        ? `Saving... ${Math.round(progress)}%`
         : sendBackStatus === 'error'
           ? 'Error'
-          : 'Send Back';
+          : 'Save & Close';
 
   const icon =
     sendBackStatus === 'sent' ? (
