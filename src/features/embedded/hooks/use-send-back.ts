@@ -45,11 +45,9 @@ export function useSendBack() {
         const currentProject = useProjectStore.getState().currentProject;
         if (currentProject) {
           // Force save timeline to DB before exporting (auto-save may not have flushed yet)
-          const { getTimelineSnapshot } = await import('../deps/timeline-contract');
-          const snapshot = getTimelineSnapshot();
-          if (snapshot.saveTimeline) {
-            await snapshot.saveTimeline(currentProject.id);
-          }
+          const { useTimelineStore } = await import('../deps/timeline-contract');
+          const { saveTimeline } = useTimelineStore.getState();
+          await saveTimeline(currentProject.id);
 
           projectJson = await exportProjectJson(currentProject.id, {
             includeMediaReferences: true,
