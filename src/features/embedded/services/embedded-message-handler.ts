@@ -136,6 +136,20 @@ async function handleLoadVideo(event: MessageEvent) {
     }
     store.setInputMetadata(inputMeta);
 
+    // Import additional connected assets into the media library (e.g. manual-edit multi-input)
+    const { additionalFiles } = event.data.payload;
+    if (additionalFiles?.length) {
+      for (const file of additionalFiles) {
+        try {
+          const fileBlob = new Blob([file.buffer], { type: file.type });
+          await mediaLibraryService.importMediaBlob(fileBlob, project.id, file.name);
+        } catch (e) {
+          log.warn(`Failed to import additional asset ${file.name}:`, e);
+        }
+      }
+      log.info('Additional assets imported', { count: additionalFiles.length });
+    }
+
     router.navigate({
       to: '/editor/$projectId',
       params: { projectId: project.id },
