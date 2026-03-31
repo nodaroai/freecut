@@ -148,6 +148,13 @@ async function handleLoadVideo(event: MessageEvent) {
         }
       }
       log.info('Additional assets imported', { count: additionalFiles.length });
+      // Refresh media library UI so additional assets appear immediately
+      try {
+        const { useMediaLibraryStore } = await import('../deps/media-library-contract');
+        await useMediaLibraryStore.getState().loadMediaItems();
+      } catch (e) {
+        log.warn('Failed to refresh media library after additional imports:', e);
+      }
     }
 
     router.navigate({
