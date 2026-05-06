@@ -33,7 +33,10 @@ vi.mock('./video-content', () => ({
 
 import { StableVideoSequence } from './stable-video-sequence'
 import type { StableVideoSequenceItem } from './stable-video-sequence'
-import { areGroupPropsEqual } from './stable-video-sequence-comparator'
+import {
+  areGroupPropsEqual,
+  getStableVideoRenderSignature,
+} from './stable-video-sequence-comparator'
 import type { StableVideoGroup } from '../utils/video-scene'
 
 const renderComparatorItem = (
@@ -79,6 +82,54 @@ const comparatorProps = (
   group,
   renderItem,
   transitionWindows: undefined,
+})
+
+describe('getStableVideoRenderSignature', () => {
+  it('centralizes exactly the currently compared item fields', () => {
+    const cornerPin = {
+      topLeft: [0, 0] as [number, number],
+      topRight: [1, 0] as [number, number],
+      bottomRight: [1, 1] as [number, number],
+      bottomLeft: [0, 1] as [number, number],
+    }
+    const signature = getStableVideoRenderSignature(
+      renderComparatorItem({
+        crop: { left: 0.1, right: 0.2, top: 0.3, bottom: 0.4, softness: 0.5 },
+        cornerPin,
+        audioPitchSemitones: 2,
+        audioPitchCents: 25,
+        audioEqEnabled: true,
+        audioEqMidGainDb: 3,
+        trackAudioEq: { enabled: true, highGainDb: 4 },
+      }),
+    )
+
+    expect(signature).toMatchObject({
+      id: 'clip-1',
+      speed: 1,
+      sourceStart: 5,
+      sourceEnd: 65,
+      from: 10,
+      durationInFrames: 60,
+      trackVisible: true,
+      muted: false,
+      cropLeft: 0.1,
+      cropRight: 0.2,
+      cropTop: 0.3,
+      cropBottom: 0.4,
+      cropSoftness: 0.5,
+      cornerPin,
+      blendMode: undefined,
+      src: 'blob:video',
+      audioSrc: 'blob:audio',
+      reverseConformSrc: undefined,
+      reverseConformPreviewSrc: undefined,
+      reverseConformStatus: undefined,
+      audioPitchSemitones: 2,
+      audioPitchCents: 25,
+    })
+    expect(signature.audioEqStages).toHaveLength(2)
+  })
 })
 
 describe('areGroupPropsEqual', () => {

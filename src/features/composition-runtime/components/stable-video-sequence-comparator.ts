@@ -19,6 +19,126 @@ export type StableVideoSequenceComparatorItem = VideoItem & {
   _sharedTransitionSync?: boolean
 }
 
+type StableVideoRenderBaseSignature = {
+  id: string
+  speed: number | undefined
+  sourceStart: number | undefined
+  sourceEnd: number | undefined
+  from: number
+  durationInFrames: number
+  trackVisible: boolean
+  muted: boolean
+  cropLeft: number
+  cropRight: number
+  cropTop: number
+  cropBottom: number
+  cropSoftness: number
+  cornerPin: StableVideoSequenceComparatorItem['cornerPin']
+  blendMode: StableVideoSequenceComparatorItem['blendMode']
+  src: string | undefined
+  audioSrc: string | undefined
+  reverseConformSrc: string | undefined
+  reverseConformPreviewSrc: string | undefined
+  reverseConformStatus: StableVideoSequenceComparatorItem['reverseConformStatus']
+  audioPitchSemitones: number
+  audioPitchCents: number
+}
+
+type StableVideoRenderSignature = StableVideoRenderBaseSignature & {
+  audioEqStages: ReturnType<typeof appendResolvedAudioEqSources>
+}
+
+function getStableVideoRenderBaseSignature(
+  item: StableVideoSequenceComparatorItem,
+): StableVideoRenderBaseSignature {
+  return {
+    id: item.id,
+    speed: item.speed,
+    sourceStart: item.sourceStart,
+    sourceEnd: item.sourceEnd,
+    from: item.from,
+    durationInFrames: item.durationInFrames,
+    trackVisible: item.trackVisible,
+    muted: item.muted,
+    cropLeft: item.crop?.left ?? 0,
+    cropRight: item.crop?.right ?? 0,
+    cropTop: item.crop?.top ?? 0,
+    cropBottom: item.crop?.bottom ?? 0,
+    cropSoftness: item.crop?.softness ?? 0,
+    cornerPin: item.cornerPin,
+    blendMode: item.blendMode,
+    src: item.src,
+    audioSrc: item.audioSrc,
+    reverseConformSrc: item.reverseConformSrc,
+    reverseConformPreviewSrc: item.reverseConformPreviewSrc,
+    reverseConformStatus: item.reverseConformStatus,
+    audioPitchSemitones: item.audioPitchSemitones ?? 0,
+    audioPitchCents: item.audioPitchCents ?? 0,
+  }
+}
+
+function getStableVideoAudioEqStages(item: StableVideoSequenceComparatorItem) {
+  return appendResolvedAudioEqSources(undefined, item.trackAudioEq, getAudioEqSettings(item))
+}
+
+export function getStableVideoRenderSignature(
+  item: StableVideoSequenceComparatorItem,
+): StableVideoRenderSignature {
+  return {
+    ...getStableVideoRenderBaseSignature(item),
+    audioEqStages: getStableVideoAudioEqStages(item),
+  }
+}
+
+function areStableVideoRenderBaseSignaturesEqual(
+  prevSignature: StableVideoRenderBaseSignature,
+  nextSignature: StableVideoRenderBaseSignature,
+): boolean {
+  return (
+    prevSignature.id === nextSignature.id &&
+    prevSignature.speed === nextSignature.speed &&
+    prevSignature.sourceStart === nextSignature.sourceStart &&
+    prevSignature.sourceEnd === nextSignature.sourceEnd &&
+    prevSignature.from === nextSignature.from &&
+    prevSignature.durationInFrames === nextSignature.durationInFrames &&
+    prevSignature.trackVisible === nextSignature.trackVisible &&
+    prevSignature.muted === nextSignature.muted &&
+    prevSignature.cropLeft === nextSignature.cropLeft &&
+    prevSignature.cropRight === nextSignature.cropRight &&
+    prevSignature.cropTop === nextSignature.cropTop &&
+    prevSignature.cropBottom === nextSignature.cropBottom &&
+    prevSignature.cropSoftness === nextSignature.cropSoftness &&
+    prevSignature.cornerPin === nextSignature.cornerPin &&
+    prevSignature.blendMode === nextSignature.blendMode &&
+    prevSignature.src === nextSignature.src &&
+    prevSignature.audioSrc === nextSignature.audioSrc &&
+    prevSignature.reverseConformSrc === nextSignature.reverseConformSrc &&
+    prevSignature.reverseConformPreviewSrc === nextSignature.reverseConformPreviewSrc &&
+    prevSignature.reverseConformStatus === nextSignature.reverseConformStatus &&
+    prevSignature.audioPitchSemitones === nextSignature.audioPitchSemitones &&
+    prevSignature.audioPitchCents === nextSignature.audioPitchCents
+  )
+}
+
+function areStableVideoItemsRenderEqual(
+  prevItem: StableVideoSequenceComparatorItem,
+  nextItem: StableVideoSequenceComparatorItem,
+): boolean {
+  if (
+    !areStableVideoRenderBaseSignaturesEqual(
+      getStableVideoRenderBaseSignature(prevItem),
+      getStableVideoRenderBaseSignature(nextItem),
+    )
+  ) {
+    return false
+  }
+
+  return areAudioEqStagesEqual(
+    getStableVideoAudioEqStages(prevItem),
+    getStableVideoAudioEqStages(nextItem),
+  )
+}
+
 /**
  * Custom comparison for GroupRenderer to ensure re-render when item properties change.
  * Default React.memo shallow comparison only checks reference equality, which may miss
@@ -68,42 +188,7 @@ export function areGroupPropsEqual(
   for (let i = 0; i < prevProps.group.items.length; i++) {
     const prevItem = prevProps.group.items[i]!
     const nextItem = nextProps.group.items[i]!
-    if (
-      prevItem.id !== nextItem.id ||
-      prevItem.speed !== nextItem.speed ||
-      prevItem.sourceStart !== nextItem.sourceStart ||
-      prevItem.sourceEnd !== nextItem.sourceEnd ||
-      prevItem.from !== nextItem.from ||
-      prevItem.durationInFrames !== nextItem.durationInFrames ||
-      prevItem.trackVisible !== nextItem.trackVisible ||
-      prevItem.muted !== nextItem.muted ||
-      (prevItem.crop?.left ?? 0) !== (nextItem.crop?.left ?? 0) ||
-      (prevItem.crop?.right ?? 0) !== (nextItem.crop?.right ?? 0) ||
-      (prevItem.crop?.top ?? 0) !== (nextItem.crop?.top ?? 0) ||
-      (prevItem.crop?.bottom ?? 0) !== (nextItem.crop?.bottom ?? 0) ||
-      (prevItem.crop?.softness ?? 0) !== (nextItem.crop?.softness ?? 0) ||
-      prevItem.cornerPin !== nextItem.cornerPin ||
-      prevItem.blendMode !== nextItem.blendMode ||
-      prevItem.src !== nextItem.src ||
-      prevItem.audioSrc !== nextItem.audioSrc ||
-      prevItem.reverseConformSrc !== nextItem.reverseConformSrc ||
-      prevItem.reverseConformPreviewSrc !== nextItem.reverseConformPreviewSrc ||
-      prevItem.reverseConformStatus !== nextItem.reverseConformStatus ||
-      (prevItem.audioPitchSemitones ?? 0) !== (nextItem.audioPitchSemitones ?? 0) ||
-      (prevItem.audioPitchCents ?? 0) !== (nextItem.audioPitchCents ?? 0) ||
-      !areAudioEqStagesEqual(
-        appendResolvedAudioEqSources(
-          undefined,
-          prevItem.trackAudioEq,
-          getAudioEqSettings(prevItem),
-        ),
-        appendResolvedAudioEqSources(
-          undefined,
-          nextItem.trackAudioEq,
-          getAudioEqSettings(nextItem),
-        ),
-      )
-    ) {
+    if (!areStableVideoItemsRenderEqual(prevItem, nextItem)) {
       return false
     }
   }
