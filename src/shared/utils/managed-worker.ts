@@ -17,10 +17,10 @@ export function rejectAndDeletePendingRequests<TPending extends RejectablePendin
   pendingRequests: Map<string, TPending>,
   error: Error,
 ): void {
-  pendingRequests.forEach((pending, id) => {
+  pendingRequests.forEach((pending) => {
     pending.reject(error)
-    pendingRequests.delete(id)
   })
+  pendingRequests.clear()
 }
 
 export function createManagedWorker<TWorker extends Worker = Worker>(
