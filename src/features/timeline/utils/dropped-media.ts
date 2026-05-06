@@ -83,7 +83,7 @@ export function buildDroppedMediaTimelineItems(params: {
     thumbnailUrl: params.thumbnailUrl,
     canvasWidth: params.canvasWidth,
     canvasHeight: params.canvasHeight,
-    placements: params.placement as LinkedMediaTimelinePlacement,
+    placements: params.placement satisfies LinkedMediaTimelinePlacement,
     linkVideoAudio: params.linkVideoAudio,
   })
 }

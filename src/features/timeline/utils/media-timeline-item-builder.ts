@@ -27,7 +27,6 @@ interface TimelineMediaMetadata {
   fps?: number
   width?: number
   height?: number
-  audioCodec?: string
 }
 
 interface TimelineBaseItem {
