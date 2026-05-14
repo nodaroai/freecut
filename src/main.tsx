@@ -54,6 +54,12 @@ function showUpdateAvailableToast(applyUpdate: () => void = () => window.locatio
       label: i18n.t('appShell.reloadWithoutSaving'),
       onClick: applyUpdate,
     },
+    onDismiss: () => {
+      updateToastVisible = false
+    },
+    onAutoClose: () => {
+      updateToastVisible = false
+    },
   })
 }
 

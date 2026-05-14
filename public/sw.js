@@ -21,17 +21,19 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((cacheNames) =>
-        Promise.all(
-          cacheNames
-            .filter((cacheName) => cacheName !== CACHE_VERSION)
-            .map((cacheName) => caches.delete(cacheName)),
+    Promise.all([
+      caches
+        .keys()
+        .then((cacheNames) =>
+          Promise.all(
+            cacheNames
+              .filter((cacheName) => cacheName !== CACHE_VERSION)
+              .map((cacheName) => caches.delete(cacheName)),
+          ),
         ),
-      ),
+      self.clients.claim(),
+    ]),
   )
-  self.clients.claim()
 })
 
 self.addEventListener('fetch', (event) => {
@@ -74,7 +76,9 @@ async function networkFirstWithOfflineFallback(request) {
 
   try {
     const response = await fetch(request)
-    cache.put('/index.html', response.clone())
+    if (response.ok) {
+      cache.put('/index.html', response.clone())
+    }
     return response
   } catch {
     return (await cache.match('/index.html')) ?? Response.error()
@@ -85,12 +89,19 @@ async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_VERSION)
   const cachedResponse = await cache.match(request)
 
-  const fetchPromise = fetch(request).then((response) => {
-    if (response.ok) {
-      cache.put(request, response.clone())
-    }
-    return response
-  })
+  const fetchPromise = fetch(request)
+    .then((response) => {
+      if (response.ok) {
+        cache.put(request, response.clone()).catch(() => {})
+      }
+      return response
+    })
+    .catch((error) => {
+      if (cachedResponse) {
+        return cachedResponse
+      }
+      throw error
+    })
 
   return cachedResponse ?? fetchPromise
 }

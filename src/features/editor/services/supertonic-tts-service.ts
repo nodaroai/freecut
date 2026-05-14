@@ -69,7 +69,8 @@ const ESTIMATED_BYTES = 398_000_000
 const MODEL_BASE_URL = 'https://huggingface.co/spaces/Supertone/supertonic-3/resolve/main/assets'
 const ONNX_BASE_URL = `${MODEL_BASE_URL}/onnx`
 const VOICE_STYLE_BASE_URL = `${MODEL_BASE_URL}/voice_styles`
-const ORT_WASM_PATH = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/'
+const ORT_WASM_PATH =
+  'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260410-5e55544225/dist/'
 const DEFAULT_TOTAL_STEPS = 8
 const MAX_CHARS_PER_SEGMENT = 300
 const MAX_CJK_CHARS_PER_SEGMENT = 120
