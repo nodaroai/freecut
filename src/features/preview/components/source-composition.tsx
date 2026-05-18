@@ -156,6 +156,7 @@ function VideoSource({
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false)
   const [decodedFrameKey, setDecodedFrameKey] = useState<number | null>(null)
   const [pausedRenderTargetKey, setPausedRenderTargetKey] = useState<number | null>(null)
+  const shouldUseDecodedScrubFrame = forceFastScrub && strictDecodeReady && !useLegacyPausedSeek
 
   useEffect(() => {
     playingRef.current = playing
@@ -579,7 +580,11 @@ function VideoSource({
 
       lastFrameRef.current = frame
 
-      if (!playingRef.current && !useLegacyPausedSeek && !isPreviewScrubbing) {
+      if (
+        !playingRef.current &&
+        !useLegacyPausedSeek &&
+        (!isPreviewScrubbing || shouldUseDecodedScrubFrame)
+      ) {
         if (pausedRenderTargetKeyRef.current !== targetCacheKey) {
           pausedRenderTargetKeyRef.current = targetCacheKey
           setPausedRenderTargetKey(targetCacheKey)
@@ -623,7 +628,7 @@ function VideoSource({
         strictDecodeReady &&
         hasDecodedFrame &&
         !useLegacyPausedSeek &&
-        !isPreviewScrubbing
+        (!isPreviewScrubbing || shouldUseDecodedScrubFrame)
       ) {
         syncAudioTime()
         return
@@ -667,6 +672,7 @@ function VideoSource({
       hasDecodedFrame,
       isPreviewScrubbing,
       pumpLatestDecodedFrame,
+      shouldUseDecodedScrubFrame,
       src,
       strictDecodeReady,
       useLegacyPausedSeek,
@@ -746,12 +752,14 @@ function VideoSource({
 
   const showDecodedCanvas =
     !playing &&
-    !isPreviewScrubbing &&
+    (!isPreviewScrubbing || shouldUseDecodedScrubFrame) &&
     strictDecodeReady &&
     hasDecodedFrame &&
     !useLegacyPausedSeek &&
     decodedFrameKey !== null &&
     decodedFrameKey === pausedRenderTargetKey
+  const hideNativeVideoForPendingDecodedScrub =
+    shouldUseDecodedScrubFrame && pausedRenderTargetKey !== decodedFrameKey
 
   return (
     <AbsoluteFill>
@@ -761,7 +769,7 @@ function VideoSource({
           width: '100%',
           height: '100%',
           position: 'relative',
-          display: showDecodedCanvas ? 'none' : 'block',
+          display: showDecodedCanvas || hideNativeVideoForPendingDecodedScrub ? 'none' : 'block',
         }}
       />
       <canvas
