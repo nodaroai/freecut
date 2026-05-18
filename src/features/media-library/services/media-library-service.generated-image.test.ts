@@ -72,6 +72,7 @@ vi.mock('@/infrastructure/storage', () => ({
   getMediaForProject: vi.fn(),
   deleteTranscript: vi.fn(),
   saveTranscript: vi.fn(),
+  writeMediaSource: vi.fn(async () => undefined),
 }))
 
 vi.mock('./opfs-service', () => ({
