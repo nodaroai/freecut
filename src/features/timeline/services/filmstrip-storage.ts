@@ -15,6 +15,7 @@ import { createLogger } from '@/shared/logging/logger'
 import { getCacheMigration } from '@/infrastructure/storage/cache-version'
 import {
   readBlob,
+  readDirectoryFiles,
   readJson,
   writeBlob,
   writeJsonAtomic,
@@ -257,39 +258,31 @@ class FilmstripStorage {
       const metadata = await this.ensureWorkspaceFilmstrip(mediaId)
       if (!metadata) return null
 
-      const entries = await listDirectory(requireWorkspaceRoot(), filmstripDir(mediaId))
+      // Resolve the filmstrip dir once and read all matching files via the
+      // same handle iterator. readBlob-per-path would re-walk the 4-segment
+      // media path for every frame; with N=60 that's 240 wasted lookups.
+      const files = await readDirectoryFiles(
+        requireWorkspaceRoot(),
+        filmstripDir(mediaId),
+        (entry) => parseFrameFileNameParts(entry.name) !== null,
+      )
 
-      // Pick the best file per index up front (prefer primary ext when both exist),
-      // then issue all blob reads concurrently. Sequential awaits used to dominate
-      // re-display latency for cached clips — O(N) wall time at ~1-5ms per frame.
-      const fileByIndex = new Map<number, { name: string; index: number; ext: string }>()
-      for (const entry of entries) {
-        if (entry.kind !== 'file') continue
-        const parsed = parseFrameFileNameParts(entry.name)
+      const fileByIndex = new Map<number, { index: number; ext: string; blob: Blob }>()
+      for (const { name, blob } of files) {
+        const parsed = parseFrameFileNameParts(name)
         if (!parsed) continue
+        if (!blob || blob.size <= 0) continue
         const existing = fileByIndex.get(parsed.index)
         const shouldReplace =
           !existing || (parsed.ext === PRIMARY_FRAME_EXT && existing.ext !== PRIMARY_FRAME_EXT)
         if (shouldReplace) {
-          fileByIndex.set(parsed.index, { name: entry.name, index: parsed.index, ext: parsed.ext })
+          fileByIndex.set(parsed.index, { index: parsed.index, ext: parsed.ext, blob })
         }
       }
 
-      const candidates = Array.from(fileByIndex.values()).sort((a, b) => a.index - b.index)
-      const readResults = await Promise.all(
-        candidates.map(async ({ index, ext }) => {
-          const blob = await readBlob(
-            requireWorkspaceRoot(),
-            filmstripFramePath(mediaId, index, ext),
-          )
-          return blob && blob.size > 0 ? { index, blob } : null
-        }),
-      )
-
-      const frameFiles: Array<{ index: number; blob: Blob }> = []
-      for (const result of readResults) {
-        if (result) frameFiles.push(result)
-      }
+      const frameFiles = Array.from(fileByIndex.values())
+        .map(({ index, blob }) => ({ index, blob }))
+        .sort((a, b) => a.index - b.index)
 
       const nextUrls: Array<{ index: number; url: string }> = []
       const frames: FilmstripFrame[] = frameFiles.map(({ index, blob }) => {
