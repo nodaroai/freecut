@@ -127,12 +127,14 @@ const FilmstripTile = memo(function FilmstripTile({
 }) {
   const [errorSrc, setErrorSrc] = useState<string | null>(null)
 
-  // Draw bitmap to canvas when ref is attached or bitmap changes
+  // Draw bitmap to canvas when ref is attached or bitmap changes.
+  // Assigning canvas.width/height resets the backing buffer even when the value
+  // doesn't change, so guard against same-size writes to avoid wasted realloc.
   const canvasRefCallback: RefCallback<HTMLCanvasElement> = useCallback(
     (canvas: HTMLCanvasElement | null) => {
       if (!canvas || !bitmap || bitmap.width === 0 || bitmap.height === 0) return
-      canvas.width = bitmap.width
-      canvas.height = bitmap.height
+      if (canvas.width !== bitmap.width) canvas.width = bitmap.width
+      if (canvas.height !== bitmap.height) canvas.height = bitmap.height
       const ctx = canvas.getContext('2d')
       try {
         if (ctx) ctx.drawImage(bitmap, 0, 0)
@@ -474,13 +476,15 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     }
   }, [mediaId, isVisible, proxyBlobUrl, blobUrlVersion, hasStartedLoadingRef, setBlobUrl])
 
-  // Use filmstrip hook
+  // Use filmstrip hook. `enabled` no longer requires the source blob URL —
+  // disk-cached frames can render before useMediaBlobUrl resolves. The
+  // extraction path inside the hook still gates on blobUrl.
   const { frames, isLoading, isComplete, error } = useFilmstrip({
     mediaId,
     blobUrl: filmstripSourceUrl,
     duration: sourceDuration,
     isVisible,
-    enabled: !!filmstripSourceUrl && sourceDuration > 0,
+    enabled: sourceDuration > 0,
     priorityWindow,
     targetFrameCount,
     targetFrameIndices,
@@ -514,9 +518,11 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     [mediaId],
   )
 
-  // Calculate tiles - maps each tile position to the best frame
-  // Visible tiles stay locked to the clip geometry even during zoom; only the
-  // extraction request density above is reduced while interaction is active.
+  // Calculate tiles - maps each tile position to the best frame.
+  // During active zoom, drop tile density to match the request density (the
+  // extraction path already does this). Dedupe by frame.index and merge spans
+  // so the same frame stays in the same DOM node across zoom steps — keyed by
+  // frame.index, only style.left/width changes during zoom (no src thrash).
   const tiles = useMemo(() => {
     if (!frames || frames.length === 0 || thumbnailWidth === 0 || renderPixelsPerSecond <= 0)
       return []
@@ -528,7 +534,10 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     const visibleTileCount = Math.max(0, endTile - startTile)
     if (visibleTileCount <= 0) return []
 
-    const tileStep = getTileStep(visibleTileCount, MAX_TILES_IDLE)
+    const maxTiles = isInteractionLod
+      ? getInteractionMaxTiles(renderPixelsPerSecond)
+      : MAX_TILES_IDLE
+    const tileStep = getTileStep(visibleTileCount, maxTiles)
     const tileDurationSeconds = (thumbnailWidth / renderPixelsPerSecond) * speed
     const candidateWindowPadSeconds = Math.max(1, tileDurationSeconds * Math.max(2, tileStep))
     const windowStartTime = getSourceTimeForX(renderWindow.paddedStartX)
@@ -548,7 +557,11 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
       candidateFrames.length === frames.length
         ? frameByIndex
         : new Map(candidateFrames.map((frame) => [frame.index, frame] as const))
-    const result: { tileIndex: number; frame: FilmstripFrame; x: number; width: number }[] = []
+    // Build in slot order so adjacent slots that resolve to the same frame can
+    // merge into a single wider tile (preserves visible coverage without
+    // duplicating DOM nodes / breaking the key={frame.index} contract).
+    const result: { frame: FilmstripFrame; x: number; width: number }[] = []
+    let last: { frame: FilmstripFrame; x: number; width: number } | null = null
 
     for (let tile = startTile; tile < endTile; tile += tileStep) {
       const tileX = tile * thumbnailWidth
@@ -566,8 +579,14 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
         // Fall back to full frame set — always cover gaps with the closest available frame
         findClosestFrame(frames, tileTime)
 
-      if (frame) {
-        result.push({ tileIndex: tile, frame, x: tileX, width: tileWidth })
+      if (!frame) continue
+
+      if (last && last.frame.index === frame.index) {
+        // Same frame as previous slot — extend the existing tile right edge.
+        last.width = tileX + tileWidth - last.x
+      } else {
+        last = { frame, x: tileX, width: tileWidth }
+        result.push(last)
       }
     }
 
@@ -582,6 +601,7 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     speed,
     thumbnailWidth,
     renderWindow,
+    isInteractionLod,
   ])
 
   // Pick a cover frame from the middle of available frames — used as a repeating
@@ -626,9 +646,9 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
             : undefined
         }
       >
-        {tiles.map(({ tileIndex, frame, x, width }) => (
+        {tiles.map(({ frame, x, width }) => (
           <FilmstripTile
-            key={tileIndex}
+            key={frame.index}
             src={frame.url}
             bitmap={frame.bitmap}
             x={x}
