@@ -392,7 +392,11 @@ export class VideoFrameExtractor {
       // Phone videos commonly store landscape pixels with 90/270 degree
       // rotation metadata. VideoSample.draw() honors that metadata, while a
       // raw VideoFrame draw does not.
-      sample.draw?.(ctx, x, y, width, height)
+      if (typeof sample.draw !== 'function') {
+        this.lastFailureKind = 'decode-error'
+        return false
+      }
+      sample.draw(ctx, x, y, width, height)
       return true
     } catch (error) {
       // Draw failed — discard the cached frame so next attempt gets a fresh one
@@ -453,8 +457,8 @@ export class VideoFrameExtractor {
       return null
     }
 
-    const width = Math.max(1, Math.round(this.videoTrack?.displayWidth ?? 0))
-    const height = Math.max(1, Math.round(this.videoTrack?.displayHeight ?? 0))
+    const width = Math.round(this.videoTrack?.displayWidth ?? 0)
+    const height = Math.round(this.videoTrack?.displayHeight ?? 0)
     if (width <= 0 || height <= 0) {
       return this.cloneCurrentVideoFrame()
     }
@@ -463,7 +467,8 @@ export class VideoFrameExtractor {
       const canvas = new OffscreenCanvas(width, height)
       const ctx = canvas.getContext('2d')
       if (!ctx) return this.cloneCurrentVideoFrame()
-      sample.draw?.(ctx, 0, 0, width, height)
+      if (typeof sample.draw !== 'function') return this.cloneCurrentVideoFrame()
+      sample.draw(ctx, 0, 0, width, height)
       return await createImageBitmap(canvas)
     } catch (error) {
       this.sampleLoopError = error
@@ -589,8 +594,10 @@ export class VideoFrameExtractor {
       for await (const sample of this.sink.samplesAtTimestamps(timestamps)) {
         if (!sample) continue
         try {
-          sample.draw?.(ctx, x, y, width, height)
-          decoded++
+          if (typeof sample.draw === 'function') {
+            sample.draw(ctx, x, y, width, height)
+            decoded++
+          }
         } finally {
           sample.close()
         }
