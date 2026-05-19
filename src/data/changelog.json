@@ -1,25 +1,50 @@
 {
   "current": {
     "version": "current",
-    "date": "2026-05-14",
+    "date": "2026-05-19",
     "groups": {
-      "added": [
+      "fixed": [
         {
-          "title": "Translated UI in 9 languages: English, Spanish, French, German, Portuguese (Brazil), Turkish, Japanese, Korean, and Chinese (Simplified)"
+          "title": "Rotated videos display the correct orientation in skim preview and exports"
         },
         {
-          "title": "Language picker in editor settings, with auto-detection from your browser"
+          "title": "Scrub overlay stays aligned and the skim indicator sits flush on clip edges"
+        }
+      ],
+      "improved": [
+        {
+          "title": "Filmstrips and waveforms render smoother while zooming the timeline"
         },
         {
-          "title": "Effect names, timeline labels, and media library all translate alongside the rest of the UI"
-        },
-        {
-          "title": "Supertonic voice engine added to AI text-to-speech"
+          "title": "Faster filmstrip reload from disk cache when reopening projects"
         }
       ]
     }
   },
   "releases": [
+    {
+      "version": "2026.05.11",
+      "date": "2026-05-11",
+      "groups": {
+        "added": [
+          {
+            "title": "Translated UI in 9 languages: English, Spanish, French, German, Portuguese (Brazil), Turkish, Japanese, Korean, and Chinese (Simplified)"
+          },
+          {
+            "title": "Language picker in editor settings, with auto-detection from your browser"
+          },
+          {
+            "title": "Effect names, timeline labels, and media library all translate alongside the rest of the UI"
+          },
+          {
+            "title": "Supertonic voice engine added to AI text-to-speech"
+          },
+          {
+            "title": "Install FreeCut as a desktop app, with prompts when new versions ship"
+          }
+        ]
+      }
+    },
     {
       "version": "2026.05.04",
       "date": "2026-05-04",
