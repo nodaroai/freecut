@@ -411,7 +411,15 @@ export function isSubCompFullyOccludingItem(
   if (item.type !== 'video' && item.type !== 'image') return false
   if (item.blendMode && item.blendMode !== 'normal') return false
   if (hasCornerPin(item.cornerPin)) return false
-  if ((item.effects ?? []).some((effect) => effect.enabled !== false)) return false
+  // Use the same preview-override path as the renderer above. Otherwise a
+  // preview-only effect can flip this check the wrong way (e.g. a clean clip
+  // with a transparency-producing override would be falsely treated as fully
+  // occluding) and underlying layers would be skipped from the preview.
+  const itemEffects =
+    (rctx.renderMode === 'preview' ? rctx.getPreviewEffectsOverride?.(item.id) : undefined) ??
+    item.effects ??
+    []
+  if (itemEffects.some((effect) => effect.enabled !== false)) return false
   const adjustmentEffects = getAdjustmentLayerEffects(
     trackOrder,
     adjustmentLayers,
