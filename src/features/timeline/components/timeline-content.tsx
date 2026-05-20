@@ -13,7 +13,7 @@ import { useEditorStore } from '@/app/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
 
 // Hooks
-import { useMarqueeSelection } from '@/hooks/use-marquee-selection'
+import { useMarqueeSelection } from '@/shared/hooks/use-marquee-selection'
 import { useWaveformPrefetch } from '../hooks/use-waveform-prefetch'
 
 // Constants

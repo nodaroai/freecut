@@ -97,7 +97,7 @@ import {
   isMarqueeJustFinished,
   useMarqueeSelection,
   type MarqueeItem,
-} from '@/hooks/use-marquee-selection'
+} from '@/shared/hooks/use-marquee-selection'
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useTranslation()

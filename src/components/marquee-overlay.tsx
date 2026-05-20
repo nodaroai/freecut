@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { getMarqueeRect, type MarqueeController } from '@/hooks/use-marquee-selection'
+import { getMarqueeRect, type MarqueeController } from '@/shared/hooks/use-marquee-selection'
 
 interface MarqueeOverlayProps {
   /** Subscription-based controller returned from `useMarqueeSelection` */

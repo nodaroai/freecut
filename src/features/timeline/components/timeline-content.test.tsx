@@ -23,7 +23,7 @@ vi.mock('../hooks/use-timeline-zoom', () => ({
   }),
 }))
 
-vi.mock('@/hooks/use-marquee-selection', () => {
+vi.mock('@/shared/hooks/use-marquee-selection', () => {
   const INACTIVE = { active: false, startX: 0, startY: 0, currentX: 0, currentY: 0 }
   return {
     useMarqueeSelection: () => ({
