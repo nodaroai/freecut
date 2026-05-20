@@ -24,6 +24,90 @@
         "blankAdjustmentLayer": "Blank adjustment layer",
         "presets": "Presets"
       },
+      "textSection": {
+        "sectionTitle": "Text",
+        "content": "Content",
+        "single": "Single",
+        "twoSpans": "2 Spans",
+        "threeSpans": "3 Spans",
+        "mixedNone": "Mixed / None",
+        "selectPreset": "Select preset",
+        "span": "Span {{count}}",
+        "spanText": "Span {{count}} text",
+        "eyebrow": "Eyebrow",
+        "eyebrowText": "Eyebrow text",
+        "title": "Title",
+        "titleText": "Title text",
+        "subtitle": "Subtitle",
+        "subtitleText": "Subtitle text",
+        "text": "Text",
+        "enterText": "Enter text...",
+        "defaultText": "Your Text Here",
+        "selectFont": "Select font",
+        "size": "Size",
+        "spacing": "Spacing",
+        "scale": "Scale",
+        "font": "Font",
+        "weight": "Weight",
+        "style": "Style",
+        "align": "Align",
+        "color": "Color",
+        "background": "Background",
+        "clear": "Clear",
+        "clearBackground": "Clear background",
+        "lineHeightShort": "Line H.",
+        "padding": "Padding",
+        "radius": "Radius",
+        "mixed": "Mixed",
+        "selectWeight": "Select weight",
+        "bold": "Bold",
+        "boldUnavailable": "Bold is not available for this font",
+        "italic": "Italic",
+        "underline": "Underline",
+        "italicSpan": "Italic {{label}}",
+        "underlineSpan": "Underline {{label}}",
+        "alignLeft": "Align Left",
+        "alignCenter": "Align Center",
+        "alignRight": "Align Right",
+        "alignTop": "Align Top",
+        "alignMiddle": "Align Middle",
+        "alignBottom": "Align Bottom",
+        "effects": "Effects",
+        "presets": "Presets",
+        "fontWeights": {
+          "regular": "Regular",
+          "medium": "Medium",
+          "semibold": "Semibold",
+          "bold": "Bold"
+        },
+        "effectPresets": {
+          "none": "None",
+          "shadow": "Shadow",
+          "outline": "Outline",
+          "glow": "Glow"
+        },
+        "shadow": "Shadow",
+        "shadowX": "Shadow X",
+        "shadowY": "Shadow Y",
+        "shadowBlur": "Shadow B.",
+        "strokeWidth": "Stroke W.",
+        "stroke": "Stroke",
+        "animation": "Animation",
+        "intro": "Intro",
+        "outro": "Outro",
+        "animationFooter": "Applies short ease-out text motion at the start or end of each selected clip.",
+        "animationPresets": {
+          "none": "None",
+          "fade": "Fade",
+          "rise": "Rise",
+          "drop": "Drop",
+          "left": "Left",
+          "right": "Right",
+          "tilt": "Tilt",
+          "pop": "Pop",
+          "swing": "Swing"
+        }
+      },
       "tts": {
         "seek": "Seek",
         "dialogTitle": "Generate audio from text",
@@ -211,6 +295,106 @@
           "unloadedToast": "Unloaded {{count}} local runtime(s)."
         }
       }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} clip",
+        "clip_other": "{{count}} clips",
+        "scene_one": "{{count}} scene",
+        "scene_other": "{{count}} scenes",
+        "match_one": "{{count}} match",
+        "match_other": "{{count}} matches"
+      },
+      "sort": {
+        "label": "Sort",
+        "relevance": "Relevance",
+        "time": "Timestamp",
+        "name": "Media name"
+      },
+      "scope": {
+        "placeholder": "Scope",
+        "allMedia": "All media",
+        "scopedTo": "Scope: {{name}}",
+        "scopedToAll": "Scope: All media"
+      },
+      "banners": {
+        "downloadingSemanticModel": "Downloading semantic model (~22 MB, first run only)...",
+        "indexingCaptions": "Indexing captions for semantic search - {{current}}/{{total}} clips",
+        "reanalyzing": "Re-analyzing <strong>{{label}}</strong> - scenes will refresh when done."
+      },
+      "analyze": {
+        "title": "Analyze media with AI",
+        "button": "Analyze",
+        "scope": "Analyze \"{{name}}\"",
+        "newMedia": "Analyze new media",
+        "reanalyzeAll": "Re-analyze all"
+      },
+      "view": {
+        "list": "List view",
+        "grid": "Grid view"
+      },
+      "empty": {
+        "noCaptionsTitle": "No AI captions yet.",
+        "noCaptionsPrefix": "Run",
+        "noCaptionsSuffix": "on a clip from the media library to generate searchable scene captions.",
+        "noMatchesTitle": "No scenes match your search.",
+        "noMatchesPrefix": "Try a shorter query or switch scope to"
+      },
+      "search": {
+        "exitColorMode": "Exit color mode",
+        "colorTitle": "Search by color",
+        "color": "Color",
+        "semanticTitle": "Semantic search (by meaning)",
+        "keywordTitle": "Keyword search (exact match)",
+        "semanticLabel": "Semantic search",
+        "keywordLabel": "Keyword search",
+        "semantic": "Semantic",
+        "keyword": "Keyword",
+        "keywordDescription": "Exact word matches",
+        "semanticDescription": "Match by meaning",
+        "clearReference": "Clear reference and pick another color",
+        "findingSimilarPalette": "Finding scenes with a similar palette...",
+        "semanticPlaceholder": "Search by meaning - \"sunset over water\", \"people laughing\"...",
+        "keywordPlaceholder": "Search scenes by what you see...",
+        "clearSearch": "Clear search",
+        "similarPaletteTo": "Similar palette to {{label}} - click to clear"
+      },
+      "matchTiers": {
+        "strong": "Strong",
+        "good": "Good",
+        "fair": "Fair"
+      },
+      "match": {
+        "keyword": "Keyword",
+        "keywordHint": "Keyword match · cosine {{score}}",
+        "meaningWithTier": "Meaning · {{tier}}",
+        "textEmbeddingHint": "Text-embedding cosine: {{score}}",
+        "visualWithTier": "Visual · {{tier}}",
+        "clipHint": "CLIP cosine: {{score}}",
+        "colorWithName": "Color · {{color}}",
+        "paletteColorHint": "Palette match on {{color}} (ΔE 2000)",
+        "paletteDistance": "Palette · ΔE {{distance}}",
+        "paletteDistanceHint": "Weighted-mean ΔE 2000 to the reference palette",
+        "belowThreshold": "Below threshold",
+        "cosineHint": "cosine {{score}}",
+        "top": "Top",
+        "topHint": "Highest-scoring match"
+      },
+      "palette": {
+        "libraryColor": "Library color",
+        "empty": "No palettes indexed yet - run AI captioning to populate.",
+        "moreColors_one": "{{count}} more color",
+        "moreColors_other": "{{count}} more colors",
+        "showMoreColors_one": "Show {{count}} more color",
+        "showMoreColors_other": "Show {{count}} more colors",
+        "moreColorsTitle": "More colors",
+        "findColor": "Find scenes in this color ({{percent}}% of the library)",
+        "findSimilar": "Find scenes with a similar palette",
+        "pickedSwatch": "Picked swatch"
+      },
+      "scene": {
+        "previewAndDragHint": "Click to preview in source monitor - drag to add to the timeline"
+      }
     }
   },
   "es": {
@@ -238,19 +422,103 @@
         "blankAdjustmentLayer": "Capa de ajuste en blanco",
         "presets": "Preajustes"
       },
+      "textSection": {
+        "sectionTitle": "Texto",
+        "content": "Contenido",
+        "single": "Simple",
+        "twoSpans": "2 fragmentos",
+        "threeSpans": "3 fragmentos",
+        "mixedNone": "Mixto / Ninguno",
+        "selectPreset": "Seleccionar preajuste",
+        "span": "Fragmento {{count}}",
+        "spanText": "Texto del fragmento {{count}}",
+        "eyebrow": "Antetítulo",
+        "eyebrowText": "Texto del antetítulo",
+        "title": "Título",
+        "titleText": "Texto del título",
+        "subtitle": "Subtítulo",
+        "subtitleText": "Texto del subtítulo",
+        "text": "Texto",
+        "enterText": "Introduce texto...",
+        "defaultText": "Tu texto aquí",
+        "selectFont": "Seleccionar fuente",
+        "size": "Tamaño",
+        "spacing": "Espaciado",
+        "scale": "Escala",
+        "font": "Fuente",
+        "weight": "Peso",
+        "style": "Estilo",
+        "align": "Alinear",
+        "color": "Color",
+        "background": "Fondo",
+        "clear": "Quitar",
+        "clearBackground": "Quitar fondo",
+        "lineHeightShort": "Alt. línea",
+        "padding": "Relleno",
+        "radius": "Radio",
+        "mixed": "Mixto",
+        "selectWeight": "Seleccionar peso",
+        "bold": "Negrita",
+        "boldUnavailable": "La negrita no está disponible para esta fuente",
+        "italic": "Cursiva",
+        "underline": "Subrayado",
+        "italicSpan": "Cursiva en {{label}}",
+        "underlineSpan": "Subrayar {{label}}",
+        "alignLeft": "Alinear a la izquierda",
+        "alignCenter": "Alinear al centro",
+        "alignRight": "Alinear a la derecha",
+        "alignTop": "Alinear arriba",
+        "alignMiddle": "Alinear al medio",
+        "alignBottom": "Alinear abajo",
+        "effects": "Efectos",
+        "presets": "Preajustes",
+        "fontWeights": {
+          "regular": "Regular",
+          "medium": "Medio",
+          "semibold": "Seminegrita",
+          "bold": "Negrita"
+        },
+        "effectPresets": {
+          "none": "Ninguno",
+          "shadow": "Sombra",
+          "outline": "Contorno",
+          "glow": "Brillo"
+        },
+        "shadow": "Sombra",
+        "shadowX": "Sombra X",
+        "shadowY": "Sombra Y",
+        "shadowBlur": "Desenfoque s.",
+        "strokeWidth": "Ancho c.",
+        "stroke": "Contorno",
+        "animation": "Animación",
+        "intro": "Entrada",
+        "outro": "Salida",
+        "animationFooter": "Aplica una breve animación con ease-out al inicio o final de cada clip seleccionado.",
+        "animationPresets": {
+          "none": "Ninguno",
+          "fade": "Fundido",
+          "rise": "Subir",
+          "drop": "Caer",
+          "left": "Izquierda",
+          "right": "Derecha",
+          "tilt": "Inclinar",
+          "pop": "Aparecer",
+          "swing": "Balancear"
+        }
+      },
       "tts": {
         "seek": "Buscar",
         "dialogTitle": "Generar audio desde texto",
-        "dialogDescription": "Genera voz e ins?rtala en la posici?n del clip de texto.",
-        "kokoroUnsupported": "WebGPU no est? disponible en este navegador. Kokoro TTS necesita Chrome 113+, Edge 113+ o Safari 26+.",
-        "mossUnsupported": "El almacenamiento gestionado por el navegador no est? disponible. MOSS TTS multiling?e funciona mejor en un navegador Chromium reciente.",
+        "dialogDescription": "Genera voz e insértala en la posición del clip de texto.",
+        "kokoroUnsupported": "WebGPU no está disponible en este navegador. Kokoro TTS necesita Chrome 113+, Edge 113+ o Safari 26+.",
+        "mossUnsupported": "El almacenamiento gestionado por el navegador no está disponible. MOSS TTS multilingüe funciona mejor en un navegador Chromium reciente.",
         "supertonicUnsupported": "Este navegador no puede ejecutar el runtime local de Supertonic TTS. Prueba con una versión reciente de Chrome o Edge.",
         "engine": "Motor",
         "engineSupportDetails": "Detalles de compatibilidad del motor TTS",
-        "kokoroDescription": "Voces en ingl?s con WebGPU.",
+        "kokoroDescription": "Voces en inglés con WebGPU.",
         "supertonicDescription": "Voces ONNX locales en 31 idiomas con WebGPU o WASM.",
         "supportedLanguages": "Idiomas compatibles: {{languages}}.",
-        "kokoroOption": "Kokoro (ingl?s, WebGPU)",
+        "kokoroOption": "Kokoro (inglés, WebGPU)",
         "mossOption": "MOSS Nano (20 idiomas, CPU)",
         "supertonicOption": "Supertonic 3 (31 idiomas, ONNX local)",
         "language": "Idioma",
@@ -271,14 +539,14 @@
           "openProject": "Abre un proyecto antes de generar audio.",
           "enterText": "Introduce texto para sintetizar.",
           "kokoroUnsupported": "WebGPU es necesario para Kokoro TTS. Prueba Chrome 113+, Edge 113+ o Safari 26+.",
-          "mossUnsupported": "El almacenamiento gestionado por el navegador es necesario para MOSS TTS multiling?e. Prueba un navegador Chromium reciente.",
+          "mossUnsupported": "El almacenamiento gestionado por el navegador es necesario para MOSS TTS multilingüe. Prueba un navegador Chromium reciente.",
           "supertonicUnsupported": "Este navegador no puede ejecutar el runtime local de Supertonic TTS. Prueba con una versión reciente de Chrome o Edge.",
           "generateFailed": "No se pudo generar la voz.",
           "insertFailed": "No se pudo guardar e insertar el audio."
         },
         "notifications": {
-          "addedAndLinked": "Se a?adi? \"{{fileName}}\" a la l?nea de tiempo y se vincul? con el texto.",
-          "savedNoTrack": "Se guard? \"{{fileName}}\", pero no hay una pista de audio disponible."
+          "addedAndLinked": "Se añadió \"{{fileName}}\" a la línea de tiempo y se vinculó con el texto.",
+          "savedNoTrack": "Se guardó \"{{fileName}}\", pero no hay una pista de audio disponible."
         }
       },
       "aiPanel": {
@@ -288,34 +556,34 @@
         "runsLocally": "{{runtime}} se ejecuta localmente en el navegador con {{backend}}.",
         "history": "Historial ({{count}}) - {{size}}",
         "clearAll": "Borrar todo",
-        "musicGeneration": "Generaci?n de m?sica",
-        "collapseMusicGeneration": "Contraer generaci?n de m?sica",
-        "expandMusicGeneration": "Expandir generaci?n de m?sica",
-        "musicGenerationInfo": "Informaci?n de generaci?n de m?sica",
-        "musicgenDescription": "Usa el modelo MusicGen preparado para navegador de Xenova mediante Transformers.js. La primera descarga es grande; despu?s queda en cach? local.",
-        "musicgenPromptHint": "Describe g?nero, ?nimo, tempo e instrumentaci?n. Los clips m?s cortos terminan mucho m?s r?pido.",
-        "musicgenUnsupported": "WebGPU no est? disponible en este navegador. MusicGen necesita Chrome 113+, Edge 113+ o Safari 26+.",
+        "musicGeneration": "Generación de música",
+        "collapseMusicGeneration": "Contraer generación de música",
+        "expandMusicGeneration": "Expandir generación de música",
+        "musicGenerationInfo": "Información de generación de música",
+        "musicgenDescription": "Usa el modelo MusicGen preparado para navegador de Xenova mediante Transformers.js. La primera descarga es grande; después queda en caché local.",
+        "musicgenPromptHint": "Describe género, ánimo, tempo e instrumentación. Los clips más cortos terminan mucho más rápido.",
+        "musicgenUnsupported": "WebGPU no está disponible en este navegador. MusicGen necesita Chrome 113+, Edge 113+ o Safari 26+.",
         "prompt": "Prompt",
         "presets": "Preajustes",
-        "musicPromptPlaceholder": "Describe el tipo de m?sica que quieres generar...",
-        "length": "Duraci?n",
-        "generateMusic": "Generar m?sica",
-        "musicHistory": "Historial de m?sica ({{count}}) - {{size}}",
+        "musicPromptPlaceholder": "Describe el tipo de música que quieres generar...",
+        "length": "Duración",
+        "generateMusic": "Generar música",
+        "musicHistory": "Historial de música ({{count}}) - {{size}}",
         "remove": "Quitar",
         "saved": "Guardado",
         "saving": "Guardando...",
         "saveAndInsert": "Guardar e insertar",
         "saveToLibrary": "Guardar en biblioteca",
-        "progressPreparingMusic": "Preparando generaci?n local de m?sica...",
+        "progressPreparingMusic": "Preparando generación local de música...",
         "errors": {
-          "describeMusic": "Describe la m?sica que quieres generar.",
+          "describeMusic": "Describe la música que quieres generar.",
           "musicgenUnsupported": "WebGPU es necesario para MusicGen. Prueba Chrome 113+, Edge 113+ o Safari 26+.",
-          "generateMusicFailed": "No se pudo generar la m?sica.",
+          "generateMusicFailed": "No se pudo generar la música.",
           "saveAudioFailed": "No se pudo guardar el audio en la biblioteca multimedia."
         },
         "notifications": {
-          "savedToLibrary": "Se guard? \"{{fileName}}\" en la biblioteca multimedia.",
-          "savedAndAdded": "Se guard? \"{{fileName}}\" y se a?adi? a la l?nea de tiempo."
+          "savedToLibrary": "Se guardó \"{{fileName}}\" en la biblioteca multimedia.",
+          "savedAndAdded": "Se guardó \"{{fileName}}\" y se añadió a la línea de tiempo."
         },
         "defaultTtsPrompt": "Welcome to freecut. This voice was generated locally in the browser.",
         "musicPresets": {
@@ -334,14 +602,14 @@
         }
       },
       "clearKeyframesDialog": {
-        "descriptionProperty": "?Borrar los fotogramas clave de {{property}} de {{count}} elemento(s) seleccionado(s)?",
-        "descriptionAll": "?Borrar todos los fotogramas clave de {{count}} elemento(s) seleccionado(s)?"
+        "descriptionProperty": "¿Borrar los fotogramas clave de {{property}} de {{count}} elemento(s) seleccionado(s)?",
+        "descriptionAll": "¿Borrar todos los fotogramas clave de {{count}} elemento(s) seleccionado(s)?"
       },
       "localInferencePill": {
         "jobs": "{{count}} tarea(s)"
       },
       "subtitleSection": {
-        "cueCount": "{{count}} subt?tulo(s)"
+        "cueCount": "{{count}} subtítulo(s)"
       },
       "propertiesSidebar": {
         "clipsSelected": "{{count}} clips seleccionados"
@@ -391,15 +659,15 @@
         "errorsLogged": "{{count}} error(es) registrados"
       },
       "legacyMigrationErrors": {
-        "retryStillFailing": "El reintento a?n tiene {{count}} error(es).",
-        "failedCount": "{{count}} error(es) de migraci?n"
+        "retryStillFailing": "El reintento aún tiene {{count}} error(es).",
+        "failedCount": "{{count}} error(es) de migración"
       },
       "list": {
         "movedToTrashCount": "{{count}} proyecto(s) movidos a la papelera.",
         "selectedCount": "{{count}} seleccionados",
         "deleteN": "Eliminar {{count}}",
         "projectCount": "{{count}} proyecto(s)",
-        "bulkDeleteTitle": "?Eliminar {{count}} proyecto(s) seleccionado(s)?"
+        "bulkDeleteTitle": "¿Eliminar {{count}} proyecto(s) seleccionado(s)?"
       },
       "trash": {
         "emptiedTrash": "Se vaciaron {{count}} proyecto(s) de la papelera.",
@@ -408,10 +676,10 @@
       "relativeTime": {
         "minutesAgo": "hace {{count}} min",
         "hoursAgo": "hace {{count}} h",
-        "daysAgo": "hace {{count}} d?a(s)",
+        "daysAgo": "hace {{count}} día(s)",
         "weeksAgo": "hace {{count}} semana(s)",
         "monthsAgo": "hace {{count}} mes(es)",
-        "yearsAgo": "hace {{count}} a?o(s)"
+        "yearsAgo": "hace {{count}} año(s)"
       },
       "settings": {
         "hotkeys": {
@@ -424,6 +692,106 @@
           "activeJobs": "{{count}} tarea(s) activas",
           "unloadedToast": "Se descargaron {{count}} runtime(s) locales."
         }
+      }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} clip",
+        "clip_other": "{{count}} clips",
+        "scene_one": "{{count}} escena",
+        "scene_other": "{{count}} escenas",
+        "match_one": "{{count}} coincidencia",
+        "match_other": "{{count}} coincidencias"
+      },
+      "sort": {
+        "label": "Ordenar",
+        "relevance": "Relevancia",
+        "time": "Marca de tiempo",
+        "name": "Nombre del medio"
+      },
+      "scope": {
+        "placeholder": "Alcance",
+        "allMedia": "Todos los medios",
+        "scopedTo": "Alcance: {{name}}",
+        "scopedToAll": "Alcance: todos los medios"
+      },
+      "banners": {
+        "downloadingSemanticModel": "Descargando modelo semántico (~22 MB, solo la primera vez)...",
+        "indexingCaptions": "Indexando subtítulos para búsqueda semántica - {{current}}/{{total}} clips",
+        "reanalyzing": "Reanalizando <strong>{{label}}</strong> - las escenas se actualizarán al terminar."
+      },
+      "analyze": {
+        "title": "Analizar medios con IA",
+        "button": "Analizar",
+        "scope": "Analizar \"{{name}}\"",
+        "newMedia": "Analizar medios nuevos",
+        "reanalyzeAll": "Reanalizar todo"
+      },
+      "view": {
+        "list": "Vista de lista",
+        "grid": "Vista de cuadrícula"
+      },
+      "empty": {
+        "noCaptionsTitle": "Aún no hay subtítulos de IA.",
+        "noCaptionsPrefix": "Ejecuta",
+        "noCaptionsSuffix": "en un clip de la biblioteca de medios para generar subtítulos de escenas buscables.",
+        "noMatchesTitle": "Ninguna escena coincide con tu búsqueda.",
+        "noMatchesPrefix": "Prueba una consulta más corta o cambia el alcance a"
+      },
+      "search": {
+        "exitColorMode": "Salir del modo de color",
+        "colorTitle": "Buscar por color",
+        "color": "Color",
+        "semanticTitle": "Búsqueda semántica (por significado)",
+        "keywordTitle": "Búsqueda por palabra clave (coincidencia exacta)",
+        "semanticLabel": "Búsqueda semántica",
+        "keywordLabel": "Búsqueda por palabra clave",
+        "semantic": "Semántica",
+        "keyword": "Palabra clave",
+        "keywordDescription": "Coincidencias exactas de palabras",
+        "semanticDescription": "Coincidir por significado",
+        "clearReference": "Borrar referencia y elegir otro color",
+        "findingSimilarPalette": "Buscando escenas con una paleta similar...",
+        "semanticPlaceholder": "Buscar por significado - \"atardecer sobre el agua\", \"personas riendo\"...",
+        "keywordPlaceholder": "Buscar escenas por lo que ves...",
+        "clearSearch": "Borrar búsqueda",
+        "similarPaletteTo": "Paleta similar a {{label}} - haz clic para borrar"
+      },
+      "matchTiers": {
+        "strong": "Fuerte",
+        "good": "Bueno",
+        "fair": "Aceptable"
+      },
+      "match": {
+        "keyword": "Palabra clave",
+        "keywordHint": "Coincidencia de palabra clave · coseno {{score}}",
+        "meaningWithTier": "Significado · {{tier}}",
+        "textEmbeddingHint": "Coseno de embedding de texto: {{score}}",
+        "visualWithTier": "Visual · {{tier}}",
+        "clipHint": "Coseno CLIP: {{score}}",
+        "colorWithName": "Color · {{color}}",
+        "paletteColorHint": "Coincidencia de paleta en {{color}} (ΔE 2000)",
+        "paletteDistance": "Paleta · ΔE {{distance}}",
+        "paletteDistanceHint": "Media ponderada ΔE 2000 frente a la paleta de referencia",
+        "belowThreshold": "Por debajo del umbral",
+        "cosineHint": "coseno {{score}}",
+        "top": "Principal",
+        "topHint": "Coincidencia con mayor puntuación"
+      },
+      "palette": {
+        "libraryColor": "Color de biblioteca",
+        "empty": "Aún no hay paletas indexadas; ejecuta subtítulos de IA para llenarlas.",
+        "moreColors_one": "{{count}} color más",
+        "moreColors_other": "{{count}} colores más",
+        "showMoreColors_one": "Mostrar {{count}} color más",
+        "showMoreColors_other": "Mostrar {{count}} colores más",
+        "moreColorsTitle": "Más colores",
+        "findColor": "Buscar escenas en este color ({{percent}}% de la biblioteca)",
+        "findSimilar": "Buscar escenas con una paleta similar",
+        "pickedSwatch": "Muestra seleccionada"
+      },
+      "scene": {
+        "previewAndDragHint": "Haz clic para previsualizar en el monitor de origen - arrastra para añadir a la línea de tiempo"
       }
     }
   },
@@ -452,15 +820,99 @@
         "blankAdjustmentLayer": "Calque d'ajustement vide",
         "presets": "Préréglages"
       },
+      "textSection": {
+        "sectionTitle": "Texte",
+        "content": "Contenu",
+        "single": "Simple",
+        "twoSpans": "2 segments",
+        "threeSpans": "3 segments",
+        "mixedNone": "Mixte / Aucun",
+        "selectPreset": "Sélectionner un préréglage",
+        "span": "Segment {{count}}",
+        "spanText": "Texte du segment {{count}}",
+        "eyebrow": "Accroche",
+        "eyebrowText": "Texte de l'accroche",
+        "title": "Titre",
+        "titleText": "Texte du titre",
+        "subtitle": "Sous-titre",
+        "subtitleText": "Texte du sous-titre",
+        "text": "Texte",
+        "enterText": "Saisir du texte...",
+        "defaultText": "Votre texte ici",
+        "selectFont": "Sélectionner une police",
+        "size": "Taille",
+        "spacing": "Espacement",
+        "scale": "Échelle",
+        "font": "Police",
+        "weight": "Graisse",
+        "style": "Style",
+        "align": "Aligner",
+        "color": "Couleur",
+        "background": "Arrière-plan",
+        "clear": "Effacer",
+        "clearBackground": "Effacer l'arrière-plan",
+        "lineHeightShort": "Interligne",
+        "padding": "Marge",
+        "radius": "Rayon",
+        "mixed": "Mixte",
+        "selectWeight": "Sélectionner une graisse",
+        "bold": "Gras",
+        "boldUnavailable": "Le gras n'est pas disponible pour cette police",
+        "italic": "Italique",
+        "underline": "Souligné",
+        "italicSpan": "Italique {{label}}",
+        "underlineSpan": "Souligner {{label}}",
+        "alignLeft": "Aligner à gauche",
+        "alignCenter": "Aligner au centre",
+        "alignRight": "Aligner à droite",
+        "alignTop": "Aligner en haut",
+        "alignMiddle": "Aligner au milieu",
+        "alignBottom": "Aligner en bas",
+        "effects": "Effets",
+        "presets": "Préréglages",
+        "fontWeights": {
+          "regular": "Normal",
+          "medium": "Moyen",
+          "semibold": "Demi-gras",
+          "bold": "Gras"
+        },
+        "effectPresets": {
+          "none": "Aucun",
+          "shadow": "Ombre",
+          "outline": "Contour",
+          "glow": "Lueur"
+        },
+        "shadow": "Ombre",
+        "shadowX": "Ombre X",
+        "shadowY": "Ombre Y",
+        "shadowBlur": "Flou ombre",
+        "strokeWidth": "Cont. ép.",
+        "stroke": "Contour",
+        "animation": "Animation",
+        "intro": "Entrée",
+        "outro": "Sortie",
+        "animationFooter": "Applique un court mouvement de texte en ease-out au début ou à la fin de chaque clip sélectionné.",
+        "animationPresets": {
+          "none": "Aucun",
+          "fade": "Fondu",
+          "rise": "Monter",
+          "drop": "Descendre",
+          "left": "Gauche",
+          "right": "Droite",
+          "tilt": "Incliner",
+          "pop": "Apparaître",
+          "swing": "Balancer"
+        }
+      },
       "tts": {
         "seek": "Parcourir",
-        "dialogTitle": "G?n?rer de l?audio depuis le texte",
-        "dialogDescription": "G?n?rez une voix et ins?rez-la ? la position du clip de texte.",
-        "kokoroUnsupported": "WebGPU n?est pas disponible dans ce navigateur. Kokoro TTS n?cessite Chrome 113+, Edge 113+ ou Safari 26+.",
-        "mossUnsupported": "Le stockage g?r? par le navigateur n?est pas disponible. MOSS TTS multilingue fonctionne mieux dans un navigateur Chromium r?cent.",
+        "dialogTitle": "Générer de l'audio depuis le texte",
+        "dialogDescription": "Générez une voix et insérez-la à la position du clip de texte.",
+        "kokoroUnsupported": "WebGPU n'est pas disponible dans ce navigateur. Kokoro TTS nécessite Chrome 113+, Edge 113+ ou Safari 26+.",
+        "mossUnsupported": "Le stockage géré par le navigateur n'est pas disponible. MOSS TTS multilingue fonctionne mieux dans un navigateur Chromium récent.",
         "supertonicUnsupported": "Ce navigateur ne peut pas exécuter le runtime TTS local de Supertonic. Essayez une version récente de Chrome ou Edge.",
         "engine": "Moteur",
-        "engineSupportDetails": "D?tails de compatibilit? du moteur TTS",
+        "engineSupportDetails": "Détails de compatibilité du moteur TTS",
         "kokoroDescription": "Voix anglaises sur WebGPU.",
         "supertonicDescription": "Voix ONNX locales en 31 langues sur WebGPU ou WASM.",
         "supportedLanguages": "Langues prises en charge : {{languages}}.",
@@ -471,65 +923,65 @@
         "autoDetectLanguage": "Détection automatique",
         "voice": "Voix",
         "text": "Texte",
-        "textPlaceholder": "Saisissez le texte ? lire...",
+        "textPlaceholder": "Saisissez le texte à lire...",
         "expressiveTags": "Balises expressives",
         "speed": "Vitesse",
-        "progressPreparing": "Pr?paration du TTS local...",
-        "insertedAndLinked": "Ins?r? et li?",
-        "generate": "G?n?rer",
-        "generating": "G?n?ration...",
-        "regenerate": "R?g?n?rer",
-        "insertAndLink": "Ins?rer et lier",
+        "progressPreparing": "Préparation du TTS local...",
+        "insertedAndLinked": "Inséré et lié",
+        "generate": "Générer",
+        "generating": "Génération...",
+        "regenerate": "Régénérer",
+        "insertAndLink": "Insérer et lier",
         "inserting": "Insertion...",
         "errors": {
-          "openProject": "Ouvrez un projet avant de g?n?rer de l?audio.",
-          "enterText": "Saisissez du texte ? synth?tiser.",
+          "openProject": "Ouvrez un projet avant de générer de l'audio.",
+          "enterText": "Saisissez du texte à synthétiser.",
           "kokoroUnsupported": "WebGPU est requis pour Kokoro TTS. Essayez Chrome 113+, Edge 113+ ou Safari 26+.",
-          "mossUnsupported": "Le stockage g?r? par le navigateur est requis pour MOSS TTS multilingue. Essayez un navigateur Chromium r?cent.",
+          "mossUnsupported": "Le stockage géré par le navigateur est requis pour MOSS TTS multilingue. Essayez un navigateur Chromium récent.",
           "supertonicUnsupported": "Ce navigateur ne peut pas exécuter le runtime TTS local de Supertonic. Essayez une version récente de Chrome ou Edge.",
-          "generateFailed": "?chec de la g?n?ration vocale.",
-          "insertFailed": "?chec de l?enregistrement et de l?insertion de l?audio."
+          "generateFailed": "Échec de la génération vocale.",
+          "insertFailed": "Échec de l'enregistrement et de l'insertion de l'audio."
         },
         "notifications": {
-          "addedAndLinked": "? {{fileName}} ? a ?t? ajout? ? la timeline et li? au texte.",
-          "savedNoTrack": "? {{fileName}} ? a ?t? enregistr?, mais aucune piste audio n?est disponible."
+          "addedAndLinked": "« {{fileName}} » a été ajouté à la timeline et lié au texte.",
+          "savedNoTrack": "« {{fileName}} » a été enregistré, mais aucune piste audio n'est disponible."
         }
       },
       "aiPanel": {
         "textToSpeech": "Texte vers voix",
-        "collapseTextToSpeech": "R?duire le texte vers voix",
-        "expandTextToSpeech": "D?velopper le texte vers voix",
-        "runsLocally": "{{runtime}} s?ex?cute localement dans le navigateur avec {{backend}}.",
+        "collapseTextToSpeech": "Réduire le texte vers voix",
+        "expandTextToSpeech": "Développer le texte vers voix",
+        "runsLocally": "{{runtime}} s'exécute localement dans le navigateur avec {{backend}}.",
         "history": "Historique ({{count}}) - {{size}}",
         "clearAll": "Tout effacer",
-        "musicGeneration": "G?n?ration musicale",
-        "collapseMusicGeneration": "R?duire la g?n?ration musicale",
-        "expandMusicGeneration": "D?velopper la g?n?ration musicale",
-        "musicGenerationInfo": "Infos de g?n?ration musicale",
-        "musicgenDescription": "Utilise le mod?le MusicGen de Xenova pr?t pour le navigateur via Transformers.js. Le premier t?l?chargement est volumineux, puis il reste en cache local.",
-        "musicgenPromptHint": "D?crivez le genre, l?ambiance, le tempo et les instruments. Les clips plus courts finissent beaucoup plus vite.",
-        "musicgenUnsupported": "WebGPU n?est pas disponible dans ce navigateur. MusicGen n?cessite Chrome 113+, Edge 113+ ou Safari 26+.",
+        "musicGeneration": "Génération musicale",
+        "collapseMusicGeneration": "Réduire la génération musicale",
+        "expandMusicGeneration": "Développer la génération musicale",
+        "musicGenerationInfo": "Infos de génération musicale",
+        "musicgenDescription": "Utilise le modèle MusicGen de Xenova prêt pour le navigateur via Transformers.js. Le premier téléchargement est volumineux, puis il reste en cache local.",
+        "musicgenPromptHint": "Décrivez le genre, l'ambiance, le tempo et les instruments. Les clips plus courts finissent beaucoup plus vite.",
+        "musicgenUnsupported": "WebGPU n'est pas disponible dans ce navigateur. MusicGen nécessite Chrome 113+, Edge 113+ ou Safari 26+.",
         "prompt": "Prompt",
-        "presets": "Pr?r?glages",
-        "musicPromptPlaceholder": "D?crivez le type de musique ? g?n?rer...",
-        "length": "Dur?e",
-        "generateMusic": "G?n?rer la musique",
+        "presets": "Préréglages",
+        "musicPromptPlaceholder": "Décrivez le type de musique à générer...",
+        "length": "Durée",
+        "generateMusic": "Générer la musique",
         "musicHistory": "Historique musical ({{count}}) - {{size}}",
         "remove": "Supprimer",
-        "saved": "Enregistr?",
+        "saved": "Enregistré",
         "saving": "Enregistrement...",
-        "saveAndInsert": "Enregistrer et ins?rer",
-        "saveToLibrary": "Enregistrer dans la biblioth?que",
-        "progressPreparingMusic": "Pr?paration de la g?n?ration musicale locale...",
+        "saveAndInsert": "Enregistrer et insérer",
+        "saveToLibrary": "Enregistrer dans la bibliothèque",
+        "progressPreparingMusic": "Préparation de la génération musicale locale...",
         "errors": {
-          "describeMusic": "D?crivez la musique ? g?n?rer.",
+          "describeMusic": "Décrivez la musique à générer.",
           "musicgenUnsupported": "WebGPU est requis pour MusicGen. Essayez Chrome 113+, Edge 113+ ou Safari 26+.",
-          "generateMusicFailed": "?chec de la g?n?ration musicale.",
-          "saveAudioFailed": "Impossible d?enregistrer l?audio dans la biblioth?que multim?dia."
+          "generateMusicFailed": "Échec de la génération musicale.",
+          "saveAudioFailed": "Impossible d'enregistrer l'audio dans la bibliothèque multimédia."
         },
         "notifications": {
-          "savedToLibrary": "? {{fileName}} ? a ?t? enregistr? dans la biblioth?que multim?dia.",
-          "savedAndAdded": "? {{fileName}} ? a ?t? enregistr? et ajout? ? la timeline."
+          "savedToLibrary": "« {{fileName}} » a été enregistré dans la bibliothèque multimédia.",
+          "savedAndAdded": "« {{fileName}} » a été enregistré et ajouté à la timeline."
         },
         "defaultTtsPrompt": "Welcome to freecut. This voice was generated locally in the browser.",
         "musicPresets": {
@@ -548,17 +1000,17 @@
         }
       },
       "clearKeyframesDialog": {
-        "descriptionProperty": "Effacer les images cl?s {{property}} de {{count}} ?l?ment(s) s?lectionn?(s) ?",
-        "descriptionAll": "Effacer toutes les images cl?s de {{count}} ?l?ment(s) s?lectionn?(s) ?"
+        "descriptionProperty": "Effacer les images clés {{property}} de {{count}} élément(s) sélectionné(s) ?",
+        "descriptionAll": "Effacer toutes les images clés de {{count}} élément(s) sélectionné(s) ?"
       },
       "localInferencePill": {
-        "jobs": "{{count}} t?che(s)"
+        "jobs": "{{count}} tâche(s)"
       },
       "subtitleSection": {
-        "cueCount": "{{count}} r?plique(s)"
+        "cueCount": "{{count}} réplique(s)"
       },
       "propertiesSidebar": {
-        "clipsSelected": "{{count}} clips s?lectionn?s"
+        "clipsSelected": "{{count}} clips sélectionnés"
       }
     },
     "preview": {
@@ -589,34 +1041,34 @@
     },
     "settings": {
       "ai": {
-        "scene": "{{count}} sc?ne(s)"
+        "scene": "{{count}} scène(s)"
       },
       "feedback": {
-        "completedForItems": "{{action}} termin? pour {{count}} ?l?ment(s).",
-        "couldntProcessItems": "Impossible de {{action}} pour {{count}} ?l?ment(s){{detail}}"
+        "completedForItems": "{{action}} terminé pour {{count}} élément(s).",
+        "couldntProcessItems": "Impossible de {{action}} pour {{count}} élément(s){{detail}}"
       },
       "toasts": {
-        "itemsUpdated": "{{count}} ?l?ment(s) mis ? jour.",
-        "itemsUpdatedFailed": "{{count}} ?l?ment(s) mis ? jour. ?chec : {{failed}}"
+        "itemsUpdated": "{{count}} élément(s) mis à jour.",
+        "itemsUpdatedFailed": "{{count}} élément(s) mis à jour. Échec : {{failed}}"
       }
     },
     "projects": {
       "legacyMigration": {
-        "errorsLogged": "{{count}} erreur(s) consign?es"
+        "errorsLogged": "{{count}} erreur(s) consignées"
       },
       "legacyMigrationErrors": {
         "retryStillFailing": "Le nouvel essai contient encore {{count}} erreur(s).",
         "failedCount": "{{count}} erreur(s) de migration"
       },
       "list": {
-        "movedToTrashCount": "{{count}} projet(s) d?plac?s dans la corbeille.",
-        "selectedCount": "{{count}} s?lectionn?(s)",
+        "movedToTrashCount": "{{count}} projet(s) déplacés dans la corbeille.",
+        "selectedCount": "{{count}} sélectionné(s)",
         "deleteN": "Supprimer {{count}}",
         "projectCount": "{{count}} projet(s)",
-        "bulkDeleteTitle": "Supprimer {{count}} projet(s) s?lectionn?(s) ?"
+        "bulkDeleteTitle": "Supprimer {{count}} projet(s) sélectionné(s) ?"
       },
       "trash": {
-        "emptiedTrash": "{{count}} projet(s) supprim?s de la corbeille.",
+        "emptiedTrash": "{{count}} projet(s) supprimés de la corbeille.",
         "emptiedTrashWithFailures": "Impossible de supprimer {{count}} projet(s)."
       },
       "relativeTime": {
@@ -629,15 +1081,115 @@
       },
       "settings": {
         "hotkeys": {
-          "importedCommands": "{{count}} commande(s) import?es",
-          "remappedCount": "{{count}} r?assign?es",
-          "ignoredCount": "{{count}} ignor?es",
-          "customCount": "{{count}} personnalis?s"
+          "importedCommands": "{{count}} commande(s) importées",
+          "remappedCount": "{{count}} réassignées",
+          "ignoredCount": "{{count}} ignorées",
+          "customCount": "{{count}} personnalisés"
         },
         "localInference": {
-          "activeJobs": "{{count}} t?che(s) active(s)",
-          "unloadedToast": "{{count}} runtime(s) locaux d?charg?s."
+          "activeJobs": "{{count}} tâche(s) active(s)",
+          "unloadedToast": "{{count}} runtime(s) locaux déchargés."
         }
+      }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} clip",
+        "clip_other": "{{count}} clips",
+        "scene_one": "{{count}} scène",
+        "scene_other": "{{count}} scènes",
+        "match_one": "{{count}} résultat",
+        "match_other": "{{count}} résultats"
+      },
+      "sort": {
+        "label": "Trier",
+        "relevance": "Pertinence",
+        "time": "Horodatage",
+        "name": "Nom du média"
+      },
+      "scope": {
+        "placeholder": "Portée",
+        "allMedia": "Tous les médias",
+        "scopedTo": "Portée : {{name}}",
+        "scopedToAll": "Portée : tous les médias"
+      },
+      "banners": {
+        "downloadingSemanticModel": "Téléchargement du modèle sémantique (~22 Mo, première exécution seulement)...",
+        "indexingCaptions": "Indexation des légendes pour la recherche sémantique - {{current}}/{{total}} clips",
+        "reanalyzing": "Nouvelle analyse de <strong>{{label}}</strong> - les scènes seront actualisées à la fin."
+      },
+      "analyze": {
+        "title": "Analyser les médias avec l'IA",
+        "button": "Analyser",
+        "scope": "Analyser \"{{name}}\"",
+        "newMedia": "Analyser les nouveaux médias",
+        "reanalyzeAll": "Tout réanalyser"
+      },
+      "view": {
+        "list": "Vue liste",
+        "grid": "Vue grille"
+      },
+      "empty": {
+        "noCaptionsTitle": "Aucune légende IA pour le moment.",
+        "noCaptionsPrefix": "Lancez",
+        "noCaptionsSuffix": "sur un clip de la médiathèque pour générer des légendes de scènes consultables.",
+        "noMatchesTitle": "Aucune scène ne correspond à votre recherche.",
+        "noMatchesPrefix": "Essayez une requête plus courte ou passez la portée à"
+      },
+      "search": {
+        "exitColorMode": "Quitter le mode couleur",
+        "colorTitle": "Rechercher par couleur",
+        "color": "Couleur",
+        "semanticTitle": "Recherche sémantique (par sens)",
+        "keywordTitle": "Recherche par mot-clé (correspondance exacte)",
+        "semanticLabel": "Recherche sémantique",
+        "keywordLabel": "Recherche par mot-clé",
+        "semantic": "Sémantique",
+        "keyword": "Mot-clé",
+        "keywordDescription": "Correspondances exactes",
+        "semanticDescription": "Correspondance par sens",
+        "clearReference": "Effacer la référence et choisir une autre couleur",
+        "findingSimilarPalette": "Recherche de scènes avec une palette similaire...",
+        "semanticPlaceholder": "Rechercher par sens - \"coucher de soleil sur l'eau\", \"personnes qui rient\"...",
+        "keywordPlaceholder": "Rechercher des scènes par ce que vous voyez...",
+        "clearSearch": "Effacer la recherche",
+        "similarPaletteTo": "Palette similaire à {{label}} - cliquez pour effacer"
+      },
+      "matchTiers": {
+        "strong": "Fort",
+        "good": "Bon",
+        "fair": "Correct"
+      },
+      "match": {
+        "keyword": "Mot-clé",
+        "keywordHint": "Correspondance mot-clé · cosinus {{score}}",
+        "meaningWithTier": "Sens · {{tier}}",
+        "textEmbeddingHint": "Cosinus de l'embedding texte : {{score}}",
+        "visualWithTier": "Visuel · {{tier}}",
+        "clipHint": "Cosinus CLIP : {{score}}",
+        "colorWithName": "Couleur · {{color}}",
+        "paletteColorHint": "Correspondance de palette sur {{color}} (ΔE 2000)",
+        "paletteDistance": "Palette · ΔE {{distance}}",
+        "paletteDistanceHint": "Moyenne pondérée ΔE 2000 par rapport à la palette de référence",
+        "belowThreshold": "Sous le seuil",
+        "cosineHint": "cosinus {{score}}",
+        "top": "Top",
+        "topHint": "Correspondance au meilleur score"
+      },
+      "palette": {
+        "libraryColor": "Couleur de la médiathèque",
+        "empty": "Aucune palette indexée pour le moment - lancez les légendes IA pour les remplir.",
+        "moreColors_one": "{{count}} couleur de plus",
+        "moreColors_other": "{{count}} couleurs de plus",
+        "showMoreColors_one": "Afficher {{count}} couleur de plus",
+        "showMoreColors_other": "Afficher {{count}} couleurs de plus",
+        "moreColorsTitle": "Plus de couleurs",
+        "findColor": "Trouver des scènes dans cette couleur ({{percent}} % de la médiathèque)",
+        "findSimilar": "Trouver des scènes avec une palette similaire",
+        "pickedSwatch": "Échantillon choisi"
+      },
+      "scene": {
+        "previewAndDragHint": "Cliquez pour prévisualiser dans le moniteur source - faites glisser pour ajouter à la timeline"
       }
     }
   },
@@ -666,18 +1218,102 @@
         "blankAdjustmentLayer": "Leere Einstellungsebene",
         "presets": "Vorgaben"
       },
+      "textSection": {
+        "sectionTitle": "Text",
+        "content": "Inhalt",
+        "single": "Einzeln",
+        "twoSpans": "2 Abschnitte",
+        "threeSpans": "3 Abschnitte",
+        "mixedNone": "Gemischt / Keine",
+        "selectPreset": "Vorgabe auswählen",
+        "span": "Abschnitt {{count}}",
+        "spanText": "Text für Abschnitt {{count}}",
+        "eyebrow": "Kicker",
+        "eyebrowText": "Kicker-Text",
+        "title": "Titel",
+        "titleText": "Titeltext",
+        "subtitle": "Untertitel",
+        "subtitleText": "Untertiteltext",
+        "text": "Text",
+        "enterText": "Text eingeben...",
+        "defaultText": "Dein Text hier",
+        "selectFont": "Schrift auswählen",
+        "size": "Größe",
+        "spacing": "Abstand",
+        "scale": "Skalierung",
+        "font": "Schrift",
+        "weight": "Stärke",
+        "style": "Stil",
+        "align": "Ausrichten",
+        "color": "Farbe",
+        "background": "Hintergrund",
+        "clear": "Leeren",
+        "clearBackground": "Hintergrund entfernen",
+        "lineHeightShort": "Zeilenh.",
+        "padding": "Innenabstand",
+        "radius": "Radius",
+        "mixed": "Gemischt",
+        "selectWeight": "Stärke auswählen",
+        "bold": "Fett",
+        "boldUnavailable": "Fett ist für diese Schrift nicht verfügbar",
+        "italic": "Kursiv",
+        "underline": "Unterstrichen",
+        "italicSpan": "{{label}} kursiv",
+        "underlineSpan": "{{label}} unterstreichen",
+        "alignLeft": "Links ausrichten",
+        "alignCenter": "Zentrieren",
+        "alignRight": "Rechts ausrichten",
+        "alignTop": "Oben ausrichten",
+        "alignMiddle": "Mittig ausrichten",
+        "alignBottom": "Unten ausrichten",
+        "effects": "Effekte",
+        "presets": "Vorgaben",
+        "fontWeights": {
+          "regular": "Normal",
+          "medium": "Mittel",
+          "semibold": "Halbfett",
+          "bold": "Fett"
+        },
+        "effectPresets": {
+          "none": "Keine",
+          "shadow": "Schatten",
+          "outline": "Kontur",
+          "glow": "Leuchten"
+        },
+        "shadow": "Schatten",
+        "shadowX": "Schatten X",
+        "shadowY": "Schatten Y",
+        "shadowBlur": "Schatten W.",
+        "strokeWidth": "Kontur S.",
+        "stroke": "Kontur",
+        "animation": "Animation",
+        "intro": "Intro",
+        "outro": "Outro",
+        "animationFooter": "Wendet am Anfang oder Ende jedes ausgewählten Clips eine kurze Ease-out-Textbewegung an.",
+        "animationPresets": {
+          "none": "Keine",
+          "fade": "Einblenden",
+          "rise": "Aufsteigen",
+          "drop": "Absinken",
+          "left": "Links",
+          "right": "Rechts",
+          "tilt": "Neigen",
+          "pop": "Pop",
+          "swing": "Schwingen"
+        }
+      },
       "tts": {
         "seek": "Suchen",
         "dialogTitle": "Audio aus Text generieren",
-        "dialogDescription": "Sprache erzeugen und an der Position des Textclips einf?gen.",
-        "kokoroUnsupported": "WebGPU ist in diesem Browser nicht verf?gbar. Kokoro TTS ben?tigt Chrome 113+, Edge 113+ oder Safari 26+.",
-        "mossUnsupported": "Browserverwalteter Speicher ist nicht verf?gbar. MOSS mehrsprachiges TTS funktioniert am besten in einem aktuellen Chromium-Browser.",
+        "dialogDescription": "Sprache erzeugen und an der Position des Textclips einfügen.",
+        "kokoroUnsupported": "WebGPU ist in diesem Browser nicht verfügbar. Kokoro TTS benötigt Chrome 113+, Edge 113+ oder Safari 26+.",
+        "mossUnsupported": "Browserverwalteter Speicher ist nicht verfügbar. MOSS mehrsprachiges TTS funktioniert am besten in einem aktuellen Chromium-Browser.",
         "supertonicUnsupported": "Dieser Browser kann die lokale Supertonic-TTS-Laufzeit nicht ausführen. Versuche es mit einer aktuellen Version von Chrome oder Edge.",
         "engine": "Engine",
-        "engineSupportDetails": "Details zur TTS-Engine-Unterst?tzung",
-        "kokoroDescription": "Englische Stimmen ?ber WebGPU.",
+        "engineSupportDetails": "Details zur TTS-Engine-Unterstützung",
+        "kokoroDescription": "Englische Stimmen über WebGPU.",
         "supertonicDescription": "Lokale ONNX-Stimmen in 31 Sprachen mit WebGPU oder WASM.",
-        "supportedLanguages": "Unterst?tzte Sprachen: {{languages}}.",
+        "supportedLanguages": "Unterstützte Sprachen: {{languages}}.",
         "kokoroOption": "Kokoro (Englisch, WebGPU)",
         "mossOption": "MOSS Nano (20 Sprachen, CPU)",
         "supertonicOption": "Supertonic 3 (31 Sprachen, lokales ONNX)",
@@ -685,65 +1321,65 @@
         "autoDetectLanguage": "Automatisch erkennen",
         "voice": "Stimme",
         "text": "Text",
-        "textPlaceholder": "Gib den Text ein, den du h?ren m?chtest...",
+        "textPlaceholder": "Gib den Text ein, den du hören möchtest...",
         "expressiveTags": "Ausdrucks-Tags",
         "speed": "Geschwindigkeit",
         "progressPreparing": "Lokales TTS wird vorbereitet...",
-        "insertedAndLinked": "Eingef?gt und verkn?pft",
+        "insertedAndLinked": "Eingefügt und verknüpft",
         "generate": "Generieren",
         "generating": "Generieren...",
         "regenerate": "Neu generieren",
-        "insertAndLink": "Einf?gen und verkn?pfen",
-        "inserting": "Einf?gen...",
+        "insertAndLink": "Einfügen und verknüpfen",
+        "inserting": "Einfügen...",
         "errors": {
-          "openProject": "?ffne ein Projekt, bevor du Audio generierst.",
+          "openProject": "Öffne ein Projekt, bevor du Audio generierst.",
           "enterText": "Gib Text zum Synthetisieren ein.",
-          "kokoroUnsupported": "WebGPU ist f?r Kokoro TTS erforderlich. Versuche Chrome 113+, Edge 113+ oder Safari 26+.",
-          "mossUnsupported": "Browserverwalteter Speicher ist f?r MOSS mehrsprachiges TTS erforderlich. Versuche einen aktuellen Chromium-Browser.",
+          "kokoroUnsupported": "WebGPU ist für Kokoro TTS erforderlich. Versuche Chrome 113+, Edge 113+ oder Safari 26+.",
+          "mossUnsupported": "Browserverwalteter Speicher ist für MOSS mehrsprachiges TTS erforderlich. Versuche einen aktuellen Chromium-Browser.",
           "supertonicUnsupported": "Dieser Browser kann die lokale Supertonic-TTS-Laufzeit nicht ausführen. Versuche es mit einer aktuellen Version von Chrome oder Edge.",
           "generateFailed": "Sprache konnte nicht generiert werden.",
-          "insertFailed": "Audio konnte nicht gespeichert und eingef?gt werden."
+          "insertFailed": "Audio konnte nicht gespeichert und eingefügt werden."
         },
         "notifications": {
-          "addedAndLinked": "\"{{fileName}}\" wurde zur Timeline hinzugef?gt und mit Text verkn?pft.",
-          "savedNoTrack": "\"{{fileName}}\" wurde gespeichert, aber es ist keine Audiospur verf?gbar."
+          "addedAndLinked": "\"{{fileName}}\" wurde zur Timeline hinzugefügt und mit Text verknüpft.",
+          "savedNoTrack": "\"{{fileName}}\" wurde gespeichert, aber es ist keine Audiospur verfügbar."
         }
       },
       "aiPanel": {
         "textToSpeech": "Text zu Sprache",
         "collapseTextToSpeech": "Text zu Sprache einklappen",
         "expandTextToSpeech": "Text zu Sprache ausklappen",
-        "runsLocally": "{{runtime}} l?uft lokal im Browser mit {{backend}}.",
+        "runsLocally": "{{runtime}} läuft lokal im Browser mit {{backend}}.",
         "history": "Verlauf ({{count}}) - {{size}}",
-        "clearAll": "Alle l?schen",
+        "clearAll": "Alle löschen",
         "musicGeneration": "Musik generieren",
         "collapseMusicGeneration": "Musikgenerierung einklappen",
         "expandMusicGeneration": "Musikgenerierung ausklappen",
         "musicGenerationInfo": "Infos zur Musikgenerierung",
-        "musicgenDescription": "Verwendet Xenovas browserf?higes MusicGen-Modell ?ber Transformers.js. Der erste Download ist gro?, danach bleibt es lokal im Cache.",
-        "musicgenPromptHint": "Beschreibe Genre, Stimmung, Tempo und Instrumentierung. K?rzere Clips sind deutlich schneller fertig.",
-        "musicgenUnsupported": "WebGPU ist in diesem Browser nicht verf?gbar. MusicGen ben?tigt Chrome 113+, Edge 113+ oder Safari 26+.",
+        "musicgenDescription": "Verwendet Xenovas browserfähiges MusicGen-Modell über Transformers.js. Der erste Download ist groß, danach bleibt es lokal im Cache.",
+        "musicgenPromptHint": "Beschreibe Genre, Stimmung, Tempo und Instrumentierung. Kürzere Clips sind deutlich schneller fertig.",
+        "musicgenUnsupported": "WebGPU ist in diesem Browser nicht verfügbar. MusicGen benötigt Chrome 113+, Edge 113+ oder Safari 26+.",
         "prompt": "Prompt",
         "presets": "Vorgaben",
-        "musicPromptPlaceholder": "Beschreibe, welche Musik du erzeugen m?chtest...",
-        "length": "L?nge",
+        "musicPromptPlaceholder": "Beschreibe, welche Musik du erzeugen möchtest...",
+        "length": "Länge",
         "generateMusic": "Musik generieren",
         "musicHistory": "Musikverlauf ({{count}}) - {{size}}",
         "remove": "Entfernen",
         "saved": "Gespeichert",
         "saving": "Speichern...",
-        "saveAndInsert": "Speichern und einf?gen",
+        "saveAndInsert": "Speichern und einfügen",
         "saveToLibrary": "In Bibliothek speichern",
         "progressPreparingMusic": "Lokale Musikgenerierung wird vorbereitet...",
         "errors": {
-          "describeMusic": "Beschreibe die Musik, die du erzeugen m?chtest.",
-          "musicgenUnsupported": "WebGPU ist f?r MusicGen erforderlich. Versuche Chrome 113+, Edge 113+ oder Safari 26+.",
+          "describeMusic": "Beschreibe die Musik, die du erzeugen möchtest.",
+          "musicgenUnsupported": "WebGPU ist für MusicGen erforderlich. Versuche Chrome 113+, Edge 113+ oder Safari 26+.",
           "generateMusicFailed": "Musik konnte nicht generiert werden.",
           "saveAudioFailed": "Audio konnte nicht in der Medienbibliothek gespeichert werden."
         },
         "notifications": {
           "savedToLibrary": "\"{{fileName}}\" wurde in der Medienbibliothek gespeichert.",
-          "savedAndAdded": "\"{{fileName}}\" wurde gespeichert und zur Timeline hinzugef?gt."
+          "savedAndAdded": "\"{{fileName}}\" wurde gespeichert und zur Timeline hinzugefügt."
         },
         "defaultTtsPrompt": "Welcome to freecut. This voice was generated locally in the browser.",
         "musicPresets": {
@@ -762,8 +1398,8 @@
         }
       },
       "clearKeyframesDialog": {
-        "descriptionProperty": "{{property}}-Keyframes von {{count}} ausgew?hlten Element(en) l?schen?",
-        "descriptionAll": "Alle Keyframes von {{count}} ausgew?hlten Element(en) l?schen?"
+        "descriptionProperty": "{{property}}-Keyframes von {{count}} ausgewählten Element(en) löschen?",
+        "descriptionAll": "Alle Keyframes von {{count}} ausgewählten Element(en) löschen?"
       },
       "localInferencePill": {
         "jobs": "{{count}} Job(s)"
@@ -772,7 +1408,7 @@
         "cueCount": "{{count}} Cue(s)"
       },
       "propertiesSidebar": {
-        "clipsSelected": "{{count}} Clips ausgew?hlt"
+        "clipsSelected": "{{count}} Clips ausgewählt"
       }
     },
     "preview": {
@@ -806,8 +1442,8 @@
         "scene": "{{count}} Szene(n)"
       },
       "feedback": {
-        "completedForItems": "{{action}} f?r {{count}} Element(e) abgeschlossen.",
-        "couldntProcessItems": "{{action}} konnte f?r {{count}} Element(e) nicht ausgef?hrt werden{{detail}}"
+        "completedForItems": "{{action}} für {{count}} Element(e) abgeschlossen.",
+        "couldntProcessItems": "{{action}} konnte für {{count}} Element(e) nicht ausgeführt werden{{detail}}"
       },
       "toasts": {
         "itemsUpdated": "{{count}} Element(e) aktualisiert.",
@@ -824,14 +1460,14 @@
       },
       "list": {
         "movedToTrashCount": "{{count}} Projekt(e) in den Papierkorb verschoben.",
-        "selectedCount": "{{count}} ausgew?hlt",
-        "deleteN": "{{count}} l?schen",
+        "selectedCount": "{{count}} ausgewählt",
+        "deleteN": "{{count}} löschen",
         "projectCount": "{{count}} Projekt(e)",
-        "bulkDeleteTitle": "{{count}} ausgew?hlte Projekt(e) l?schen?"
+        "bulkDeleteTitle": "{{count}} ausgewählte Projekt(e) löschen?"
       },
       "trash": {
-        "emptiedTrash": "{{count}} Projekt(e) aus dem Papierkorb gel?scht.",
-        "emptiedTrashWithFailures": "{{count}} Projekt(e) konnten nicht gel?scht werden."
+        "emptiedTrash": "{{count}} Projekt(e) aus dem Papierkorb gelöscht.",
+        "emptiedTrashWithFailures": "{{count}} Projekt(e) konnten nicht gelöscht werden."
       },
       "relativeTime": {
         "minutesAgo": "vor {{count}} Min.",
@@ -852,6 +1488,106 @@
           "activeJobs": "{{count}} aktive Job(s)",
           "unloadedToast": "{{count}} lokale Runtime(s) entladen."
         }
+      }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} Clip",
+        "clip_other": "{{count}} Clips",
+        "scene_one": "{{count}} Szene",
+        "scene_other": "{{count}} Szenen",
+        "match_one": "{{count}} Treffer",
+        "match_other": "{{count}} Treffer"
+      },
+      "sort": {
+        "label": "Sortieren",
+        "relevance": "Relevanz",
+        "time": "Zeitstempel",
+        "name": "Medienname"
+      },
+      "scope": {
+        "placeholder": "Bereich",
+        "allMedia": "Alle Medien",
+        "scopedTo": "Bereich: {{name}}",
+        "scopedToAll": "Bereich: Alle Medien"
+      },
+      "banners": {
+        "downloadingSemanticModel": "Semantisches Modell wird heruntergeladen (~22 MB, nur beim ersten Mal)...",
+        "indexingCaptions": "Untertitel für semantische Suche werden indexiert - {{current}}/{{total}} Clips",
+        "reanalyzing": "Analysiere <strong>{{label}}</strong> erneut - Szenen werden danach aktualisiert."
+      },
+      "analyze": {
+        "title": "Medien mit KI analysieren",
+        "button": "Analysieren",
+        "scope": "\"{{name}}\" analysieren",
+        "newMedia": "Neue Medien analysieren",
+        "reanalyzeAll": "Alles erneut analysieren"
+      },
+      "view": {
+        "list": "Listenansicht",
+        "grid": "Rasteransicht"
+      },
+      "empty": {
+        "noCaptionsTitle": "Noch keine KI-Untertitel.",
+        "noCaptionsPrefix": "Führe",
+        "noCaptionsSuffix": "für einen Clip aus der Medienbibliothek aus, um durchsuchbare Szenenuntertitel zu erzeugen.",
+        "noMatchesTitle": "Keine Szenen passen zu deiner Suche.",
+        "noMatchesPrefix": "Versuche eine kürzere Suche oder wechsle den Bereich zu"
+      },
+      "search": {
+        "exitColorMode": "Farbmodus beenden",
+        "colorTitle": "Nach Farbe suchen",
+        "color": "Farbe",
+        "semanticTitle": "Semantische Suche (nach Bedeutung)",
+        "keywordTitle": "Schlagwortsuche (exakte Übereinstimmung)",
+        "semanticLabel": "Semantische Suche",
+        "keywordLabel": "Schlagwortsuche",
+        "semantic": "Semantisch",
+        "keyword": "Schlagwort",
+        "keywordDescription": "Exakte Worttreffer",
+        "semanticDescription": "Nach Bedeutung abgleichen",
+        "clearReference": "Referenz löschen und andere Farbe wählen",
+        "findingSimilarPalette": "Suche Szenen mit ähnlicher Palette...",
+        "semanticPlaceholder": "Nach Bedeutung suchen - \"Sonnenuntergang über Wasser\", \"lachende Menschen\"...",
+        "keywordPlaceholder": "Szenen nach sichtbarem Inhalt suchen...",
+        "clearSearch": "Suche löschen",
+        "similarPaletteTo": "Ähnliche Palette wie {{label}} - zum Löschen klicken"
+      },
+      "matchTiers": {
+        "strong": "Stark",
+        "good": "Gut",
+        "fair": "Okay"
+      },
+      "match": {
+        "keyword": "Schlagwort",
+        "keywordHint": "Schlagworttreffer · Kosinus {{score}}",
+        "meaningWithTier": "Bedeutung · {{tier}}",
+        "textEmbeddingHint": "Text-Embedding-Kosinus: {{score}}",
+        "visualWithTier": "Visuell · {{tier}}",
+        "clipHint": "CLIP-Kosinus: {{score}}",
+        "colorWithName": "Farbe · {{color}}",
+        "paletteColorHint": "Palettentreffer für {{color}} (ΔE 2000)",
+        "paletteDistance": "Palette · ΔE {{distance}}",
+        "paletteDistanceHint": "Gewichteter Mittelwert ΔE 2000 zur Referenzpalette",
+        "belowThreshold": "Unter Schwellenwert",
+        "cosineHint": "Kosinus {{score}}",
+        "top": "Top",
+        "topHint": "Treffer mit höchster Bewertung"
+      },
+      "palette": {
+        "libraryColor": "Bibliotheksfarbe",
+        "empty": "Noch keine Paletten indexiert - führe KI-Untertitel aus, um sie zu füllen.",
+        "moreColors_one": "{{count}} weitere Farbe",
+        "moreColors_other": "{{count}} weitere Farben",
+        "showMoreColors_one": "{{count}} weitere Farbe anzeigen",
+        "showMoreColors_other": "{{count}} weitere Farben anzeigen",
+        "moreColorsTitle": "Weitere Farben",
+        "findColor": "Szenen in dieser Farbe finden ({{percent}} % der Bibliothek)",
+        "findSimilar": "Szenen mit ?hnlicher Palette finden",
+        "pickedSwatch": "Gewählte Farbe"
+      },
+      "scene": {
+        "previewAndDragHint": "Klicken zum Anzeigen im Quellmonitor - ziehen, um zur Timeline hinzuzufügen"
       }
     }
   },
@@ -879,6 +1615,90 @@
         "adjustmentLayer": "Camada de ajuste",
         "blankAdjustmentLayer": "Camada de ajuste em branco",
         "presets": "Predefinições"
+      },
+      "textSection": {
+        "sectionTitle": "Texto",
+        "content": "Conteúdo",
+        "single": "Único",
+        "twoSpans": "2 trechos",
+        "threeSpans": "3 trechos",
+        "mixedNone": "Misto / Nenhum",
+        "selectPreset": "Selecionar predefinição",
+        "span": "Trecho {{count}}",
+        "spanText": "Texto do trecho {{count}}",
+        "eyebrow": "Chamada",
+        "eyebrowText": "Texto da chamada",
+        "title": "Título",
+        "titleText": "Texto do título",
+        "subtitle": "Subtítulo",
+        "subtitleText": "Texto do subtítulo",
+        "text": "Texto",
+        "enterText": "Digite o texto...",
+        "defaultText": "Seu texto aqui",
+        "selectFont": "Selecionar fonte",
+        "size": "Tamanho",
+        "spacing": "Espaçamento",
+        "scale": "Escala",
+        "font": "Fonte",
+        "weight": "Peso",
+        "style": "Estilo",
+        "align": "Alinhar",
+        "color": "Cor",
+        "background": "Fundo",
+        "clear": "Limpar",
+        "clearBackground": "Limpar fundo",
+        "lineHeightShort": "Alt. linha",
+        "padding": "Margem",
+        "radius": "Raio",
+        "mixed": "Misto",
+        "selectWeight": "Selecionar peso",
+        "bold": "Negrito",
+        "boldUnavailable": "Negrito não está disponível para esta fonte",
+        "italic": "Itálico",
+        "underline": "Sublinhado",
+        "italicSpan": "Itálico em {{label}}",
+        "underlineSpan": "Sublinhar {{label}}",
+        "alignLeft": "Alinhar à esquerda",
+        "alignCenter": "Alinhar ao centro",
+        "alignRight": "Alinhar à direita",
+        "alignTop": "Alinhar ao topo",
+        "alignMiddle": "Alinhar ao meio",
+        "alignBottom": "Alinhar à base",
+        "effects": "Efeitos",
+        "presets": "Predefinições",
+        "fontWeights": {
+          "regular": "Regular",
+          "medium": "Médio",
+          "semibold": "Seminegrito",
+          "bold": "Negrito"
+        },
+        "effectPresets": {
+          "none": "Nenhum",
+          "shadow": "Sombra",
+          "outline": "Contorno",
+          "glow": "Brilho"
+        },
+        "shadow": "Sombra",
+        "shadowX": "Sombra X",
+        "shadowY": "Sombra Y",
+        "shadowBlur": "Desfoque s.",
+        "strokeWidth": "Largura c.",
+        "stroke": "Contorno",
+        "animation": "Animação",
+        "intro": "Entrada",
+        "outro": "Saída",
+        "animationFooter": "Aplica um breve movimento de texto com ease-out no início ou no fim de cada clipe selecionado.",
+        "animationPresets": {
+          "none": "Nenhum",
+          "fade": "Fade",
+          "rise": "Subir",
+          "drop": "Cair",
+          "left": "Esquerda",
+          "right": "Direita",
+          "tilt": "Inclinar",
+          "pop": "Surgir",
+          "swing": "Balançar"
+        }
       },
       "tts": {
         "seek": "Buscar",
@@ -1071,6 +1891,106 @@
           "unloadedToast": "{{count}} runtime(s) locais descarregados."
         }
       }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} clipe",
+        "clip_other": "{{count}} clipes",
+        "scene_one": "{{count}} cena",
+        "scene_other": "{{count}} cenas",
+        "match_one": "{{count}} resultado",
+        "match_other": "{{count}} resultados"
+      },
+      "sort": {
+        "label": "Ordenar",
+        "relevance": "Relevância",
+        "time": "Timestamp",
+        "name": "Nome da mídia"
+      },
+      "scope": {
+        "placeholder": "Escopo",
+        "allMedia": "Todas as mídias",
+        "scopedTo": "Escopo: {{name}}",
+        "scopedToAll": "Escopo: todas as mídias"
+      },
+      "banners": {
+        "downloadingSemanticModel": "Baixando modelo semântico (~22 MB, só na primeira execução)...",
+        "indexingCaptions": "Indexando legendas para busca semântica - {{current}}/{{total}} clipes",
+        "reanalyzing": "Reanalisando <strong>{{label}}</strong> - as cenas serão atualizadas ao terminar."
+      },
+      "analyze": {
+        "title": "Analisar mídia com IA",
+        "button": "Analisar",
+        "scope": "Analisar \"{{name}}\"",
+        "newMedia": "Analisar novas mídias",
+        "reanalyzeAll": "Reanalisar tudo"
+      },
+      "view": {
+        "list": "Visualização em lista",
+        "grid": "Visualização em grade"
+      },
+      "empty": {
+        "noCaptionsTitle": "Ainda não há legendas de IA.",
+        "noCaptionsPrefix": "Execute",
+        "noCaptionsSuffix": "em um clipe da biblioteca de mídia para gerar legendas de cenas pesquisáveis.",
+        "noMatchesTitle": "Nenhuma cena corresponde à sua busca.",
+        "noMatchesPrefix": "Tente uma busca mais curta ou altere o escopo para"
+      },
+      "search": {
+        "exitColorMode": "Sair do modo de cor",
+        "colorTitle": "Buscar por cor",
+        "color": "Cor",
+        "semanticTitle": "Busca semântica (por significado)",
+        "keywordTitle": "Busca por palavra-chave (correspondência exata)",
+        "semanticLabel": "Busca semântica",
+        "keywordLabel": "Busca por palavra-chave",
+        "semantic": "Semântica",
+        "keyword": "Palavra-chave",
+        "keywordDescription": "Correspondências exatas de palavras",
+        "semanticDescription": "Combinar por significado",
+        "clearReference": "Limpar referência e escolher outra cor",
+        "findingSimilarPalette": "Procurando cenas com paleta semelhante...",
+        "semanticPlaceholder": "Buscar por significado - \"pôr do sol sobre a água\", \"pessoas rindo\"...",
+        "keywordPlaceholder": "Buscar cenas pelo que você vê...",
+        "clearSearch": "Limpar busca",
+        "similarPaletteTo": "Paleta semelhante a {{label}} - clique para limpar"
+      },
+      "matchTiers": {
+        "strong": "Forte",
+        "good": "Bom",
+        "fair": "Razoável"
+      },
+      "match": {
+        "keyword": "Palavra-chave",
+        "keywordHint": "Correspondência de palavra-chave · cosseno {{score}}",
+        "meaningWithTier": "Significado · {{tier}}",
+        "textEmbeddingHint": "Cosseno do embedding de texto: {{score}}",
+        "visualWithTier": "Visual · {{tier}}",
+        "clipHint": "Cosseno CLIP: {{score}}",
+        "colorWithName": "Cor · {{color}}",
+        "paletteColorHint": "Correspondência de paleta em {{color}} (ΔE 2000)",
+        "paletteDistance": "Paleta · ΔE {{distance}}",
+        "paletteDistanceHint": "Média ponderada ΔE 2000 para a paleta de referência",
+        "belowThreshold": "Abaixo do limite",
+        "cosineHint": "cosseno {{score}}",
+        "top": "Principal",
+        "topHint": "Correspondência com maior pontuação"
+      },
+      "palette": {
+        "libraryColor": "Cor da biblioteca",
+        "empty": "Ainda não há paletas indexadas - execute legendas de IA para preencher.",
+        "moreColors_one": "{{count}} cor a mais",
+        "moreColors_other": "{{count}} cores a mais",
+        "showMoreColors_one": "Mostrar mais {{count}} cor",
+        "showMoreColors_other": "Mostrar mais {{count}} cores",
+        "moreColorsTitle": "Mais cores",
+        "findColor": "Encontrar cenas nesta cor ({{percent}}% da biblioteca)",
+        "findSimilar": "Encontrar cenas com uma paleta semelhante",
+        "pickedSwatch": "Amostra escolhida"
+      },
+      "scene": {
+        "previewAndDragHint": "Clique para pré-visualizar no monitor de origem - arraste para adicionar à linha do tempo"
+      }
     }
   },
   "ja": {
@@ -1097,6 +2017,90 @@
         "adjustmentLayer": "調整レイヤー",
         "blankAdjustmentLayer": "空の調整レイヤー",
         "presets": "プリセット"
+      },
+      "textSection": {
+        "sectionTitle": "テキスト",
+        "content": "内容",
+        "single": "単一",
+        "twoSpans": "2スパン",
+        "threeSpans": "3スパン",
+        "mixedNone": "混在 / なし",
+        "selectPreset": "プリセットを選択",
+        "span": "スパン {{count}}",
+        "spanText": "スパン {{count}} のテキスト",
+        "eyebrow": "アイブロウ",
+        "eyebrowText": "アイブロウのテキスト",
+        "title": "タイトル",
+        "titleText": "タイトルのテキスト",
+        "subtitle": "サブタイトル",
+        "subtitleText": "サブタイトルのテキスト",
+        "text": "テキスト",
+        "enterText": "テキストを入力...",
+        "defaultText": "ここにテキスト",
+        "selectFont": "フォントを選択",
+        "size": "サイズ",
+        "spacing": "間隔",
+        "scale": "スケール",
+        "font": "フォント",
+        "weight": "太さ",
+        "style": "スタイル",
+        "align": "整列",
+        "color": "色",
+        "background": "背景",
+        "clear": "クリア",
+        "clearBackground": "背景をクリア",
+        "lineHeightShort": "行の高さ",
+        "padding": "余白",
+        "radius": "角丸",
+        "mixed": "混在",
+        "selectWeight": "太さを選択",
+        "bold": "太字",
+        "boldUnavailable": "このフォントでは太字を使用できません",
+        "italic": "斜体",
+        "underline": "下線",
+        "italicSpan": "{{label}} を斜体",
+        "underlineSpan": "{{label}} に下線",
+        "alignLeft": "左揃え",
+        "alignCenter": "中央揃え",
+        "alignRight": "右揃え",
+        "alignTop": "上揃え",
+        "alignMiddle": "中央揃え（縦）",
+        "alignBottom": "下揃え",
+        "effects": "エフェクト",
+        "presets": "プリセット",
+        "fontWeights": {
+          "regular": "標準",
+          "medium": "中",
+          "semibold": "セミボールド",
+          "bold": "太字"
+        },
+        "effectPresets": {
+          "none": "なし",
+          "shadow": "影",
+          "outline": "アウトライン",
+          "glow": "発光"
+        },
+        "shadow": "影",
+        "shadowX": "影 X",
+        "shadowY": "影 Y",
+        "shadowBlur": "影ぼかし",
+        "strokeWidth": "縁取り幅",
+        "stroke": "縁取り",
+        "animation": "アニメーション",
+        "intro": "イントロ",
+        "outro": "アウトロ",
+        "animationFooter": "選択した各クリップの開始または終了に短いイーズアウトのテキストモーションを適用します。",
+        "animationPresets": {
+          "none": "なし",
+          "fade": "フェード",
+          "rise": "ライズ",
+          "drop": "ドロップ",
+          "left": "左",
+          "right": "右",
+          "tilt": "ティルト",
+          "pop": "ポップ",
+          "swing": "スイング"
+        }
       },
       "tts": {
         "seek": "シーク",
@@ -1194,17 +2198,17 @@
         }
       },
       "clearKeyframesDialog": {
-        "descriptionProperty": "???? {{count}} ???? {{property}} ??????????????",
-        "descriptionAll": "???? {{count}} ??????????????????????"
+        "descriptionProperty": "選択した {{count}} 項目から {{property}} のキーフレームをクリアしますか？",
+        "descriptionAll": "選択した {{count}} 項目からすべてのキーフレームをクリアしますか？"
       },
       "localInferencePill": {
-        "jobs": "{{count}} ?????"
+        "jobs": "{{count}} 件のジョブ"
       },
       "subtitleSection": {
-        "cueCount": "{{count}} ?????"
+        "cueCount": "{{count}} 件のキュー"
       },
       "propertiesSidebar": {
-        "clipsSelected": "{{count}} ??????????"
+        "clipsSelected": "{{count}} クリップを選択中"
       }
     },
     "preview": {
@@ -1235,55 +2239,155 @@
     },
     "settings": {
       "ai": {
-        "scene": "{{count}} ???"
+        "scene": "{{count}} シーン"
       },
       "feedback": {
-        "completedForItems": "{{count}} ??? {{action}} ????????",
-        "couldntProcessItems": "{{count}} ??? {{action}} ???????????{{detail}}"
+        "completedForItems": "{{count}} 項目の {{action}} が完了しました。",
+        "couldntProcessItems": "{{count}} 項目の {{action}} を実行できませんでした{{detail}}"
       },
       "toasts": {
-        "itemsUpdated": "{{count}} ??????????",
-        "itemsUpdatedFailed": "{{count}} ????????????: {{failed}}"
+        "itemsUpdated": "{{count}} 項目を更新しました。",
+        "itemsUpdatedFailed": "{{count}} 項目を更新しました。失敗: {{failed}}"
       }
     },
     "projects": {
       "legacyMigration": {
-        "errorsLogged": "{{count}} ????????"
+        "errorsLogged": "{{count}} 件のエラーを記録"
       },
       "legacyMigrationErrors": {
-        "retryStillFailing": "????? {{count}} ???????????",
-        "failedCount": "{{count}} ???????"
+        "retryStillFailing": "再試行に {{count}} 件のエラーが残っています。",
+        "failedCount": "{{count}} 件の移行エラー"
       },
       "list": {
-        "movedToTrashCount": "{{count}} ????????????????????",
-        "selectedCount": "{{count}} ????",
-        "deleteN": "{{count}} ????",
-        "projectCount": "{{count}} ????????",
-        "bulkDeleteTitle": "???? {{count}} ????????????????"
+        "movedToTrashCount": "{{count}} 件のプロジェクトをゴミ箱に移動しました。",
+        "selectedCount": "{{count}} 件を選択中",
+        "deleteN": "{{count}} 件を削除",
+        "projectCount": "{{count}} 件のプロジェクト",
+        "bulkDeleteTitle": "選択した {{count}} 件のプロジェクトを削除しますか？"
       },
       "trash": {
-        "emptiedTrash": "????? {{count}} ????????????????",
-        "emptiedTrashWithFailures": "{{count}} ????????????????????"
+        "emptiedTrash": "ゴミ箱から {{count}} 件のプロジェクトを削除しました。",
+        "emptiedTrashWithFailures": "{{count}} 件のプロジェクトを削除できませんでした。"
       },
       "relativeTime": {
-        "minutesAgo": "{{count}} ??",
-        "hoursAgo": "{{count}} ???",
-        "daysAgo": "{{count}} ??",
-        "weeksAgo": "{{count}} ???",
-        "monthsAgo": "{{count}} ???",
-        "yearsAgo": "{{count}} ??"
+        "minutesAgo": "{{count}} 分前",
+        "hoursAgo": "{{count}} 時間前",
+        "daysAgo": "{{count}} 日前",
+        "weeksAgo": "{{count}} 週間前",
+        "monthsAgo": "{{count}} か月前",
+        "yearsAgo": "{{count}} 年前"
       },
       "settings": {
         "hotkeys": {
-          "importedCommands": "{{count}} ????????????",
-          "remappedCount": "{{count}} ???????",
-          "ignoredCount": "{{count}} ????",
-          "customCount": "???? {{count}} ?"
+          "importedCommands": "{{count}} 件のコマンドをインポートしました",
+          "remappedCount": "{{count}} 件を再割り当て",
+          "ignoredCount": "{{count}} 件を無視",
+          "customCount": "{{count}} 件のカスタム"
         },
         "localInference": {
-          "activeJobs": "{{count}} ??????????",
-          "unloadedToast": "{{count}} ??????????????????????"
+          "activeJobs": "{{count}} 件のアクティブなジョブ",
+          "unloadedToast": "{{count}} 件のローカルランタイムをアンロードしました。"
         }
+      }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} クリップ",
+        "clip_other": "{{count}} クリップ",
+        "scene_one": "{{count}} シーン",
+        "scene_other": "{{count}} シーン",
+        "match_one": "{{count}} 件一致",
+        "match_other": "{{count}} 件一致"
+      },
+      "sort": {
+        "label": "並び替え",
+        "relevance": "関連性",
+        "time": "タイムスタンプ",
+        "name": "メディア名"
+      },
+      "scope": {
+        "placeholder": "範囲",
+        "allMedia": "すべてのメディア",
+        "scopedTo": "範囲: {{name}}",
+        "scopedToAll": "範囲: すべてのメディア"
+      },
+      "banners": {
+        "downloadingSemanticModel": "セマンティックモデルをダウンロード中（約 22 MB、初回のみ）...",
+        "indexingCaptions": "セマンティック検索のためキャプションをインデックス中 - {{current}}/{{total}} クリップ",
+        "reanalyzing": "<strong>{{label}}</strong> を再解析中 - 完了するとシーンが更新されます。"
+      },
+      "analyze": {
+        "title": "AI でメディアを解析",
+        "button": "解析",
+        "scope": "「{{name}}」を解析",
+        "newMedia": "新しいメディアを解析",
+        "reanalyzeAll": "すべて再解析"
+      },
+      "view": {
+        "list": "リスト表示",
+        "grid": "グリッド表示"
+      },
+      "empty": {
+        "noCaptionsTitle": "AI キャプションがまだありません。",
+        "noCaptionsPrefix": "メディアライブラリのクリップで",
+        "noCaptionsSuffix": "を実行すると、検索可能なシーンキャプションを生成できます。",
+        "noMatchesTitle": "検索に一致するシーンがありません。",
+        "noMatchesPrefix": "短いクエリを試すか、範囲を次に切り替えてください:"
+      },
+      "search": {
+        "exitColorMode": "カラーモードを終了",
+        "colorTitle": "色で検索",
+        "color": "色",
+        "semanticTitle": "セマンティック検索（意味で検索）",
+        "keywordTitle": "キーワード検索（完全一致）",
+        "semanticLabel": "セマンティック検索",
+        "keywordLabel": "キーワード検索",
+        "semantic": "セマンティック",
+        "keyword": "キーワード",
+        "keywordDescription": "完全な単語一致",
+        "semanticDescription": "意味で一致",
+        "clearReference": "参照をクリアして別の色を選ぶ",
+        "findingSimilarPalette": "似たパレットのシーンを検索中...",
+        "semanticPlaceholder": "意味で検索 - 「水面に沈む夕日」「笑う人々」...",
+        "keywordPlaceholder": "見える内容でシーンを検索...",
+        "clearSearch": "検索をクリア",
+        "similarPaletteTo": "{{label}} に似たパレット - クリックでクリア"
+      },
+      "matchTiers": {
+        "strong": "強",
+        "good": "良",
+        "fair": "可"
+      },
+      "match": {
+        "keyword": "キーワード",
+        "keywordHint": "キーワード一致 · コサイン {{score}}",
+        "meaningWithTier": "意味 · {{tier}}",
+        "textEmbeddingHint": "テキスト埋め込みのコサイン: {{score}}",
+        "visualWithTier": "ビジュアル · {{tier}}",
+        "clipHint": "CLIP コサイン: {{score}}",
+        "colorWithName": "色 · {{color}}",
+        "paletteColorHint": "{{color}} でのパレット一致 (ΔE 2000)",
+        "paletteDistance": "パレット · ΔE {{distance}}",
+        "paletteDistanceHint": "参照パレットへの加重平均 ΔE 2000",
+        "belowThreshold": "しきい値未満",
+        "cosineHint": "コサイン {{score}}",
+        "top": "トップ",
+        "topHint": "最高スコアの一致"
+      },
+      "palette": {
+        "libraryColor": "ライブラリの色",
+        "empty": "まだ索引付けされたパレットがありません - AI キャプションを実行して追加してください。",
+        "moreColors_one": "あと {{count}} 色",
+        "moreColors_other": "あと {{count}} 色",
+        "showMoreColors_one": "あと {{count}} 色を表示",
+        "showMoreColors_other": "あと {{count}} 色を表示",
+        "moreColorsTitle": "その他の色",
+        "findColor": "この色のシーンを検索（ライブラリの {{percent}}%）",
+        "findSimilar": "似たパレットのシーンを検索",
+        "pickedSwatch": "選択したスウォッチ"
+      },
+      "scene": {
+        "previewAndDragHint": "クリックでソースモニターでプレビュー - ドラッグでタイムラインに追加"
       }
     }
   },
@@ -1311,6 +2415,90 @@
         "adjustmentLayer": "조정 레이어",
         "blankAdjustmentLayer": "빈 조정 레이어",
         "presets": "프리셋"
+      },
+      "textSection": {
+        "sectionTitle": "텍스트",
+        "content": "내용",
+        "single": "단일",
+        "twoSpans": "2개 구간",
+        "threeSpans": "3개 구간",
+        "mixedNone": "혼합 / 없음",
+        "selectPreset": "프리셋 선택",
+        "span": "구간 {{count}}",
+        "spanText": "구간 {{count}} 텍스트",
+        "eyebrow": "보조 제목",
+        "eyebrowText": "보조 제목 텍스트",
+        "title": "제목",
+        "titleText": "제목 텍스트",
+        "subtitle": "부제목",
+        "subtitleText": "부제목 텍스트",
+        "text": "텍스트",
+        "enterText": "텍스트 입력...",
+        "defaultText": "여기에 텍스트 입력",
+        "selectFont": "글꼴 선택",
+        "size": "크기",
+        "spacing": "간격",
+        "scale": "배율",
+        "font": "글꼴",
+        "weight": "두께",
+        "style": "스타일",
+        "align": "정렬",
+        "color": "색상",
+        "background": "배경",
+        "clear": "지우기",
+        "clearBackground": "배경 지우기",
+        "lineHeightShort": "줄 높이",
+        "padding": "여백",
+        "radius": "반경",
+        "mixed": "혼합",
+        "selectWeight": "두께 선택",
+        "bold": "굵게",
+        "boldUnavailable": "이 글꼴에서는 굵게를 사용할 수 없습니다",
+        "italic": "기울임",
+        "underline": "밑줄",
+        "italicSpan": "{{label}} 기울임",
+        "underlineSpan": "{{label}} 밑줄",
+        "alignLeft": "왼쪽 정렬",
+        "alignCenter": "가운데 정렬",
+        "alignRight": "오른쪽 정렬",
+        "alignTop": "위쪽 정렬",
+        "alignMiddle": "세로 가운데 정렬",
+        "alignBottom": "아래쪽 정렬",
+        "effects": "효과",
+        "presets": "프리셋",
+        "fontWeights": {
+          "regular": "일반",
+          "medium": "중간",
+          "semibold": "세미볼드",
+          "bold": "굵게"
+        },
+        "effectPresets": {
+          "none": "없음",
+          "shadow": "그림자",
+          "outline": "외곽선",
+          "glow": "광선"
+        },
+        "shadow": "그림자",
+        "shadowX": "그림자 X",
+        "shadowY": "그림자 Y",
+        "shadowBlur": "그림자 흐림",
+        "strokeWidth": "외곽선 굵기",
+        "stroke": "외곽선",
+        "animation": "애니메이션",
+        "intro": "인트로",
+        "outro": "아웃트로",
+        "animationFooter": "선택한 각 클립의 시작 또는 끝에 짧은 이즈아웃 텍스트 모션을 적용합니다.",
+        "animationPresets": {
+          "none": "없음",
+          "fade": "페이드",
+          "rise": "위로",
+          "drop": "아래로",
+          "left": "왼쪽",
+          "right": "오른쪽",
+          "tilt": "기울임",
+          "pop": "팝",
+          "swing": "스윙"
+        }
       },
       "tts": {
         "seek": "탐색",
@@ -1408,17 +2596,17 @@
         }
       },
       "clearKeyframesDialog": {
-        "descriptionProperty": "??? {{count}}? ???? {{property}} ????? ?????",
-        "descriptionAll": "??? {{count}}? ???? ?? ????? ?????"
+        "descriptionProperty": "선택한 {{count}}개 항목에서 {{property}} 키프레임을 지우시겠습니까?",
+        "descriptionAll": "선택한 {{count}}개 항목에서 모든 키프레임을 지우시겠습니까?"
       },
       "localInferencePill": {
-        "jobs": "{{count}}? ??"
+        "jobs": "{{count}}개 작업"
       },
       "subtitleSection": {
-        "cueCount": "{{count}}? ?"
+        "cueCount": "{{count}}개 큐"
       },
       "propertiesSidebar": {
-        "clipsSelected": "{{count}}? ?? ???"
+        "clipsSelected": "{{count}}개 클립 선택됨"
       }
     },
     "preview": {
@@ -1449,55 +2637,155 @@
     },
     "settings": {
       "ai": {
-        "scene": "{{count}}? ??"
+        "scene": "{{count}}개 장면"
       },
       "feedback": {
-        "completedForItems": "{{count}}? ??? ?? {{action}} ??.",
-        "couldntProcessItems": "{{count}}? ??? ?? {{action}}? ? ????{{detail}}"
+        "completedForItems": "{{count}}개 항목에 대한 {{action}} 완료.",
+        "couldntProcessItems": "{{count}}개 항목에 대한 {{action}}을(를) 수행할 수 없습니다{{detail}}"
       },
       "toasts": {
-        "itemsUpdated": "{{count}}? ??? ?????????.",
-        "itemsUpdatedFailed": "{{count}}? ??? ?????????. ??: {{failed}}"
+        "itemsUpdated": "{{count}}개 항목이 업데이트되었습니다.",
+        "itemsUpdatedFailed": "{{count}}개 항목이 업데이트되었습니다. 실패: {{failed}}"
       }
     },
     "projects": {
       "legacyMigration": {
-        "errorsLogged": "{{count}}? ?? ???"
+        "errorsLogged": "{{count}}개 오류 기록됨"
       },
       "legacyMigrationErrors": {
-        "retryStillFailing": "??? ??? {{count}}? ??? ????.",
-        "failedCount": "{{count}}? ?????? ??"
+        "retryStillFailing": "재시도에 {{count}}개 오류가 남아 있습니다.",
+        "failedCount": "{{count}}개 마이그레이션 오류"
       },
       "list": {
-        "movedToTrashCount": "{{count}}? ????? ????? ??????.",
-        "selectedCount": "{{count}}? ???",
-        "deleteN": "{{count}}? ??",
-        "projectCount": "{{count}}? ????",
-        "bulkDeleteTitle": "??? {{count}}? ????? ??????"
+        "movedToTrashCount": "{{count}}개 프로젝트를 휴지통으로 이동했습니다.",
+        "selectedCount": "{{count}}개 선택됨",
+        "deleteN": "{{count}}개 삭제",
+        "projectCount": "{{count}}개 프로젝트",
+        "bulkDeleteTitle": "선택한 {{count}}개 프로젝트를 삭제하시겠습니까?"
       },
       "trash": {
-        "emptiedTrash": "????? {{count}}? ????? ?????.",
-        "emptiedTrashWithFailures": "{{count}}? ????? ???? ?????."
+        "emptiedTrash": "휴지통에서 {{count}}개 프로젝트를 비웠습니다.",
+        "emptiedTrashWithFailures": "{{count}}개 프로젝트를 삭제할 수 없습니다."
       },
       "relativeTime": {
-        "minutesAgo": "{{count}}? ?",
-        "hoursAgo": "{{count}}?? ?",
-        "daysAgo": "{{count}}? ?",
-        "weeksAgo": "{{count}}? ?",
-        "monthsAgo": "{{count}}?? ?",
-        "yearsAgo": "{{count}}? ?"
+        "minutesAgo": "{{count}}분 전",
+        "hoursAgo": "{{count}}시간 전",
+        "daysAgo": "{{count}}일 전",
+        "weeksAgo": "{{count}}주 전",
+        "monthsAgo": "{{count}}개월 전",
+        "yearsAgo": "{{count}}년 전"
       },
       "settings": {
         "hotkeys": {
-          "importedCommands": "{{count}}? ?? ???",
-          "remappedCount": "{{count}}? ????",
-          "ignoredCount": "{{count}}? ???",
-          "customCount": "{{count}}? ??? ??"
+          "importedCommands": "{{count}}개 명령 가져옴",
+          "remappedCount": "{{count}}개 재매핑됨",
+          "ignoredCount": "{{count}}개 무시됨",
+          "customCount": "{{count}}개 사용자 지정"
         },
         "localInference": {
-          "activeJobs": "{{count}}? ?? ??",
-          "unloadedToast": "{{count}}? ?? ???? ???????."
+          "activeJobs": "{{count}}개 활성 작업",
+          "unloadedToast": "{{count}}개 로컬 런타임을 언로드했습니다."
         }
+      }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "클립 {{count}}개",
+        "clip_other": "클립 {{count}}개",
+        "scene_one": "장면 {{count}}개",
+        "scene_other": "장면 {{count}}개",
+        "match_one": "일치 {{count}}건",
+        "match_other": "일치 {{count}}건"
+      },
+      "sort": {
+        "label": "정렬",
+        "relevance": "관련성",
+        "time": "타임스탬프",
+        "name": "미디어 이름"
+      },
+      "scope": {
+        "placeholder": "범위",
+        "allMedia": "모든 미디어",
+        "scopedTo": "범위: {{name}}",
+        "scopedToAll": "범위: 모든 미디어"
+      },
+      "banners": {
+        "downloadingSemanticModel": "시맨틱 모델 다운로드 중(~22MB, 최초 1회)...",
+        "indexingCaptions": "시맨틱 검색을 위해 캡션 인덱싱 중 - {{current}}/{{total}}개 클립",
+        "reanalyzing": "<strong>{{label}}</strong> 재분석 중 - 완료되면 장면이 업데이트됩니다."
+      },
+      "analyze": {
+        "title": "AI로 미디어 분석",
+        "button": "분석",
+        "scope": "\"{{name}}\" 분석",
+        "newMedia": "새 미디어 분석",
+        "reanalyzeAll": "모두 다시 분석"
+      },
+      "view": {
+        "list": "목록 보기",
+        "grid": "그리드 보기"
+      },
+      "empty": {
+        "noCaptionsTitle": "아직 AI 캡션이 없습니다.",
+        "noCaptionsPrefix": "미디어 라이브러리의 클립에서",
+        "noCaptionsSuffix": "을(를) 실행하면 검색 가능한 장면 캡션을 생성할 수 있습니다.",
+        "noMatchesTitle": "검색과 일치하는 장면이 없습니다.",
+        "noMatchesPrefix": "더 짧은 쿼리를 시도하거나 범위를 다음으로 전환하세요:"
+      },
+      "search": {
+        "exitColorMode": "색상 모드 종료",
+        "colorTitle": "색상으로 검색",
+        "color": "색상",
+        "semanticTitle": "시맨틱 검색(의미 기반)",
+        "keywordTitle": "키워드 검색(정확한 일치)",
+        "semanticLabel": "시맨틱 검색",
+        "keywordLabel": "키워드 검색",
+        "semantic": "시맨틱",
+        "keyword": "키워드",
+        "keywordDescription": "정확한 단어 일치",
+        "semanticDescription": "의미로 매칭",
+        "clearReference": "참조를 지우고 다른 색상 선택",
+        "findingSimilarPalette": "비슷한 팔레트를 가진 장면 찾는 중...",
+        "semanticPlaceholder": "의미로 검색 - \"물 위의 노을\", \"웃는 사람들\"...",
+        "keywordPlaceholder": "보이는 내용으로 장면 검색...",
+        "clearSearch": "검색 지우기",
+        "similarPaletteTo": "{{label}}와 비슷한 팔레트 - 클릭하여 지우기"
+      },
+      "matchTiers": {
+        "strong": "강함",
+        "good": "양호",
+        "fair": "보통"
+      },
+      "match": {
+        "keyword": "키워드",
+        "keywordHint": "키워드 일치 · 코사인 {{score}}",
+        "meaningWithTier": "의미 · {{tier}}",
+        "textEmbeddingHint": "텍스트 임베딩 코사인: {{score}}",
+        "visualWithTier": "비주얼 · {{tier}}",
+        "clipHint": "CLIP 코사인: {{score}}",
+        "colorWithName": "색상 · {{color}}",
+        "paletteColorHint": "{{color}} 팔레트 일치(ΔE 2000)",
+        "paletteDistance": "팔레트 · ΔE {{distance}}",
+        "paletteDistanceHint": "참조 팔레트에 대한 가중 평균 ΔE 2000",
+        "belowThreshold": "임계값 미만",
+        "cosineHint": "코사인 {{score}}",
+        "top": "최상",
+        "topHint": "가장 높은 점수의 일치"
+      },
+      "palette": {
+        "libraryColor": "라이브러리 색상",
+        "empty": "아직 인덱싱된 팔레트가 없습니다 - AI 캡션을 실행해 채우세요.",
+        "moreColors_one": "추가 {{count}}개 색상",
+        "moreColors_other": "추가 {{count}}개 색상",
+        "showMoreColors_one": "추가 {{count}}개 색상 표시",
+        "showMoreColors_other": "추가 {{count}}개 색상 표시",
+        "moreColorsTitle": "더 많은 색상",
+        "findColor": "이 색상의 장면 찾기(라이브러리의 {{percent}}%)",
+        "findSimilar": "비슷한 팔레트의 장면 찾기",
+        "pickedSwatch": "선택한 색상"
+      },
+      "scene": {
+        "previewAndDragHint": "클릭하여 소스 모니터에서 미리보기 - 드래그하여 타임라인에 추가"
       }
     }
   },
@@ -1525,6 +2813,90 @@
         "adjustmentLayer": "调整图层",
         "blankAdjustmentLayer": "空白调整图层",
         "presets": "预设"
+      },
+      "textSection": {
+        "sectionTitle": "文本",
+        "content": "内容",
+        "single": "单段",
+        "twoSpans": "2 段",
+        "threeSpans": "3 段",
+        "mixedNone": "混合 / 无",
+        "selectPreset": "选择预设",
+        "span": "段 {{count}}",
+        "spanText": "段 {{count}} 文本",
+        "eyebrow": "眉题",
+        "eyebrowText": "眉题文本",
+        "title": "标题",
+        "titleText": "标题文本",
+        "subtitle": "副标题",
+        "subtitleText": "副标题文本",
+        "text": "文本",
+        "enterText": "输入文本...",
+        "defaultText": "在此输入文本",
+        "selectFont": "选择字体",
+        "size": "大小",
+        "spacing": "间距",
+        "scale": "缩放",
+        "font": "字体",
+        "weight": "字重",
+        "style": "样式",
+        "align": "对齐",
+        "color": "颜色",
+        "background": "背景",
+        "clear": "清除",
+        "clearBackground": "清除背景",
+        "lineHeightShort": "行高",
+        "padding": "内边距",
+        "radius": "圆角",
+        "mixed": "混合",
+        "selectWeight": "选择字重",
+        "bold": "加粗",
+        "boldUnavailable": "此字体不支持加粗",
+        "italic": "斜体",
+        "underline": "下划线",
+        "italicSpan": "{{label}} 斜体",
+        "underlineSpan": "{{label}} 下划线",
+        "alignLeft": "左对齐",
+        "alignCenter": "居中对齐",
+        "alignRight": "右对齐",
+        "alignTop": "顶部对齐",
+        "alignMiddle": "垂直居中",
+        "alignBottom": "底部对齐",
+        "effects": "效果",
+        "presets": "预设",
+        "fontWeights": {
+          "regular": "常规",
+          "medium": "中等",
+          "semibold": "半粗",
+          "bold": "加粗"
+        },
+        "effectPresets": {
+          "none": "无",
+          "shadow": "阴影",
+          "outline": "描边",
+          "glow": "发光"
+        },
+        "shadow": "阴影",
+        "shadowX": "阴影 X",
+        "shadowY": "阴影 Y",
+        "shadowBlur": "阴影模糊",
+        "strokeWidth": "描边宽度",
+        "stroke": "描边",
+        "animation": "动画",
+        "intro": "入场",
+        "outro": "出场",
+        "animationFooter": "在所选每个剪辑的开头或结尾应用短暂的缓出文字动作。",
+        "animationPresets": {
+          "none": "无",
+          "fade": "淡入淡出",
+          "rise": "上升",
+          "drop": "下落",
+          "left": "向左",
+          "right": "向右",
+          "tilt": "倾斜",
+          "pop": "弹出",
+          "swing": "摇摆"
+        }
       },
       "tts": {
         "seek": "定位",
@@ -1622,17 +2994,17 @@
         }
       },
       "clearKeyframesDialog": {
-        "descriptionProperty": "????? {{count}} ?????? {{property}} ?????",
-        "descriptionAll": "????? {{count}} ?????????????"
+        "descriptionProperty": "从所选 {{count}} 个项目清除 {{property}} 关键帧吗？",
+        "descriptionAll": "从所选 {{count}} 个项目清除所有关键帧吗？"
       },
       "localInferencePill": {
-        "jobs": "{{count}} ???"
+        "jobs": "{{count}} 个任务"
       },
       "subtitleSection": {
-        "cueCount": "{{count}} ???"
+        "cueCount": "{{count}} 条字幕"
       },
       "propertiesSidebar": {
-        "clipsSelected": "??? {{count}} ???"
+        "clipsSelected": "已选择 {{count}} 个剪辑"
       }
     },
     "preview": {
@@ -1663,55 +3035,155 @@
     },
     "settings": {
       "ai": {
-        "scene": "{{count}} ???"
+        "scene": "{{count}} 个场景"
       },
       "feedback": {
-        "completedForItems": "?? {{count}} ????? {{action}}?",
-        "couldntProcessItems": "??? {{count}} ????? {{action}}{{detail}}"
+        "completedForItems": "已为 {{count}} 个项目完成 {{action}}。",
+        "couldntProcessItems": "无法为 {{count}} 个项目执行 {{action}}{{detail}}"
       },
       "toasts": {
-        "itemsUpdated": "??? {{count}} ????",
-        "itemsUpdatedFailed": "??? {{count}} ???????{{failed}}"
+        "itemsUpdated": "已更新 {{count}} 个项目。",
+        "itemsUpdatedFailed": "已更新 {{count}} 个项目。失败：{{failed}}"
       }
     },
     "projects": {
       "legacyMigration": {
-        "errorsLogged": "??? {{count}} ???"
+        "errorsLogged": "已记录 {{count}} 个错误"
       },
       "legacyMigrationErrors": {
-        "retryStillFailing": "????? {{count}} ????",
-        "failedCount": "{{count}} ?????"
+        "retryStillFailing": "重试仍有 {{count}} 个错误。",
+        "failedCount": "{{count}} 个迁移错误"
       },
       "list": {
-        "movedToTrashCount": "?? {{count}} ?????????",
-        "selectedCount": "??? {{count}} ?",
-        "deleteN": "?? {{count}} ?",
-        "projectCount": "{{count}} ???",
-        "bulkDeleteTitle": "????? {{count}} ????"
+        "movedToTrashCount": "已将 {{count}} 个项目移至回收站。",
+        "selectedCount": "已选择 {{count}} 个",
+        "deleteN": "删除 {{count}} 个",
+        "projectCount": "{{count}} 个项目",
+        "bulkDeleteTitle": "删除所选的 {{count}} 个项目吗？"
       },
       "trash": {
-        "emptiedTrash": "??????? {{count}} ????",
-        "emptiedTrashWithFailures": "???? {{count}} ????"
+        "emptiedTrash": "已从回收站清空 {{count}} 个项目。",
+        "emptiedTrashWithFailures": "无法删除 {{count}} 个项目。"
       },
       "relativeTime": {
-        "minutesAgo": "{{count}} ???",
-        "hoursAgo": "{{count}} ???",
-        "daysAgo": "{{count}} ??",
-        "weeksAgo": "{{count}} ??",
-        "monthsAgo": "{{count}} ???",
-        "yearsAgo": "{{count}} ??"
+        "minutesAgo": "{{count}} 分钟前",
+        "hoursAgo": "{{count}} 小时前",
+        "daysAgo": "{{count}} 天前",
+        "weeksAgo": "{{count}} 周前",
+        "monthsAgo": "{{count}} 个月前",
+        "yearsAgo": "{{count}} 年前"
       },
       "settings": {
         "hotkeys": {
-          "importedCommands": "??? {{count}} ???",
-          "remappedCount": "????? {{count}} ?",
-          "ignoredCount": "??? {{count}} ?",
-          "customCount": "{{count}} ????"
+          "importedCommands": "已导入 {{count}} 个命令",
+          "remappedCount": "已重新映射 {{count}} 个",
+          "ignoredCount": "已忽略 {{count}} 个",
+          "customCount": "{{count}} 个自定义"
         },
         "localInference": {
-          "activeJobs": "{{count}} ?????",
-          "unloadedToast": "??? {{count}} ???????"
+          "activeJobs": "{{count}} 个活动任务",
+          "unloadedToast": "已卸载 {{count}} 个本地运行时。"
         }
+      }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} 个剪辑",
+        "clip_other": "{{count}} 个剪辑",
+        "scene_one": "{{count}} 个场景",
+        "scene_other": "{{count}} 个场景",
+        "match_one": "{{count}} 个匹配",
+        "match_other": "{{count}} 个匹配"
+      },
+      "sort": {
+        "label": "排序",
+        "relevance": "相关性",
+        "time": "时间戳",
+        "name": "媒体名称"
+      },
+      "scope": {
+        "placeholder": "范围",
+        "allMedia": "所有媒体",
+        "scopedTo": "范围：{{name}}",
+        "scopedToAll": "范围：所有媒体"
+      },
+      "banners": {
+        "downloadingSemanticModel": "正在下载语义模型（约 22 MB，仅首次运行）...",
+        "indexingCaptions": "正在为语义搜索索引字幕 - {{current}}/{{total}} 个剪辑",
+        "reanalyzing": "正在重新分析 <strong>{{label}}</strong> - 完成后场景将刷新。"
+      },
+      "analyze": {
+        "title": "用 AI 分析媒体",
+        "button": "分析",
+        "scope": "分析\"{{name}}\"",
+        "newMedia": "分析新媒体",
+        "reanalyzeAll": "全部重新分析"
+      },
+      "view": {
+        "list": "列表视图",
+        "grid": "网格视图"
+      },
+      "empty": {
+        "noCaptionsTitle": "还没有 AI 字幕。",
+        "noCaptionsPrefix": "在媒体库中的剪辑上运行",
+        "noCaptionsSuffix": "以生成可搜索的场景字幕。",
+        "noMatchesTitle": "没有场景与你的搜索匹配。",
+        "noMatchesPrefix": "尝试更短的查询，或将范围切换到"
+      },
+      "search": {
+        "exitColorMode": "退出颜色模式",
+        "colorTitle": "按颜色搜索",
+        "color": "颜色",
+        "semanticTitle": "语义搜索（按含义）",
+        "keywordTitle": "关键词搜索（精确匹配）",
+        "semanticLabel": "语义搜索",
+        "keywordLabel": "关键词搜索",
+        "semantic": "语义",
+        "keyword": "关键词",
+        "keywordDescription": "精确单词匹配",
+        "semanticDescription": "按含义匹配",
+        "clearReference": "清除参考并选择其他颜色",
+        "findingSimilarPalette": "正在查找具有相似调色板的场景...",
+        "semanticPlaceholder": "按含义搜索 - \"水面上的日落\"、\"大笑的人\"...",
+        "keywordPlaceholder": "按所见内容搜索场景...",
+        "clearSearch": "清除搜索",
+        "similarPaletteTo": "与 {{label}} 相似的调色板 - 点击清除"
+      },
+      "matchTiers": {
+        "strong": "强",
+        "good": "良好",
+        "fair": "一般"
+      },
+      "match": {
+        "keyword": "关键词",
+        "keywordHint": "关键词匹配 · 余弦 {{score}}",
+        "meaningWithTier": "含义 · {{tier}}",
+        "textEmbeddingHint": "文本嵌入余弦：{{score}}",
+        "visualWithTier": "视觉 · {{tier}}",
+        "clipHint": "CLIP 余弦：{{score}}",
+        "colorWithName": "颜色 · {{color}}",
+        "paletteColorHint": "{{color}} 上的调色板匹配（ΔE 2000）",
+        "paletteDistance": "调色板 · ΔE {{distance}}",
+        "paletteDistanceHint": "与参考调色板的加权平均 ΔE 2000",
+        "belowThreshold": "低于阈值",
+        "cosineHint": "余弦 {{score}}",
+        "top": "最佳",
+        "topHint": "得分最高的匹配"
+      },
+      "palette": {
+        "libraryColor": "媒体库颜色",
+        "empty": "还没有索引的调色板 - 运行 AI 字幕进行填充。",
+        "moreColors_one": "另有 {{count}} 种颜色",
+        "moreColors_other": "另有 {{count}} 种颜色",
+        "showMoreColors_one": "再显示 {{count}} 种颜色",
+        "showMoreColors_other": "再显示 {{count}} 种颜色",
+        "moreColorsTitle": "更多颜色",
+        "findColor": "查找此颜色的场景（占媒体库的 {{percent}}%）",
+        "findSimilar": "查找具有相似调色板的场景",
+        "pickedSwatch": "选取的色样"
+      },
+      "scene": {
+        "previewAndDragHint": "点击在源监视器中预览 - 拖动以添加到时间线"
       }
     }
   },
@@ -1739,6 +3211,90 @@
         "adjustmentLayer": "Ayar katmanı",
         "blankAdjustmentLayer": "Boş ayar katmanı",
         "presets": "Ön Ayarlar"
+      },
+      "textSection": {
+        "sectionTitle": "Metin",
+        "content": "İçerik",
+        "single": "Tek",
+        "twoSpans": "2 aralık",
+        "threeSpans": "3 aralık",
+        "mixedNone": "Karışık / Yok",
+        "selectPreset": "Ön ayar seç",
+        "span": "Aralık {{count}}",
+        "spanText": "Aralık {{count}} metni",
+        "eyebrow": "Üst başlık",
+        "eyebrowText": "Üst başlık metni",
+        "title": "Başlık",
+        "titleText": "Başlık metni",
+        "subtitle": "Alt başlık",
+        "subtitleText": "Alt başlık metni",
+        "text": "Metin",
+        "enterText": "Metin gir...",
+        "defaultText": "Metninizi buraya yazın",
+        "selectFont": "Yazı tipi seç",
+        "size": "Boyut",
+        "spacing": "Aralık",
+        "scale": "Ölçek",
+        "font": "Yazı tipi",
+        "weight": "Ağırlık",
+        "style": "Stil",
+        "align": "Hizala",
+        "color": "Renk",
+        "background": "Arka plan",
+        "clear": "Temizle",
+        "clearBackground": "Arka planı temizle",
+        "lineHeightShort": "Satır y.",
+        "padding": "Dolgu",
+        "radius": "Yarıçap",
+        "mixed": "Karışık",
+        "selectWeight": "Ağırlık seç",
+        "bold": "Kalın",
+        "boldUnavailable": "Bu yazı tipinde kalın kullanılamaz",
+        "italic": "İtalik",
+        "underline": "Altı çizili",
+        "italicSpan": "{{label}} italik",
+        "underlineSpan": "{{label}} altı çizili",
+        "alignLeft": "Sola hizala",
+        "alignCenter": "Ortala",
+        "alignRight": "Sağa hizala",
+        "alignTop": "Üste hizala",
+        "alignMiddle": "Ortaya hizala",
+        "alignBottom": "Alta hizala",
+        "effects": "Efektler",
+        "presets": "Ön Ayarlar",
+        "fontWeights": {
+          "regular": "Normal",
+          "medium": "Orta",
+          "semibold": "Yarı kalın",
+          "bold": "Kalın"
+        },
+        "effectPresets": {
+          "none": "Yok",
+          "shadow": "Gölge",
+          "outline": "Kontur",
+          "glow": "Parıltı"
+        },
+        "shadow": "Gölge",
+        "shadowX": "Gölge X",
+        "shadowY": "Gölge Y",
+        "shadowBlur": "Gölge bul.",
+        "strokeWidth": "Kontur k.",
+        "stroke": "Kontur",
+        "animation": "Animasyon",
+        "intro": "Giriş",
+        "outro": "Çıkış",
+        "animationFooter": "Seçili her klibin başına veya sonuna kısa bir ease-out metin hareketi uygular.",
+        "animationPresets": {
+          "none": "Yok",
+          "fade": "Soldur",
+          "rise": "Yüksel",
+          "drop": "Düş",
+          "left": "Sol",
+          "right": "Sağ",
+          "tilt": "Eğ",
+          "pop": "Pop",
+          "swing": "Salla"
+        }
       },
       "tts": {
         "seek": "Git",
@@ -1926,6 +3482,106 @@
           "activeJobs": "{{count}} etkin iş",
           "unloadedToast": "{{count}} yerel çalışma zamanı boşaltıldı."
         }
+      }
+    },
+    "sceneBrowser": {
+      "counts": {
+        "clip_one": "{{count}} klip",
+        "clip_other": "{{count}} klip",
+        "scene_one": "{{count}} sahne",
+        "scene_other": "{{count}} sahne",
+        "match_one": "{{count}} eşleşme",
+        "match_other": "{{count}} eşleşme"
+      },
+      "sort": {
+        "label": "Sırala",
+        "relevance": "Alaka düzeyi",
+        "time": "Zaman damgası",
+        "name": "Medya adı"
+      },
+      "scope": {
+        "placeholder": "Kapsam",
+        "allMedia": "Tüm medya",
+        "scopedTo": "Kapsam: {{name}}",
+        "scopedToAll": "Kapsam: tüm medya"
+      },
+      "banners": {
+        "downloadingSemanticModel": "Semantik model indiriliyor (~22 MB, yalnızca ilk çalıştırma)...",
+        "indexingCaptions": "Semantik arama için altyazılar indeksleniyor - {{current}}/{{total}} klip",
+        "reanalyzing": "<strong>{{label}}</strong> yeniden analiz ediliyor - tamamlanınca sahneler yenilenecek."
+      },
+      "analyze": {
+        "title": "Medyayı AI ile analiz et",
+        "button": "Analiz et",
+        "scope": "\"{{name}}\" analiz et",
+        "newMedia": "Yeni medyayı analiz et",
+        "reanalyzeAll": "Tümünü yeniden analiz et"
+      },
+      "view": {
+        "list": "Liste görünümü",
+        "grid": "Izgara görünümü"
+      },
+      "empty": {
+        "noCaptionsTitle": "Henüz AI altyazısı yok.",
+        "noCaptionsPrefix": "Aranabilir sahne altyazıları oluşturmak için medya kitaplığındaki bir klipte",
+        "noCaptionsSuffix": "çalıştırın.",
+        "noMatchesTitle": "Aramanızla eşleşen sahne yok.",
+        "noMatchesPrefix": "Daha kısa bir sorgu deneyin veya kapsamı şuna değiştirin:"
+      },
+      "search": {
+        "exitColorMode": "Renk modundan çık",
+        "colorTitle": "Renge göre ara",
+        "color": "Renk",
+        "semanticTitle": "Semantik arama (anlama göre)",
+        "keywordTitle": "Anahtar kelime araması (tam eşleşme)",
+        "semanticLabel": "Semantik arama",
+        "keywordLabel": "Anahtar kelime araması",
+        "semantic": "Semantik",
+        "keyword": "Anahtar kelime",
+        "keywordDescription": "Tam kelime eşleşmeleri",
+        "semanticDescription": "Anlama göre eşleştir",
+        "clearReference": "Referansı temizle ve başka renk seç",
+        "findingSimilarPalette": "Benzer palete sahip sahneler aranıyor...",
+        "semanticPlaceholder": "Anlama göre ara - \"suyun üstünde gün batımı\", \"gülen insanlar\"...",
+        "keywordPlaceholder": "Sahneleri gördüğünüz şeye göre arayın...",
+        "clearSearch": "Aramayı temizle",
+        "similarPaletteTo": "{{label}} benzeri palet - temizlemek için tıklayın"
+      },
+      "matchTiers": {
+        "strong": "Güçlü",
+        "good": "İyi",
+        "fair": "Orta"
+      },
+      "match": {
+        "keyword": "Anahtar kelime",
+        "keywordHint": "Anahtar kelime eşleşmesi · kosinüs {{score}}",
+        "meaningWithTier": "Anlam · {{tier}}",
+        "textEmbeddingHint": "Metin gömme kosinüsü: {{score}}",
+        "visualWithTier": "Görsel · {{tier}}",
+        "clipHint": "CLIP kosinüsü: {{score}}",
+        "colorWithName": "Renk · {{color}}",
+        "paletteColorHint": "{{color}} üzerinde palet eşleşmesi (ΔE 2000)",
+        "paletteDistance": "Palet · ΔE {{distance}}",
+        "paletteDistanceHint": "Referans palete ağırlıklı ortalama ΔE 2000",
+        "belowThreshold": "Eşiğin altında",
+        "cosineHint": "kosinüs {{score}}",
+        "top": "En iyi",
+        "topHint": "En yüksek puanlı eşleşme"
+      },
+      "palette": {
+        "libraryColor": "Kitaplık rengi",
+        "empty": "Henüz indekslenmiş palet yok - doldurmak için AI altyazılarını çalıştırın.",
+        "moreColors_one": "{{count}} renk daha",
+        "moreColors_other": "{{count}} renk daha",
+        "showMoreColors_one": "{{count}} renk daha göster",
+        "showMoreColors_other": "{{count}} renk daha göster",
+        "moreColorsTitle": "Daha fazla renk",
+        "findColor": "Bu renkte sahneler bul (kitaplığın %{{percent}} kadarı)",
+        "findSimilar": "Benzer palete sahip sahneleri bul",
+        "pickedSwatch": "Seçilen örnek"
+      },
+      "scene": {
+        "previewAndDragHint": "Kaynak monitörde önizlemek için tıklayın - zaman çizelgesine eklemek için sürükleyin"
       }
     }
   }
