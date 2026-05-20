@@ -26,6 +26,10 @@ import { CompactNavigator } from './compact-navigator'
 import { DopesheetClipboardActions } from './dopesheet-clipboard-actions'
 import { DopesheetEditActions } from './dopesheet-edit-actions'
 import { DopesheetGraphPane } from './dopesheet-graph-pane'
+import { useGraphViewState } from './use-graph-view-state'
+import { useGroupExpansion } from './use-group-expansion'
+import { useHeaderFrameInputs } from './use-header-frame-inputs'
+import { usePropertyFilters } from './use-property-filters'
 import { DopesheetHeaderFrameInputs } from './dopesheet-header-frame-inputs'
 import { DopesheetRulerHeader } from './dopesheet-ruler-header'
 import { DopesheetSheetBody } from './dopesheet-sheet-body'
@@ -39,7 +43,6 @@ import {
   buildGroupedPropertyRows,
   getNiceTickStep,
 } from './dopesheet-helpers'
-import { loadGraphVisibleProperties, saveGraphVisibleProperties } from './graph-visibility-storage'
 import {
   DRAG_THRESHOLD,
   EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
@@ -73,11 +76,6 @@ import { PROPERTY_VALUE_RANGES } from '@/features/keyframes/property-value-range
 import { constrainSelectedKeyframeDelta } from '@/features/keyframes/utils/frame-move-constraints'
 import { useAutoKeyframeStore } from '../../stores/auto-keyframe-store'
 import { clampFrame } from './frame-utils'
-import {
-  getCommittedHeaderFrameValues,
-  planGlobalHeaderFrameCommit,
-  planLocalHeaderFrameCommit,
-} from './header-frame-input-actions'
 import {
   buildSelectionFramePreview as buildSelectionFramePreviewState,
   commitSelectionFramePreview as commitSelectionFramePreviewState,
@@ -235,8 +233,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const graphPaneRef = useRef<HTMLDivElement>(null)
   const keyframeButtonRefs = useRef(new Map<string, HTMLButtonElement>())
-  const selectedPropertyRef = useRef<AnimatableProperty | null>(selectedProperty)
-  const skipNextGraphVisibilitySaveRef = useRef(false)
   const [timelineWidth, setTimelineWidth] = useState(0)
   const [graphPaneSize, setGraphPaneSize] = useState({ width: 0, height: 0 })
   const snapEnabled = true
@@ -251,10 +247,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   )
   const setAutoKeyframeEnabled = useAutoKeyframeStore((state) => state.setAutoKeyframeEnabled)
   const toggleAutoKeyframeEnabled = useAutoKeyframeStore((state) => state.toggleAutoKeyframeEnabled)
-  const [localFrameInputValue, setLocalFrameInputValue] = useState('')
-  const [globalFrameInputValue, setGlobalFrameInputValue] = useState('')
   const skipNextBlurCommitPropertyRef = useRef<AnimatableProperty | null>(null)
-  const skipNextHeaderFrameBlurRef = useRef<'local' | 'global' | null>(null)
   const appliedDragPreviewFramesRef = useRef<Record<string, number> | null>(null)
   const [sheetPreviewFrames, setSheetPreviewFrames] = useState<Record<string, number> | null>(null)
   const [sheetPreviewDuplicateKeyframeIds, setSheetPreviewDuplicateKeyframeIds] = useState<
@@ -358,93 +351,36 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       ),
     [availableProperties, keyframesByProperty],
   )
-  const [visibleGroups, setVisibleGroups] = useState<Record<string, boolean>>({})
-  const [showKeyframedOnly, setShowKeyframedOnly] = useState(false)
-  const [lockedProperties, setLockedProperties] = useState<
-    Partial<Record<AnimatableProperty, boolean>>
-  >({})
-  const [graphRulerUnit, setGraphRulerUnit] = useState<'frames' | 'seconds'>('frames')
-  const [showAllGraphHandles, setShowAllGraphHandles] = useState(false)
-  const [autoZoomGraphHeight, setAutoZoomGraphHeight] = useState(true)
-  const [graphVerticalZoomValue, setGraphVerticalZoomValue] = useState(0)
-  const [graphVisibleProperties, setGraphVisibleProperties] = useState<Set<AnimatableProperty>>(
-    () => loadGraphVisibleProperties(itemId, availableProperties, selectedProperty),
-  )
+  const {
+    graphVisibleProperties,
+    graphRulerUnit,
+    setGraphRulerUnit,
+    showAllGraphHandles,
+    setShowAllGraphHandles,
+    autoZoomGraphHeight,
+    setAutoZoomGraphHeight,
+    graphVerticalZoomValue,
+    setGraphVerticalZoomValue,
+    togglePropertyCurve,
+    toggleGroupCurves,
+  } = useGraphViewState({
+    itemId,
+    availableProperties,
+    selectedProperty,
+    onPropertyChange,
+    onActivePropertyChange,
+  })
 
-  // Restore visible curves when clip selection or available properties change
-  useEffect(() => {
-    skipNextGraphVisibilitySaveRef.current = true
-    setGraphVisibleProperties(
-      loadGraphVisibleProperties(itemId, availableProperties, selectedPropertyRef.current),
-    )
-  }, [itemId, availableProperties])
-
-  useEffect(() => {
-    selectedPropertyRef.current = selectedProperty
-  }, [selectedProperty])
-
-  useEffect(() => {
-    if (skipNextGraphVisibilitySaveRef.current) {
-      skipNextGraphVisibilitySaveRef.current = false
-      return
-    }
-
-    saveGraphVisibleProperties(itemId, graphVisibleProperties)
-  }, [graphVisibleProperties, itemId])
-
-  useEffect(() => {
-    setGraphVerticalZoomValue(0)
-  }, [itemId, autoZoomGraphHeight])
-
-  useEffect(() => {
-    const groupIds = new Set(allPropertyGroups.map((group) => group.id))
-
-    setVisibleGroups((prev) => {
-      const next = { ...prev }
-      let changed = false
-
-      for (const groupId of groupIds) {
-        if (next[groupId] === undefined) {
-          next[groupId] = true
-          changed = true
-        }
-      }
-
-      for (const groupId of Object.keys(next)) {
-        if (!groupIds.has(groupId)) {
-          delete next[groupId]
-          changed = true
-        }
-      }
-
-      return changed ? next : prev
-    })
-  }, [allPropertyGroups])
-
-  useEffect(() => {
-    const propertyIds = new Set(availableProperties)
-
-    setLockedProperties((prev) => {
-      const next = { ...prev }
-      let changed = false
-
-      for (const property of propertyIds) {
-        if (next[property] === undefined) {
-          next[property] = false
-          changed = true
-        }
-      }
-
-      for (const property of Object.keys(next) as AnimatableProperty[]) {
-        if (!propertyIds.has(property)) {
-          delete next[property]
-          changed = true
-        }
-      }
-
-      return changed ? next : prev
-    })
-  }, [availableProperties])
+  const {
+    visibleGroups,
+    setVisibleGroups,
+    showKeyframedOnly,
+    setShowKeyframedOnly,
+    toggleVisibleGroup,
+    isPropertyLocked,
+    toggleLockedProperty,
+    setGroupLocked,
+  } = usePropertyFilters({ allPropertyGroups, availableProperties })
 
   const filteredProperties = useMemo(
     () =>
@@ -507,86 +443,13 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     () => new Map(propertyRows.map((row) => [row.property, row])),
     [propertyRows],
   )
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const { expandedGroups, toggleGroup, setAllGroupsExpanded } = useGroupExpansion({
+    allPropertyGroups,
+    groupedSheetRows,
+    groupedPropertyRows,
+    activeSelectedProperty,
+  })
 
-  useEffect(() => {
-    const groupIds = new Set([
-      ...groupedSheetRows.map((group) => group.id),
-      ...groupedPropertyRows.map((group) => group.id),
-    ])
-
-    setExpandedGroups((prev) => {
-      const next = { ...prev }
-      let changed = false
-
-      for (const groupId of groupIds) {
-        if (next[groupId] === undefined) {
-          next[groupId] = true
-          changed = true
-        }
-      }
-
-      for (const groupId of Object.keys(next)) {
-        if (!groupIds.has(groupId)) {
-          delete next[groupId]
-          changed = true
-        }
-      }
-
-      return changed ? next : prev
-    })
-  }, [groupedPropertyRows, groupedSheetRows])
-
-  useEffect(() => {
-    if (!activeSelectedProperty) return
-
-    const activeGroup = [...groupedPropertyRows, ...groupedSheetRows].find((group) =>
-      group.rows.some((row) => row.property === activeSelectedProperty),
-    )
-    if (!activeGroup) return
-
-    setExpandedGroups((prev) => {
-      if (prev[activeGroup.id] !== false) return prev
-      return {
-        ...prev,
-        [activeGroup.id]: true,
-      }
-    })
-  }, [activeSelectedProperty, groupedPropertyRows, groupedSheetRows])
-
-  const toggleGroup = useCallback((groupId: string) => {
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [groupId]: !(prev[groupId] ?? true),
-    }))
-  }, [])
-  const toggleVisibleGroup = useCallback((groupId: string) => {
-    setVisibleGroups((prev) => ({
-      ...prev,
-      [groupId]: !(prev[groupId] ?? true),
-    }))
-  }, [])
-  const isPropertyLocked = useCallback(
-    (property: AnimatableProperty) => lockedProperties[property] ?? false,
-    [lockedProperties],
-  )
-  const toggleLockedProperty = useCallback((property: AnimatableProperty) => {
-    setLockedProperties((prev) => ({
-      ...prev,
-      [property]: !(prev[property] ?? false),
-    }))
-  }, [])
-  const setAllGroupsExpanded = useCallback(
-    (expanded: boolean) => {
-      setExpandedGroups(
-        Object.fromEntries(allPropertyGroups.map((group) => [group.id, expanded])) as Record<
-          string,
-          boolean
-        >,
-      )
-    },
-    [allPropertyGroups],
-  )
   const resetParameterView = useCallback(() => {
     setShowKeyframedOnly(false)
     setVisibleGroups(
@@ -596,57 +459,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       >,
     )
     setAllGroupsExpanded(true)
-  }, [allPropertyGroups, setAllGroupsExpanded])
-  const togglePropertyCurve = useCallback(
-    (property: AnimatableProperty) => {
-      setGraphVisibleProperties((prev) => {
-        const next = new Set(prev)
-        if (next.has(property)) {
-          next.delete(property)
-        } else {
-          next.add(property)
-        }
-        // Set primary to this property when toggling on
-        if (next.has(property)) {
-          onPropertyChange?.(property)
-          onActivePropertyChange?.(property)
-        } else if (next.size > 0) {
-          // Switch primary to first remaining visible
-          const first = [...next][0]!
-          onPropertyChange?.(first)
-          onActivePropertyChange?.(first)
-        }
-        return next
-      })
-    },
-    [onActivePropertyChange, onPropertyChange],
-  )
-
-  const toggleGroupCurves = useCallback(
-    (properties: AnimatableProperty[]) => {
-      if (properties.length === 0) return
-      setGraphVisibleProperties((prev) => {
-        const anyVisible = properties.some((p) => prev.has(p))
-        const next = new Set(prev)
-        if (anyVisible) {
-          // Turn all off
-          for (const p of properties) next.delete(p)
-          if (next.size > 0) {
-            const first = [...next][0]!
-            onPropertyChange?.(first)
-            onActivePropertyChange?.(first)
-          }
-        } else {
-          // Turn all on
-          for (const p of properties) next.add(p)
-          onPropertyChange?.(properties[0]!)
-          onActivePropertyChange?.(properties[0]!)
-        }
-        return next
-      })
-    },
-    [onActivePropertyChange, onPropertyChange],
-  )
+  }, [allPropertyGroups, setAllGroupsExpanded, setShowKeyframedOnly, setVisibleGroups])
 
   useEffect(() => {
     if (visualizationMode !== 'graph') return
@@ -767,15 +580,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
     return property
   }, [keyframeMetaById, selectedKeyframeIds])
-
-  useEffect(() => {
-    setLocalFrameInputValue(
-      selectedFrameSummary.localFrame === null ? '' : String(selectedFrameSummary.localFrame),
-    )
-    setGlobalFrameInputValue(
-      selectedFrameSummary.globalFrame === null ? '' : String(selectedFrameSummary.globalFrame),
-    )
-  }, [selectedFrameSummary.globalFrame, selectedFrameSummary.localFrame])
 
   useEffect(() => {
     if (visualizationMode !== 'graph' || !selectedCurveProperty) {
@@ -1265,15 +1069,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [disabled, isPropertyLocked, onRemoveKeyframes],
   )
 
-  const resetHeaderFrameInputs = useCallback(() => {
-    setLocalFrameInputValue(
-      selectedFrameSummary.localFrame === null ? '' : String(selectedFrameSummary.localFrame),
-    )
-    setGlobalFrameInputValue(
-      selectedFrameSummary.globalFrame === null ? '' : String(selectedFrameSummary.globalFrame),
-    )
-  }, [selectedFrameSummary.globalFrame, selectedFrameSummary.localFrame])
-
   const moveSelectedKeyframesByDelta = useCallback(
     (deltaFrames: number) => {
       if (disabled || !onKeyframeMove || selectedRefIds.length === 0 || deltaFrames === 0) {
@@ -1308,115 +1103,25 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     ],
   )
 
-  const commitLocalFrameInput = useCallback(() => {
-    if (!onKeyframeMove) {
-      resetHeaderFrameInputs()
-      return
-    }
-
-    const plan = planLocalHeaderFrameCommit({
-      inputValue: localFrameInputValue,
-      selectedFrameSummary,
-      totalFrames,
-      transitionBlockedRanges,
-    })
-    if (!plan) {
-      resetHeaderFrameInputs()
-      return
-    }
-
-    const moveResult = moveSelectedKeyframesByDelta(plan.targetLocalFrame - plan.initialLocalFrame)
-    const committedValues = getCommittedHeaderFrameValues(plan, moveResult)
-
-    setLocalFrameInputValue(committedValues.localInputValue)
-    if (committedValues.globalInputValue !== null) {
-      setGlobalFrameInputValue(committedValues.globalInputValue)
-    }
-
-    if (!moveResult.didMove) {
-      return
-    }
-
-    onNavigateToKeyframe?.(committedValues.finalLocalFrame)
-  }, [
+  const {
     localFrameInputValue,
-    moveSelectedKeyframesByDelta,
-    onKeyframeMove,
-    onNavigateToKeyframe,
-    resetHeaderFrameInputs,
+    globalFrameInputValue,
+    setLocalFrameInputValue,
+    setGlobalFrameInputValue,
+    skipNextHeaderFrameBlurRef,
+    commitLocalFrameInput,
+    commitGlobalFrameInput,
+    handleHeaderFrameInputKeyDown,
+  } = useHeaderFrameInputs({
     selectedFrameSummary,
-    totalFrames,
-    transitionBlockedRanges,
-  ])
-
-  const commitGlobalFrameInput = useCallback(() => {
-    if (!onKeyframeMove) {
-      resetHeaderFrameInputs()
-      return
-    }
-
-    const plan = planGlobalHeaderFrameCommit({
-      inputValue: globalFrameInputValue,
-      selectedFrameSummary,
-      currentFrame,
-      globalFrame,
-      totalFrames,
-      transitionBlockedRanges,
-    })
-    if (!plan) {
-      resetHeaderFrameInputs()
-      return
-    }
-
-    const moveResult = moveSelectedKeyframesByDelta(plan.targetLocalFrame - plan.initialLocalFrame)
-    const committedValues = getCommittedHeaderFrameValues(plan, moveResult)
-
-    setLocalFrameInputValue(committedValues.localInputValue)
-    if (committedValues.globalInputValue !== null) {
-      setGlobalFrameInputValue(committedValues.globalInputValue)
-    }
-
-    if (!moveResult.didMove) {
-      return
-    }
-
-    onNavigateToKeyframe?.(committedValues.finalLocalFrame)
-  }, [
     currentFrame,
     globalFrame,
-    globalFrameInputValue,
-    moveSelectedKeyframesByDelta,
-    onKeyframeMove,
-    onNavigateToKeyframe,
-    resetHeaderFrameInputs,
-    selectedFrameSummary,
     totalFrames,
     transitionBlockedRanges,
-  ])
-
-  const handleHeaderFrameInputKeyDown = useCallback(
-    (
-      event: React.KeyboardEvent<HTMLInputElement>,
-      input: 'local' | 'global',
-      commit: () => void,
-    ) => {
-      if (event.key === 'Enter') {
-        event.preventDefault()
-        skipNextHeaderFrameBlurRef.current = input
-        event.currentTarget.blur()
-        commit()
-        return
-      }
-
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        resetHeaderFrameInputs()
-        skipNextHeaderFrameBlurRef.current = input
-        event.currentTarget.blur()
-      }
-    },
-    [resetHeaderFrameInputs],
-  )
+    onKeyframeMove,
+    onNavigateToKeyframe,
+    moveSelectedKeyframesByDelta,
+  })
 
   const activateProperty = useCallback(
     (property: AnimatableProperty) => {
@@ -2747,12 +2452,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               )}
               onClick={(event) => {
                 event.stopPropagation()
-                setLockedProperties((prev) => ({
-                  ...prev,
-                  ...Object.fromEntries(
-                    groupProperties.map((property) => [property, !allRowsLocked]),
-                  ),
-                }))
+                setGroupLocked(groupProperties, !allRowsLocked)
               }}
               disabled={groupProperties.length === 0}
               title={
@@ -3001,6 +2701,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       onRemoveKeyframes,
       onNavigateToKeyframe,
       onPropertyValueCommit,
+      setGroupLocked,
       t,
       toggleGroupCurves,
       toggleGroup,
