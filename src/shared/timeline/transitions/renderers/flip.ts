@@ -5,7 +5,6 @@
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition, FlipDirection } from '@/types/transition'
 
 const ALL_DIRECTIONS: FlipDirection[] = ['from-left', 'from-right', 'from-top', 'from-bottom']
@@ -17,25 +16,6 @@ const ALL_TIMINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'cubic-bezi
 
 const flipRenderer: TransitionRenderer = {
   gpuTransitionId: 'flip',
-  calculateStyles(progress, isOutgoing, _cw, _ch, direction): TransitionStyleCalculation {
-    const dir = (direction as FlipDirection) || 'from-left'
-    const axis = dir === 'from-left' || dir === 'from-right' ? 'Y' : 'X'
-    const sign = dir === 'from-right' || dir === 'from-bottom' ? -1 : 1
-    const midpoint = 0.5
-
-    const flipOpacity = isOutgoing ? (progress < midpoint ? 1 : 0) : progress >= midpoint ? 1 : 0
-
-    let transform: string
-    if (isOutgoing) {
-      const flipProgress = Math.min(progress / midpoint, 1)
-      transform = `perspective(1000px) rotate${axis}(${sign * flipProgress * 90}deg)`
-    } else {
-      const flipProgress = Math.max((progress - midpoint) / midpoint, 0)
-      transform = `perspective(1000px) rotate${axis}(${sign * (-90 + flipProgress * 90)}deg)`
-    }
-
-    return { transform, opacity: flipOpacity }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, direction, canvas) {
     const p = Math.max(0, Math.min(1, progress))
     const dir = (direction as FlipDirection) || 'from-left'

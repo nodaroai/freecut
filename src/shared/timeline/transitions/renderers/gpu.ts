@@ -3,13 +3,11 @@
  *
  * Registers WebGPU-accelerated transitions into the transition registry.
  * Each GPU transition provides:
- * - calculateStyles: CSS approximation for DOM preview
  * - renderCanvas: Canvas 2D fallback for non-GPU environments
  * - gpuTransitionId: ID for GPU-accelerated rendering via TransitionPipeline
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition, WipeDirection } from '@/types/transition'
 
 const ALL_TIMINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'cubic-bezier'] as const
@@ -329,10 +327,6 @@ function renderSparklesCanvas(
 
 const dissolveRenderer: TransitionRenderer = {
   gpuTransitionId: 'dissolve',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const t = crossDissolveT(progress)
-    return { opacity: isOutgoing ? 1 - t : t }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     renderCrossDissolveCanvas(ctx, leftCanvas, rightCanvas, progress, canvas)
   },
@@ -353,10 +347,6 @@ const dissolveDef: TransitionDefinition = {
 
 const additiveDissolveRenderer: TransitionRenderer = {
   gpuTransitionId: 'additiveDissolve',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    return { opacity: isOutgoing ? 1 - p : p }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     const p = clamp01(progress)
     const w = canvas?.width ?? leftCanvas.width
@@ -387,22 +377,6 @@ const additiveDissolveDef: TransitionDefinition = {
 
 const blurDissolveRenderer: TransitionRenderer = {
   gpuTransitionId: 'blurDissolve',
-  calculateStyles(
-    progress,
-    isOutgoing,
-    _canvasWidth,
-    _canvasHeight,
-    _direction,
-    properties,
-  ): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    const envelope = Math.sin(p * Math.PI)
-    const strength = getNumericProperty(properties, 'strength', 9) / 9
-    return {
-      opacity: isOutgoing ? 1 - p : p,
-      transform: envelope > 0.05 ? `scale(${1 + envelope * 0.006 * strength})` : undefined,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas, properties) {
     const p = clamp01(progress)
     const envelope = Math.sin(p * Math.PI)
@@ -442,11 +416,6 @@ const blurDissolveDef: TransitionDefinition = {
 
 const dipToColorDissolveRenderer: TransitionRenderer = {
   gpuTransitionId: 'dipToColorDissolve',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    if (p < 0.5) return { opacity: isOutgoing ? 1 - smoothStep(0, 0.5, p) : 0 }
-    return { opacity: isOutgoing ? 0 : smoothStep(0.5, 1, p) }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas, properties) {
     renderDipToColorCanvas(ctx, leftCanvas, rightCanvas, progress, canvas, properties)
   },
@@ -477,10 +446,6 @@ const dipToColorDissolveDef: TransitionDefinition = {
 
 const nonAdditiveDissolveRenderer: TransitionRenderer = {
   gpuTransitionId: 'nonAdditiveDissolve',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    return { opacity: isOutgoing ? 1 - p : p }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     renderCrossDissolveCanvas(ctx, leftCanvas, rightCanvas, progress, canvas)
   },
@@ -501,26 +466,6 @@ const nonAdditiveDissolveDef: TransitionDefinition = {
 
 const smoothCutRenderer: TransitionRenderer = {
   gpuTransitionId: 'smoothCut',
-  calculateStyles(
-    progress,
-    isOutgoing,
-    _canvasWidth,
-    _canvasHeight,
-    _direction,
-    properties,
-  ): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    const t = smoothStep(0.22, 0.78, p)
-    const envelope = Math.sin(p * Math.PI)
-    const strength = getNumericProperty(properties, 'strength', 0.9)
-    return {
-      opacity: isOutgoing ? 1 - t : t,
-      transform:
-        envelope > 0.05
-          ? `translateX(${((isOutgoing ? -1 : 1) * envelope * 4 * strength).toFixed(2)}px) skewX(${((isOutgoing ? -1 : 1) * envelope * 0.7 * strength).toFixed(2)}deg)`
-          : undefined,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas, properties) {
     const p = clamp01(progress)
     const envelope = Math.sin(p * Math.PI)
@@ -576,25 +521,6 @@ const smoothCutDef: TransitionDefinition = {
 
 const sparklesRenderer: TransitionRenderer = {
   gpuTransitionId: 'sparkles',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    const envelope = Math.sin(p * Math.PI)
-    const phase = isOutgoing ? 0.2 : 1.05
-    const drift = 14 * envelope
-    const x = Math.sin(p * Math.PI * 2.2 + phase) * drift * 0.55
-    const y = Math.cos(p * Math.PI * 1.6 + phase) * drift * 0.28
-    const rotate = Math.sin(p * Math.PI * 1.8 + phase) * envelope * 1.6
-    const scale = isOutgoing ? 1 - 0.03 * p : 1.03 - 0.03 * p
-    const opacity = isOutgoing ? 1 - smoothStep(0.2, 0.94, p) : smoothStep(0.06, 0.8, p)
-
-    return {
-      opacity,
-      transform:
-        envelope > 0.08
-          ? `translate(${x}px, ${y}px) rotate(${rotate}deg) scale(${scale})`
-          : undefined,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas, properties) {
     renderSparklesCanvas(ctx, leftCanvas, rightCanvas, progress, canvas, properties)
   },
@@ -661,24 +587,6 @@ const sparklesDef: TransitionDefinition = {
 
 const glitchRenderer: TransitionRenderer = {
   gpuTransitionId: 'glitch',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    // CSS approximation: hard cut with deterministic jitter
-    const p = clamp01(progress)
-    const envelope = Math.sin(p * Math.PI)
-    const offset = Math.sin(p * 47) * envelope * 5
-    const midpoint = 0.5
-
-    if (isOutgoing) {
-      return {
-        opacity: p < midpoint ? 1 : 0,
-        transform: envelope > 0.2 ? `translateX(${offset}px)` : undefined,
-      }
-    }
-    return {
-      opacity: p >= midpoint ? 1 : 0,
-      transform: envelope > 0.2 ? `translateX(${-offset}px)` : undefined,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress) {
     // Canvas 2D fallback: simple hard cut
     const p = clamp01(progress)
@@ -742,10 +650,6 @@ const glitchDef: TransitionDefinition = {
 
 const pixelateRenderer: TransitionRenderer = {
   gpuTransitionId: 'pixelate',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    // CSS approximation: crossfade (GPU version does mosaic pixelation)
-    return { opacity: fadeOpacity(clamp01(progress), isOutgoing) }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress) {
     // Canvas 2D fallback: hard cut at midpoint
     const p = clamp01(progress)
@@ -789,10 +693,6 @@ const pixelateDef: TransitionDefinition = {
 
 const chromaticRenderer: TransitionRenderer = {
   gpuTransitionId: 'chromatic',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    // CSS approximation: crossfade with slight blur
-    return { opacity: fadeOpacity(clamp01(progress), isOutgoing) }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     // Canvas 2D fallback: directional crossfade
     const p = clamp01(progress)
@@ -853,16 +753,6 @@ const chromaticDef: TransitionDefinition = {
 
 const radialBlurRenderer: TransitionRenderer = {
   gpuTransitionId: 'radialBlur',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    // CSS approximation: crossfade with slight scale
-    const p = clamp01(progress)
-    const envelope = Math.sin(p * Math.PI)
-    const scale = 1 + envelope * 0.02
-    return {
-      opacity: fadeOpacity(p, isOutgoing),
-      transform: envelope > 0.1 ? `scale(${scale})` : undefined,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress) {
     // Canvas 2D fallback: crossfade
     const p = clamp01(progress)
@@ -919,17 +809,6 @@ const radialBlurDef: TransitionDefinition = {
 
 const liquidDistortRenderer: TransitionRenderer = {
   gpuTransitionId: 'liquidDistort',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    const envelope = Math.sin(p * Math.PI)
-    const offset = Math.sin(p * Math.PI * 2.4) * envelope * 3
-    const scale = isOutgoing ? 1 + envelope * 0.012 : 1 + envelope * 0.018
-    return {
-      opacity: fadeOpacity(p, isOutgoing),
-      transform:
-        envelope > 0.08 ? `translate(${offset}px, ${-offset * 0.45}px) scale(${scale})` : undefined,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     const p = clamp01(progress)
     const w = canvas?.width ?? leftCanvas.width
@@ -1043,15 +922,6 @@ const liquidDistortDef: TransitionDefinition = {
 
 const lensWarpZoomRenderer: TransitionRenderer = {
   gpuTransitionId: 'lensWarpZoom',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    const envelope = Math.sin(p * Math.PI)
-    const zoom = isOutgoing ? 1 + p * 0.18 + envelope * 0.04 : 1.18 - p * 0.18 + envelope * 0.03
-    return {
-      opacity: fadeOpacity(p, isOutgoing),
-      transform: `scale(${zoom})`,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     const p = clamp01(progress)
     const w = canvas?.width ?? leftCanvas.width
@@ -1166,9 +1036,6 @@ const lensWarpZoomDef: TransitionDefinition = {
 
 const lightLeakBurnRenderer: TransitionRenderer = {
   gpuTransitionId: 'lightLeakBurn',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    return { opacity: fadeOpacity(clamp01(progress), isOutgoing) }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, direction, canvas) {
     const p = clamp01(progress)
     const w = canvas?.width ?? leftCanvas.width
@@ -1285,16 +1152,6 @@ const lightLeakBurnDef: TransitionDefinition = {
 
 const filmGateSlipRenderer: TransitionRenderer = {
   gpuTransitionId: 'filmGateSlip',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    const envelope = Math.sin(p * Math.PI)
-    const y = (isOutgoing ? 1 : -0.55) * (p - 0.5) * envelope * 18
-    const x = Math.sin(p * Math.PI * 18) * envelope * 2
-    return {
-      opacity: fadeOpacity(p, isOutgoing),
-      transform: envelope > 0.08 ? `translate(${x}px, ${y}px)` : undefined,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
     const p = clamp01(progress)
     const w = canvas?.width ?? leftCanvas.width

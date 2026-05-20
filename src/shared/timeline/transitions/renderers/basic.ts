@@ -5,7 +5,6 @@
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition } from '@/types/transition'
 
 // ============================================================================
@@ -25,12 +24,6 @@ function calculateFadeDipOpacity(progress: number, isOutgoing: boolean): number 
 
 const fadeRenderer: TransitionRenderer = {
   gpuTransitionId: 'fade',
-  calculateStyles(progress, isOutgoing): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    return {
-      opacity: calculateFadeDipOpacity(p, isOutgoing),
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress) {
     const p = clamp01(progress)
     const outgoingWeight = calculateFadeDipOpacity(p, true)

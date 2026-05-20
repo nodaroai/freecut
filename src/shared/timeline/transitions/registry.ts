@@ -16,26 +16,12 @@ import type {
   SlideDirection,
   FlipDirection,
 } from '@/types/transition'
-import type { TransitionStyleCalculation } from './engine'
 
 /**
- * Renderer interface for CSS/DOM-based transitions (preview + Composition).
+ * Renderer interface for transitions.
  * Each registered transition must provide this.
  */
 export interface TransitionRenderer {
-  /**
-   * Calculate CSS styles for a clip at a given transition progress.
-   * Used by the engine, preview, and Composition renderer.
-   */
-  calculateStyles(
-    progress: number,
-    isOutgoing: boolean,
-    canvasWidth: number,
-    canvasHeight: number,
-    direction?: WipeDirection | SlideDirection | FlipDirection,
-    properties?: Record<string, unknown>,
-  ): TransitionStyleCalculation
-
   /**
    * Render the transition onto a Canvas 2D context (for export).
    * @param ctx - Output canvas context
@@ -55,9 +41,6 @@ export interface TransitionRenderer {
     canvas?: { width: number; height: number },
     properties?: Record<string, unknown>,
   ): void
-
-  /** Optional GLSL fragment shader source for WebGL acceleration */
-  glslShader?: string
 
   /** GPU transition ID for WebGPU-accelerated rendering via TransitionPipeline */
   gpuTransitionId?: string

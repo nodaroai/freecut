@@ -6,7 +6,6 @@
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition, WipeDirection } from '@/types/transition'
 import { clockWipeDef, clockWipeRenderer } from './mask'
 
@@ -48,132 +47,6 @@ function getSpiralStrokeWidth(width: number, height: number, progress: number): 
 
 function getXStrokeWidth(width: number, height: number, progress: number): number {
   return Math.sqrt(width * width + height * height) * clamp01(progress) * 0.36
-}
-
-function createSpiralPolyline(width: number, height: number): string {
-  const cx = width / 2
-  const cy = height / 2
-  const maxRadius = Math.sqrt(width * width + height * height) * 0.58
-  const turns = 3.8
-  const steps = 220
-  const points: string[] = []
-
-  for (let index = 0; index <= steps; index += 1) {
-    const t = index / steps
-    const angle = t * Math.PI * 2 * turns
-    const radius = maxRadius * t
-    const x = cx + Math.cos(angle) * radius
-    const y = cy + Math.sin(angle) * radius
-    points.push(`${x.toFixed(2)},${y.toFixed(2)}`)
-  }
-
-  return points.join(' ')
-}
-
-function createRadialFanPath(width: number, height: number, progress: number): string {
-  const p = clamp01(progress)
-  if (p <= 0) return `M0 0H${width}V${height}H0Z`
-  if (p >= 1) return ''
-
-  const cx = width / 2
-  const cy = height / 2
-  const radius = Math.sqrt(width * width + height * height)
-  const segmentCount = 4
-  const segmentAngle = (Math.PI * 2) / segmentCount
-  const paths: string[] = []
-
-  for (let index = 0; index < segmentCount; index += 1) {
-    const segmentStart = -Math.PI / 2 + index * segmentAngle
-    const startAngle = segmentStart + p * segmentAngle
-    const endAngle = segmentStart + segmentAngle
-    const start = polarPoint(cx, cy, radius, startAngle)
-    const end = polarPoint(cx, cy, radius, endAngle)
-    paths.push(
-      [
-        `M ${cx.toFixed(2)} ${cy.toFixed(2)}`,
-        `L ${start.x.toFixed(2)} ${start.y.toFixed(2)}`,
-        `A ${radius.toFixed(2)} ${radius.toFixed(2)} 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`,
-        'Z',
-      ].join(' '),
-    )
-  }
-
-  return paths.join(' ')
-}
-
-function createOutgoingMaskSvg(
-  kind: WipeMask,
-  width: number,
-  height: number,
-  progress: number,
-  direction: WipeDirection = 'from-top',
-): string {
-  const p = clamp01(progress)
-  const paths: string[] = []
-
-  if (kind === 'band') {
-    const stripeCount = 10
-    const stripeHeight = height / stripeCount
-    for (let index = 0; index < stripeCount; index += 1) {
-      const stagger = (index % 2) * 0.18
-      const local = clamp01((p - stagger) / Math.max(0.2, 1 - stagger))
-      const revealWidth = width * local
-      const y = index * stripeHeight
-      const nextY = (index + 1) * stripeHeight
-      if (index % 2 === 0) {
-        paths.push(
-          `M ${revealWidth.toFixed(2)} ${y.toFixed(2)}H${width}V${nextY.toFixed(2)}H${revealWidth.toFixed(2)}Z`,
-        )
-      } else {
-        paths.push(`M 0 ${y.toFixed(2)}H${(width - revealWidth).toFixed(2)}V${nextY.toFixed(2)}H0Z`)
-      }
-    }
-  } else if (kind === 'venetianBlind') {
-    const stripeCount = 10
-    const stripeHeight = height / stripeCount
-    for (let index = 0; index < stripeCount; index += 1) {
-      const y = index * stripeHeight
-      const remainingHeight = stripeHeight * (1 - p)
-      paths.push(`M 0 ${y.toFixed(2)}H${width}V${(y + remainingHeight).toFixed(2)}H0Z`)
-    }
-  } else if (kind === 'center') {
-    const sideWidth = (width / 2) * (1 - p)
-    paths.push(`M0 0H${sideWidth.toFixed(2)}V${height}H0Z`)
-    paths.push(
-      `M${(width - sideWidth).toFixed(2)} 0H${width}V${height}H${(width - sideWidth).toFixed(2)}Z`,
-    )
-  } else if (kind === 'edge') {
-    switch (direction) {
-      case 'from-left':
-        paths.push(`M${(width * p).toFixed(2)} 0H${width}V${height}H${(width * p).toFixed(2)}Z`)
-        break
-      case 'from-right':
-        paths.push(`M0 0H${(width * (1 - p)).toFixed(2)}V${height}H0Z`)
-        break
-      case 'from-bottom':
-        paths.push(`M0 0H${width}V${(height * (1 - p)).toFixed(2)}H0Z`)
-        break
-      case 'from-top':
-      default:
-        paths.push(`M0 ${(height * p).toFixed(2)}H${width}V${height}H0Z`)
-        break
-    }
-  } else if (kind === 'radial') {
-    paths.push(createRadialFanPath(width, height, p))
-  } else if (kind === 'spiral') {
-    const strokeWidth = getSpiralStrokeWidth(width, height, p)
-    const polyline = createSpiralPolyline(width, height)
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><mask id="m" maskUnits="userSpaceOnUse"><rect width="${width}" height="${height}" fill="white"/><polyline points="${polyline}" fill="none" stroke="black" stroke-width="${strokeWidth.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><rect width="${width}" height="${height}" fill="white" mask="url(#m)"/></svg>`
-    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
-  } else {
-    const strokeWidth = getXStrokeWidth(width, height, p)
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><mask id="m" maskUnits="userSpaceOnUse"><rect width="${width}" height="${height}" fill="white"/><path d="M0 0L${width} ${height}M${width} 0L0 ${height}" fill="none" stroke="black" stroke-width="${strokeWidth.toFixed(2)}" stroke-linecap="butt"/></mask></defs><rect width="${width}" height="${height}" fill="white" mask="url(#m)"/></svg>`
-    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
-  }
-
-  const fillRule = kind === 'radial' ? ' fill-rule="evenodd"' : ''
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path fill="white"${fillRule} d="${paths.join(' ')}"/></svg>`
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
 }
 
 function addRadialFanPath(path: Path2D, width: number, height: number, progress: number): void {
@@ -363,36 +236,6 @@ function createWipeMaskRenderer(kind: WipeMask): TransitionRenderer {
   }
 
   return {
-    calculateStyles(
-      progress,
-      isOutgoing,
-      canvasWidth,
-      canvasHeight,
-      direction,
-    ): TransitionStyleCalculation {
-      const p = clamp01(progress)
-      const dir = (direction as WipeDirection) || 'from-top'
-
-      if (isOutgoing) {
-        if (p <= 0) {
-          return { opacity: 1 }
-        }
-        if (p >= 1) {
-          return { opacity: 0 }
-        }
-
-        const maskImage = createOutgoingMaskSvg(kind, canvasWidth, canvasHeight, p, dir)
-        return {
-          maskImage,
-          webkitMaskImage: maskImage,
-          maskSize: '100% 100%',
-          webkitMaskSize: '100% 100%',
-          opacity: 1,
-        }
-      }
-
-      return { opacity: 1 }
-    },
     renderCanvas(ctx, leftCanvas, rightCanvas, progress, direction, canvas) {
       const p = clamp01(progress)
       const dir = (direction as WipeDirection) || 'from-top'
@@ -439,46 +282,8 @@ function createWipeMaskRenderer(kind: WipeMask): TransitionRenderer {
   }
 }
 
-function calculateWipeClipPath(
-  progress: number,
-  direction: WipeDirection,
-  isOutgoing: boolean,
-): string {
-  const p = clamp01(progress)
-  const inverse = 1 - p
-  switch (direction) {
-    case 'from-left':
-      return isOutgoing ? `inset(0 0 0 ${p * 100}%)` : `inset(0 ${inverse * 100}% 0 0)`
-    case 'from-right':
-      return isOutgoing ? `inset(0 ${p * 100}% 0 0)` : `inset(0 0 0 ${inverse * 100}%)`
-    case 'from-top':
-      return isOutgoing ? `inset(${p * 100}% 0 0 0)` : `inset(0 0 ${inverse * 100}% 0)`
-    case 'from-bottom':
-      return isOutgoing ? `inset(0 0 ${p * 100}% 0)` : `inset(${inverse * 100}% 0 0)`
-    default:
-      return 'none'
-  }
-}
-
 const wipeRenderer: TransitionRenderer = {
   gpuTransitionId: 'wipe',
-  calculateStyles(
-    progress,
-    isOutgoing,
-    _canvasWidth,
-    _canvasHeight,
-    direction,
-  ): TransitionStyleCalculation {
-    const p = clamp01(progress)
-    const dir = (direction as WipeDirection) || 'from-left'
-    const clipPath = calculateWipeClipPath(p, dir, isOutgoing)
-
-    return {
-      clipPath,
-      webkitClipPath: clipPath,
-      opacity: 1,
-    }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, direction, canvas) {
     const p = clamp01(progress)
     const dir = (direction as WipeDirection) || 'from-left'

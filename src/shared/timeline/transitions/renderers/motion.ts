@@ -6,7 +6,6 @@
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition } from '@/types/transition'
 
 const ALL_TIMINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'cubic-bezier'] as const
@@ -15,43 +14,6 @@ type MotionMask = 'barnDoor' | 'split'
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
-}
-
-function createOutgoingMaskSvg(
-  kind: MotionMask,
-  width: number,
-  height: number,
-  progress: number,
-): string {
-  const p = clamp01(progress)
-  const centerX = width / 2
-  const centerY = height / 2
-
-  let paths: string
-  if (kind === 'barnDoor') {
-    const leftWidth = Math.max(0, centerX * (1 - p))
-    const rightX = width - leftWidth
-    paths = [
-      `M0 0H${leftWidth.toFixed(2)}V${height}H0Z`,
-      `M${rightX.toFixed(2)} 0H${width}V${height}H${rightX.toFixed(2)}Z`,
-    ].join('')
-  } else {
-    const gapX = centerX * p
-    const gapY = centerY * p
-    const leftWidth = Math.max(0, centerX - gapX)
-    const rightX = width - leftWidth
-    const topHeight = Math.max(0, centerY - gapY)
-    const bottomY = height - topHeight
-    paths = [
-      `M0 0H${leftWidth.toFixed(2)}V${topHeight.toFixed(2)}H0Z`,
-      `M${rightX.toFixed(2)} 0H${width}V${topHeight.toFixed(2)}H${rightX.toFixed(2)}Z`,
-      `M0 ${bottomY.toFixed(2)}H${leftWidth.toFixed(2)}V${height}H0Z`,
-      `M${rightX.toFixed(2)} ${bottomY.toFixed(2)}H${width}V${height}H${rightX.toFixed(2)}Z`,
-    ].join('')
-  }
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path fill="white" d="${paths}"/></svg>`
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
 }
 
 function addOutgoingMaskPath(
@@ -82,29 +44,6 @@ function addOutgoingMaskPath(
 
 function createMotionMaskRenderer(kind: MotionMask): TransitionRenderer {
   return {
-    calculateStyles(progress, isOutgoing, canvasWidth, canvasHeight): TransitionStyleCalculation {
-      const p = clamp01(progress)
-
-      if (isOutgoing) {
-        if (p <= 0) {
-          return { opacity: 1 }
-        }
-        if (p >= 1) {
-          return { opacity: 0 }
-        }
-
-        const maskImage = createOutgoingMaskSvg(kind, canvasWidth, canvasHeight, p)
-        return {
-          maskImage,
-          webkitMaskImage: maskImage,
-          maskSize: '100% 100%',
-          webkitMaskSize: '100% 100%',
-          opacity: 1,
-        }
-      }
-
-      return { opacity: 1 }
-    },
     renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
       const p = clamp01(progress)
       const w = canvas?.width ?? leftCanvas.width

@@ -64,9 +64,7 @@ const TRANSITION: Transition = {
 
 const LINEAR_ONLY_PRESENTATION_ID = 'test-linear-only-transition'
 
-const NO_EASE_RENDERER: TransitionRenderer = {
-  calculateStyles: () => ({ opacity: 1 }),
-}
+const NO_EASE_RENDERER: TransitionRenderer = {}
 
 describe('TransitionPanel', () => {
   beforeAll(() => {

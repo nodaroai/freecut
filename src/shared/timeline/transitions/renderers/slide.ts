@@ -5,7 +5,6 @@
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition, SlideDirection } from '@/types/transition'
 
 const ALL_DIRECTIONS: SlideDirection[] = ['from-left', 'from-right', 'from-top', 'from-bottom']
@@ -42,36 +41,6 @@ function getSlideOffset(
 
 const slideRenderer: TransitionRenderer = {
   gpuTransitionId: 'slide',
-  calculateStyles(
-    progress,
-    isOutgoing,
-    canvasWidth,
-    canvasHeight,
-    direction,
-  ): TransitionStyleCalculation {
-    const dir = (direction as SlideDirection) || 'from-left'
-    const slideProgress = isOutgoing ? progress : progress - 1
-    let transform: string
-    // Keep sub-pixel precision — CSS GPU compositor interpolates smoothly.
-    // Only the canvas drawImage path (renderCanvas/getSlideOffset) needs rounding.
-    switch (dir) {
-      case 'from-left':
-        transform = `translateX(${slideProgress * canvasWidth}px)`
-        break
-      case 'from-right':
-        transform = `translateX(${-slideProgress * canvasWidth}px)`
-        break
-      case 'from-top':
-        transform = `translateY(${slideProgress * canvasHeight}px)`
-        break
-      case 'from-bottom':
-        transform = `translateY(${-slideProgress * canvasHeight}px)`
-        break
-      default:
-        transform = 'none'
-    }
-    return { transform }
-  },
   renderCanvas(ctx, leftCanvas, rightCanvas, progress, direction, canvas) {
     const dir = (direction as SlideDirection) || 'from-left'
     const w = canvas?.width ?? leftCanvas.width

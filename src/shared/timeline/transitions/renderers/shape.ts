@@ -5,7 +5,6 @@
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition } from '@/types/transition'
 
 const ALL_TIMINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'cubic-bezier'] as const
@@ -41,17 +40,6 @@ function getShapeScale(
     return clamp01(progress) * Math.max(width / 2, height / (2 * 0.62)) * 1.12
   }
   return clamp01(progress) * Math.max(width, height) * 1.45
-}
-
-function pointsToPath(points: Point[], centerX: number, centerY: number, scale: number): string {
-  return points
-    .map((point, index) => {
-      const x = centerX + point.x * scale
-      const y = centerY + point.y * scale
-      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
-    })
-    .join(' ')
-    .concat(' Z')
 }
 
 function getStarPoints(): Point[] {
@@ -93,59 +81,6 @@ function getPolygonPoints(shape: ShapeAperture): Point[] {
     default:
       return []
   }
-}
-
-function getHeartPath(centerX: number, centerY: number, scale: number): string {
-  const s = scale
-  return [
-    `M ${centerX.toFixed(2)} ${(centerY + 0.78 * s).toFixed(2)}`,
-    `C ${(centerX - 1.08 * s).toFixed(2)} ${(centerY + 0.12 * s).toFixed(2)} ${(centerX - 0.96 * s).toFixed(2)} ${(centerY - 0.78 * s).toFixed(2)} ${(centerX - 0.36 * s).toFixed(2)} ${(centerY - 0.78 * s).toFixed(2)}`,
-    `C ${(centerX - 0.12 * s).toFixed(2)} ${(centerY - 0.78 * s).toFixed(2)} ${(centerX + 0).toFixed(2)} ${(centerY - 0.58 * s).toFixed(2)} ${centerX.toFixed(2)} ${(centerY - 0.42 * s).toFixed(2)}`,
-    `C ${centerX.toFixed(2)} ${(centerY - 0.58 * s).toFixed(2)} ${(centerX + 0.12 * s).toFixed(2)} ${(centerY - 0.78 * s).toFixed(2)} ${(centerX + 0.36 * s).toFixed(2)} ${(centerY - 0.78 * s).toFixed(2)}`,
-    `C ${(centerX + 0.96 * s).toFixed(2)} ${(centerY - 0.78 * s).toFixed(2)} ${(centerX + 1.08 * s).toFixed(2)} ${(centerY + 0.12 * s).toFixed(2)} ${centerX.toFixed(2)} ${(centerY + 0.78 * s).toFixed(2)}`,
-    'Z',
-  ].join(' ')
-}
-
-export function getAperturePath(
-  shape: ShapeAperture,
-  width: number,
-  height: number,
-  progress: number,
-): string {
-  const p = clamp01(progress)
-  if (shape === 'triangleLeft') {
-    const x = width * p * TRIANGLE_CORNER_OVERSCAN
-    const y = height * p * TRIANGLE_CORNER_OVERSCAN
-    return `M 0 0 L ${x.toFixed(2)} 0 L 0 ${y.toFixed(2)} Z`
-  }
-
-  if (shape === 'triangleRight') {
-    const x = width - width * p * TRIANGLE_CORNER_OVERSCAN
-    const y = height * p * TRIANGLE_CORNER_OVERSCAN
-    return `M ${width} 0 L ${x.toFixed(2)} 0 L ${width} ${y.toFixed(2)} Z`
-  }
-
-  const centerX = width / 2
-  const centerY = height / 2
-  const scale = getShapeScale(shape, p, width, height)
-
-  if (shape === 'heart') {
-    return getHeartPath(centerX, centerY, scale)
-  }
-
-  return pointsToPath(getPolygonPoints(shape), centerX, centerY, scale)
-}
-
-function createMaskSvg(
-  shape: ShapeAperture,
-  width: number,
-  height: number,
-  progress: number,
-): string {
-  const aperturePath = getAperturePath(shape, width, height, progress)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path fill="white" fill-rule="evenodd" d="M0 0H${width}V${height}H0Z ${aperturePath}"/></svg>`
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
 }
 
 function addHeartPath(path: Path2D, centerX: number, centerY: number, scale: number): void {
@@ -234,29 +169,6 @@ function addAperturePath(
 
 function createShapeRenderer(shape: ShapeAperture): TransitionRenderer {
   return {
-    calculateStyles(progress, isOutgoing, canvasWidth, canvasHeight): TransitionStyleCalculation {
-      const p = clamp01(progress)
-
-      if (isOutgoing) {
-        if (p <= 0) {
-          return { opacity: 1 }
-        }
-        if (p >= 1) {
-          return { opacity: 0 }
-        }
-
-        const maskImage = createMaskSvg(shape, canvasWidth, canvasHeight, p)
-        return {
-          maskImage,
-          webkitMaskImage: maskImage,
-          maskSize: '100% 100%',
-          webkitMaskSize: '100% 100%',
-          opacity: 1,
-        }
-      }
-
-      return { opacity: 1 }
-    },
     renderCanvas(ctx, leftCanvas, rightCanvas, progress, _direction, canvas) {
       const p = clamp01(progress)
       const w = canvas?.width ?? leftCanvas.width

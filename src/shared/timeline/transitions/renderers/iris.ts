@@ -5,7 +5,6 @@
  */
 
 import type { TransitionRegistry, TransitionRenderer } from '../registry'
-import type { TransitionStyleCalculation } from '../engine'
 import type { TransitionDefinition } from '@/types/transition'
 
 const ALL_TIMINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'cubic-bezier'] as const
@@ -108,17 +107,6 @@ function getUnitPoints(shape: IrisShape): Point[] {
   }
 }
 
-function pointsToPath(points: Point[], centerX: number, centerY: number, scale: number): string {
-  return points
-    .map((point, index) => {
-      const x = centerX + point.x * scale
-      const y = centerY + point.y * scale
-      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
-    })
-    .join(' ')
-    .concat(' Z')
-}
-
 function getEllipseRadii(
   shape: IrisShape,
   width: number,
@@ -131,46 +119,6 @@ function getEllipseRadii(
 
   const aspect = width >= height ? 1.15 : 0.85
   return { rx: scale * aspect, ry: scale * 0.72 }
-}
-
-function getAperturePath(
-  shape: IrisShape,
-  width: number,
-  height: number,
-  progress: number,
-): string {
-  const p = clamp01(progress)
-  const centerX = width / 2
-  const centerY = height / 2
-  const scale = getIrisScale(p, width, height)
-
-  if (shape === 'oval') {
-    const { rx, ry } = getEllipseRadii(shape, width, height, scale)
-    return [
-      `M ${(centerX - rx).toFixed(2)} ${centerY.toFixed(2)}`,
-      `A ${rx.toFixed(2)} ${ry.toFixed(2)} 0 1 0 ${(centerX + rx).toFixed(2)} ${centerY.toFixed(2)}`,
-      `A ${rx.toFixed(2)} ${ry.toFixed(2)} 0 1 0 ${(centerX - rx).toFixed(2)} ${centerY.toFixed(2)}`,
-      'Z',
-    ].join(' ')
-  }
-
-  if (shape === 'eye') {
-    const { rx, ry } = getEllipseRadii(shape, width, height, scale)
-    return [
-      `M ${(centerX - rx).toFixed(2)} ${centerY.toFixed(2)}`,
-      `C ${(centerX - rx * 0.5).toFixed(2)} ${(centerY - ry).toFixed(2)} ${(centerX + rx * 0.5).toFixed(2)} ${(centerY - ry).toFixed(2)} ${(centerX + rx).toFixed(2)} ${centerY.toFixed(2)}`,
-      `C ${(centerX + rx * 0.5).toFixed(2)} ${(centerY + ry).toFixed(2)} ${(centerX - rx * 0.5).toFixed(2)} ${(centerY + ry).toFixed(2)} ${(centerX - rx).toFixed(2)} ${centerY.toFixed(2)}`,
-      'Z',
-    ].join(' ')
-  }
-
-  return pointsToPath(getUnitPoints(shape), centerX, centerY, scale)
-}
-
-function createMaskSvg(shape: IrisShape, width: number, height: number, progress: number): string {
-  const aperturePath = getAperturePath(shape, width, height, progress)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path fill="white" fill-rule="evenodd" d="M0 0H${width}V${height}H0Z ${aperturePath}"/></svg>`
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
 }
 
 function addAperturePath(
@@ -228,42 +176,6 @@ function addAperturePath(
 
 function createIrisRenderer(shape: IrisShape): TransitionRenderer {
   return {
-    calculateStyles(
-      progress,
-      isOutgoing,
-      canvasWidth,
-      canvasHeight,
-      _dir,
-      properties,
-    ): TransitionStyleCalculation {
-      const p = clamp01(progress)
-      const outgoingDim = Math.max(
-        0,
-        Math.min(0.12, getNumericProperty(properties, 'outgoingDim', 0.06)),
-      )
-
-      if (isOutgoing) {
-        if (p <= 0) {
-          return { opacity: 1 }
-        }
-        if (p >= 1) {
-          return { opacity: 0 }
-        }
-
-        const maskImage = createMaskSvg(shape, canvasWidth, canvasHeight, p)
-        return {
-          maskImage,
-          webkitMaskImage: maskImage,
-          maskSize: '100% 100%',
-          webkitMaskSize: '100% 100%',
-          opacity: 1 - outgoingDim * p,
-        }
-      }
-
-      return {
-        opacity: 0.9 + 0.1 * p,
-      }
-    },
     renderCanvas(ctx, leftCanvas, rightCanvas, progress, _dir, canvas, properties) {
       const p = clamp01(progress)
       const w = canvas?.width ?? leftCanvas.width
