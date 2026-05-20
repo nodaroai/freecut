@@ -35,7 +35,7 @@ src/
 ├── runtime/               # Playback and rendering engines (not user-facing UI features)
 │   ├── composition-runtime/ # Composition rendering (sequences, items, audio, transitions)
 │   └── player/            # Clock, video source pools, composition playback
-├── infrastructure/        # Platform adapters — browser, storage, GPU, ML
+├── infrastructure/        # Platform adapters — browser, storage, GPU, ML, audio
 │   ├── gpu-effects/       # WebGPU effect pipeline + shader definitions
 │   ├── gpu-transitions/   # WebGPU transition pipeline + shaders
 │   ├── gpu-compositor/    # WebGPU blend-mode compositor
@@ -60,8 +60,8 @@ src/
 │   ├── typography/        # Font loading, text style presets
 │   ├── graphics/          # Shape generators and path helpers
 │   └── utils/             # Managed workers, color/curve math, easing, async, etc.
-├── components/            # App-level shared components + shadcn/ui
-├── app/                   # App bootstrap, providers, debug utilities
+├── components/            # shadcn/ui components + brand assets
+├── app/                   # App bootstrap, error boundary, PWA prompt, debug
 ├── config/                # Hotkeys + editor layout config
 ├── i18n/                  # i18next setup, supported languages, locale JSON + per-feature partials
 ├── routes/                # TanStack Router (file-based, auto-generated routeTree)

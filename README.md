@@ -252,9 +252,9 @@ VITE_SHOW_DEBUG_PANEL=true   # Show debug panel in dev
 
 ```text
 src/
-|- app/                     # App-level providers and shared app state
-|- components/              # Shared app components and shadcn-style UI
-|- config/                  # Hotkeys and editor configuration
+|- app/                     # App bootstrap, error boundary, PWA install prompt, debug utilities
+|- components/              # shadcn/ui components and brand assets
+|- config/                  # Hotkeys and editor layout configuration
 |- data/                    # Generated app data, including changelog JSON
 |- features/                # User-facing UI modules
 |  |- editor/                # Editor shell, toolbar, panels, dialogs, deps adapters
@@ -288,7 +288,16 @@ src/
 |  |- storage/               # Workspace FS, handles DB, legacy IDB migration
 |  \- thumbnails/            # GPU-backed thumbnail generation adapters
 |- routes/                  # TanStack Router file routes
-|- shared/                  # Shared UI, utilities, typography, model settings
+|- shared/                  # Framework-agnostic primitives + cross-feature state
+|  |- timeline/              # Transition engine/registry/renderers, defaults
+|  |- projects/              # Schema migrations and normalization
+|  |- state/                 # Cross-feature Zustand stores
+|  |- marquee/               # Marquee-selection hook + overlay (paired)
+|  |- ui/                    # cn helper, property controls
+|  |- logging/               # Structured logger
+|  |- typography/            # Font loading, text style presets
+|  |- graphics/              # Shape generators and path helpers
+|  \- utils/                 # Workers, color/curve math, easing, time helpers
 |- test/                    # Test setup
 \- types/                   # Shared TypeScript types
 ```
