@@ -16,6 +16,9 @@ import type {
   SlideDirection,
   FlipDirection,
 } from '@/types/transition'
+import { createLogger } from '@/shared/logging/logger'
+
+const log = createLogger('TransitionRegistry')
 
 /**
  * Renderer interface for transitions.
@@ -66,7 +69,7 @@ export class TransitionRegistry {
    */
   register(id: string, definition: TransitionDefinition, renderer: TransitionRenderer): void {
     if (this.entries.has(id)) {
-      console.warn(`[TransitionRegistry] Transition "${id}" is being overwritten`)
+      log.warn(`Transition "${id}" is being overwritten`)
     }
     this.entries.set(id, { definition, renderer })
   }

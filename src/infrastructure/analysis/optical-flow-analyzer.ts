@@ -14,6 +14,9 @@ import {
   ANALYSIS_HEIGHT,
   PYRAMID_LEVELS,
 } from './optical-flow-shaders'
+import { createLogger } from '@/shared/logging/logger'
+
+const log = createLogger('OpticalFlow')
 
 export interface MotionResult {
   totalMotion: number
@@ -98,9 +101,7 @@ export class OpticalFlowAnalyzer {
     const errors = info.messages.filter((m) => m.type === 'error')
     if (errors.length > 0) {
       for (const err of errors) {
-        console.error(
-          `[OpticalFlow] Shader error: ${err.message} (line ${err.lineNum}:${err.linePos})`,
-        )
+        log.error(`Shader error: ${err.message} (line ${err.lineNum}:${err.linePos})`)
       }
       return false
     }
@@ -573,9 +574,8 @@ export class OpticalFlowAnalyzer {
     const maxBinIndex = bins.indexOf(maxBin)
     const dominantDirection = (maxBinIndex * 45 + 22.5) % 360
 
-    // eslint-disable-next-line no-console
-    console.debug(
-      `[OF] mean=${meanMagnitude.toFixed(2)} cov=${coverageRatio.toFixed(2)} coh=${directionCoherence.toFixed(2)} max=${maxMagnitude.toFixed(2)} cut=${isSceneCut}`,
+    log.debug(
+      `mean=${meanMagnitude.toFixed(2)} cov=${coverageRatio.toFixed(2)} coh=${directionCoherence.toFixed(2)} max=${maxMagnitude.toFixed(2)} cut=${isSceneCut}`,
     )
 
     return {

@@ -21,6 +21,9 @@ import type { MigrationResult } from './types'
 import { CURRENT_SCHEMA_VERSION } from './types'
 import { getMigrationsToApply } from './migrations'
 import { normalizeProject, didNormalizationChange } from './normalize'
+import { createLogger } from '@/shared/logging/logger'
+
+const log = createLogger('Migrations')
 
 // Re-export types and constants
 export { CURRENT_SCHEMA_VERSION } from './types'
@@ -65,13 +68,13 @@ function runMigrations(project: Project): {
 
   for (const migration of migrationsToApply) {
     if (import.meta.env.DEV) {
-      console.warn(`[Migrations] Running migration v${migration.version}: ${migration.description}`)
+      log.info(`Running migration v${migration.version}: ${migration.description}`)
     }
     try {
       migratedProject = migration.migrate(migratedProject)
       appliedMigrations.push(migration.version)
     } catch (error) {
-      console.error(`[Migrations] Migration v${migration.version} failed:`, error)
+      log.error(`Migration v${migration.version} failed:`, error)
       throw new Error(
         `Failed to migrate project from v${fromVersion} to v${migration.version}: ${error}`,
       )
