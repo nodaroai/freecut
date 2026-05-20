@@ -11,7 +11,6 @@ import { ChevronDown, ChevronLeft, ChevronRight, LineChart, Lock, Timer, X } fro
 import { cn } from '@/shared/ui/cn'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { KEYFRAME_MARQUEE_THRESHOLD, type KeyframeMarqueeRect } from '../keyframe-marquee'
 import type {
   AnimatableProperty,
   BezierControlPoints,
@@ -30,6 +29,8 @@ import { useGraphViewState } from './use-graph-view-state'
 import { useGroupExpansion } from './use-group-expansion'
 import { useHeaderFrameInputs } from './use-header-frame-inputs'
 import { usePropertyFilters } from './use-property-filters'
+import { useDopesheetMarquee } from './use-dopesheet-marquee'
+import { useTimingStripDrag } from './use-timing-strip-drag'
 import { DopesheetHeaderFrameInputs } from './dopesheet-header-frame-inputs'
 import { DopesheetRulerHeader } from './dopesheet-ruler-header'
 import { DopesheetSheetBody } from './dopesheet-sheet-body'
@@ -47,8 +48,6 @@ import {
   DRAG_THRESHOLD,
   EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
   GROUP_HEADER_HEIGHT,
-  MARQUEE_SCROLL_EDGE_PX,
-  MARQUEE_SCROLL_MAX_SPEED,
   MINI_ICON_BUTTON_CLASS,
   MINI_ICON_CLASS,
   MIN_VISIBLE_FRAMES,
@@ -63,8 +62,6 @@ import type {
   DopesheetPropertyRow,
   DragState,
   KeyframeMeta,
-  MarqueeMode,
-  MarqueeState,
   RenderedSheetEntry,
   Viewport,
 } from './dopesheet-types'
@@ -236,7 +233,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const [timelineWidth, setTimelineWidth] = useState(0)
   const [graphPaneSize, setGraphPaneSize] = useState({ width: 0, height: 0 })
   const snapEnabled = true
-  const [marqueeRect, setMarqueeRect] = useState<KeyframeMarqueeRect | null>(null)
   const [valueDrafts, setValueDrafts] = useState<Partial<Record<AnimatableProperty, string>>>({})
   const [editingValueProperty, setEditingValueProperty] = useState<AnimatableProperty | null>(null)
   const autoKeyEnabledByProperty = useAutoKeyframeStore(
@@ -253,12 +249,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const [sheetPreviewDuplicateKeyframeIds, setSheetPreviewDuplicateKeyframeIds] = useState<
     string[] | null
   >(null)
-  const [timingStripPreviewFrames, setTimingStripPreviewFrames] = useState<Record<
-    string,
-    number
-  > | null>(null)
-  const timingStripPreviewFramesRef = useRef<Record<string, number> | null>(null)
-  const timingStripDraggedIdsRef = useRef<string[]>([])
   const contentFrameMax = useMemo(() => Math.max(totalFrames, 1), [totalFrames])
   const minViewportFrames = useMemo(
     () => Math.max(1, Math.min(MIN_VISIBLE_FRAMES, contentFrameMax)),
@@ -721,17 +711,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     },
     [applyDragPreviewFrames],
   )
-  useEffect(() => {
-    timingStripPreviewFramesRef.current = timingStripPreviewFrames
-  }, [timingStripPreviewFrames])
-  useEffect(() => {
-    if (visualizationMode !== 'dopesheet') {
-      scheduleDragPreviewFrames(null)
-      return
-    }
-
-    scheduleDragPreviewFrames(timingStripPreviewFrames)
-  }, [scheduleDragPreviewFrames, timingStripPreviewFrames, visualizationMode])
   const renderedKeyframeXById = useMemo(() => {
     const positions = new Map<string, number>()
     for (const row of sheetRows) {
@@ -1393,39 +1372,20 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   )
 
   const dragStateRef = useRef<DragState | null>(null)
-  const marqueeStateRef = useRef<MarqueeState | null>(null)
-  const marqueeJustEndedRef = useRef(false)
   const selectionAnchorByPropertyRef = useRef(new Map<AnimatableProperty, string>())
 
-  const getMarqueeModeFromPointerEvent = useCallback(
-    (event: Pick<React.PointerEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>): MarqueeMode =>
-      event.shiftKey ? 'add' : event.ctrlKey || event.metaKey ? 'toggle' : 'replace',
-    [],
-  )
-
-  const beginMarqueeSelection = useCallback(
-    (
-      pointerId: number,
-      clientX: number,
-      clientY: number,
-      mode: MarqueeMode,
-      baseSelection: Set<string>,
-    ) => {
-      const startX = getTimelineXFromClientX(clientX)
-      const startY = getContentYFromClientY(clientY)
-      marqueeStateRef.current = {
-        pointerId,
-        startX,
-        startY,
-        currentX: startX,
-        currentY: startY,
-        mode,
-        baseSelection,
-        started: false,
-      }
-    },
-    [getContentYFromClientY, getTimelineXFromClientX],
-  )
+  const {
+    marqueeRect,
+    marqueeJustEndedRef,
+    getMarqueeModeFromPointerEvent,
+    beginMarqueeSelection,
+  } = useDopesheetMarquee({
+    keyframePointsRef,
+    scrollAreaRef,
+    getTimelineXFromClientX,
+    getContentYFromClientY,
+    onSelectionChange,
+  })
 
   const handleKeyframePointerDown = useCallback(
     (
@@ -1613,47 +1573,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [sheetPreviewDuplicateKeyframeIds, sheetPreviewFrames],
   )
 
-  const updateSelectionFromMarquee = useCallback(
-    (state: MarqueeState) => {
-      const minX = Math.min(state.startX, state.currentX)
-      const maxX = Math.max(state.startX, state.currentX)
-      const minY = Math.min(state.startY, state.currentY)
-      const maxY = Math.max(state.startY, state.currentY)
-
-      const hitIds = new Set<string>()
-      for (const point of keyframePointsRef.current) {
-        if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) {
-          hitIds.add(point.keyframeId)
-        }
-      }
-
-      let nextSelection = new Set<string>()
-      if (state.mode === 'replace') {
-        nextSelection = hitIds
-      } else if (state.mode === 'add') {
-        nextSelection = new Set([...state.baseSelection, ...hitIds])
-      } else {
-        nextSelection = new Set(state.baseSelection)
-        for (const keyframeId of hitIds) {
-          if (nextSelection.has(keyframeId)) {
-            nextSelection.delete(keyframeId)
-          } else {
-            nextSelection.add(keyframeId)
-          }
-        }
-      }
-
-      onSelectionChange?.(nextSelection)
-      setMarqueeRect({
-        x: minX,
-        y: minY,
-        width: Math.max(1, maxX - minX),
-        height: Math.max(1, maxY - minY),
-      })
-    },
-    [onSelectionChange],
-  )
-
   const handleRowPointerDown = useCallback(
     (property: AnimatableProperty, event: React.PointerEvent<HTMLDivElement>) => {
       if (disabled) return
@@ -1820,78 +1739,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [onScrubEnd],
   )
 
-  useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      const marqueeState = marqueeStateRef.current
-      if (!marqueeState || marqueeState.pointerId !== event.pointerId) return
-
-      const scrollNode = scrollAreaRef.current
-      if (scrollNode) {
-        const rect = scrollNode.getBoundingClientRect()
-        const topEdge = rect.top + MARQUEE_SCROLL_EDGE_PX
-        const bottomEdge = rect.bottom - MARQUEE_SCROLL_EDGE_PX
-        let scrollDelta = 0
-
-        if (event.clientY < topEdge) {
-          const intensity = Math.min(1, (topEdge - event.clientY) / MARQUEE_SCROLL_EDGE_PX)
-          scrollDelta = -Math.max(1, Math.round(intensity * MARQUEE_SCROLL_MAX_SPEED))
-        } else if (event.clientY > bottomEdge) {
-          const intensity = Math.min(1, (event.clientY - bottomEdge) / MARQUEE_SCROLL_EDGE_PX)
-          scrollDelta = Math.max(1, Math.round(intensity * MARQUEE_SCROLL_MAX_SPEED))
-        }
-
-        if (scrollDelta !== 0) {
-          const maxScrollTop = Math.max(0, scrollNode.scrollHeight - scrollNode.clientHeight)
-          scrollNode.scrollTop = Math.max(
-            0,
-            Math.min(maxScrollTop, scrollNode.scrollTop + scrollDelta),
-          )
-        }
-      }
-
-      const x = getTimelineXFromClientX(event.clientX)
-      const y = getContentYFromClientY(event.clientY)
-      const movedEnough =
-        Math.abs(x - marqueeState.startX) > KEYFRAME_MARQUEE_THRESHOLD ||
-        Math.abs(y - marqueeState.startY) > KEYFRAME_MARQUEE_THRESHOLD
-      if (!marqueeState.started && movedEnough) {
-        marqueeState.started = true
-      }
-      if (!marqueeState.started) return
-
-      marqueeState.currentX = x
-      marqueeState.currentY = y
-      updateSelectionFromMarquee(marqueeState)
-    }
-
-    const handlePointerUp = (event: PointerEvent) => {
-      const marqueeState = marqueeStateRef.current
-      if (!marqueeState || marqueeState.pointerId !== event.pointerId) return
-      if (marqueeState.started) {
-        marqueeJustEndedRef.current = true
-        setTimeout(() => {
-          marqueeJustEndedRef.current = false
-        }, 100)
-      } else if (marqueeState.mode === 'replace') {
-        onSelectionChange?.(new Set())
-      }
-      marqueeStateRef.current = null
-      setMarqueeRect(null)
-    }
-
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-    }
-  }, [
-    getTimelineXFromClientX,
-    getContentYFromClientY,
-    updateSelectionFromMarquee,
-    onSelectionChange,
-  ])
-
   const handleWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
       if (disabled) return
@@ -1997,41 +1844,31 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       }),
     [keyframesByProperty, totalFrames],
   )
-  const handleTimingStripSelectionChange = useCallback(
-    (selectedIds: Set<string>) => {
-      onSelectionChange?.(selectedIds)
-    },
-    [onSelectionChange],
-  )
-  const handleTimingStripSlideStart = useCallback(
-    (selectedIds: string[]) => {
-      if (disabled || !onKeyframeMove || selectedIds.length === 0) {
-        return
-      }
+  const {
+    timingStripPreviewFrames,
+    handleTimingStripSelectionChange,
+    handleTimingStripSlideStart,
+    handleTimingStripSlideChange,
+    handleTimingStripSlideEnd,
+  } = useTimingStripDrag({
+    disabled,
+    onKeyframeMove,
+    onSelectionChange,
+    onDragStart,
+    onDragEnd,
+    buildSelectionFramePreview,
+    commitSelectionFramePreview,
+  })
 
-      timingStripDraggedIdsRef.current = selectedIds
-      onDragStart?.()
-    },
-    [disabled, onDragStart, onKeyframeMove],
-  )
-  const handleTimingStripSlideChange = useCallback(
-    (deltaFrames: number, selectedIds: string[]) => {
-      timingStripDraggedIdsRef.current = selectedIds
-      const preview = buildSelectionFramePreview(selectedIds, deltaFrames)
-      setTimingStripPreviewFrames(preview.previewFrames)
-    },
-    [buildSelectionFramePreview],
-  )
-  const handleTimingStripSlideEnd = useCallback(
-    (selectedIds: string[]) => {
-      const dragIds = selectedIds.length > 0 ? selectedIds : timingStripDraggedIdsRef.current
-      commitSelectionFramePreview(dragIds, timingStripPreviewFramesRef.current)
-      timingStripDraggedIdsRef.current = []
-      setTimingStripPreviewFrames(null)
-      onDragEnd?.()
-    },
-    [commitSelectionFramePreview, onDragEnd],
-  )
+  // Mirror timing-strip preview into the dopesheet-mode drag preview
+  useEffect(() => {
+    if (visualizationMode !== 'dopesheet') {
+      scheduleDragPreviewFrames(null)
+      return
+    }
+
+    scheduleDragPreviewFrames(timingStripPreviewFrames)
+  }, [scheduleDragPreviewFrames, timingStripPreviewFrames, visualizationMode])
   const formatRulerTick = useCallback(
     (frame: number): string => {
       if (graphRulerUnit === 'frames' || !fps || fps <= 0) {
