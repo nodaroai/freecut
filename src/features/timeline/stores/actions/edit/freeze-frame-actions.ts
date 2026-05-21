@@ -1,12 +1,10 @@
 import type { ImageItem } from '@/types/timeline'
-import type { MediaMetadata, ThumbnailData } from '@/types/storage'
 import { useItemsStore } from '../../items-store'
 import { useTransitionsStore } from '../../transitions-store'
 import { useTimelineSettingsStore } from '../../timeline-settings-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
-import { mediaLibraryService, opfsService } from '@/features/timeline/deps/media-library-service'
-import { writeMediaSource } from '@/infrastructure/storage/workspace-fs/media-source'
+import { mediaLibraryService } from '@/features/timeline/deps/media-library-service'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { execute, applyTransitionRepairs, getLogger } from '../shared'
 import { timelineToSourceFrames } from '../../../utils/source-calculations'
@@ -113,64 +111,37 @@ export async function insertFreezeFrame(itemId: string, playheadFrame: number): 
     ;(sink as unknown as { dispose?: () => void }).dispose?.()
     input.dispose()
 
-    // Step 3: Store frame as media in IndexedDB
-    const { createMedia, saveThumbnail, associateMediaWithProject } =
-      await import('@/infrastructure/storage')
+    // Step 3: Persist the frame as a media item. Delegates to the shared
+    // import path (mediaLibraryService -> persistGeneratedMediaAsset) which
+    // handles OPFS write, thumbnail generation, metadata persist, project
+    // association, and workspace mirroring — plus rollback of all of those
+    // if any step throws. Hand-rolling this here previously skipped the
+    // rollback and had to be patched repeatedly (createMedia-before-thumbnailId,
+    // store-prepend-before-execute).
     const currentProjectId = useMediaLibraryStore.getState().currentProjectId
     if (!currentProjectId) {
       getLogger().error('[insertFreezeFrame] No project context')
       return false
     }
 
-    const frameMediaId = crypto.randomUUID()
-    const frameBlobUrl = blobUrlManager.acquire(frameMediaId, frameBlob)
     const fileName = `freeze-frame-${item.label || 'video'}-${Math.round(timestampSeconds * 100) / 100}s.png`
-
-    const mediaMetadata: MediaMetadata = {
-      id: frameMediaId,
-      storageType: 'opfs',
-      fileName,
-      fileSize: frameBlob.size,
-      mimeType: 'image/png',
-      duration: 0,
-      width: frameWidth,
-      height: frameHeight,
-      fps: 0,
-      codec: 'png',
-      bitrate: 0,
-      tags: ['freeze-frame'],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
-
-    // Store the frame blob in OPFS, then mirror it into the workspace folder
-    // so other origins and external tooling can see it on disk.
-    const opfsPath = `content/${frameMediaId.slice(0, 2)}/${frameMediaId.slice(2, 4)}/${frameMediaId}/data`
-    await opfsService.saveFile(opfsPath, await frameBlob.arrayBuffer())
-    mediaMetadata.opfsPath = opfsPath
-    void writeMediaSource(frameMediaId, frameBlob, fileName).catch((error) => {
-      getLogger().warn('[insertFreezeFrame] Failed to mirror frame to workspace', error)
+    const frameFile = new File([frameBlob], fileName, {
+      type: 'image/png',
+      lastModified: Date.now(),
     })
 
-    // Save thumbnail first so we can persist the metadata with its
-    // thumbnailId in a single write — createMedia serializes the metadata
-    // verbatim, so setting thumbnailId after createMedia would only update
-    // the in-memory copy and leave the on-disk record without a thumbnail
-    // association (visible after project reload).
-    const thumbnailId = crypto.randomUUID()
-    const thumbnailData: ThumbnailData = {
-      id: thumbnailId,
-      mediaId: frameMediaId,
-      blob: frameBlob,
-      timestamp: 0,
-      width: frameWidth,
-      height: frameHeight,
-    }
-    await saveThumbnail(thumbnailData)
-    mediaMetadata.thumbnailId = thumbnailId
-
-    await createMedia(mediaMetadata)
-    await associateMediaWithProject(currentProjectId, frameMediaId)
+    const mediaMetadata = await mediaLibraryService.importGeneratedImage(
+      frameFile,
+      currentProjectId,
+      {
+        width: frameWidth,
+        height: frameHeight,
+        tags: ['freeze-frame'],
+        codec: 'png',
+      },
+    )
+    const frameMediaId = mediaMetadata.id
+    const frameBlobUrl = blobUrlManager.acquire(frameMediaId, frameBlob)
 
     // Step 4: Perform timeline mutations atomically (split + insert + shift).
     // Prepend the media item to the store only after execute() succeeds so a
@@ -249,6 +220,26 @@ export async function insertFreezeFrame(itemId: string, playheadFrame: number): 
     )
 
     if (!success) {
+      // Roll back the persisted media so a failed split (rare — only if the
+      // source clip was deleted between validation and execute) doesn't leave
+      // an orphan on disk or a dangling blob URL in memory.
+      // deleteMediaFromProject is the right call here (not deleteMedia): the
+      // frame was just associated with currentProjectId and is referenced
+      // only by this project, so the reference-counted variant covers it
+      // and preserves the global "delete everywhere" semantics for the
+      // explicit user action.
+      try {
+        await mediaLibraryService.deleteMediaFromProject(currentProjectId, frameMediaId)
+      } catch (cleanupError) {
+        getLogger().warn(
+          '[insertFreezeFrame] Failed to roll back persisted frame after split failure',
+          cleanupError,
+        )
+      }
+      // blobUrlManager.acquire above bumped the ref count for frameMediaId;
+      // matched release here revokes the underlying ObjectURL and frees the
+      // Blob so a failure path doesn't accumulate leaked frames over time.
+      blobUrlManager.release(frameMediaId)
       return false
     }
 
