@@ -222,15 +222,24 @@ export async function insertFreezeFrame(itemId: string, playheadFrame: number): 
     if (!success) {
       // Roll back the persisted media so a failed split (rare — only if the
       // source clip was deleted between validation and execute) doesn't leave
-      // an orphan on disk.
+      // an orphan on disk or a dangling blob URL in memory.
+      // deleteMediaFromProject is the right call here (not deleteMedia): the
+      // frame was just associated with currentProjectId and is referenced
+      // only by this project, so the reference-counted variant covers it
+      // and preserves the global "delete everywhere" semantics for the
+      // explicit user action.
       try {
-        await mediaLibraryService.deleteMedia(frameMediaId)
+        await mediaLibraryService.deleteMediaFromProject(currentProjectId, frameMediaId)
       } catch (cleanupError) {
         getLogger().warn(
           '[insertFreezeFrame] Failed to roll back persisted frame after split failure',
           cleanupError,
         )
       }
+      // blobUrlManager.acquire above bumped the ref count for frameMediaId;
+      // matched release here revokes the underlying ObjectURL and frees the
+      // Blob so a failure path doesn't accumulate leaked frames over time.
+      blobUrlManager.release(frameMediaId)
       return false
     }
 
