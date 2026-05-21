@@ -64,12 +64,19 @@ describe('smoothStep', () => {
     expect(smoothStep(0, 1, 0.5)).toBeCloseTo(0.5, 5)
   })
 
-  it('is smooth at the midpoint (3x^2 - 2x^3 with x = 0.5)', () => {
-    // 3 * 0.25 - 2 * 0.125 = 0.5; derivative at midpoint is 3/2 * 0.25 = (smooth, not linear)
-    const left = smoothStep(0, 1, 0.49)
-    const right = smoothStep(0, 1, 0.51)
-    expect(right - left).toBeGreaterThan(0)
-    expect(right - left).toBeLessThan(0.1) // shallower than linear (0.02)
+  it('produces a smoothed S-curve, not a linear interpolation', () => {
+    // smoothStep(0,1,x) = 3x²-2x³ is below the linear line on the lower
+    // half and above it on the upper half — that's the defining S-shape
+    // and what protects against a "just use linear" rewrite.
+    expect(smoothStep(0, 1, 0.25)).toBeLessThan(0.25)
+    expect(smoothStep(0, 1, 0.75)).toBeGreaterThan(0.75)
+
+    // Slope at the midpoint is d/dt(3t²-2t³) = 6t(1-t) = 1.5, so the
+    // central difference over [0.49, 0.51] is ~0.03 — 1.5× steeper than
+    // the linear 0.02. Tight band so a flatter or steeper curve fails.
+    const midpointSlope = smoothStep(0, 1, 0.51) - smoothStep(0, 1, 0.49)
+    expect(midpointSlope).toBeGreaterThan(0.025)
+    expect(midpointSlope).toBeLessThan(0.035)
   })
 
   it('handles a zero-width interval (edge0 === edge1) without NaN', () => {
@@ -174,9 +181,13 @@ describe('crossDissolveT', () => {
 })
 
 describe('registerGpuTransitions', () => {
+  // Shared across every test in this block — the registry is the unit under
+  // test and doesn't mutate, so 17 tests get one registration pass instead
+  // of 17.
+  const registry = new TransitionRegistry()
+  registerGpuTransitions(registry)
+
   it('registers exactly 15 transitions', () => {
-    const registry = new TransitionRegistry()
-    registerGpuTransitions(registry)
     expect(registry.size).toBe(EXPECTED_GPU_TRANSITION_IDS.length)
     expect(registry.getIds().sort()).toEqual([...EXPECTED_GPU_TRANSITION_IDS].sort())
   })
@@ -184,8 +195,6 @@ describe('registerGpuTransitions', () => {
   it.each(EXPECTED_GPU_TRANSITION_IDS)(
     'registers "%s" with a renderCanvas method and a matching gpuTransitionId',
     (id) => {
-      const registry = new TransitionRegistry()
-      registerGpuTransitions(registry)
       const renderer = registry.getRenderer(id)
       expect(renderer, `${id} renderer should be registered`).toBeDefined()
       expect(typeof renderer?.renderCanvas, `${id} should have renderCanvas`).toBe('function')
@@ -194,8 +203,6 @@ describe('registerGpuTransitions', () => {
   )
 
   it('attaches a TransitionDefinition for every registered transition', () => {
-    const registry = new TransitionRegistry()
-    registerGpuTransitions(registry)
     for (const id of EXPECTED_GPU_TRANSITION_IDS) {
       const definition = registry.getDefinition(id)
       expect(definition, `${id} should have a definition`).toBeDefined()
