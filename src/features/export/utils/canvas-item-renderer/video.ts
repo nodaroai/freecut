@@ -7,6 +7,8 @@ import type { VideoItem } from '@/types/timeline'
 import {
   getItemRenderTimelineSpan,
   getRenderTimelineSourceStart,
+  getSourceFrameRampOffset,
+  isFrameInsideSourceTimeRamp,
   type RenderTimelineSpan,
 } from '../render-span'
 import {
@@ -179,9 +181,17 @@ export async function renderVideoItem(
   const sourceFramesNeeded = (item.durationInFrames * speed * sourceFps) / fps
   const reverseSourceEnd = (item.sourceEnd ?? sourceStart + sourceFramesNeeded) - sourceFrameOffset
   const adjustedSourceStart = sourceStart + sourceFrameOffset
+  // A-A transition ramps add extra source frames per timeline frame so left/
+  // right participants render distinct source content (otherwise their handle
+  // expansions resolve to identical frames and the transition is invisible).
+  // Ramps are scoped to the transition window and skip reversed clips.
+  const rampOffsetSourceFrames =
+    effectiveRenderSpan.sourceTimeRamp && !item.isReversed
+      ? getSourceFrameRampOffset(effectiveRenderSpan.sourceTimeRamp, frame)
+      : 0
   const unclampedSourceTime = item.isReversed
     ? (reverseSourceEnd - localFrame * speed * (sourceFps / fps) - 1) / sourceFps
-    : adjustedSourceStart / sourceFps + localTime * speed
+    : adjustedSourceStart / sourceFps + localTime * speed + rampOffsetSourceFrames / sourceFps
   const rawSourceTime = clampVideoSourceTime(unclampedSourceTime, sourceFps, item.sourceDuration)
   const snappedSourceFrame = Math.round(rawSourceTime * sourceFps)
   const sourceTime =
@@ -197,10 +207,18 @@ export async function renderVideoItem(
   // effectiveRenderSpan (not the natural item span) and let the policy
   // function decide whether the DOM video is fresh enough, mirroring the GPU
   // transition path in gpu.ts which also passes isRenderingTransition through.
+  // A-A transition ramps render source frames offset from the DOM video
+  // element's natural playback time. Drawing from the live element would
+  // ignore the offset and show identical pixels on both transition sides,
+  // defeating the ramp. Force the decode path when a ramp is active here.
+  const hasActiveRamp =
+    !!effectiveRenderSpan.sourceTimeRamp &&
+    isFrameInsideSourceTimeRamp(effectiveRenderSpan.sourceTimeRamp, frame)
   const canUseDomVideoElement =
     isPreviewMode &&
     domVideoElementProvider &&
     sourceFrameOffset === 0 &&
+    !hasActiveRamp &&
     isFrameInsideItemTimelineSpan(effectiveRenderSpan, frame)
   const domVideo = canUseDomVideoElement ? domVideoElementProvider(item.id) : null
   const domVideoDecision = resolvePreviewDomVideoDrawDecision({
@@ -660,9 +678,13 @@ export function resolveVideoParticipantSourceTime(
   const speed = item.speed ?? 1
   const sourceFramesNeeded = (item.durationInFrames * speed * sourceFps) / rctx.fps
   const reverseSourceEnd = item.sourceEnd ?? sourceStart + sourceFramesNeeded
+  const rampOffsetSourceFrames =
+    renderSpan.sourceTimeRamp && !item.isReversed
+      ? getSourceFrameRampOffset(renderSpan.sourceTimeRamp, frame)
+      : 0
   const unclampedSourceTime = item.isReversed
     ? (reverseSourceEnd - localFrame * speed * (sourceFps / rctx.fps) - 1) / sourceFps
-    : sourceStart / sourceFps + localTime * speed
+    : sourceStart / sourceFps + localTime * speed + rampOffsetSourceFrames / sourceFps
   const rawSourceTime = clampVideoSourceTime(unclampedSourceTime, sourceFps, item.sourceDuration)
   const snappedSourceFrame = Math.round(rawSourceTime * sourceFps)
   return Math.abs(rawSourceTime * sourceFps - snappedSourceFrame) < 1e-6

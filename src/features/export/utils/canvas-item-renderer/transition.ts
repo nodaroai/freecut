@@ -15,7 +15,7 @@ import {
   type EffectSourceMask,
 } from '../canvas-effects'
 import { renderTransition, type ActiveTransition } from '../canvas-transitions'
-import { resolveTransitionRenderTimelineSpan } from '../render-span'
+import { resolveAATransitionRamps, resolveTransitionRenderTimelineSpan } from '../render-span'
 import { getAnimatedTransform } from '../canvas-keyframes'
 import type {
   ItemRenderContext,
@@ -479,13 +479,32 @@ export async function renderTransitionToGpuTexture(
 
 export function resolveTransitionParticipantRenderState<TItem extends TimelineItem>(
   clip: TItem,
-  activeTransition: Pick<ActiveTransition, 'transitionStart' | 'transitionEnd'>,
+  activeTransition: Pick<
+    ActiveTransition,
+    'transitionStart' | 'transitionEnd' | 'leftClip' | 'rightClip'
+  >,
   frame: number,
   trackOrder: number,
   rctx: ItemRenderContext,
 ): TransitionParticipantRenderState<TItem> {
   const currentClip = rctx.getCurrentItemSnapshot?.(clip) ?? clip
-  const renderSpan = resolveTransitionRenderTimelineSpan(currentClip, activeTransition, rctx.fps)
+  const leftSnapshot =
+    rctx.getCurrentItemSnapshot?.(activeTransition.leftClip) ?? activeTransition.leftClip
+  const rightSnapshot =
+    rctx.getCurrentItemSnapshot?.(activeTransition.rightClip) ?? activeTransition.rightClip
+  const ramps = resolveAATransitionRamps(leftSnapshot, rightSnapshot, activeTransition, rctx.fps)
+  const ramp =
+    ramps && currentClip.id === activeTransition.leftClip.id
+      ? ramps.left
+      : ramps && currentClip.id === activeTransition.rightClip.id
+        ? ramps.right
+        : undefined
+  const renderSpan = resolveTransitionRenderTimelineSpan(
+    currentClip,
+    activeTransition,
+    rctx.fps,
+    ramp,
+  )
   const itemKeyframes =
     rctx.getCurrentKeyframes?.(currentClip.id) ?? rctx.keyframesMap.get(currentClip.id)
   let transform = getAnimatedTransform(
