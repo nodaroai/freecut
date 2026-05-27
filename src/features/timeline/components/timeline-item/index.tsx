@@ -99,10 +99,9 @@ import { frameToPixelsNow, pixelsToFrameNow } from '../../utils/zoom-conversions
 import { timelineToSourceFrames } from '../../utils/source-calculations'
 import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils'
 import { getTransitionBridgeBounds } from '../../utils/transition-preview-geometry'
-import { getAudioFadeRatio } from '../../utils/audio-fade'
-import { getAudioFadeCurveControlPoint, getAudioFadeCurvePath } from '../../utils/audio-fade-curve'
 import { getAudioVisualizationScale, getAudioVolumeLineY } from '../../utils/audio-volume'
 import { useFadeEditors } from './use-fade-editors'
+import { useFadeMath } from './use-fade-math'
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 import { formatSignedFrameDelta, formatTimecodeCompact } from '@/shared/utils/time-utils'
 import {
@@ -1776,186 +1775,48 @@ export const TimelineItem = memo(
       activeEdges !== null
     const skipFadeComputation = isCompactWidth && !hasActiveClipInteraction
     const clipFadeDurationFrames = Math.max(1, Math.round(visualWidthFrames))
-    const videoFadeInRatio = useMemo(
-      () =>
-        skipFadeComputation
-          ? 0
-          : isVisualFadeItem
-            ? getAudioFadeRatio(displayedVideoFadeIn, fps, clipFadeDurationFrames)
-            : 0,
-      [skipFadeComputation, clipFadeDurationFrames, displayedVideoFadeIn, fps, isVisualFadeItem],
-    )
-    const videoFadeOutRatio = useMemo(
-      () =>
-        skipFadeComputation
-          ? 0
-          : isVisualFadeItem
-            ? getAudioFadeRatio(displayedVideoFadeOut, fps, clipFadeDurationFrames)
-            : 0,
-      [skipFadeComputation, clipFadeDurationFrames, displayedVideoFadeOut, fps, isVisualFadeItem],
-    )
-    const videoFadeLineYPercent = 50
-    const audioFadeInRatio = useMemo(
-      () =>
-        skipFadeComputation
-          ? 0
-          : item.type === 'audio'
-            ? getAudioFadeRatio(displayedAudioFadeIn, fps, clipFadeDurationFrames)
-            : 0,
-      [skipFadeComputation, clipFadeDurationFrames, displayedAudioFadeIn, fps, item.type],
-    )
-    const audioFadeOutRatio = useMemo(
-      () =>
-        skipFadeComputation
-          ? 0
-          : item.type === 'audio'
-            ? getAudioFadeRatio(displayedAudioFadeOut, fps, clipFadeDurationFrames)
-            : 0,
-      [skipFadeComputation, clipFadeDurationFrames, displayedAudioFadeOut, fps, item.type],
-    )
-    const audioFadeInHoverLabel = useMemo(
-      () => (skipFadeComputation ? '' : `Fade In ${displayedAudioFadeIn.toFixed(2)}s`),
-      [skipFadeComputation, displayedAudioFadeIn],
-    )
-    const audioFadeOutHoverLabel = useMemo(
-      () => (skipFadeComputation ? '' : `Fade Out ${displayedAudioFadeOut.toFixed(2)}s`),
-      [skipFadeComputation, displayedAudioFadeOut],
-    )
-    const videoFadeInHoverLabel = useMemo(
-      () => (skipFadeComputation ? '' : `Fade In ${displayedVideoFadeIn.toFixed(2)}s`),
-      [skipFadeComputation, displayedVideoFadeIn],
-    )
-    const videoFadeOutHoverLabel = useMemo(
-      () => (skipFadeComputation ? '' : `Fade Out ${displayedVideoFadeOut.toFixed(2)}s`),
-      [skipFadeComputation, displayedVideoFadeOut],
-    )
+    const {
+      videoFadeInRatio,
+      videoFadeOutRatio,
+      audioFadeInRatio,
+      audioFadeOutRatio,
+      audioFadeInHoverLabel,
+      audioFadeOutHoverLabel,
+      videoFadeInHoverLabel,
+      videoFadeOutHoverLabel,
+      audioVolumeLineYPercent,
+      audioVisualizationScale,
+      videoFadeLineYPercent,
+      audioVolumeLineStroke,
+      audioFadeInCurvePoint,
+      audioFadeOutCurvePoint,
+      audioFadeInCurvePath,
+      audioFadeOutCurvePath,
+      videoFadeInPath,
+      videoFadeOutPath,
+    } = useFadeMath({
+      item,
+      fps,
+      isVisualFadeItem,
+      isSelected,
+      audioVolumeEditActive: audioVolumeEdit !== null,
+      skipFadeComputation,
+      clipFadeDurationFrames,
+      displayedVideoFadeIn,
+      displayedVideoFadeOut,
+      displayedAudioFadeIn,
+      displayedAudioFadeOut,
+      displayedAudioFadeInCurve,
+      displayedAudioFadeOutCurve,
+      displayedAudioFadeInCurveX,
+      displayedAudioFadeOutCurveX,
+      displayedAudioVolumeDb,
+    })
     const audioVolumeEditLabel = useMemo(() => {
       if (skipFadeComputation || !audioVolumeEdit) return null
       const previewVolume = audioVolumePreviewRef.current
       return `Volume ${previewVolume >= 0 ? '+' : ''}${previewVolume.toFixed(1)} dB`
     }, [skipFadeComputation, audioVolumeEdit, audioVolumePreviewRef])
-    const audioVolumeLineY = useMemo(
-      () =>
-        item.type === 'audio'
-          ? getAudioVolumeLineY(displayedAudioVolumeDb, AUDIO_ENVELOPE_VIEWBOX_HEIGHT)
-          : AUDIO_ENVELOPE_VIEWBOX_HEIGHT / 2,
-      [displayedAudioVolumeDb, item.type],
-    )
-    const audioVisualizationScale = useMemo(
-      () => (item.type === 'audio' ? getAudioVisualizationScale(displayedAudioVolumeDb) : 1),
-      [displayedAudioVolumeDb, item.type],
-    )
-    const audioVolumeLineYPercent = useMemo(
-      () => (audioVolumeLineY / AUDIO_ENVELOPE_VIEWBOX_HEIGHT) * 100,
-      [audioVolumeLineY],
-    )
-    const isAudioVolumeControlActive =
-      item.type === 'audio' && (isSelected || audioVolumeEdit !== null)
-    const audioVolumeLineStroke = isAudioVolumeControlActive
-      ? 'rgba(255,255,255,0.72)'
-      : 'rgba(255,255,255,0.42)'
-    const audioFadeInViewboxWidth = audioFadeInRatio * FADE_VIEWBOX_WIDTH
-    const audioFadeOutViewboxWidth = audioFadeOutRatio * FADE_VIEWBOX_WIDTH
-    const videoFadeInViewboxWidth = videoFadeInRatio * FADE_VIEWBOX_WIDTH
-    const videoFadeOutViewboxWidth = videoFadeOutRatio * FADE_VIEWBOX_WIDTH
-    const audioFadeInCurvePoint = useMemo(
-      () =>
-        skipFadeComputation
-          ? null
-          : getAudioFadeCurveControlPoint({
-              handle: 'in',
-              fadePixels: audioFadeInViewboxWidth,
-              clipWidthPixels: FADE_VIEWBOX_WIDTH,
-              curve: displayedAudioFadeInCurve,
-              curveX: displayedAudioFadeInCurveX,
-            }),
-      [
-        skipFadeComputation,
-        audioFadeInViewboxWidth,
-        displayedAudioFadeInCurve,
-        displayedAudioFadeInCurveX,
-      ],
-    )
-    const audioFadeOutCurvePoint = useMemo(
-      () =>
-        skipFadeComputation
-          ? null
-          : getAudioFadeCurveControlPoint({
-              handle: 'out',
-              fadePixels: audioFadeOutViewboxWidth,
-              clipWidthPixels: FADE_VIEWBOX_WIDTH,
-              curve: displayedAudioFadeOutCurve,
-              curveX: displayedAudioFadeOutCurveX,
-            }),
-      [
-        skipFadeComputation,
-        audioFadeOutViewboxWidth,
-        displayedAudioFadeOutCurve,
-        displayedAudioFadeOutCurveX,
-      ],
-    )
-    const audioFadeInCurvePath = useMemo(
-      () =>
-        skipFadeComputation
-          ? ''
-          : getAudioFadeCurvePath({
-              handle: 'in',
-              fadePixels: audioFadeInViewboxWidth,
-              clipWidthPixels: FADE_VIEWBOX_WIDTH,
-              curve: displayedAudioFadeInCurve,
-              curveX: displayedAudioFadeInCurveX,
-            }),
-      [
-        skipFadeComputation,
-        audioFadeInViewboxWidth,
-        displayedAudioFadeInCurve,
-        displayedAudioFadeInCurveX,
-      ],
-    )
-    const audioFadeOutCurvePath = useMemo(
-      () =>
-        skipFadeComputation
-          ? ''
-          : getAudioFadeCurvePath({
-              handle: 'out',
-              fadePixels: audioFadeOutViewboxWidth,
-              clipWidthPixels: FADE_VIEWBOX_WIDTH,
-              curve: displayedAudioFadeOutCurve,
-              curveX: displayedAudioFadeOutCurveX,
-            }),
-      [
-        skipFadeComputation,
-        audioFadeOutViewboxWidth,
-        displayedAudioFadeOutCurve,
-        displayedAudioFadeOutCurveX,
-      ],
-    )
-    const videoFadeInPath = useMemo(
-      () =>
-        skipFadeComputation
-          ? ''
-          : getAudioFadeCurvePath({
-              handle: 'in',
-              fadePixels: videoFadeInViewboxWidth,
-              clipWidthPixels: FADE_VIEWBOX_WIDTH,
-              curve: 0,
-              curveX: 0.52,
-            }),
-      [skipFadeComputation, videoFadeInViewboxWidth],
-    )
-    const videoFadeOutPath = useMemo(
-      () =>
-        skipFadeComputation
-          ? ''
-          : getAudioFadeCurvePath({
-              handle: 'out',
-              fadePixels: videoFadeOutViewboxWidth,
-              clipWidthPixels: FADE_VIEWBOX_WIDTH,
-              curve: 0,
-              curveX: 0.52,
-            }),
-      [skipFadeComputation, videoFadeOutViewboxWidth],
-    )
     const contentVisualPreviewItem = useMemo<TimelineItemType>(() => {
       if (supportsVisualFadeControls(contentPreviewItem) && videoFadeEdit !== null) {
         return {
