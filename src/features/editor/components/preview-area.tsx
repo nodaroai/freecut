@@ -534,7 +534,9 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
           {isPenModeActive ? (
             <div
               className="border-t border-border panel-header flex items-center px-3 flex-shrink-0 gap-3 overflow-hidden"
-              style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
+              style={{
+                height: `calc(1.75rem + ${EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight})`,
+              }}
               role="toolbar"
               aria-label="Path pen controls"
             >
@@ -578,7 +580,9 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
           ) : isPathEditModeActive ? (
             <div
               className="border-t border-border panel-header flex items-center px-3 flex-shrink-0 gap-3 overflow-hidden"
-              style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
+              style={{
+                height: `calc(1.75rem + ${EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight})`,
+              }}
               role="toolbar"
               aria-label="Path edit controls"
             >
