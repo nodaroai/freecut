@@ -84,6 +84,7 @@ import {
   type SmartBodyIntent,
 } from '../../utils/smart-trim-zones'
 import { useSmartTrimHover } from './use-smart-trim-hover'
+import { useContextMenuState } from './use-context-menu-state'
 import { useMarkersStore } from '../../stores/markers-store'
 import { useCompositionNavigationStore } from '../../stores/composition-navigation-store'
 import { useTimelineItemOverlayStore } from '../../stores/timeline-item-overlay-store'
@@ -327,8 +328,7 @@ export const TimelineItem = memo(
     const multiEffectDropTargetCount = effectDropPreview.hoveredMultiCount
     const isEffectDropTarget = isSingleEffectDropTarget || isMultiEffectDropTarget
 
-    // Track which edge was closer when context menu was triggered
-    const [closerEdge, setCloserEdge] = useState<'left' | 'right' | null>(null)
+    const { closerEdge, handleContextMenu } = useContextMenuState(item)
 
     // Track blocked drag attempt tooltip (shown on mousedown in rate-stretch mode)
     const [pointerHint, setPointerHint] = useState<{
@@ -1535,38 +1535,6 @@ export const TimelineItem = memo(
         )
       },
       [handleTrimStart, item.id, smartTrimIntentRef],
-    )
-
-    const handleContextMenu = useCallback(
-      (e: React.MouseEvent) => {
-        const rect = e.currentTarget.getBoundingClientRect()
-        const x = e.clientX - rect.left
-        const midpoint = rect.width / 2
-        setCloserEdge(x < midpoint ? 'left' : 'right')
-
-        const { selectedItemIds, selectItems } = useSelectionStore.getState()
-        const items = useTimelineStore.getState().items
-        const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
-        const targetIds = linkedSelectionEnabled ? getLinkedItemIds(items, item.id) : [item.id]
-        const isCurrentSelection = targetIds.some((id) => selectedItemIds.includes(id))
-
-        if (!isCurrentSelection) {
-          if (
-            selectedItemIds.length === 1 &&
-            targetIds.length === 1 &&
-            !selectedItemIds.includes(item.id)
-          ) {
-            selectItems(
-              linkedSelectionEnabled
-                ? expandSelectionWithLinkedItems(items, [...selectedItemIds, item.id])
-                : Array.from(new Set([...selectedItemIds, item.id])),
-            )
-          } else {
-            selectItems(targetIds)
-          }
-        }
-      },
-      [item.id],
     )
 
     if (isHiddenByLinkedEditPreview) {
