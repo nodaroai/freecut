@@ -38,7 +38,9 @@ import { ClipIndicators } from './clip-indicators'
 import { shouldSuppressLinkedSyncBadge } from './linked-sync-badge'
 import { shouldSuppressTimelineItemClickAfterDrag } from './post-drag-click-guard'
 import { TrimHandles } from './trim-handles'
-import { CONSTRAINED_COLORS, FREE_COLORS, type ActiveEdgeState } from './trim-constants'
+import { type ActiveEdgeState } from './trim-constants'
+import { EdgeHalos } from './edge-halos'
+import { TransitionDropGhost } from './transition-drop-ghost'
 import { TrackPushHandle } from './track-push-handle'
 import { StretchHandles } from './stretch-handles'
 import { AudioFadeHandles } from './audio-fade-handles'
@@ -1971,81 +1973,13 @@ export const TimelineItem = memo(
         <ToolOperationOverlay visual={toolOperationOverlay} />
 
         {/* Active edge halos - top layer, above both clip and bounds box */}
-        {activeEdges && (
-          <div
-            className="absolute inset-y-0 pointer-events-none"
-            style={{
-              left: getFramePositionStyle(visualLeftFrame),
-              width: getFramePositionStyle(visualWidthFrames),
-              zIndex: 2,
-            }}
-          >
-            {activeEdges.start &&
-              (() => {
-                const constrained =
-                  activeEdges.constrainedEdge === 'start' || activeEdges.constrainedEdge === 'both'
-                const colors = constrained ? CONSTRAINED_COLORS : FREE_COLORS
-                return (
-                  <>
-                    <div
-                      className="absolute inset-y-0 left-0"
-                      style={{ width: '2px', background: colors.edge, boxShadow: colors.glow }}
-                    />
-                    <div
-                      className="absolute inset-y-0"
-                      style={{
-                        left: '2px',
-                        width: '8px',
-                        background: `linear-gradient(to right, ${colors.fade}, transparent)`,
-                      }}
-                    />
-                  </>
-                )
-              })()}
-            {activeEdges.end &&
-              (() => {
-                const constrained =
-                  activeEdges.constrainedEdge === 'end' || activeEdges.constrainedEdge === 'both'
-                const colors = constrained ? CONSTRAINED_COLORS : FREE_COLORS
-                return (
-                  <>
-                    <div
-                      className="absolute inset-y-0 right-0"
-                      style={{ width: '2px', background: colors.edge, boxShadow: colors.glow }}
-                    />
-                    <div
-                      className="absolute inset-y-0"
-                      style={{
-                        right: '2px',
-                        width: '8px',
-                        background: `linear-gradient(to left, ${colors.fade}, transparent)`,
-                      }}
-                    />
-                  </>
-                )
-              })()}
-          </div>
-        )}
+        <EdgeHalos
+          activeEdges={activeEdges}
+          visualLeftFrame={visualLeftFrame}
+          visualWidthFrames={visualWidthFrames}
+        />
 
-        {transitionDropGhost && (
-          <div
-            className="absolute inset-y-0 pointer-events-none overflow-hidden rounded-sm border border-slate-100/80 shadow-[0_8px_20px_rgba(15,23,42,0.18)]"
-            style={{
-              left: `${transitionDropGhost.left}px`,
-              width: `${transitionDropGhost.width}px`,
-              zIndex: 35,
-              background: 'rgba(248,250,252,0.08)',
-            }}
-          >
-            <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(248,250,252,0.08),rgba(255,255,255,0.02)_48%,rgba(255,255,255,0.02)_52%,rgba(248,250,252,0.08))]" />
-            <div
-              className="absolute top-0 bottom-0 w-px bg-slate-50/90"
-              style={{ left: `${transitionDropGhost.cutOffset}px` }}
-            />
-            <div className="absolute inset-x-0 top-0 h-px bg-white/60" />
-            <div className="absolute inset-x-0 bottom-0 h-px bg-slate-900/20" />
-          </div>
-        )}
+        <TransitionDropGhost ghost={transitionDropGhost} />
 
         {/* Alt-drag ghosts */}
         <AnchorDragGhost
