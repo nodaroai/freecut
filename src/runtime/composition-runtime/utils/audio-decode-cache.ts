@@ -28,6 +28,7 @@ import {
   deleteDecodedPreviewAudio,
   getMedia,
 } from '@/infrastructure/storage'
+import { getWorkspaceRoot } from '@/infrastructure/storage/workspace-fs/root'
 import { ensureAc3DecoderRegistered, isAc3AudioCodec } from '@/shared/utils/ac3-decoder'
 import { createManagedWorker, type ManagedWorker } from '@/shared/utils/managed-worker'
 import type { DecodedPreviewAudioMeta, DecodedPreviewAudioBin } from '@/types/storage'
@@ -663,6 +664,10 @@ function decodeFullAudioViaWorker(mediaId: string, src: PreviewAudioSource): Pro
   return new Promise<AudioBuffer>((resolve, reject) => {
     const worker = getAudioDecodeWorker()
     const requestId = `audio-decode-${++audioDecodeRequestCounter}`
+    // When the worker is handed the workspace root it persists bins itself, so
+    // the main thread only accumulates them for AudioBuffer assembly.
+    const workspaceRoot = getWorkspaceRoot()
+    const workerPersistsBins = workspaceRoot !== null
     const persistedBins: DecodedAudioBinData[] = []
     const persistPromises: Array<Promise<void>> = []
 
@@ -686,15 +691,17 @@ function decodeFullAudioViaWorker(mediaId: string, src: PreviewAudioSource): Pro
           right: new Int16Array(message.right),
         }
         persistedBins.push(bin)
-        persistPromises.push(
-          saveDecodedBin(mediaId, bin).catch((err) => {
-            log.warn('Failed to persist decoded audio bin from worker', {
-              mediaId,
-              binIndex: bin.binIndex,
-              err,
-            })
-          }),
-        )
+        if (!workerPersistsBins) {
+          persistPromises.push(
+            saveDecodedBin(mediaId, bin).catch((err) => {
+              log.warn('Failed to persist decoded audio bin from worker', {
+                mediaId,
+                binIndex: bin.binIndex,
+                err,
+              })
+            }),
+          )
+        }
       } else if (message.type === 'complete') {
         cleanup()
         const totalBins = message.totalBins
@@ -729,6 +736,7 @@ function decodeFullAudioViaWorker(mediaId: string, src: PreviewAudioSource): Pro
       fallbackBlob: prepared.fallbackBlob,
       binDurationSec: BIN_DURATION_SEC,
       storageSampleRate: STORAGE_SAMPLE_RATE,
+      workspaceRoot,
     })
   })
 }

@@ -10,6 +10,12 @@ export interface AudioDecodeRequest {
   fallbackBlob?: Blob | null
   binDurationSec: number
   storageSampleRate: number
+  /**
+   * Workspace root handle. When present, the worker persists decoded bins to
+   * disk itself (off the main thread); otherwise it only streams them back for
+   * the main thread to persist.
+   */
+  workspaceRoot?: FileSystemDirectoryHandle | null
 }
 
 export interface AudioDecodeWindowRequest {

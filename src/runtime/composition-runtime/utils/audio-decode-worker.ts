@@ -11,9 +11,15 @@
  */
 
 import { createMediabunnyInputSource } from '@/infrastructure/browser/mediabunny-input-source'
+import { writeDecodedPreviewAudioToRoot } from '@/infrastructure/storage/workspace-fs/decoded-preview-audio'
 import { createLogger } from '@/shared/logging/logger'
 import { ensureAc3DecoderRegistered, isAc3AudioCodec } from '@/shared/utils/ac3-decoder'
-import { buildDownsampledStereo, downmixToStereo, produceDecodedBin } from './audio-decode-dsp'
+import {
+  buildDownsampledStereo,
+  downmixToStereo,
+  produceDecodedBin,
+  type DecodedAudioBinData,
+} from './audio-decode-dsp'
 import type {
   AudioDecodeBinResponse,
   AudioDecodeCompleteResponse,
@@ -54,6 +60,24 @@ function extractStereoChunk(sample: DecodeSampleData): {
   return { left, right, frameCount }
 }
 
+async function persistBinToWorkspace(
+  root: FileSystemDirectoryHandle,
+  mediaId: string,
+  bin: DecodedAudioBinData,
+): Promise<void> {
+  await writeDecodedPreviewAudioToRoot(root, {
+    id: `${mediaId}:bin:${bin.binIndex}`,
+    mediaId,
+    kind: 'bin',
+    binIndex: bin.binIndex,
+    left: bin.left.buffer as ArrayBuffer,
+    right: bin.right.buffer as ArrayBuffer,
+    frames: bin.frames,
+    sampleRate: bin.sampleRate,
+    createdAt: Date.now(),
+  })
+}
+
 async function decode(
   message: Extract<AudioDecodeWorkerMessage, { type: 'decode' }>,
 ): Promise<void> {
@@ -65,6 +89,7 @@ async function decode(
     fallbackBlob,
     binDurationSec,
     storageSampleRate,
+    workspaceRoot,
   } = message
 
   const mb = await import('mediabunny')
@@ -95,7 +120,10 @@ async function decode(
     let binAccumFrames = 0
     let binIndex = 0
 
-    const flushBin = () => {
+    // Persist the bin (when we own the workspace handle) BEFORE transferring its
+    // buffers to the main thread — transfer neuters the ArrayBuffers, so the
+    // write must read them first.
+    const flushBin = async () => {
       const bin = produceDecodedBin(
         binIndex,
         binLeftChunks,
@@ -104,6 +132,15 @@ async function decode(
         sampleRate,
         storageSampleRate,
       )
+      binIndex++
+      binLeftChunks = []
+      binRightChunks = []
+      binAccumFrames = 0
+
+      if (workspaceRoot) {
+        await persistBinToWorkspace(workspaceRoot, mediaId, bin)
+      }
+
       const response: AudioDecodeBinResponse = {
         type: 'bin',
         requestId,
@@ -114,10 +151,6 @@ async function decode(
         right: bin.right.buffer as ArrayBuffer,
       }
       self.postMessage(response, { transfer: [response.left, response.right] })
-      binIndex++
-      binLeftChunks = []
-      binRightChunks = []
-      binAccumFrames = 0
     }
 
     for await (const sample of sink.samples() as AsyncIterable<DecodeSampleData>) {
@@ -137,7 +170,7 @@ async function decode(
 
         const binFramesAtSource = binDurationSec * sampleRate
         if (binAccumFrames >= binFramesAtSource) {
-          flushBin()
+          await flushBin()
         }
       } finally {
         sample.close()
@@ -145,7 +178,7 @@ async function decode(
     }
 
     if (binAccumFrames > 0) {
-      flushBin()
+      await flushBin()
     }
 
     const complete: AudioDecodeCompleteResponse = {
