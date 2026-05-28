@@ -132,10 +132,29 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
       return withItemIndexes(normalizedItems, state)
     }),
   setTracks: (tracks) =>
-    set({
-      tracks: [...tracks]
-        .map((track) => normalizeTrack(track))
-        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    set((state) => {
+      // Preserve object identity for tracks that didn't change. normalizeTrack
+      // always allocates a new object, so without this every setTracks call
+      // (drop, mute, rename, reorder, resize) gives every track a fresh
+      // reference — breaking the identity-based memo on TimelineTrack
+      // (areTrackPropsEqual) and re-rendering every track row. When the caller
+      // passes the existing stored object, normalization is a no-op re-clone, so
+      // reuse the previous reference.
+      const previousById = new Map(state.tracks.map((track) => [track.id, track]))
+      const nextTracks = tracks
+        .map((track) => {
+          const previous = previousById.get(track.id)
+          return previous === track ? previous : normalizeTrack(track)
+        })
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+      // If the result is element-wise identical to the current tracks, keep the
+      // same array reference so `s.tracks` selectors don't fire at all.
+      const unchanged =
+        nextTracks.length === state.tracks.length &&
+        nextTracks.every((track, index) => track === state.tracks[index])
+
+      return { tracks: unchanged ? state.tracks : nextTracks }
     }),
 
   // Add item
