@@ -1639,6 +1639,13 @@ export const TimelineItem = memo(
                 zIndex: isBeingDragged ? 50 : undefined,
                 transition: isBeingDragged ? 'none' : undefined,
                 contain: 'layout style paint',
+                // Let the browser skip laying out/painting the interior (label,
+                // filmstrip, waveform, fade SVGs) of clips that are mounted in
+                // the cull buffer but currently off-screen. The box itself stays
+                // correctly sized by inset-y + explicit left/width, so the zoom
+                // reflow (--timeline-px-per-frame change) only pays interior
+                // layout for clips actually in the viewport.
+                contentVisibility: 'auto',
                 '--timeline-audio-volume-line-y': `${
                   item.type === 'audio' && audioVolumeEdit !== null
                     ? (getAudioVolumeLineY(
