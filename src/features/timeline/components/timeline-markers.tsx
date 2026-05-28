@@ -41,6 +41,11 @@ const TILE_WIDTH = 1000
 const MAX_VISIBLE_MINOR_MARKERS = 72
 const MIN_MINOR_TICK_SPACING_PX = 14
 
+// Tick marks rise from the ruler's bottom edge. Majors are taller to read as the
+// primary division; both stay short so they don't compete with the playhead/clip grid.
+const MAJOR_TICK_HEIGHT = 14
+const MINOR_TICK_HEIGHT = 7
+
 // Quantize pixelsPerSecond for cache keys to avoid redrawing on every minor zoom change
 // Uses logarithmic steps for perceptually uniform quantization across zoom range
 function quantizePPSForCache(pps: number): number {
@@ -133,8 +138,8 @@ function drawTile(
   // Use pre-computed marker interval (intervalInSeconds is already set correctly in config)
   const intervalInSeconds = markerConfig.intervalInSeconds
   const markerWidthPx = timeToPixels(intervalInSeconds)
-  const minorTickTop = canvasHeight - 16
-  const minorTickBottom = canvasHeight - 8
+  const majorTickTop = canvasHeight - MAJOR_TICK_HEIGHT
+  const minorTickTop = canvasHeight - MINOR_TICK_HEIGHT
 
   if (markerWidthPx <= 0) return
 
@@ -156,13 +161,13 @@ function drawTile(
     const absoluteX = timeToPixels(timeInSeconds)
     const x = absoluteX - tileOffset // Convert to tile-relative coordinate
 
-    // Major tick line - only draw if within tile bounds
+    // Major tick mark - bottom-anchored, only draw if within tile bounds
     if (x >= 0 && x <= actualTileWidth) {
       const lineX = Math.round(x) + 0.5
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.30)'
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.moveTo(lineX, 0)
+      ctx.moveTo(lineX, majorTickTop)
       ctx.lineTo(lineX, canvasHeight)
       ctx.stroke()
     }
@@ -173,7 +178,7 @@ function drawTile(
       const lastTickX = x + tickSpacing * (markerConfig.minorTicks - 1)
       if (lastTickX < 0 || x > actualTileWidth) continue
 
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)'
       ctx.lineWidth = 1
 
       for (let j = 1; j < markerConfig.minorTicks; j++) {
@@ -182,7 +187,7 @@ function drawTile(
 
         ctx.beginPath()
         ctx.moveTo(tickX, minorTickTop)
-        ctx.lineTo(tickX, minorTickBottom)
+        ctx.lineTo(tickX, canvasHeight)
         ctx.stroke()
       }
     }
@@ -259,7 +264,7 @@ function syncLabels(
       span.style.top = '2px'
       span.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
       span.style.fontFeatureSettings = '"tnum"'
-      span.style.textShadow = '1px 1px 0 rgba(0, 0, 0, 0.5)'
+      span.style.textShadow = '0 1px 2px rgba(0, 0, 0, 0.45)'
       span.style.zIndex = '24'
       container.appendChild(span)
       pool.set(i, span)
@@ -913,8 +918,7 @@ export const TimelineMarkers = memo(function TimelineMarkers({
       className="border-b border-border/80 relative"
       onMouseDown={handleMouseDown}
       style={{
-        background:
-          'linear-gradient(to bottom, oklch(0.22 0 0 / 0.30), oklch(0.22 0 0 / 0.20), oklch(0.22 0 0 / 0.10))',
+        background: 'oklch(0.22 0 0 / 0.22)',
         userSelect: 'none',
         height: EDITOR_LAYOUT_CSS_VALUES.timelineRulerHeight,
         width: width ? `${width}px` : undefined,
@@ -929,16 +933,6 @@ export const TimelineMarkers = memo(function TimelineMarkers({
         ref={labelsContainerRef}
         className="absolute inset-0 overflow-hidden pointer-events-none"
         style={{ contain: 'layout style paint' }}
-      />
-
-      {/* Vignette effects */}
-      <div
-        className="absolute inset-y-0 left-0 w-8 pointer-events-none"
-        style={{ background: 'linear-gradient(to right, oklch(0.15 0 0 / 0.15), transparent)' }}
-      />
-      <div
-        className="absolute inset-y-0 right-0 w-8 pointer-events-none"
-        style={{ background: 'linear-gradient(to left, oklch(0.15 0 0 / 0.15), transparent)' }}
       />
 
       {/* Full ruler highlight between in/out points */}
