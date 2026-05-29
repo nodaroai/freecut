@@ -604,6 +604,92 @@ async function repairLegacyProjectAvLayouts(
 /**
  * Save timeline to project in IndexedDB.
  */
+/**
+ * Serialize the current timeline domain stores into a {@link ProjectTimeline}.
+ *
+ * This is the pure store-serialization half of {@link saveTimeline}, factored
+ * out so callers that don't persist through workspace storage (e.g. the
+ * headless edit harness, which writes project.json itself) can obtain the
+ * timeline shape without the thumbnail-generation / storage-write side
+ * effects. fps lives in project.metadata, not the timeline.
+ */
+export function buildTimelineFromStores(): ProjectTimeline {
+  const itemsState = useItemsStore.getState()
+  const transitionsState = useTransitionsStore.getState()
+  const keyframesState = useKeyframesStore.getState()
+  const markersState = useMarkersStore.getState()
+  const settingsState = useTimelineSettingsStore.getState()
+  const currentFrame = usePlaybackStore.getState().currentFrame
+  const busAudioEq = usePlaybackStore.getState().busAudioEq
+  const masterBusDb = usePlaybackStore.getState().masterBusDb
+  const zoomLevel = useZoomStore.getState().level
+
+  const timeline: ProjectTimeline = {
+    tracks: itemsState.tracks as ProjectTimeline['tracks'],
+    items: itemsState.items as ProjectTimeline['items'],
+    ...(busAudioEq && { busAudioEq }),
+    masterBusDb,
+    currentFrame,
+    zoomLevel,
+    scrollPosition: settingsState.scrollPosition,
+    ...(markersState.inPoint !== null && { inPoint: markersState.inPoint }),
+    ...(markersState.outPoint !== null && { outPoint: markersState.outPoint }),
+    ...(markersState.markers.length > 0 && {
+      markers: markersState.markers.map((m) => ({
+        id: m.id,
+        frame: m.frame,
+        color: m.color,
+        ...(m.label && { label: m.label }),
+      })),
+    }),
+    ...(transitionsState.transitions.length > 0 && {
+      transitions: transitionsState.transitions.map(cloneTransitionForProject),
+    }),
+    ...(keyframesState.keyframes.length > 0 && {
+      keyframes: keyframesState.keyframes.map((ik) => ({
+        itemId: ik.itemId,
+        properties: ik.properties.map((pk) => ({
+          property: pk.property,
+          keyframes: pk.keyframes.map((k) => ({
+            id: k.id,
+            frame: k.frame,
+            value: k.value,
+            easing: k.easing,
+            ...(k.easingConfig && { easingConfig: k.easingConfig }),
+          })),
+        })),
+      })),
+    }),
+    // Sub-compositions (pre-comps)
+    ...(() => {
+      const comps = useCompositionsStore.getState().compositions
+      if (comps.length === 0) return {}
+      return {
+        compositions: comps.map((c) => ({
+          id: c.id,
+          name: c.name,
+          items: c.items as ProjectTimeline['items'],
+          tracks: c.tracks as ProjectTimeline['tracks'],
+          ...(c.transitions?.length && {
+            transitions: c.transitions.map(
+              cloneTransitionForProject,
+            ) as ProjectTimeline['transitions'],
+          }),
+          ...(c.keyframes?.length && { keyframes: c.keyframes as ProjectTimeline['keyframes'] }),
+          fps: c.fps,
+          width: c.width,
+          height: c.height,
+          durationInFrames: c.durationInFrames,
+          ...(c.backgroundColor && { backgroundColor: c.backgroundColor }),
+          ...(c.busAudioEq && { busAudioEq: c.busAudioEq }),
+        })),
+      }
+    })(),
+  }
+
+  return sanitizeTimelineEphemeralFields(timeline).timeline
+}
+
 export async function saveTimeline(projectId: string): Promise<void> {
   const opId = createOperationId()
   const event = logger.startEvent('saveTimeline', opId)
@@ -631,15 +717,12 @@ export async function saveTimeline(projectId: string): Promise<void> {
     }
   }
 
-  // Read directly from domain stores
+  // Read directly from domain stores (for the event log + thumbnail; the
+  // timeline shape itself comes from buildTimelineFromStores()).
   const itemsState = useItemsStore.getState()
   const transitionsState = useTransitionsStore.getState()
   const keyframesState = useKeyframesStore.getState()
-  const markersState = useMarkersStore.getState()
   const currentFrame = usePlaybackStore.getState().currentFrame
-  const busAudioEq = usePlaybackStore.getState().busAudioEq
-  const masterBusDb = usePlaybackStore.getState().masterBusDb
-  const zoomLevel = useZoomStore.getState().level
 
   event.merge({
     itemCount: itemsState.items.length,
@@ -661,72 +744,7 @@ export async function saveTimeline(projectId: string): Promise<void> {
       height: project.metadata?.height,
     })
 
-    const settingsState = useTimelineSettingsStore.getState()
-
-    // Build timeline data (fps is stored in project.metadata, not timeline)
-    const timeline: ProjectTimeline = {
-      tracks: itemsState.tracks as ProjectTimeline['tracks'],
-      items: itemsState.items as ProjectTimeline['items'],
-      ...(busAudioEq && { busAudioEq }),
-      masterBusDb,
-      currentFrame,
-      zoomLevel,
-      scrollPosition: settingsState.scrollPosition,
-      ...(markersState.inPoint !== null && { inPoint: markersState.inPoint }),
-      ...(markersState.outPoint !== null && { outPoint: markersState.outPoint }),
-      ...(markersState.markers.length > 0 && {
-        markers: markersState.markers.map((m) => ({
-          id: m.id,
-          frame: m.frame,
-          color: m.color,
-          ...(m.label && { label: m.label }),
-        })),
-      }),
-      ...(transitionsState.transitions.length > 0 && {
-        transitions: transitionsState.transitions.map(cloneTransitionForProject),
-      }),
-      ...(keyframesState.keyframes.length > 0 && {
-        keyframes: keyframesState.keyframes.map((ik) => ({
-          itemId: ik.itemId,
-          properties: ik.properties.map((pk) => ({
-            property: pk.property,
-            keyframes: pk.keyframes.map((k) => ({
-              id: k.id,
-              frame: k.frame,
-              value: k.value,
-              easing: k.easing,
-              ...(k.easingConfig && { easingConfig: k.easingConfig }),
-            })),
-          })),
-        })),
-      }),
-      // Sub-compositions (pre-comps)
-      ...(() => {
-        const comps = useCompositionsStore.getState().compositions
-        if (comps.length === 0) return {}
-        return {
-          compositions: comps.map((c) => ({
-            id: c.id,
-            name: c.name,
-            items: c.items as ProjectTimeline['items'],
-            tracks: c.tracks as ProjectTimeline['tracks'],
-            ...(c.transitions?.length && {
-              transitions: c.transitions.map(
-                cloneTransitionForProject,
-              ) as ProjectTimeline['transitions'],
-            }),
-            ...(c.keyframes?.length && { keyframes: c.keyframes as ProjectTimeline['keyframes'] }),
-            fps: c.fps,
-            width: c.width,
-            height: c.height,
-            durationInFrames: c.durationInFrames,
-            ...(c.backgroundColor && { backgroundColor: c.backgroundColor }),
-            ...(c.busAudioEq && { busAudioEq: c.busAudioEq }),
-          })),
-        }
-      })(),
-    }
-    const { timeline: sanitizedTimeline } = sanitizeTimelineEphemeralFields(timeline)
+    const sanitizedTimeline = buildTimelineFromStores()
 
     // Generate thumbnail — prefer capturing the existing preview canvas
     // (near-free: reuses the already-initialized scrub renderer with cached
@@ -848,6 +866,126 @@ export async function saveTimeline(projectId: string): Promise<void> {
  * 4. Persists migrated projects back to storage
  * 5. Restores timeline state to stores
  */
+/**
+ * Populate the timeline domain stores from an already-migrated Project object.
+ *
+ * This is the pure store-hydration half of {@link loadTimeline}, factored out
+ * so callers that already hold a Project (e.g. the headless render/edit
+ * harness, which has no workspace storage layer) can hydrate the stores
+ * without the storage read, migrated-project persist, or orphaned-media
+ * dialog side effects. {@link loadTimeline} calls this after reading +
+ * migrating from storage; it then runs media validation on top.
+ */
+export async function hydrateTimelineStoresFromProject(project: Project): Promise<void> {
+  if (project.timeline && project.timeline.tracks?.length > 0) {
+    const t = project.timeline
+
+    logger.debug('hydrateTimelineStoresFromProject: loading existing timeline', {
+      tracksCount: t.tracks?.length ?? 0,
+      itemsCount: t.items?.length ?? 0,
+      keyframesCount: t.keyframes?.length ?? 0,
+      transitionsCount: t.transitions?.length ?? 0,
+      schemaVersion: project.schemaVersion ?? 1,
+    })
+
+    // Restore tracks and items from project
+    // Sort tracks by order property to preserve user's track arrangement
+    const sortedTracks = [...(t.tracks || [])]
+      .map((track, index) => ({ track, originalIndex: index }))
+      .sort((a, b) => (a.track.order ?? a.originalIndex) - (b.track.order ?? b.originalIndex))
+      .map(({ track }) => ({
+        ...track,
+        items: [], // Items are stored separately
+      }))
+
+    // Restore all state to domain stores
+    const projectFps = project.metadata?.fps || 30
+    const sanitizedInOutPoints = sanitizeInOutPoints({
+      inPoint: t.inPoint ?? null,
+      outPoint: t.outPoint ?? null,
+      maxFrame: getEffectiveTimelineMaxFrame((t.items || []) as TimelineItem[], projectFps),
+    })
+    const hydratedItems = await reverseConformService.hydrateItems(
+      (t.items || []) as TimelineItem[],
+    )
+    useItemsStore.getState().setTracks(sortedTracks as TimelineTrack[])
+    useItemsStore.getState().setItems(hydratedItems)
+    useTransitionsStore.getState().setTransitions((t.transitions || []) as Transition[])
+    useKeyframesStore.getState().setKeyframes((t.keyframes || []) as ItemKeyframes[])
+    useMarkersStore.getState().setMarkers(t.markers || [])
+    useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint)
+    useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint)
+    useTimelineSettingsStore.getState().setScrollPosition(t.scrollPosition || 0)
+    usePlaybackStore.getState().setBusAudioEq(t.busAudioEq)
+    usePlaybackStore.getState().setMasterBusDb(t.masterBusDb ?? 0)
+
+    // Restore sub-compositions
+    if (t.compositions && t.compositions.length > 0) {
+      const hydratedCompositions = await Promise.all(
+        t.compositions.map(async (c) => ({
+          id: c.id,
+          name: c.name,
+          items: await reverseConformService.hydrateItems(c.items as TimelineItem[]),
+          tracks: c.tracks as TimelineTrack[],
+          transitions: (c.transitions ?? []) as Transition[],
+          keyframes: (c.keyframes ?? []) as ItemKeyframes[],
+          fps: c.fps,
+          width: c.width,
+          height: c.height,
+          durationInFrames: c.durationInFrames,
+          ...(c.backgroundColor && { backgroundColor: c.backgroundColor }),
+          ...(c.busAudioEq && { busAudioEq: c.busAudioEq }),
+        })),
+      )
+      useCompositionsStore.getState().setCompositions(hydratedCompositions)
+    } else {
+      useCompositionsStore.getState().setCompositions([])
+    }
+
+    // Reset composition navigation to root on load
+    useCompositionNavigationStore.getState().resetToRoot()
+
+    // Restore zoom and playback
+    if (t.zoomLevel !== undefined) {
+      useZoomStore.getState().setZoomLevel(t.zoomLevel)
+    } else {
+      useZoomStore.getState().setZoomLevel(1)
+    }
+    if (t.currentFrame !== undefined) {
+      usePlaybackStore.getState().setCurrentFrame(t.currentFrame)
+    } else {
+      usePlaybackStore.getState().setCurrentFrame(0)
+    }
+  } else {
+    logger.debug('hydrateTimelineStoresFromProject: initializing new project with default track')
+
+    // Initialize with default tracks for new projects
+    useItemsStore.getState().setTracks(createDefaultClassicTracks(DEFAULT_TRACK_HEIGHT))
+    useItemsStore.getState().setItems([])
+    useTransitionsStore.getState().setTransitions([])
+    useKeyframesStore.getState().setKeyframes([])
+    useMarkersStore.getState().setMarkers([])
+    useMarkersStore.getState().setInPoint(null)
+    useMarkersStore.getState().setOutPoint(null)
+    useCompositionsStore.getState().setCompositions([])
+    useCompositionNavigationStore.getState().resetToRoot()
+    useTimelineSettingsStore.getState().setScrollPosition(0)
+    useZoomStore.getState().setZoomLevel(1)
+    usePlaybackStore.getState().setCurrentFrame(0)
+    usePlaybackStore.getState().setBusAudioEq(undefined)
+  }
+
+  // Common setup for both cases
+  // fps is stored in project.metadata, not timeline
+  useTimelineSettingsStore.getState().setFps(project.metadata?.fps || 30)
+  // snapEnabled is UI state, seeded from the app-level default
+  useTimelineSettingsStore.getState().setSnapEnabled(useSettingsStore.getState().snapEnabled)
+  useTimelineSettingsStore.getState().markClean()
+
+  // Clear undo history when loading
+  useTimelineCommandStore.getState().clearHistory()
+}
+
 export async function loadTimeline(
   projectId: string,
   options: LoadTimelineOptions = {},
@@ -905,113 +1043,7 @@ export async function loadTimeline(
       logger.debug('Saved migrated project to storage')
     }
 
-    if (project.timeline && project.timeline.tracks?.length > 0) {
-      const t = project.timeline
-
-      logger.debug('loadTimeline: loading existing timeline', {
-        tracksCount: t.tracks?.length ?? 0,
-        itemsCount: t.items?.length ?? 0,
-        keyframesCount: t.keyframes?.length ?? 0,
-        transitionsCount: t.transitions?.length ?? 0,
-        schemaVersion: project.schemaVersion ?? 1,
-      })
-
-      // Restore tracks and items from project
-      // Sort tracks by order property to preserve user's track arrangement
-      const sortedTracks = [...(t.tracks || [])]
-        .map((track, index) => ({ track, originalIndex: index }))
-        .sort((a, b) => (a.track.order ?? a.originalIndex) - (b.track.order ?? b.originalIndex))
-        .map(({ track }) => ({
-          ...track,
-          items: [], // Items are stored separately
-        }))
-
-      // Restore all state to domain stores
-      const projectFps = project.metadata?.fps || 30
-      const sanitizedInOutPoints = sanitizeInOutPoints({
-        inPoint: t.inPoint ?? null,
-        outPoint: t.outPoint ?? null,
-        maxFrame: getEffectiveTimelineMaxFrame((t.items || []) as TimelineItem[], projectFps),
-      })
-      const hydratedItems = await reverseConformService.hydrateItems(
-        (t.items || []) as TimelineItem[],
-      )
-      useItemsStore.getState().setTracks(sortedTracks as TimelineTrack[])
-      useItemsStore.getState().setItems(hydratedItems)
-      useTransitionsStore.getState().setTransitions((t.transitions || []) as Transition[])
-      useKeyframesStore.getState().setKeyframes((t.keyframes || []) as ItemKeyframes[])
-      useMarkersStore.getState().setMarkers(t.markers || [])
-      useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint)
-      useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint)
-      useTimelineSettingsStore.getState().setScrollPosition(t.scrollPosition || 0)
-      usePlaybackStore.getState().setBusAudioEq(t.busAudioEq)
-      usePlaybackStore.getState().setMasterBusDb(t.masterBusDb ?? 0)
-
-      // Restore sub-compositions
-      if (t.compositions && t.compositions.length > 0) {
-        const hydratedCompositions = await Promise.all(
-          t.compositions.map(async (c) => ({
-            id: c.id,
-            name: c.name,
-            items: await reverseConformService.hydrateItems(c.items as TimelineItem[]),
-            tracks: c.tracks as TimelineTrack[],
-            transitions: (c.transitions ?? []) as Transition[],
-            keyframes: (c.keyframes ?? []) as ItemKeyframes[],
-            fps: c.fps,
-            width: c.width,
-            height: c.height,
-            durationInFrames: c.durationInFrames,
-            ...(c.backgroundColor && { backgroundColor: c.backgroundColor }),
-            ...(c.busAudioEq && { busAudioEq: c.busAudioEq }),
-          })),
-        )
-        useCompositionsStore.getState().setCompositions(hydratedCompositions)
-      } else {
-        useCompositionsStore.getState().setCompositions([])
-      }
-
-      // Reset composition navigation to root on load
-      useCompositionNavigationStore.getState().resetToRoot()
-
-      // Restore zoom and playback
-      if (t.zoomLevel !== undefined) {
-        useZoomStore.getState().setZoomLevel(t.zoomLevel)
-      } else {
-        useZoomStore.getState().setZoomLevel(1)
-      }
-      if (t.currentFrame !== undefined) {
-        usePlaybackStore.getState().setCurrentFrame(t.currentFrame)
-      } else {
-        usePlaybackStore.getState().setCurrentFrame(0)
-      }
-    } else {
-      logger.debug('loadTimeline: initializing new project with default track')
-
-      // Initialize with default tracks for new projects
-      useItemsStore.getState().setTracks(createDefaultClassicTracks(DEFAULT_TRACK_HEIGHT))
-      useItemsStore.getState().setItems([])
-      useTransitionsStore.getState().setTransitions([])
-      useKeyframesStore.getState().setKeyframes([])
-      useMarkersStore.getState().setMarkers([])
-      useMarkersStore.getState().setInPoint(null)
-      useMarkersStore.getState().setOutPoint(null)
-      useCompositionsStore.getState().setCompositions([])
-      useCompositionNavigationStore.getState().resetToRoot()
-      useTimelineSettingsStore.getState().setScrollPosition(0)
-      useZoomStore.getState().setZoomLevel(1)
-      usePlaybackStore.getState().setCurrentFrame(0)
-      usePlaybackStore.getState().setBusAudioEq(undefined)
-    }
-
-    // Common setup for both cases
-    // fps is stored in project.metadata, not timeline
-    useTimelineSettingsStore.getState().setFps(project.metadata?.fps || 30)
-    // snapEnabled is UI state, seeded from the app-level default
-    useTimelineSettingsStore.getState().setSnapEnabled(useSettingsStore.getState().snapEnabled)
-    useTimelineSettingsStore.getState().markClean()
-
-    // Clear undo history when loading
-    useTimelineCommandStore.getState().clearHistory()
+    await hydrateTimelineStoresFromProject(project)
 
     // Validate media references after loading timeline
     const loadedItems = useItemsStore.getState().items
