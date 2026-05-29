@@ -33,6 +33,7 @@
     "test:preview-sync": "vp test run src/features/preview/components/video-preview.sync.test.tsx",
     "test:preview-sync:stress": "node scripts/preview-sync-stress.mjs --runs 20",
     "test:coverage": "vp test run --coverage",
+    "headless": "node headless/render.mjs",
     "changelog:append": "node scripts/changelog-append.mjs",
     "changelog:rollup": "node scripts/changelog-rollup.mjs",
     "prepare": "vp config"
@@ -99,6 +100,7 @@
     "@vitejs/plugin-react": "6.0.1",
     "@webgpu/types": "0.1.69",
     "jsdom": "27.4.0",
+    "playwright": "^1.60.0",
     "tailwindcss": "4.2.2",
     "typescript": "5.9.3",
     "vite-plus": "0.1.19"

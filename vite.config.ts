@@ -70,6 +70,13 @@ export default defineConfig({
     // Keep warnings focused on unexpected growth rather than this known outlier.
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
+      // Multi-entry: the editor app (index.html) plus the headless render
+      // harness (headless.html), a UI-less entry that exposes window.freecut
+      // for the Node/Playwright headless render+edit CLI.
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        headless: fileURLToPath(new URL('./headless.html', import.meta.url)),
+      },
       output: {
         manualChunks: (id) => {
           // Logger must be in its own chunk to avoid circular chunk TDZ errors.
