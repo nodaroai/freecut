@@ -9,6 +9,7 @@ import {
   FolderArchive,
   Github,
   Keyboard,
+  ListVideo,
   Save,
   Settings,
   Sparkles,
@@ -50,6 +51,9 @@ interface ToolbarProps {
   onSave?: () => Promise<void>
   onExport?: () => void
   onExportBundle?: () => void
+  onOpenRenderQueue?: () => void
+  /** Number of queued + rendering jobs, shown as a badge on the queue button. */
+  renderQueueCount?: number
 }
 
 export const Toolbar = memo(function Toolbar({
@@ -59,6 +63,8 @@ export const Toolbar = memo(function Toolbar({
   onSave,
   onExport,
   onExportBundle,
+  onOpenRenderQueue,
+  renderQueueCount = 0,
 }: ToolbarProps) {
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -253,6 +259,25 @@ export const Toolbar = memo(function Toolbar({
           </div>
           {t('toolbar.save')}
         </Button>
+
+        {onOpenRenderQueue && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-7 w-7 relative"
+            onClick={onOpenRenderQueue}
+            data-tooltip={t('toolbar.renderQueue')}
+            data-tooltip-side="bottom"
+            aria-label={t('toolbar.renderQueueAria')}
+          >
+            <ListVideo className="h-4 w-4" />
+            {renderQueueCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground">
+                {renderQueueCount}
+              </span>
+            )}
+          </Button>
+        )}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

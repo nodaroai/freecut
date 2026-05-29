@@ -163,6 +163,23 @@ export {
   type OrphanSweepOptions,
 } from '@/infrastructure/storage/workspace-fs/orphan-sweep'
 
+// Final render outputs (export queue)
+export {
+  saveExportFile,
+  listExportFiles,
+  readExportFile,
+  deleteExportFile,
+  type SavedExport,
+  type ExportFileEntry,
+} from '@/infrastructure/storage/workspace-fs/exports'
+
+// Per-project render-queue persistence
+export {
+  loadRenderQueue,
+  saveRenderQueue,
+  deleteRenderQueue,
+} from '@/infrastructure/storage/workspace-fs/render-queue'
+
 // Soft-delete / trash for projects
 export {
   softDeleteProject,

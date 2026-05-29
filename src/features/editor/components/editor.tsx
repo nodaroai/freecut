@@ -35,7 +35,13 @@ import { usePlaybackStore } from '@/shared/state/playback'
 import { useEditorStore } from '@/shared/state/editor'
 import { clearPreviewAudioCache } from '@/features/editor/deps/composition-runtime'
 import { useProjectStore } from '@/features/editor/deps/projects'
-import { importExportDialog } from '@/features/editor/deps/export-contract'
+import {
+  importExportDialog,
+  importExportsDialog,
+  RenderQueuePersistence,
+  RenderQueueRunner,
+  useRenderQueueStore,
+} from '@/features/editor/deps/export-contract'
 import { prewarmEffectPreviews } from '@/features/editor/deps/effects-contract'
 import { getEditorLayout, getEditorLayoutCssVars } from '@/config/editor-layout'
 import {
@@ -62,6 +68,11 @@ const LazyExportDialog = lazy(() =>
 const LazyBundleExportDialog = lazy(() =>
   importBundleExportDialog().then((module) => ({
     default: module.BundleExportDialog,
+  })),
+)
+const LazyExportsDialog = lazy(() =>
+  importExportsDialog().then((module) => ({
+    default: module.ExportsDialog,
   })),
 )
 const LazyClearKeyframesDialog = lazy(() =>
@@ -230,6 +241,10 @@ export const LoadedEditor = memo(function LoadedEditor({
   const router = useRouter()
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [bundleExportDialogOpen, setBundleExportDialogOpen] = useState(false)
+  const [renderQueueOpen, setRenderQueueOpen] = useState(false)
+  const renderQueueActiveCount = useRenderQueueStore(
+    (s) => s.jobs.filter((j) => j.status === 'queued' || j.status === 'rendering').length,
+  )
   const [bundleFileHandle, setBundleFileHandle] = useState<FileSystemFileHandle | undefined>()
   const editorDensity = useSettingsStore((s) => s.editorDensity)
   const snapEnabledPreference = useSettingsStore((s) => s.snapEnabled)
@@ -412,6 +427,11 @@ export const LoadedEditor = memo(function LoadedEditor({
     setExportDialogOpen(true)
   }, [])
 
+  const handleOpenRenderQueue = useCallback(() => {
+    void importExportsDialog()
+    setRenderQueueOpen(true)
+  }, [])
+
   const handleExportBundle = useCallback(async () => {
     void preloadBundleExportDialog()
 
@@ -480,6 +500,8 @@ export const LoadedEditor = memo(function LoadedEditor({
           onSave={handleSave}
           onExport={handleExport}
           onExportBundle={handleExportBundle}
+          onOpenRenderQueue={handleOpenRenderQueue}
+          renderQueueCount={renderQueueActiveCount}
         />
       </InteractionLockRegion>
 
@@ -569,7 +591,16 @@ export const LoadedEditor = memo(function LoadedEditor({
       <Suspense fallback={null}>
         {/* Export Dialog */}
         {exportDialogOpen && (
-          <LazyExportDialog open={exportDialogOpen} onClose={() => setExportDialogOpen(false)} />
+          <LazyExportDialog
+            open={exportDialogOpen}
+            onClose={() => setExportDialogOpen(false)}
+            onOpenRenderQueue={handleOpenRenderQueue}
+          />
+        )}
+
+        {/* Exports + render queue dialog */}
+        {renderQueueOpen && (
+          <LazyExportsDialog open={renderQueueOpen} onClose={() => setRenderQueueOpen(false)} />
         )}
 
         {/* Bundle Export Dialog */}
@@ -586,6 +617,10 @@ export const LoadedEditor = memo(function LoadedEditor({
           />
         )}
       </Suspense>
+
+      {/* Restores/persists the per-project queue, and drains it serially. */}
+      <RenderQueuePersistence projectId={projectId} />
+      <RenderQueueRunner />
 
       <EditorDialogHost projectId={projectId} />
 
