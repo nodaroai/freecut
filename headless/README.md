@@ -141,6 +141,16 @@ Safe by default: with neither `--out` nor `--in-place` it's a dry run.
 | `split` | `id`, `frame` |
 | `trimStart` / `trimEnd` | `id`, `amount` |
 | `addTransition` | `leftClipId`, `rightClipId`, `type?`, `durationInFrames?` |
+| `addClip` | `mediaId`, `from`, `trackId?`, `durationInFrames?` (video adds a linked audio companion; source range computed from the media's metadata) |
+| `addTrack` | `kind?` (`video`\|`audio`), `order?` |
+| `addKeyframe` | `itemId`, `property`, `frame`, `value`, `easing?` |
+| `removeKeyframes` | `itemId`, `property` |
+| `addEffect` | `itemId`, `gpuEffectType` + `params?` (or a full `effect` object) |
+| `removeEffect` | `itemId`, `effectId` |
+| `setTransform` | `id`, `transform` (e.g. `{ "x": 0, "y": 150, "opacity": 0.5, "rotation": 0 }`) |
+
+`addClip` reads the media's `metadata.json` (passed automatically by the CLI),
+so its source range, fps, and audio companion match an in-app import.
 
 ```json
 [

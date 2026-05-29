@@ -33,7 +33,7 @@ import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadProject } from './lib/workspace.mjs'
+import { loadProject, readMediaMetadata } from './lib/workspace.mjs'
 import { createHarnessServer } from './server.mjs'
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -105,6 +105,19 @@ async function main() {
   console.log(`Project: ${project.name ?? project.id} (${projectJsonPath})`)
   console.log(`Ops: ${ops.length}`)
 
+  // Collect metadata for media referenced by addClip ops (for duration/fps/codec).
+  const addClipMediaIds = [
+    ...new Set(ops.filter((o) => o.op === 'addClip' && o.mediaId).map((o) => o.mediaId)),
+  ]
+  const media = addClipMediaIds.map((mediaId) => ({
+    mediaId,
+    metadata: readMediaMetadata(args.workspace, mediaId) ?? undefined,
+  }))
+  const missingMeta = media.filter((m) => !m.metadata).map((m) => m.mediaId)
+  if (missingMeta.length > 0) {
+    throw new Error(`addClip media not found in workspace: ${missingMeta.join(', ')}`)
+  }
+
   const { harnessUrl, close } = await startHarness(args)
   const browser = await chromium.launch({ channel: 'chrome', headless: !args.head })
   let result
@@ -118,7 +131,11 @@ async function main() {
     })
     await page.goto(harnessUrl, { waitUntil: 'load', timeout: 60_000 })
     await page.waitForFunction(() => Boolean(window.freecut?.ready), { timeout: 30_000 })
-    result = await page.evaluate((payload) => window.freecut.editProject(payload), { project, ops })
+    result = await page.evaluate((payload) => window.freecut.editProject(payload), {
+      project,
+      ops,
+      media,
+    })
   } finally {
     await browser.close()
     await close()

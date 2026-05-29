@@ -8,7 +8,18 @@
  * storage layer is required.
  */
 import type { Project } from '@/types/project'
-import type { TimelineItem, TimelineTrack, TextItem } from '@/types/timeline'
+import type {
+  TimelineItem,
+  TimelineTrack,
+  TextItem,
+  VideoItem,
+  AudioItem,
+  ImageItem,
+} from '@/types/timeline'
+import type { MediaMetadata } from '@/types/storage'
+import type { AnimatableProperty, EasingType } from '@/types/keyframe'
+import type { VisualEffect } from '@/types/effects'
+import type { TransformProperties } from '@/types/transform'
 
 import { createLogger } from '@/shared/logging/logger'
 import { migrateProject } from '@/shared/projects/migrations'
@@ -17,6 +28,9 @@ import {
   buildTimelineFromStores,
 } from '@/features/timeline/stores/timeline-persistence'
 import { useItemsStore } from '@/features/timeline/stores/items-store'
+import { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
+import { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
+import { createClassicTrack } from '@/features/timeline/utils/classic-tracks'
 import {
   addItem,
   updateItem,
@@ -26,6 +40,12 @@ import {
   trimItemStart,
   trimItemEnd,
   addTransition,
+  setTracks,
+  addKeyframe,
+  removeKeyframesForProperty,
+  addEffect,
+  removeEffect,
+  updateItemTransform,
 } from '@/features/timeline/stores/timeline-actions'
 
 const log = createLogger('HeadlessEdit')
@@ -36,6 +56,8 @@ export type EditOp = Record<string, unknown> & { op: string }
 export interface HeadlessEditInput {
   project: Project
   ops: EditOp[]
+  /** MediaMetadata for any media referenced by ops (e.g. addClip), keyed for codec/fps/duration lookups. */
+  media?: Array<{ mediaId: string; metadata?: MediaMetadata }>
 }
 
 export interface HeadlessEditResult {
@@ -55,6 +77,18 @@ function tracks(): TimelineTrack[] {
   return useItemsStore.getState().tracks
 }
 
+/** Seed the media-library store so addClip can read media duration/fps/dimensions. */
+function seedMediaLibrary(media: HeadlessEditInput['media']): void {
+  const metadatas = (media ?? [])
+    .map((m) => m.metadata)
+    .filter((m): m is MediaMetadata => Boolean(m))
+  if (metadatas.length === 0) return
+  const existing = useMediaLibraryStore.getState()
+  const mediaById = { ...existing.mediaById }
+  for (const meta of metadatas) mediaById[meta.id] = meta
+  useMediaLibraryStore.setState({ mediaItems: Object.values(mediaById), mediaById })
+}
+
 /** Resolve a usable trackId: the requested one if it exists, else the first non-group video track. */
 function resolveTrackId(preferred: unknown, kind: 'video' | 'audio' = 'video'): string {
   const all = tracks()
@@ -68,6 +102,33 @@ function resolveTrackId(preferred: unknown, kind: 'video' | 'audio' = 'video'): 
 
 function newId(): string {
   return crypto.randomUUID()
+}
+
+/** Find a non-group track of the given kind, or create one (video on top, audio at bottom). */
+function getOrCreateTrack(kind: 'video' | 'audio'): string {
+  const all = tracks()
+  const existing = all.find((t) => !t.isGroup && (t.kind ?? 'video') === kind)
+  if (existing) return existing.id
+  const orders = all.map((t) => t.order)
+  const order = kind === 'video' ? Math.min(0, ...orders) - 1 : Math.max(0, ...orders) + 1
+  const track = createClassicTrack({ tracks: all, kind, order })
+  setTracks([...all, track])
+  return track.id
+}
+
+/** The requested track if it exists, else find-or-create one of the given kind. */
+function resolveOrCreateTrack(preferred: unknown, kind: 'video' | 'audio'): string {
+  const requested = asString(preferred)
+  if (requested && tracks().some((t) => t.id === requested)) return requested
+  return getOrCreateTrack(kind)
+}
+
+/** Source-frame fields for a media clip (source* are in source-native fps). */
+function sourceFieldsFor(media: MediaMetadata, projectFps: number) {
+  const sourceFps = media.fps && media.fps > 0 ? media.fps : projectFps
+  const durationSec = media.duration ?? 0
+  const sourceEnd = Math.max(1, Math.round(durationSec * sourceFps))
+  return { sourceFps, sourceStart: 0, sourceEnd, sourceDuration: sourceEnd, speed: 1 }
 }
 
 function buildTextItem(op: EditOp): TextItem {
@@ -164,6 +225,163 @@ function applyOp(op: EditOp): unknown {
       )
       return { added }
     }
+    case 'addTrack': {
+      const kind = op.kind === 'audio' ? 'audio' : 'video'
+      const all = tracks()
+      const orders = all.map((t) => t.order)
+      const order =
+        asNumber(op.order) ??
+        (kind === 'video' ? Math.min(0, ...orders) - 1 : Math.max(0, ...orders) + 1)
+      const track = createClassicTrack({ tracks: all, kind, order })
+      setTracks([...all, track])
+      return { trackId: track.id, name: track.name }
+    }
+    case 'addClip': {
+      const mediaId = asString(op.mediaId)
+      if (!mediaId) throw new Error('addClip requires `mediaId`')
+      const media = useMediaLibraryStore.getState().mediaById[mediaId]
+      if (!media) {
+        throw new Error(
+          `addClip: no metadata for media ${mediaId} (pass it via the CLI's media list)`,
+        )
+      }
+      const from = asNumber(op.from, 0)!
+      const projectFps = useTimelineSettingsStore.getState().fps || 30
+      const created: Array<{ id: string; type: string }> = []
+      const label = media.fileName ?? mediaId
+
+      if (media.mimeType.startsWith('image/')) {
+        const item: ImageItem = {
+          id: newId(),
+          type: 'image',
+          trackId: resolveOrCreateTrack(op.trackId, 'video'),
+          from,
+          durationInFrames: asNumber(op.durationInFrames, 150)!,
+          label,
+          mediaId,
+          src: '',
+          ...(media.width ? { sourceWidth: media.width } : {}),
+          ...(media.height ? { sourceHeight: media.height } : {}),
+        }
+        addItem(item)
+        created.push({ id: item.id, type: 'image' })
+      } else if (media.mimeType.startsWith('audio/')) {
+        const sf = sourceFieldsFor(media, projectFps)
+        const item: AudioItem = {
+          id: newId(),
+          type: 'audio',
+          trackId: resolveOrCreateTrack(op.trackId, 'audio'),
+          from,
+          durationInFrames:
+            asNumber(op.durationInFrames) ??
+            Math.max(1, Math.round((media.duration ?? 0) * projectFps)),
+          label,
+          mediaId,
+          src: '',
+          volume: 0,
+          ...sf,
+        }
+        addItem(item)
+        created.push({ id: item.id, type: 'audio' })
+      } else if (media.mimeType.startsWith('video/')) {
+        const sf = sourceFieldsFor(media, projectFps)
+        const durationInFrames =
+          asNumber(op.durationInFrames) ??
+          Math.max(1, Math.round((media.duration ?? 0) * projectFps))
+        const linkedGroupId = crypto.randomUUID()
+        const video: VideoItem = {
+          id: newId(),
+          type: 'video',
+          trackId: resolveOrCreateTrack(op.trackId, 'video'),
+          from,
+          durationInFrames,
+          label,
+          mediaId,
+          src: '',
+          volume: 0,
+          linkedGroupId,
+          ...(media.width ? { sourceWidth: media.width } : {}),
+          ...(media.height ? { sourceHeight: media.height } : {}),
+          ...sf,
+        }
+        addItem(video)
+        created.push({ id: video.id, type: 'video' })
+        // Linked audio companion (as the app creates on import) so audio renders.
+        if (media.audioCodec) {
+          const audio: AudioItem = {
+            id: newId(),
+            type: 'audio',
+            trackId: getOrCreateTrack('audio'),
+            from,
+            durationInFrames,
+            label: `${label} audio`,
+            mediaId,
+            src: '',
+            volume: 0,
+            linkedGroupId,
+            ...sf,
+          }
+          addItem(audio)
+          created.push({ id: audio.id, type: 'audio' })
+        }
+      } else {
+        throw new Error(`addClip: unsupported media mimeType ${media.mimeType}`)
+      }
+      return { created }
+    }
+    case 'addKeyframe': {
+      const itemId = asString(op.itemId)
+      const property = asString(op.property)
+      const frame = asNumber(op.frame)
+      const value = asNumber(op.value)
+      if (!itemId || !property || frame === undefined || value === undefined) {
+        throw new Error('addKeyframe requires `itemId`, `property`, `frame`, `value`')
+      }
+      const keyframeId = addKeyframe(
+        itemId,
+        property as AnimatableProperty,
+        frame,
+        value,
+        asString(op.easing) as EasingType | undefined,
+      )
+      if (!keyframeId) throw new Error(`addKeyframe failed (item ${itemId} @ frame ${frame})`)
+      return { keyframeId }
+    }
+    case 'removeKeyframes': {
+      const itemId = asString(op.itemId)
+      const property = asString(op.property)
+      if (!itemId || !property) throw new Error('removeKeyframes requires `itemId` and `property`')
+      removeKeyframesForProperty(itemId, property as AnimatableProperty)
+      return { itemId, property }
+    }
+    case 'addEffect': {
+      const itemId = asString(op.itemId)
+      if (!itemId) throw new Error('addEffect requires `itemId`')
+      const effect =
+        op.effect && typeof op.effect === 'object'
+          ? op.effect
+          : op.gpuEffectType
+            ? { type: 'gpu-effect', gpuEffectType: op.gpuEffectType, params: op.params ?? {} }
+            : null
+      if (!effect) throw new Error('addEffect requires `effect` or `gpuEffectType`')
+      addEffect(itemId, effect as VisualEffect)
+      return { itemId }
+    }
+    case 'removeEffect': {
+      const itemId = asString(op.itemId)
+      const effectId = asString(op.effectId)
+      if (!itemId || !effectId) throw new Error('removeEffect requires `itemId` and `effectId`')
+      removeEffect(itemId, effectId)
+      return { itemId, effectId }
+    }
+    case 'setTransform': {
+      const id = asString(op.id)
+      if (!id || !op.transform || typeof op.transform !== 'object') {
+        throw new Error('setTransform requires `id` and `transform`')
+      }
+      updateItemTransform(id, op.transform as Partial<TransformProperties>)
+      return { id }
+    }
     default:
       throw new Error(`Unknown edit op: ${String(op.op)}`)
   }
@@ -172,6 +390,7 @@ function applyOp(op: EditOp): unknown {
 export async function editProject(input: HeadlessEditInput): Promise<HeadlessEditResult> {
   const { project: migrated } = migrateProject(input.project)
   await hydrateTimelineStoresFromProject(migrated)
+  seedMediaLibrary(input.media)
 
   log.info('Headless edit starting', { ops: input.ops.length })
 
