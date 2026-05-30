@@ -30,8 +30,10 @@ import { useProjectStore } from '@/features/editor/deps/projects'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
 import {
   clearMediaDragData,
+  importMediaLibrary,
   setMediaDragData,
 } from '@/features/editor/deps/media-library'
+import { importKeyframeGraphPanel } from '@/features/editor/deps/timeline-contract'
 import {
   createDefaultAdjustmentItem,
   createDefaultShapeItem,
@@ -59,14 +61,12 @@ import {
 const logger = createLogger('MediaSidebar')
 const TEXT_TEMPLATE_PREVIEW_SHELL =
   'w-full aspect-video rounded-sm border border-border bg-slate-950'
-const LazyAiPanel = lazy(() =>
-  import('./ai-panel').then((module) => ({ default: module.AiPanel })),
-)
+const LazyAiPanel = lazy(() => import('./ai-panel').then((module) => ({ default: module.AiPanel })))
 const LazyTransitionsPanel = lazy(() =>
   import('./transitions-panel').then((module) => ({ default: module.TransitionsPanel })),
 )
 const LazyKeyframeGraphPanel = lazy(() =>
-  import('@/features/timeline/components/keyframe-graph-panel').then((module) => ({
+  importKeyframeGraphPanel().then((module) => ({
     default: module.KeyframeGraphPanel,
   })),
 )
@@ -76,7 +76,7 @@ const LazyEffectsTab = lazy(() =>
   })),
 )
 const LazyMediaLibrary = lazy(() =>
-  import('@/features/media-library/components/media-library').then((module) => ({
+  importMediaLibrary().then((module) => ({
     default: module.MediaLibrary,
   })),
 )

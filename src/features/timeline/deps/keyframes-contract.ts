@@ -16,6 +16,9 @@ export {
 } from '@/features/keyframes/utils/animated-text-item'
 export { getBezierPresetForEasing } from '@/features/keyframes/utils/easing-presets'
 export {
-  isFrameInTransitionRegion,
   getTransitionBlockedRanges,
+  isFrameInTransitionRegion,
 } from '@/features/keyframes/utils/transition-region'
+export { DopesheetEditor } from '@/features/keyframes/components/dopesheet-editor'
+export { getAnimatablePropertiesForItem } from '@/features/keyframes/utils/animatable-properties'
+export { getEffectPropertyBaseValue } from '@/features/keyframes/utils/effect-animatable-properties'

@@ -1,1 +1,1 @@
-export { subtitleSidecarService } from '@/features/media-library/services/subtitle-sidecar-service'
+export { subtitleSidecarService } from './media-library-contract'

@@ -1,1 +1,1 @@
-export { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
+export { useMediaLibraryStore } from './media-library-contract'

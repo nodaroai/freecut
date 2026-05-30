@@ -9,6 +9,10 @@ export { useItemsStore } from '../stores/items-store'
 export { useKeyframesStore } from '../stores/keyframes-store'
 export { useCompositionsStore } from '../stores/compositions-store'
 export { useTimelineCommandStore } from '../stores/timeline-command-store'
+export { useBentoLayoutDialogStore } from '../components/bento-layout-dialog-store'
+export { useReverseConformDialogStore } from '../stores/reverse-conform-dialog-store'
+export { useSilenceRemovalDialogStore } from '../stores/silence-removal-dialog-store'
+export { useFillerRemovalDialogStore } from '../stores/filler-removal-dialog-store'
 export { captureSnapshot } from '../stores/commands/snapshot'
 export { Timeline } from '../components/timeline'
 export { useTimelineShortcuts } from '../hooks/use-timeline-shortcuts'
@@ -34,3 +38,8 @@ export { initTransitionChainSubscription } from '../stores/transition-chain-stor
 export const importGifFrameCache = () => import('../services/gif-frame-cache')
 export const importFilmstripCache = () => import('../services/filmstrip-cache')
 export const importWaveformCache = () => import('../services/waveform-cache')
+export const importKeyframeGraphPanel = () => import('../components/keyframe-graph-panel')
+export const importBentoLayoutDialog = () => import('../components/bento-layout-dialog')
+export const importReverseConformDialog = () => import('../components/reverse-conform-dialog')
+export const importSilenceRemovalDialog = () => import('../components/silence-removal-dialog')
+export const importFillerRemovalDialog = () => import('../components/filler-removal-dialog')

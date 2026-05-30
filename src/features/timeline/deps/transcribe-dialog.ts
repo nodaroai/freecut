@@ -1,4 +1,1 @@
-export {
-  TranscribeDialog,
-  type TranscribeDialogValues,
-} from '@/features/media-library/components/transcribe-dialog'
+export { TranscribeDialog, type TranscribeDialogValues } from './media-library-contract'

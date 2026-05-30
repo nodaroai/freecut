@@ -1,24 +1,20 @@
 export {
-  resolveMediaUrl,
-  resolveProxyUrl,
-  resolveMediaUrls,
   cleanupBlobUrls,
-} from '@/features/media-library/utils/media-resolver'
+  resolveMediaUrl,
+  resolveMediaUrls,
+  resolveProxyUrl,
+} from './media-library-contract'
 export {
-  getMediaDragData,
-  setMediaDragData,
   clearMediaDragData,
   type CompositionDragData,
+  getMediaDragData,
+  setMediaDragData,
   type TimelineTemplateDragData,
-} from '@/features/media-library/utils/drag-data-cache'
+} from './media-library-contract'
 export {
   extractValidMediaFileEntriesFromDataTransfer,
   supportsFileSystemDragDrop,
   type ExtractedMediaFileEntry,
-} from '@/features/media-library/utils/file-drop'
-export type { OrphanedClipInfo } from '@/features/media-library/types'
-export {
-  getMediaType,
-  getMimeType,
-} from '@/features/media-library/utils/validation'
-export { mediaProcessorService } from '@/features/media-library/services/media-processor-service'
+} from './media-library-contract'
+export type { OrphanedClipInfo } from './media-library-contract'
+export { getMediaType, getMimeType, mediaProcessorService } from './media-library-contract'

@@ -1,7 +1,5 @@
-export {
-  mediaTranscriptionService,
-} from '@/features/media-library/services/media-transcription-service'
+export { mediaTranscriptionService } from './media-library-contract'
 export {
   getMediaTranscriptionModelLabel,
   getMediaTranscriptionModelOptions,
-} from '@/features/media-library/transcription/registry'
+} from './media-library-contract'
