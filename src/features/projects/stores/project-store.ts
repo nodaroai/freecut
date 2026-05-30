@@ -318,6 +318,10 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
             // on bootstrap) runs media cleanup on trashed projects past
             // their TTL.
             const marker = await softDeleteProject(id)
+            set((state) => ({
+              projects: state.projects.filter((project) => project.id !== id),
+              currentProject: state.currentProject?.id === id ? null : state.currentProject,
+            }))
 
             return {
               localFilesDeleted,
