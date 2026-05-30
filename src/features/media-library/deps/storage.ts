@@ -13,6 +13,7 @@ export {
   deleteThumbnailsByMediaId,
   deleteTranscript,
   getAllMedia,
+  getAllMediaMetadata,
   getMedia,
   getMediaForProject,
   getProjectMediaIds,

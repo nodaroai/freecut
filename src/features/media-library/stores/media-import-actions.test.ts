@@ -227,7 +227,7 @@ describe('createImportActions', () => {
     expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([])
   })
 
-  it('processes dropped files one at a time to avoid import decode bursts', async () => {
+  it('processes dropped files with bounded parallelism while preserving result order', async () => {
     const firstFile = new File(['video-1'], 'first.mp4', { type: 'video/mp4' })
     const secondFile = new File(['video-2'], 'second.mp4', { type: 'video/mp4' })
     const handles = [createHandle(firstFile), createHandle(secondFile)]
@@ -255,7 +255,7 @@ describe('createImportActions', () => {
     const importPromise = actions.importHandles(handles)
 
     await flushMicrotasks()
-    expect(mediaLibraryServiceMocks.importMediaWithHandle).toHaveBeenCalledTimes(1)
+    expect(mediaLibraryServiceMocks.importMediaWithHandle).toHaveBeenCalledTimes(2)
 
     firstResolve(imported[0]!)
     const result = await importPromise

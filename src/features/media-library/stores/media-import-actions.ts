@@ -19,7 +19,7 @@ type Get = () => MediaLibraryState & MediaLibraryActions
 
 type ImportedMetadata = MediaMetadata & { isDuplicate?: boolean; hasUnsupportedCodec?: boolean }
 
-const IMPORT_PROCESSING_CONCURRENCY = 1
+const IMPORT_PROCESSING_CONCURRENCY = 2
 
 interface ImportTask {
   handle: FileSystemFileHandle

@@ -25,7 +25,6 @@ import { useSelectionStore } from '@/shared/state/selection'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
 import { useProjectStore } from '@/features/timeline/deps/projects'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
-import { mediaLibraryService } from '@/features/timeline/deps/media-library-service'
 import {
   resolveMediaUrl,
   getMediaDragData,
@@ -411,13 +410,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         async (planned): Promise<TimelineItemType[] | null> => {
           const { entry, placements } = planned
           const droppedEntry = entry.payload
-          const needsThumbnail = entry.mediaType === 'video' || entry.mediaType === 'image'
-          const [blobUrl, thumbnailUrl] = await Promise.all([
-            resolveMediaUrl(droppedEntry.mediaId),
-            needsThumbnail
-              ? mediaLibraryService.getThumbnailBlobUrl(droppedEntry.mediaId)
-              : Promise.resolve(null),
-          ])
+          const blobUrl = await resolveMediaUrl(droppedEntry.mediaId)
 
           if (!blobUrl) {
             logger.error('Failed to get media blob URL for', entry.label)
@@ -438,7 +431,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
             label: entry.label,
             timelineFps: fps,
             blobUrl,
-            thumbnailUrl,
+            thumbnailUrl: null,
             canvasWidth: canvasSize.width,
             canvasHeight: canvasSize.height,
             placement: {

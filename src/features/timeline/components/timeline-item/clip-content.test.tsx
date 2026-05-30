@@ -45,6 +45,7 @@ describe('ClipContent', () => {
     })
     useSettingsStore.setState({
       showFilmstrips: false,
+      enableFilmstripExtraction: false,
       showWaveforms: false,
     })
     useMediaLibraryStore.setState({
@@ -118,6 +119,7 @@ describe('ClipContent', () => {
     })
     useSettingsStore.setState({
       showFilmstrips: true,
+      enableFilmstripExtraction: true,
       showWaveforms: false,
     })
 
@@ -188,7 +190,11 @@ describe('ClipContent', () => {
       contentPixelsPerSecond: 100,
       isZoomInteracting: true,
     })
-    useSettingsStore.setState({ showFilmstrips: true, showWaveforms: false })
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      enableFilmstripExtraction: true,
+      showWaveforms: false,
+    })
 
     const item: TimelineItem = {
       id: 'video-defer',

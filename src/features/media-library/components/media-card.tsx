@@ -368,7 +368,9 @@ export const MediaCard = memo(function MediaCard({
     useCallback(
       (s) => {
         for (const task of s.tasks.values()) {
-          if (task.mediaId === media.id && task.status !== 'error') return true
+          if (task.mediaId === media.id && task.type !== 'import' && task.status !== 'error') {
+            return true
+          }
         }
         return false
       },

@@ -19,6 +19,7 @@ export {
 // Media
 export {
   getAllMedia,
+  getAllMediaMetadata,
   getMedia,
   createMedia,
   updateMedia,

@@ -61,6 +61,7 @@ const WAVEFORM_NOTIFY_INTERVAL_MS = 180
 const SAMPLES_PER_SECOND: number = WAVEFORM_LEVELS[0] // 500 samples/sec
 const WAVEFORM_OVERVIEW_SAMPLES_PER_SECOND: number =
   WAVEFORM_LEVELS[WAVEFORM_LEVELS.length - 1]! // 10 samples/sec
+const WAVEFORM_VISIBLE_RANGE_MAX_SAMPLES_PER_SECOND = 100
 const WAVEFORM_BIN_DURATION_SEC = 30
 const WAVEFORM_BIN_SAMPLES = SAMPLES_PER_SECOND * WAVEFORM_BIN_DURATION_SEC
 
@@ -124,12 +125,17 @@ interface WaveformGenerationOptions {
   persistBins?: boolean
   persistOPFS?: boolean
   timeoutMs?: number
+  startTimeSec?: number
+  endTimeSec?: number
+  updateMemoryCache?: boolean
+  isComplete?: boolean
 }
 
 class WaveformCacheService {
   private memoryCache = new SizedAccessedMemoryCache<CachedWaveform>(MAX_CACHE_SIZE_BYTES)
   private levelCache = new SizedAccessedMemoryCache<CachedWaveformLevel>(MAX_LEVEL_CACHE_SIZE_BYTES)
   private pendingLevelRequests = new Map<string, Promise<CachedWaveformLevel | null>>()
+  private pendingRangeRequests = new Map<string, Promise<CachedWaveform | null>>()
   // Generation tokens guard against clearMedia/clearAll racing with an in-flight
   // getDisplayLevel: the async OPFS read captures the token at the start and
   // drops its cache insert if the token moved on, so a late completion can't
@@ -689,6 +695,8 @@ class WaveformCacheService {
     const persistBins = options.persistBins ?? samplesPerSecond === SAMPLES_PER_SECOND
     const persistOPFS = options.persistOPFS ?? true
     const timeoutMs = options.timeoutMs ?? 90_000
+    const updateMemoryCache = options.updateMemoryCache ?? true
+    const isCompleteResult = options.isComplete ?? true
 
     return new Promise((resolve, reject) => {
       const pendingBinWrites: Promise<void>[] = []
@@ -763,14 +771,16 @@ class WaveformCacheService {
           peaks,
           duration,
           channels,
-          loadedSamples >= peaks.length,
+          isCompleteResult && loadedSamples >= peaks.length,
           stereo,
           maxPeak,
           loadedSamples,
           samplesPerSecond,
         )
-        this.addToMemoryCache(mediaId, cached)
-        this.notifyUpdate(mediaId, cached)
+        if (updateMemoryCache) {
+          this.addToMemoryCache(mediaId, cached)
+          this.notifyUpdate(mediaId, cached)
+        }
       }
 
       // Add timeout - long clips (e.g. 10+ minutes) need more processing time.
@@ -870,7 +880,7 @@ class WaveformCacheService {
                 peaks,
                 duration,
                 channels,
-                true,
+                isCompleteResult,
                 stereo,
                 maxPeak,
                 loadedSamples,
@@ -901,9 +911,11 @@ class WaveformCacheService {
 
       this.workerRejectors.set(requestId, rejectOnce)
       const startWorker = async () => {
-        await deleteWaveformFromIndexedDB(mediaId).catch((e) => {
-          logger.debug('Failed to clear waveform before worker gen:', mediaId, e)
-        })
+        if (persistBins) {
+          await deleteWaveformFromIndexedDB(mediaId).catch((e) => {
+            logger.debug('Failed to clear waveform before worker gen:', mediaId, e)
+          })
+        }
         if (settled) return
 
         worker.addEventListener('message', handleMessage)
@@ -919,6 +931,8 @@ class WaveformCacheService {
           sourceMetadata: getObjectUrlDirectFileMetadata(blobUrl) ?? undefined,
           samplesPerSecond,
           binDurationSec: WAVEFORM_BIN_DURATION_SEC,
+          startTimeSec: options.startTimeSec,
+          endTimeSec: options.endTimeSec,
         })
       }
       void startWorker().catch((startError) => {
@@ -1267,6 +1281,93 @@ class WaveformCacheService {
     })
   }
 
+  async prepareVisibleWaveformRange(
+    mediaId: string,
+    blobUrl: string,
+    startTimeSec: number,
+    endTimeSec: number,
+    pixelsPerSecond: number,
+    onProgress?: (progress: number) => void,
+  ): Promise<CachedWaveform | null> {
+    const fullMemoryCached = this.getFromMemoryCache(mediaId)
+    if (fullMemoryCached?.isComplete && fullMemoryCached.sampleRate === SAMPLES_PER_SECOND) {
+      return fullMemoryCached
+    }
+
+    if (this.pendingRequests.has(mediaId)) {
+      return null
+    }
+
+    const safeStart = Math.max(0, Math.floor(startTimeSec * 10) / 10)
+    const safeEnd = Math.max(safeStart + 0.25, Math.ceil(endTimeSec * 10) / 10)
+    const levelIndex = chooseLevelForZoom(pixelsPerSecond)
+    const samplesPerSecond = Math.min(
+      WAVEFORM_VISIBLE_RANGE_MAX_SAMPLES_PER_SECOND,
+      WAVEFORM_LEVELS[levelIndex] ?? WAVEFORM_OVERVIEW_SAMPLES_PER_SECOND,
+    )
+    const cachedRange = await waveformOPFSStorage.getCachedRange(
+      mediaId,
+      samplesPerSecond,
+      safeStart,
+      safeEnd,
+    )
+    if (cachedRange) {
+      return this.makeCachedWaveform(
+        cachedRange.peaks,
+        cachedRange.duration,
+        cachedRange.channels,
+        false,
+        cachedRange.channels >= 2,
+        this.computeMaxPeak(cachedRange.peaks),
+        cachedRange.peaks.length,
+        cachedRange.sampleRate,
+      )
+    }
+
+    const key = `${mediaId}:${samplesPerSecond}:${safeStart}:${safeEnd}`
+    const pending = this.pendingRangeRequests.get(key)
+    if (pending) {
+      return pending
+    }
+
+    const requestId = `waveform-range-${++this.workerRequestId}`
+    const request = this.generateWaveformWithWorker(mediaId, blobUrl, requestId, onProgress, {
+      samplesPerSecond,
+      persistBins: false,
+      persistOPFS: false,
+      updateMemoryCache: false,
+      isComplete: false,
+      startTimeSec: safeStart,
+      endTimeSec: safeEnd,
+      timeoutMs: 20_000,
+    })
+      .then((waveform) => {
+        void waveformOPFSStorage
+          .saveRange(mediaId, {
+            duration: waveform.duration,
+            channels: waveform.channels,
+            sampleRate: waveform.sampleRate,
+            startTime: safeStart,
+            endTime: safeEnd,
+            peaks: waveform.peaks,
+          })
+          .catch((error) => {
+            logger.warn(`Failed to persist waveform range for ${mediaId}`, error)
+          })
+        return waveform
+      })
+      .catch((error) => {
+        logger.warn(`Visible waveform range generation failed for ${mediaId}`, error)
+        return null
+      })
+      .finally(() => {
+        this.pendingRangeRequests.delete(key)
+      })
+
+    this.pendingRangeRequests.set(key, request)
+    return request
+  }
+
   /**
    * Load an existing waveform without requiring source media access.
    * Checks memory first, then persisted IndexedDB/OPFS/workspace-backed cache.
@@ -1354,6 +1455,11 @@ class WaveformCacheService {
     for (let levelIndex = 0; levelIndex < WAVEFORM_LEVELS.length; levelIndex++) {
       this.levelCache.delete(this.levelCacheKey(mediaId, levelIndex))
     }
+    for (const key of this.pendingRangeRequests.keys()) {
+      if (key.startsWith(`${mediaId}:`)) {
+        this.pendingRangeRequests.delete(key)
+      }
+    }
 
     // Clear from OPFS
     await waveformOPFSStorage.delete(mediaId)
@@ -1373,6 +1479,7 @@ class WaveformCacheService {
     this.levelMediaGeneration.clear()
     this.memoryCache.clear()
     this.levelCache.clear()
+    this.pendingRangeRequests.clear()
   }
 
   /**
@@ -1394,6 +1501,7 @@ class WaveformCacheService {
     this.activeGenerations.clear()
     this.workerRejectors.clear()
     this.pendingRequests.clear()
+    this.pendingRangeRequests.clear()
     this.updateCallbacks.clear()
     // Terminate worker
     this.workerManager.terminate()

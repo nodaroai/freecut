@@ -36,53 +36,9 @@ function mirrorSourceToWorkspaceInBackground(
   })()
 }
 
-const MEDIA_PREPARATION_RUNNING_FLOOR = 0.03
-
-function queueMediaPreparationTask(mediaId: string, type: 'filmstrip' | 'waveform'): void {
-  useMediaPreparationStore.getState().queueTask(mediaId, type)
-}
-
-function startMediaPreparationTask(mediaId: string, type: 'filmstrip' | 'waveform'): void {
-  const preparationStore = useMediaPreparationStore.getState()
-  preparationStore.queueTask(mediaId, type)
-  preparationStore.updateTask(mediaId, type, {
-    status: 'running',
-    progress: MEDIA_PREPARATION_RUNNING_FLOOR,
-  })
-}
-
-function updateMediaPreparationTask(
-  mediaId: string,
-  type: 'filmstrip' | 'waveform',
-  progressPercent: number,
-): void {
-  const normalizedProgress =
-    progressPercent >= 100
-      ? 1
-      : Math.max(MEDIA_PREPARATION_RUNNING_FLOOR, progressPercent / 100)
-  useMediaPreparationStore.getState().updateTask(mediaId, type, {
-    status: 'running',
-    progress: normalizedProgress,
-  })
-}
-
-function completeMediaPreparationTask(mediaId: string, type: 'filmstrip' | 'waveform'): void {
-  useMediaPreparationStore.getState().completeTask(mediaId, type)
-}
-
-function failMediaPreparationTask(
-  mediaId: string,
-  type: 'filmstrip' | 'waveform',
-  error: unknown,
-): void {
-  useMediaPreparationStore.getState().updateTask(mediaId, type, {
-    status: 'error',
-    progress: 1,
-    error: error instanceof Error ? error.message : String(error),
-  })
-}
 import {
   getAllMedia as getAllMediaDB,
+  getAllMediaMetadata as getAllMediaMetadataDB,
   getMedia as getMediaDB,
   createMedia as createMediaDB,
   updateMedia as updateMediaDB,
@@ -113,22 +69,8 @@ import {
 import {
   filmstripCache,
   gifFrameCache,
-  IMPORT_FILMSTRIP_HUGE_FILE_BYTES,
-  IMPORT_FILMSTRIP_LARGE_FILE_BYTES,
-  IMPORT_FILMSTRIP_LARGE_TARGET_FRAMES,
-  IMPORT_FILMSTRIP_LONG_DURATION_SEC,
-  IMPORT_FILMSTRIP_MEDIUM_TARGET_FRAMES,
-  IMPORT_FILMSTRIP_NORMAL_TARGET_FRAMES,
-  IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
-  IMPORT_FILMSTRIP_SLOW_CONTAINER_MIME_TYPES,
-  IMPORT_FILMSTRIP_SLOW_PREP_TIMEOUT_MS,
-  IMPORT_FILMSTRIP_TINY_TARGET_FRAMES,
-  IMPORT_FILMSTRIP_VERY_LONG_DURATION_SEC,
-  MAX_FILMSTRIP_TARGET_FRAMES,
   waveformCache,
 } from '@/features/media-library/deps/timeline-services'
-import { registerObjectUrl, unregisterObjectUrl } from '@/infrastructure/browser/object-url-registry'
-import { useMediaPreparationStore } from '../stores/media-preparation-store'
 import { opfsService } from './opfs-service'
 import { proxyService } from './proxy-service'
 import { ensureFileHandlePermission, FileAccessError } from './file-access'
@@ -151,13 +93,8 @@ import {
 } from '@/features/media-library/deps/composition-runtime'
 export { FileAccessError } from './file-access'
 
-const IMPORT_FILMSTRIP_COVER_PREWARM_SECONDS = 1
-const IMPORT_FILMSTRIP_PREWARM_SECONDS = 4
-const IMPORT_BACKGROUND_COVER_WARM_DELAY_MS = 0
 const IMPORT_BACKGROUND_WARM_DELAY_MS = 600
 const IMPORT_BACKGROUND_HEAVY_DELAY_MS = 2200
-const IMPORT_BACKGROUND_PREPARE_DELAY_MS = 1200
-const IMPORT_WAVEFORM_FULL_REFINE_DELAY_MS = 2400
 const PAGE_URL_IMPORT_HOSTS = [
   'youtube.com',
   'www.youtube.com',
@@ -238,46 +175,6 @@ function inferExtensionFromMimeType(mimeType: string): string {
   return MIME_TYPE_TO_EXTENSION[mimeType] ?? ''
 }
 
-function chooseImportFilmstripPreparation(media: MediaMetadata): {
-  targetFrameCount: number
-  timeoutMs: number
-} {
-  const isSlowContainer = IMPORT_FILMSTRIP_SLOW_CONTAINER_MIME_TYPES.has(media.mimeType)
-  const isHuge =
-    media.fileSize >= IMPORT_FILMSTRIP_HUGE_FILE_BYTES ||
-    media.duration >= IMPORT_FILMSTRIP_VERY_LONG_DURATION_SEC ||
-    isSlowContainer
-  const isLarge =
-    media.fileSize >= IMPORT_FILMSTRIP_LARGE_FILE_BYTES ||
-    media.duration >= IMPORT_FILMSTRIP_LONG_DURATION_SEC
-
-  if (isHuge) {
-    return {
-      targetFrameCount: IMPORT_FILMSTRIP_TINY_TARGET_FRAMES,
-      timeoutMs: IMPORT_FILMSTRIP_SLOW_PREP_TIMEOUT_MS,
-    }
-  }
-
-  if (isLarge) {
-    return {
-      targetFrameCount: IMPORT_FILMSTRIP_LARGE_TARGET_FRAMES,
-      timeoutMs: IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
-    }
-  }
-
-  if (media.duration >= 300) {
-    return {
-      targetFrameCount: IMPORT_FILMSTRIP_MEDIUM_TARGET_FRAMES,
-      timeoutMs: IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
-    }
-  }
-
-  return {
-    targetFrameCount: Math.min(MAX_FILMSTRIP_TARGET_FRAMES, IMPORT_FILMSTRIP_NORMAL_TARGET_FRAMES),
-    timeoutMs: IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
-  }
-}
-
 function buildImportedUrlFileName(
   requestedUrl: string,
   responseUrl: string | undefined,
@@ -325,23 +222,6 @@ class MediaLibraryService {
   /** In-memory cache for thumbnail blob URLs to prevent flicker on re-renders */
   private thumbnailUrlCache = new Map<string, string>()
   private preparationPromises = new Map<string, Set<Promise<void>>>()
-
-  private trackPreparationPromise(mediaId: string, promise: Promise<void>): void {
-    let promises = this.preparationPromises.get(mediaId)
-    if (!promises) {
-      promises = new Set()
-      this.preparationPromises.set(mediaId, promises)
-    }
-    promises.add(promise)
-    promise.finally(() => {
-      const current = this.preparationPromises.get(mediaId)
-      if (!current) return
-      current.delete(promise)
-      if (current.size === 0) {
-        this.preparationPromises.delete(mediaId)
-      }
-    })
-  }
 
   async waitForMediaPreparation(mediaIds: string[]): Promise<void> {
     const promises = mediaIds.flatMap((mediaId) => [
@@ -510,172 +390,6 @@ class MediaLibraryService {
       previewAudioCodec?: string
     },
   ): void {
-    const hasAudioForWaveform =
-      mediaMetadata.mimeType.startsWith('audio/') ||
-      (mediaMetadata.mimeType.startsWith('video/') && Boolean(options.previewAudioCodec))
-
-    if (options.isVideo && mediaMetadata.duration > 0) {
-      const coverWarmEndTime = Math.min(
-        mediaMetadata.duration,
-        IMPORT_FILMSTRIP_COVER_PREWARM_SECONDS,
-      )
-      enqueueBackgroundMediaWork(
-        () =>
-          filmstripCache.prewarmPriorityWindow(mediaMetadata.id, file, mediaMetadata.duration, {
-            startTime: 0,
-            endTime: coverWarmEndTime,
-          }),
-        {
-          priority: 'warm',
-          delayMs: IMPORT_BACKGROUND_COVER_WARM_DELAY_MS,
-        },
-      )
-
-      const warmEndTime = Math.min(mediaMetadata.duration, IMPORT_FILMSTRIP_PREWARM_SECONDS)
-      enqueueBackgroundMediaWork(
-        () =>
-          filmstripCache.prewarmPriorityWindow(mediaMetadata.id, file, mediaMetadata.duration, {
-            startTime: 0,
-            endTime: warmEndTime,
-          }),
-        {
-          priority: 'warm',
-          delayMs: IMPORT_BACKGROUND_WARM_DELAY_MS,
-        },
-      )
-
-      queueMediaPreparationTask(mediaMetadata.id, 'filmstrip')
-      const filmstripPreparationPromise = new Promise<void>((resolve) => {
-        enqueueBackgroundMediaWork(
-          async () => {
-            startMediaPreparationTask(mediaMetadata.id, 'filmstrip')
-            const preparation = chooseImportFilmstripPreparation(mediaMetadata)
-            const blobUrl = URL.createObjectURL(file)
-            registerObjectUrl(blobUrl, file, {
-              mediaId: mediaMetadata.id,
-              storageType: mediaMetadata.storageType,
-              fileHandle: mediaMetadata.fileHandle,
-              opfsPath: mediaMetadata.opfsPath,
-              fileSize: mediaMetadata.fileSize,
-            })
-            let timeoutId: ReturnType<typeof setTimeout> | null = null
-            let didTimeout = false
-            try {
-              const extraction = filmstripCache.getFilmstrip(
-                mediaMetadata.id,
-                blobUrl,
-                mediaMetadata.duration,
-                (progress) => updateMediaPreparationTask(mediaMetadata.id, 'filmstrip', progress),
-                { startIndex: 0, endIndex: Math.min(Math.ceil(mediaMetadata.duration), 4) },
-                { targetFrameCount: preparation.targetFrameCount },
-              )
-              const timeout = new Promise<void>((timeoutResolve) => {
-                timeoutId = setTimeout(() => {
-                  didTimeout = true
-                  filmstripCache.abort(mediaMetadata.id)
-                  timeoutResolve()
-                }, preparation.timeoutMs)
-              })
-              const extractionResult = extraction.then(
-                () => undefined,
-                (error) => {
-                  if (didTimeout) return undefined
-                  throw error
-                },
-              )
-
-              await Promise.race([extractionResult, timeout])
-              if (!didTimeout) {
-                await extractionResult
-              }
-              updateMediaPreparationTask(mediaMetadata.id, 'filmstrip', 100)
-              completeMediaPreparationTask(mediaMetadata.id, 'filmstrip')
-            } catch (error) {
-              if (didTimeout) {
-                completeMediaPreparationTask(mediaMetadata.id, 'filmstrip')
-              } else {
-                failMediaPreparationTask(mediaMetadata.id, 'filmstrip', error)
-                throw error
-              }
-            } finally {
-              if (timeoutId) {
-                clearTimeout(timeoutId)
-              }
-              unregisterObjectUrl(blobUrl)
-              URL.revokeObjectURL(blobUrl)
-              resolve()
-            }
-          },
-          {
-            priority: 'heavy',
-            delayMs: IMPORT_BACKGROUND_PREPARE_DELAY_MS,
-          },
-        )
-      })
-      this.trackPreparationPromise(mediaMetadata.id, filmstripPreparationPromise)
-    }
-
-    if (hasAudioForWaveform && mediaMetadata.duration > 0) {
-      queueMediaPreparationTask(mediaMetadata.id, 'waveform')
-      const waveformPreparationPromise = new Promise<void>((resolve) => {
-        enqueueBackgroundMediaWork(
-          async () => {
-            startMediaPreparationTask(mediaMetadata.id, 'waveform')
-            const blobUrl = URL.createObjectURL(file)
-            registerObjectUrl(blobUrl, file, {
-              mediaId: mediaMetadata.id,
-              storageType: mediaMetadata.storageType,
-              fileHandle: mediaMetadata.fileHandle,
-              opfsPath: mediaMetadata.opfsPath,
-              fileSize: mediaMetadata.fileSize,
-            })
-            try {
-              await waveformCache.prepareOverviewWaveform(mediaMetadata.id, blobUrl, (progress) =>
-                updateMediaPreparationTask(mediaMetadata.id, 'waveform', progress),
-              )
-              updateMediaPreparationTask(mediaMetadata.id, 'waveform', 100)
-              completeMediaPreparationTask(mediaMetadata.id, 'waveform')
-            } catch (error) {
-              failMediaPreparationTask(mediaMetadata.id, 'waveform', error)
-              throw error
-            } finally {
-              unregisterObjectUrl(blobUrl)
-              URL.revokeObjectURL(blobUrl)
-              resolve()
-            }
-          },
-          {
-            priority: 'heavy',
-            delayMs: IMPORT_BACKGROUND_PREPARE_DELAY_MS,
-          },
-        )
-      })
-      this.trackPreparationPromise(mediaMetadata.id, waveformPreparationPromise)
-
-      enqueueBackgroundMediaWork(
-        async () => {
-          const blobUrl = URL.createObjectURL(file)
-          registerObjectUrl(blobUrl, file, {
-            mediaId: mediaMetadata.id,
-            storageType: mediaMetadata.storageType,
-            fileHandle: mediaMetadata.fileHandle,
-            opfsPath: mediaMetadata.opfsPath,
-            fileSize: mediaMetadata.fileSize,
-          })
-          try {
-            await waveformCache.getWaveform(mediaMetadata.id, blobUrl)
-          } finally {
-            unregisterObjectUrl(blobUrl)
-            URL.revokeObjectURL(blobUrl)
-          }
-        },
-        {
-          priority: 'heavy',
-          delayMs: IMPORT_WAVEFORM_FULL_REFINE_DELAY_MS,
-        },
-      )
-    }
-
     if (needsCustomAudioDecoder(options.previewAudioCodec)) {
       enqueueBackgroundMediaWork(() => startPreviewAudioStartupWarm(mediaMetadata.id, file), {
         priority: 'warm',
@@ -732,7 +446,7 @@ class MediaLibraryService {
     const { metadata, thumbnail } = await mediaProcessorService.processMedia(
       file,
       resolvedMimeType,
-      { thumbnailTimestamp: 1 },
+      { thumbnailTimestamp: 1, fastMetadata: true },
     )
 
     let thumbnailBlob = thumbnail
@@ -924,7 +638,7 @@ class MediaLibraryService {
     // is trashed; re-associating into the new project effectively brings
     // those records forward, and the trash sweep's ref-counted delete still
     // keeps the bytes alive because the new project now references them.
-    const workspaceMedia = await getAllMediaDB()
+    const workspaceMedia = await getAllMediaMetadataDB()
     const workspaceDuplicate = workspaceMedia.find(
       (m) =>
         m.fileName === file.name &&
@@ -961,7 +675,9 @@ class MediaLibraryService {
     // `fileLastModified` (imported before that field was persisted). Only
     // fires for records already in the current project — cross-project
     // reuse is covered by 3a.
-    const projectMedia = await getMediaForProjectDB(projectId)
+    const projectMediaIds = await getProjectMediaIds(projectId).catch(() => [] as string[])
+    const projectMediaIdSet = new Set(projectMediaIds)
+    const projectMedia = workspaceMedia.filter((media) => projectMediaIdSet.has(media.id))
     const existingMedia = projectMedia.find(
       (m) =>
         m.fileName === file.name &&
@@ -1003,7 +719,7 @@ class MediaLibraryService {
     const { metadata, thumbnail } = await mediaProcessorService.processMedia(
       file,
       resolvedMimeType,
-      { thumbnailTimestamp: 1 },
+      { thumbnailTimestamp: 1, fastMetadata: true },
     )
 
     // Stage 5: Save thumbnail if generated
@@ -1531,12 +1247,13 @@ class MediaLibraryService {
    *
    * @throws FileAccessError if permission denied or file missing
    */
-  async getMediaFile(id: string): Promise<Blob | null> {
-    const media = await getMediaDB(id)
+  async getMediaFile(idOrMedia: string | MediaMetadata): Promise<Blob | null> {
+    const media = typeof idOrMedia === 'string' ? await getMediaDB(idOrMedia) : idOrMedia
 
     if (!media) {
       return null
     }
+    const id = media.id
 
     // Handle file handle storage (local-first, origin-scoped).
     if (media.storageType === 'handle' && media.fileHandle) {

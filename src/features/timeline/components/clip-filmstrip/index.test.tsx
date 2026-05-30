@@ -162,7 +162,7 @@ describe('ClipFilmstrip', () => {
     )
   })
 
-  it('does not vary extraction targeting with zoom-derived inputs', () => {
+  it('targets the padded visible thumbnail slots for extraction', () => {
     const { rerender } = render(
       <ClipFilmstrip
         mediaId="media-1"
@@ -182,7 +182,9 @@ describe('ClipFilmstrip', () => {
     const firstCall = useFilmstripMock.mock.calls.at(-1)?.[0]
     expect(firstCall?.priorityWindow).toEqual({ startTime: 0, endTime: 20 })
     expect(firstCall?.targetFrameCount).toBeUndefined()
-    expect(firstCall?.targetFrameIndices).toBeUndefined()
+    expect(firstCall?.targetFrameIndices).toEqual([
+      3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+    ])
 
     rerender(
       <ClipFilmstrip
@@ -203,7 +205,7 @@ describe('ClipFilmstrip', () => {
     const latestCall = useFilmstripMock.mock.calls.at(-1)?.[0]
     expect(latestCall?.priorityWindow).toEqual(firstCall?.priorityWindow)
     expect(latestCall?.targetFrameCount).toBeUndefined()
-    expect(latestCall?.targetFrameIndices).toBeUndefined()
+    expect(latestCall?.targetFrameIndices).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
   })
 
   it('keeps tile media full width when the segment window is narrower than a thumbnail', async () => {

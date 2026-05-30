@@ -840,7 +840,7 @@ export const TimelineContent = memo(function TimelineContent({
   // refreshes this cache; we fall back to a live read until it has measured once.
   const viewportDimsRef = useRef<{ width: number; height: number } | null>(null)
 
-  const syncViewportFromContainer = useCallback((knownScrollLeft?: number) => {
+  const syncViewportFromContainer = useCallback((knownScrollLeft?: number, immediate = false) => {
     const container = containerRef.current
     if (!container) return
     const dims = viewportDimsRef.current
@@ -854,12 +854,18 @@ export const TimelineContent = memo(function TimelineContent({
     // scrollTop is always 0 in the known-value path.
     const scrollLeft = knownScrollLeft ?? container.scrollLeft
     const scrollTop = knownScrollLeft !== undefined ? 0 : container.scrollTop
-    useTimelineViewportStore.getState().setViewport({
+    const viewport = {
       scrollLeft,
       scrollTop,
       viewportWidth,
       viewportHeight,
-    })
+    }
+    const viewportStore = useTimelineViewportStore.getState()
+    if (immediate) {
+      viewportStore.setViewportImmediate(viewport)
+    } else {
+      viewportStore.setViewport(viewport)
+    }
   }, [])
 
   const scheduleViewportSync = useCallback(() => {
@@ -1509,7 +1515,8 @@ export const TimelineContent = memo(function TimelineContent({
     scrollLeftRef.current = 0
     useZoomStore.getState().setZoomLevelSynchronized(newZoomLevel)
     container.scrollLeft = 0
-  }, [clearQueuedZoomApply])
+    syncViewportFromContainer(0, true)
+  }, [clearQueuedZoomApply, syncViewportFromContainer])
 
   const handleZoomTo100 = useCallback(
     (centerFrame: number) => {

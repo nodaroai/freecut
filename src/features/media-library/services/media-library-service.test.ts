@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const indexedDbMocks = vi.hoisted(() => ({
   getAllMedia: vi.fn(),
+  getAllMediaMetadata: vi.fn(),
   getMedia: vi.fn(),
   createMedia: vi.fn(),
   updateMedia: vi.fn(),
@@ -193,6 +194,9 @@ describe('MediaLibraryService', () => {
       }
       return vi.fn()
     })
+    indexedDbMocks.getAllMedia.mockResolvedValue([])
+    indexedDbMocks.getAllMediaMetadata.mockImplementation(() => indexedDbMocks.getAllMedia())
+    indexedDbMocks.getProjectMediaIds.mockResolvedValue([])
     indexedDbMocks.readAiOutput.mockResolvedValue(undefined)
   })
 
@@ -260,43 +264,10 @@ describe('MediaLibraryService', () => {
       expect(indexedDbMocks.createMedia).toHaveBeenCalledTimes(1)
       expect(indexedDbMocks.associateMediaWithProject).toHaveBeenCalledWith('project-1', result.id)
       expect(indexedDbMocks.saveThumbnail).toHaveBeenCalledTimes(1)
-      expect(filmstripCacheMocks.prewarmPriorityWindow).toHaveBeenNthCalledWith(
-        1,
-        result.id,
-        mockFile,
-        10,
-        { startTime: 0, endTime: 1 },
-      )
-      expect(filmstripCacheMocks.prewarmPriorityWindow).toHaveBeenNthCalledWith(
-        2,
-        result.id,
-        mockFile,
-        10,
-        { startTime: 0, endTime: 4 },
-      )
+      expect(filmstripCacheMocks.prewarmPriorityWindow).not.toHaveBeenCalled()
     })
 
-    it('queues media preparation and marks progress when the background prep job runs', async () => {
-      const queuedJobs: Array<() => unknown> = []
-      backgroundMediaWorkMocks.enqueueBackgroundMediaWork.mockImplementation(
-        (run: () => unknown) => {
-          queuedJobs.push(run)
-          return vi.fn()
-        },
-      )
-
-      let resolveFilmstrip!: () => void
-      filmstripCacheMocks.getFilmstrip.mockImplementationOnce(
-        async (...args: unknown[]): Promise<undefined> => {
-          const onProgress = args[3] as ((progress: number) => void) | undefined
-          onProgress?.(0)
-          await new Promise<void>((resolve) => {
-            resolveFilmstrip = resolve
-          })
-          return undefined
-        },
-      )
-
+    it('does not queue filmstrip or waveform preparation during import', async () => {
       const mockFile = new File(['data'], 'video.mp4', { type: 'video/mp4' })
       const mockHandle = {
         name: 'video.mp4',
@@ -313,7 +284,7 @@ describe('MediaLibraryService', () => {
           height: 1080,
           fps: 30,
           codec: 'avc1',
-          audioCodec: undefined,
+          audioCodec: 'aac',
           audioCodecSupported: true,
           bitrate: 5000,
         },
@@ -325,32 +296,46 @@ describe('MediaLibraryService', () => {
 
       const result = await mediaLibraryService.importMediaWithHandle(mockHandle, 'project-1')
 
-      expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([
-        expect.objectContaining({
-          mediaId: result.id,
-          type: 'filmstrip',
-          status: 'queued',
-          progress: 0,
-        }),
-      ])
+      expect(result.id).toBeTruthy()
+      expect(filmstripCacheMocks.prewarmPriorityWindow).not.toHaveBeenCalled()
+      expect(filmstripCacheMocks.getFilmstrip).not.toHaveBeenCalled()
+      expect(waveformCacheMocks.prepareOverviewWaveform).not.toHaveBeenCalled()
+      expect(waveformCacheMocks.getWaveform).not.toHaveBeenCalled()
+      expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([])
+    })
 
-      const filmstripPrepareJob = queuedJobs[2]
-      expect(filmstripPrepareJob).toBeDefined()
-      const runPromise = Promise.resolve(filmstripPrepareJob?.())
+    it('skips import-time waveform extraction for long media', async () => {
+      const mockFile = new File(['data'], 'long-video.mp4', { type: 'video/mp4' })
+      const mockHandle = {
+        name: 'long-video.mp4',
+        getFile: vi.fn().mockResolvedValue(mockFile),
+        queryPermission: vi.fn().mockResolvedValue('granted'),
+        requestPermission: vi.fn().mockResolvedValue('granted'),
+      } as unknown as FileSystemFileHandle
+
+      mediaProcessorMocks.processMedia.mockResolvedValue({
+        metadata: {
+          type: 'video',
+          duration: 60 * 60,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          codec: 'avc1',
+          audioCodec: 'aac',
+          audioCodecSupported: true,
+          bitrate: 5000,
+        },
+        thumbnail: new Blob(['thumb'], { type: 'image/webp' }),
+      })
+      mediaProcessorMocks.hasUnsupportedAudioCodec.mockReturnValue({ unsupported: false })
+      indexedDbMocks.getAllMedia.mockResolvedValue([])
+      indexedDbMocks.getMediaForProject.mockResolvedValue([])
+
+      await mediaLibraryService.importMediaWithHandle(mockHandle, 'project-1')
       await Promise.resolve()
 
-      expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([
-        expect.objectContaining({
-          mediaId: result.id,
-          type: 'filmstrip',
-          status: 'running',
-          progress: 0.03,
-        }),
-      ])
-
-      resolveFilmstrip()
-      await runPromise
-
+      expect(waveformCacheMocks.prepareOverviewWaveform).not.toHaveBeenCalled()
+      expect(waveformCacheMocks.getWaveform).not.toHaveBeenCalled()
       expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([])
     })
 
@@ -365,8 +350,8 @@ describe('MediaLibraryService', () => {
         fileHandle: {} as FileSystemFileHandle,
         fileLastModified: 1234,
       }
-      indexedDbMocks.getAllMedia.mockResolvedValue([])
-      indexedDbMocks.getMediaForProject.mockResolvedValue([existingMedia])
+      indexedDbMocks.getAllMedia.mockResolvedValue([existingMedia])
+      indexedDbMocks.getProjectMediaIds.mockResolvedValue(['existing-1'])
       indexedDbMocks.updateMedia.mockResolvedValue(refreshedMedia)
 
       const mockFile = new File(['data'], 'video.mp4', { type: 'video/mp4', lastModified: 1234 })
@@ -544,7 +529,7 @@ describe('MediaLibraryService', () => {
         }),
       )
       expect(indexedDbMocks.associateMediaWithProject).toHaveBeenCalledWith('project-1', result.id)
-      expect(filmstripCacheMocks.prewarmPriorityWindow).toHaveBeenCalledTimes(2)
+      expect(filmstripCacheMocks.prewarmPriorityWindow).not.toHaveBeenCalled()
     })
 
     it('returns an existing project media item when the downloaded file matches by name and size', async () => {

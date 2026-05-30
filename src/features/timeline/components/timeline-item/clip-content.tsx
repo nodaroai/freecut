@@ -179,6 +179,8 @@ export const ClipContent = memo(function ClipContent({
   )
   const showWaveforms = useSettingsStore((s) => s.showWaveforms)
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips)
+  const enableFilmstripExtraction = useSettingsStore((s) => s.enableFilmstripExtraction)
+  const showVideoFilmstrips = showFilmstrips && enableFilmstripExtraction
 
   // Defer the heavy filmstrip/waveform mount for clips that first appear DURING
   // an active zoom gesture. Zooming out brings many clips into the viewport at
@@ -400,7 +402,7 @@ export const ClipContent = memo(function ClipContent({
         {/* Row 2: Filmstrip - flex-1 to fill remaining space */}
         {showVisualContent && (
           <div className="relative overflow-hidden flex-1 min-h-0">
-            {showFilmstrips && (
+            {showVideoFilmstrips && (
               <ClipFilmstrip
                 mediaId={item.mediaId}
                 clipWidth={clipWidth}
@@ -517,7 +519,7 @@ export const ClipContent = memo(function ClipContent({
             <>
               {/* Row 2: Filmstrip stack - flex-1 */}
               <div className="relative overflow-hidden flex-1 min-h-0">
-                {showFilmstrips &&
+                {showVideoFilmstrips &&
                   visualSegments.map((segment) => (
                     <CompositionFilmstripSegment
                       key={segment.itemId}

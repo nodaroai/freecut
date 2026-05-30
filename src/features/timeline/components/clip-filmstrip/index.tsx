@@ -290,7 +290,49 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
       ? initialPriorityWindowRef.current.window
       : null
   const targetFrameCount = undefined
-  const targetFrameIndices = undefined
+  const targetFrameIndices = useMemo(() => {
+    if (!isVisible || height <= 0 || renderPixelsPerSecond <= 0) return undefined
+    if (effectiveEnd <= effectiveStart || sourceDuration <= 0) return undefined
+
+    const pixelsPerSourceSecond = renderPixelsPerSecond / Math.max(0.0001, speed)
+    const tileWidth = thumbnailWidth
+    const { startTile, endTile } = computeFilmstripRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      tileWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+      minimumPadTiles: VIEWPORT_PAD_TILES,
+      minimumPadPx: VIEWPORT_PAD_PX,
+    })
+    if (endTile <= startTile) return undefined
+
+    const totalFrameCount = Math.max(1, Math.ceil(sourceDuration))
+    const indices = new Set<number>()
+    for (let slot = startTile; slot < endTile; slot++) {
+      const slotCenterX = slot * tileWidth + tileWidth * 0.5
+      const slotCenterTime = isReversed
+        ? effectiveEnd - slotCenterX / pixelsPerSourceSecond
+        : effectiveStart + slotCenterX / pixelsPerSourceSecond
+      indices.add(Math.max(0, Math.min(totalFrameCount - 1, Math.floor(slotCenterTime))))
+    }
+
+    return indices.size > 0 ? Array.from(indices).sort((a, b) => a - b) : undefined
+  }, [
+    isVisible,
+    height,
+    renderPixelsPerSecond,
+    effectiveEnd,
+    effectiveStart,
+    sourceDuration,
+    speed,
+    thumbnailWidth,
+    renderClipWidth,
+    visibleClipWidth,
+    visibleStartRatio,
+    visibleEndRatio,
+    isReversed,
+  ])
 
   // Load blob URL lazily when visible, and retry after global invalidation.
   useEffect(() => {

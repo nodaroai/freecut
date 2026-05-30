@@ -119,6 +119,39 @@ export const ClipWaveform = memo(function ClipWaveform({
   const [audioCodecSupported, setAudioCodecSupported] = useState(true)
   const visibleClipWidth = clipWidth
   const renderClipWidth = Math.max(visibleClipWidth, renderWidth ?? visibleClipWidth)
+  const visibleSourceWindow = useMemo(() => {
+    const effectiveStart = Math.max(0, sourceStart + trimStart)
+    const effectiveEnd = Math.min(
+      sourceDuration,
+      Math.max(
+        effectiveStart,
+        sourceEnd ?? effectiveStart + (visibleClipWidth / Math.max(1, pixelsPerSecond)) * speed,
+      ),
+    )
+    const visibleStartX = visibleClipWidth * Math.max(0, Math.min(1, visibleStartRatio))
+    const visibleEndX = visibleClipWidth * Math.max(0, Math.min(1, visibleEndRatio))
+    const startOffset = (visibleStartX / Math.max(1, pixelsPerSecond)) * speed
+    const endOffset = (visibleEndX / Math.max(1, pixelsPerSecond)) * speed
+    const sourceA = isReversed ? effectiveEnd - endOffset : effectiveStart + startOffset
+    const sourceB = isReversed ? effectiveEnd - startOffset : effectiveStart + endOffset
+    const padSeconds = Math.max(2, ((visibleEndX - visibleStartX) / Math.max(1, pixelsPerSecond)) * 0.25)
+
+    return {
+      start: Math.max(0, Math.min(sourceA, sourceB) - padSeconds),
+      end: Math.min(sourceDuration, Math.max(sourceA, sourceB) + padSeconds),
+    }
+  }, [
+    sourceStart,
+    trimStart,
+    sourceDuration,
+    sourceEnd,
+    visibleClipWidth,
+    pixelsPerSecond,
+    speed,
+    visibleStartRatio,
+    visibleEndRatio,
+    isReversed,
+  ])
 
   useEffect(() => {
     conformStartedRef.current = false
@@ -198,6 +231,8 @@ export const ClipWaveform = memo(function ClipWaveform({
       enabled: audioCodecSupported,
       deferDurationSec: sourceDuration,
       pixelsPerSecond,
+      visibleSourceStartSec: visibleSourceWindow.start,
+      visibleSourceEndSec: visibleSourceWindow.end,
     })
   const normalizationPeak = maxPeak > 0 ? maxPeak : 1
   const peakSampleCount = useMemo(
