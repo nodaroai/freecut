@@ -15,6 +15,7 @@ import { getSharedProxyKey } from '../utils/proxy-key'
 import { createImportActions } from './media-import-actions'
 import { createDeleteActions } from './media-delete-actions'
 import { createRelinkingActions } from './media-relinking-actions'
+import { useMediaPreparationStore } from './media-preparation-store'
 import { getTranscriptMediaIds } from '@/infrastructure/storage'
 import { mergeTranscriptionProgress } from '@/shared/utils/transcription-progress'
 
@@ -159,6 +160,7 @@ const newStore: MediaLibraryStoreApi =
             taggingMediaIds: new Set(),
             analysisProgress: null,
           })
+          useMediaPreparationStore.getState().clearAll()
           // Note: loadMediaItems is triggered by the component's useEffect
           // Don't call it here to avoid double loading
         },

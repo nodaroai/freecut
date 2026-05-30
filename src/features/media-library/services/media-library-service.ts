@@ -35,6 +35,52 @@ function mirrorSourceToWorkspaceInBackground(
     }
   })()
 }
+
+const MEDIA_PREPARATION_RUNNING_FLOOR = 0.03
+
+function queueMediaPreparationTask(mediaId: string, type: 'filmstrip' | 'waveform'): void {
+  useMediaPreparationStore.getState().queueTask(mediaId, type)
+}
+
+function startMediaPreparationTask(mediaId: string, type: 'filmstrip' | 'waveform'): void {
+  const preparationStore = useMediaPreparationStore.getState()
+  preparationStore.queueTask(mediaId, type)
+  preparationStore.updateTask(mediaId, type, {
+    status: 'running',
+    progress: MEDIA_PREPARATION_RUNNING_FLOOR,
+  })
+}
+
+function updateMediaPreparationTask(
+  mediaId: string,
+  type: 'filmstrip' | 'waveform',
+  progressPercent: number,
+): void {
+  const normalizedProgress =
+    progressPercent >= 100
+      ? 1
+      : Math.max(MEDIA_PREPARATION_RUNNING_FLOOR, progressPercent / 100)
+  useMediaPreparationStore.getState().updateTask(mediaId, type, {
+    status: 'running',
+    progress: normalizedProgress,
+  })
+}
+
+function completeMediaPreparationTask(mediaId: string, type: 'filmstrip' | 'waveform'): void {
+  useMediaPreparationStore.getState().completeTask(mediaId, type)
+}
+
+function failMediaPreparationTask(
+  mediaId: string,
+  type: 'filmstrip' | 'waveform',
+  error: unknown,
+): void {
+  useMediaPreparationStore.getState().updateTask(mediaId, type, {
+    status: 'error',
+    progress: 1,
+    error: error instanceof Error ? error.message : String(error),
+  })
+}
 import {
   getAllMedia as getAllMediaDB,
   getMedia as getMediaDB,
@@ -69,6 +115,8 @@ import {
   gifFrameCache,
   waveformCache,
 } from '@/features/media-library/deps/timeline-services'
+import { registerObjectUrl, unregisterObjectUrl } from '@/infrastructure/browser/object-url-registry'
+import { useMediaPreparationStore } from '../stores/media-preparation-store'
 import { opfsService } from './opfs-service'
 import { proxyService } from './proxy-service'
 import { ensureFileHandlePermission, FileAccessError } from './file-access'
@@ -93,9 +141,11 @@ export { FileAccessError } from './file-access'
 
 const IMPORT_FILMSTRIP_COVER_PREWARM_SECONDS = 1
 const IMPORT_FILMSTRIP_PREWARM_SECONDS = 4
+const IMPORT_FILMSTRIP_OVERVIEW_TARGET_FRAMES = 96
 const IMPORT_BACKGROUND_COVER_WARM_DELAY_MS = 0
 const IMPORT_BACKGROUND_WARM_DELAY_MS = 600
 const IMPORT_BACKGROUND_HEAVY_DELAY_MS = 2200
+const IMPORT_BACKGROUND_PREPARE_DELAY_MS = 1200
 const PAGE_URL_IMPORT_HOSTS = [
   'youtube.com',
   'www.youtube.com',
@@ -222,6 +272,32 @@ function parseMediaImportUrl(input: string): URL {
 class MediaLibraryService {
   /** In-memory cache for thumbnail blob URLs to prevent flicker on re-renders */
   private thumbnailUrlCache = new Map<string, string>()
+  private preparationPromises = new Map<string, Set<Promise<void>>>()
+
+  private trackPreparationPromise(mediaId: string, promise: Promise<void>): void {
+    let promises = this.preparationPromises.get(mediaId)
+    if (!promises) {
+      promises = new Set()
+      this.preparationPromises.set(mediaId, promises)
+    }
+    promises.add(promise)
+    promise.finally(() => {
+      const current = this.preparationPromises.get(mediaId)
+      if (!current) return
+      current.delete(promise)
+      if (current.size === 0) {
+        this.preparationPromises.delete(mediaId)
+      }
+    })
+  }
+
+  async waitForMediaPreparation(mediaIds: string[]): Promise<void> {
+    const promises = mediaIds.flatMap((mediaId) => [
+      ...(this.preparationPromises.get(mediaId) ?? []),
+    ])
+    if (promises.length === 0) return
+    await Promise.allSettled(promises)
+  }
 
   private async deleteTranscriptSafely(mediaId: string): Promise<void> {
     try {
@@ -382,6 +458,10 @@ class MediaLibraryService {
       previewAudioCodec?: string
     },
   ): void {
+    const hasAudioForWaveform =
+      mediaMetadata.mimeType.startsWith('audio/') ||
+      (mediaMetadata.mimeType.startsWith('video/') && Boolean(options.previewAudioCodec))
+
     if (options.isVideo && mediaMetadata.duration > 0) {
       const coverWarmEndTime = Math.min(
         mediaMetadata.duration,
@@ -411,6 +491,83 @@ class MediaLibraryService {
           delayMs: IMPORT_BACKGROUND_WARM_DELAY_MS,
         },
       )
+
+      queueMediaPreparationTask(mediaMetadata.id, 'filmstrip')
+      const filmstripPreparationPromise = new Promise<void>((resolve) => {
+        enqueueBackgroundMediaWork(
+          async () => {
+            startMediaPreparationTask(mediaMetadata.id, 'filmstrip')
+            const blobUrl = URL.createObjectURL(file)
+            registerObjectUrl(blobUrl, file, {
+              mediaId: mediaMetadata.id,
+              storageType: mediaMetadata.storageType,
+              fileHandle: mediaMetadata.fileHandle,
+              opfsPath: mediaMetadata.opfsPath,
+              fileSize: mediaMetadata.fileSize,
+            })
+            try {
+              await filmstripCache.getFilmstrip(
+                mediaMetadata.id,
+                blobUrl,
+                mediaMetadata.duration,
+                (progress) => updateMediaPreparationTask(mediaMetadata.id, 'filmstrip', progress),
+                { startIndex: 0, endIndex: Math.min(Math.ceil(mediaMetadata.duration), 4) },
+                { targetFrameCount: IMPORT_FILMSTRIP_OVERVIEW_TARGET_FRAMES },
+              )
+              completeMediaPreparationTask(mediaMetadata.id, 'filmstrip')
+            } catch (error) {
+              failMediaPreparationTask(mediaMetadata.id, 'filmstrip', error)
+              throw error
+            } finally {
+              unregisterObjectUrl(blobUrl)
+              URL.revokeObjectURL(blobUrl)
+              resolve()
+            }
+          },
+          {
+            priority: 'heavy',
+            delayMs: IMPORT_BACKGROUND_PREPARE_DELAY_MS,
+          },
+        )
+      })
+      this.trackPreparationPromise(mediaMetadata.id, filmstripPreparationPromise)
+    }
+
+    if (hasAudioForWaveform && mediaMetadata.duration > 0) {
+      queueMediaPreparationTask(mediaMetadata.id, 'waveform')
+      const waveformPreparationPromise = new Promise<void>((resolve) => {
+        enqueueBackgroundMediaWork(
+          async () => {
+            startMediaPreparationTask(mediaMetadata.id, 'waveform')
+            const blobUrl = URL.createObjectURL(file)
+            registerObjectUrl(blobUrl, file, {
+              mediaId: mediaMetadata.id,
+              storageType: mediaMetadata.storageType,
+              fileHandle: mediaMetadata.fileHandle,
+              opfsPath: mediaMetadata.opfsPath,
+              fileSize: mediaMetadata.fileSize,
+            })
+            try {
+              await waveformCache.getWaveform(mediaMetadata.id, blobUrl, (progress) =>
+                updateMediaPreparationTask(mediaMetadata.id, 'waveform', progress),
+              )
+              completeMediaPreparationTask(mediaMetadata.id, 'waveform')
+            } catch (error) {
+              failMediaPreparationTask(mediaMetadata.id, 'waveform', error)
+              throw error
+            } finally {
+              unregisterObjectUrl(blobUrl)
+              URL.revokeObjectURL(blobUrl)
+              resolve()
+            }
+          },
+          {
+            priority: 'heavy',
+            delayMs: IMPORT_BACKGROUND_PREPARE_DELAY_MS,
+          },
+        )
+      })
+      this.trackPreparationPromise(mediaMetadata.id, waveformPreparationPromise)
     }
 
     if (needsCustomAudioDecoder(options.previewAudioCodec)) {
@@ -456,6 +613,12 @@ class MediaLibraryService {
       (media) => media.fileName === file.name && media.fileSize === file.size,
     )
     if (existingMedia) {
+      this.schedulePostImportWork(file, existingMedia, {
+        isVideo: existingMedia.mimeType.startsWith('video/'),
+        previewAudioCodec: existingMedia.mimeType.startsWith('audio/')
+          ? existingMedia.codec
+          : existingMedia.audioCodec,
+      })
       return { ...existingMedia, isDuplicate: true }
     }
 
@@ -674,6 +837,12 @@ class MediaLibraryService {
         })
       }
       mirrorSourceToWorkspaceInBackground(resolvedDuplicate.id, file, file.name)
+      this.schedulePostImportWork(file, resolvedDuplicate, {
+        isVideo: resolvedDuplicate.mimeType.startsWith('video/'),
+        previewAudioCodec: resolvedDuplicate.mimeType.startsWith('audio/')
+          ? resolvedDuplicate.codec
+          : resolvedDuplicate.audioCodec,
+      })
       const projectMediaIds = await getProjectMediaIds(projectId).catch(() => [] as string[])
       const alreadyInThisProject = projectMediaIds.includes(resolvedDuplicate.id)
       if (!alreadyInThisProject) {
@@ -711,6 +880,12 @@ class MediaLibraryService {
 
       const refreshedMedia = await updateMediaDB(existingMedia.id, updates)
       mirrorSourceToWorkspaceInBackground(refreshedMedia.id, file, file.name)
+      this.schedulePostImportWork(file, refreshedMedia, {
+        isVideo: refreshedMedia.mimeType.startsWith('video/'),
+        previewAudioCodec: refreshedMedia.mimeType.startsWith('audio/')
+          ? refreshedMedia.codec
+          : refreshedMedia.audioCodec,
+      })
       return { ...refreshedMedia, isDuplicate: true }
     }
 

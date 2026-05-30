@@ -6,6 +6,7 @@ import { getMimeType } from '../utils/validation'
 import { getSharedProxyKey } from '../utils/proxy-key'
 import { hasMediaFilePickerSupport, showMediaFilePicker } from '../utils/media-file-picker'
 import { createLogger, createOperationId } from '@/shared/logging/logger'
+import { useMediaPreparationStore } from './media-preparation-store'
 
 const logger = createLogger('MediaImport')
 
@@ -58,6 +59,8 @@ function buildOptimisticMediaItem(
 }
 
 function removeImportPlaceholder(set: Set, tempId: string): void {
+  useMediaPreparationStore.getState().clearMedia(tempId)
+
   set((state) => ({
     mediaItems: state.mediaItems.filter((item) => item.id !== tempId),
     importingIds: state.importingIds.filter((id) => id !== tempId),
@@ -82,6 +85,8 @@ function removeImportPlaceholder(set: Set, tempId: string): void {
  */
 function ensureImportedMediaVisible(set: Set, tempId: string, metadata: MediaMetadata): boolean {
   let wasAlreadyVisible = false
+  useMediaPreparationStore.getState().clearMedia(tempId)
+
   set((state) => {
     const withoutPlaceholder = state.mediaItems.filter((item) => item.id !== tempId)
     wasAlreadyVisible = withoutPlaceholder.some((item) => item.id === metadata.id)
@@ -110,6 +115,18 @@ function setupImportedVideoProxy(metadata: MediaMetadata): void {
   }
 
   proxyService.setProxyKey(metadata.id, getSharedProxyKey(metadata))
+}
+
+function queueImportPreparationTask(tempId: string): void {
+  const preparationStore = useMediaPreparationStore.getState()
+  preparationStore.queueTask(tempId, 'import')
+  preparationStore.updateTask(tempId, 'import', { status: 'queued', progress: 0.05 })
+}
+
+function markImportPreparationRunning(tempId: string): void {
+  useMediaPreparationStore
+    .getState()
+    .updateTask(tempId, 'import', { status: 'running', progress: 0.2 })
 }
 
 function processImportResults(
@@ -230,6 +247,7 @@ export function createImportActions(
         importingIds: [...state.importingIds, tempId],
         error: null,
       }))
+      queueImportPreparationTask(tempId)
 
       importTasks.push({ handle, tempId, file })
     }
@@ -253,6 +271,7 @@ export function createImportActions(
         }
 
         try {
+          markImportPreparationRunning(task.tempId)
           const metadata = await mediaLibraryService.importMediaWithHandle(task.handle, projectId)
           results[index] = {
             status: 'fulfilled',
@@ -271,7 +290,7 @@ export function createImportActions(
 
   const importHandlesInternal = async (
     handles: FileSystemFileHandle[],
-    options?: { includeDuplicatesInResults?: boolean },
+    options?: { includeDuplicatesInResults?: boolean; waitForPreparation?: boolean },
   ): Promise<MediaMetadata[]> => {
     const { currentProjectId } = get()
 
@@ -295,6 +314,10 @@ export function createImportActions(
       processImportResults(importResults, importTasks, set, options)
 
     showImportNotifications(duplicateNames, unsupportedCodecFiles, get)
+
+    if (options?.waitForPreparation && results.length > 0) {
+      await mediaLibraryService.waitForMediaPreparation(results.map((media) => media.id))
+    }
 
     event.success({
       imported: importedCount,
@@ -444,6 +467,9 @@ export function createImportActions(
     },
 
     importHandlesForPlacement: async (handles: FileSystemFileHandle[]) =>
-      importHandlesInternal(handles, { includeDuplicatesInResults: true }),
+      importHandlesInternal(handles, {
+        includeDuplicatesInResults: true,
+        waitForPreparation: true,
+      }),
   }
 }

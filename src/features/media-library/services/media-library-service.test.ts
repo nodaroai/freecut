@@ -67,10 +67,12 @@ const gifFrameCacheMocks = vi.hoisted(() => ({
 
 const filmstripCacheMocks = vi.hoisted(() => ({
   prewarmPriorityWindow: vi.fn(async () => undefined),
+  getFilmstrip: vi.fn(async () => undefined),
   clearMedia: vi.fn(async () => undefined),
 }))
 
 const waveformCacheMocks = vi.hoisted(() => ({
+  getWaveform: vi.fn(async () => undefined),
   clearMedia: vi.fn(async () => undefined),
 }))
 
@@ -130,6 +132,7 @@ vi.mock('../utils/proxy-key', () => ({
 
 import { mediaLibraryService, FileAccessError } from './media-library-service'
 import type { MediaMetadata } from '@/types/storage'
+import { useMediaPreparationStore } from '../stores/media-preparation-store'
 
 const fetchMock = vi.fn()
 
@@ -158,9 +161,19 @@ describe('MediaLibraryService', () => {
     vi.clearAllMocks()
     fetchMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
+    useMediaPreparationStore.getState().clearAll()
     compositionRuntimeMocks.needsCustomAudioDecoder.mockReturnValue(false)
     compositionRuntimeMocks.startPreviewAudioStartupWarm.mockResolvedValue(undefined)
     filmstripCacheMocks.prewarmPriorityWindow.mockResolvedValue(undefined)
+    filmstripCacheMocks.getFilmstrip.mockResolvedValue(undefined)
+    waveformCacheMocks.getWaveform.mockResolvedValue(undefined)
+    backgroundMediaWorkMocks.enqueueBackgroundMediaWork.mockImplementation((run: () => unknown) => {
+      const result = run()
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+        void (result as PromiseLike<unknown>)
+      }
+      return vi.fn()
+    })
     indexedDbMocks.readAiOutput.mockResolvedValue(undefined)
   })
 
@@ -210,7 +223,7 @@ describe('MediaLibraryService', () => {
           height: 1080,
           fps: 30,
           codec: 'avc1',
-          audioCodec: 'aac',
+          audioCodec: undefined,
           audioCodecSupported: true,
           bitrate: 5000,
         },
@@ -242,6 +255,84 @@ describe('MediaLibraryService', () => {
         10,
         { startTime: 0, endTime: 4 },
       )
+    })
+
+    it('queues media preparation and marks progress when the background prep job runs', async () => {
+      const queuedJobs: Array<() => unknown> = []
+      backgroundMediaWorkMocks.enqueueBackgroundMediaWork.mockImplementation(
+        (run: () => unknown) => {
+          queuedJobs.push(run)
+          return vi.fn()
+        },
+      )
+
+      let resolveFilmstrip!: () => void
+      filmstripCacheMocks.getFilmstrip.mockImplementationOnce(
+        async (...args: unknown[]): Promise<undefined> => {
+          const onProgress = args[3] as ((progress: number) => void) | undefined
+          onProgress?.(0)
+          await new Promise<void>((resolve) => {
+            resolveFilmstrip = resolve
+          })
+          return undefined
+        },
+      )
+
+      const mockFile = new File(['data'], 'video.mp4', { type: 'video/mp4' })
+      const mockHandle = {
+        name: 'video.mp4',
+        getFile: vi.fn().mockResolvedValue(mockFile),
+        queryPermission: vi.fn().mockResolvedValue('granted'),
+        requestPermission: vi.fn().mockResolvedValue('granted'),
+      } as unknown as FileSystemFileHandle
+
+      mediaProcessorMocks.processMedia.mockResolvedValue({
+        metadata: {
+          type: 'video',
+          duration: 10,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          codec: 'avc1',
+          audioCodec: undefined,
+          audioCodecSupported: true,
+          bitrate: 5000,
+        },
+        thumbnail: new Blob(['thumb'], { type: 'image/webp' }),
+      })
+      mediaProcessorMocks.hasUnsupportedAudioCodec.mockReturnValue({ unsupported: false })
+      indexedDbMocks.getAllMedia.mockResolvedValue([])
+      indexedDbMocks.getMediaForProject.mockResolvedValue([])
+
+      const result = await mediaLibraryService.importMediaWithHandle(mockHandle, 'project-1')
+
+      expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([
+        expect.objectContaining({
+          mediaId: result.id,
+          type: 'filmstrip',
+          status: 'queued',
+          progress: 0,
+        }),
+      ])
+
+      const filmstripPrepareJob = queuedJobs[2]
+      expect(filmstripPrepareJob).toBeDefined()
+      const runPromise = Promise.resolve(filmstripPrepareJob?.())
+      await Promise.resolve()
+
+      expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([
+        expect.objectContaining({
+          mediaId: result.id,
+          type: 'filmstrip',
+          status: 'running',
+          progress: 0.03,
+        }),
+      ])
+
+      resolveFilmstrip()
+      await runPromise
+
+      expect([...useMediaPreparationStore.getState().tasks.values()]).toEqual([])
     })
 
     it('refreshes legacy project duplicate source when file already in project', async () => {

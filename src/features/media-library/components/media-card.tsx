@@ -39,6 +39,7 @@ import { getMediaType, formatDuration } from '../utils/validation'
 import { MediaInfoPopover } from './media-info-popover'
 import { getSharedProxyKey } from '../utils/proxy-key'
 import { useMediaLibraryStore } from '../stores/media-library-store'
+import { useMediaPreparationStore } from '../stores/media-preparation-store'
 import { CARD_GRID_BASE, CARD_LIST_BASE, CARD_PERF_STYLE } from './card-styles'
 import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache'
 import { proxyService } from '../services/proxy-service'
@@ -363,6 +364,19 @@ export const MediaCard = memo(function MediaCard({
   const isImporting = useMediaLibraryStore(
     useCallback((s) => s.importingIds.includes(media.id), [media.id]),
   )
+  const hasActivePreparationTasks = useMediaPreparationStore(
+    useCallback(
+      (s) => {
+        for (const task of s.tasks.values()) {
+          if (task.mediaId === media.id && task.status !== 'error') return true
+        }
+        return false
+      },
+      [media.id],
+    ),
+  )
+  const isPreparingMedia = isImporting || hasActivePreparationTasks
+  const preparingLabel = t('media.card.preparing')
 
   const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus.get(media.id))
   const transcriptStatus = useMediaLibraryStore((s) => s.transcriptStatus.get(media.id) ?? 'idle')
@@ -373,7 +387,7 @@ export const MediaCard = memo(function MediaCard({
   const canGenerateProxy =
     mediaType === 'video' &&
     !isBroken &&
-    !isImporting &&
+    !isPreparingMedia &&
     proxyService.canGenerateProxy(media.mimeType)
   const hasProxy = proxyStatus === 'ready'
   const hasTranscript = transcriptStatus === 'ready'
@@ -391,7 +405,7 @@ export const MediaCard = memo(function MediaCard({
   const isTranscriptionDialogOpen = useEditorStore((s) => s.transcriptionDialogDepth > 0)
   const pauseTimelinePlayback = usePlaybackStore((s) => s.pause)
 
-  const isAudio = mediaType === 'audio' && !isBroken && !isImporting
+  const isAudio = mediaType === 'audio' && !isBroken && !isPreparingMedia
   const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
   const [transcribeErrorMessage, setTranscribeErrorMessage] = useState<string | null>(null)
   const [isExtractingEmbeddedSubtitles, setIsExtractingEmbeddedSubtitles] = useState(false)
@@ -908,13 +922,13 @@ export const MediaCard = memo(function MediaCard({
   const canHoverPreview =
     (mediaType === 'video' || mediaType === 'image') &&
     !isBroken &&
-    !isImporting &&
+    !isPreparingMedia &&
     !isTranscriptionDialogOpen
   const canScrubPreview =
     mediaType === 'video' &&
     media.duration > 0 &&
     !isBroken &&
-    !isImporting &&
+    !isPreparingMedia &&
     !isTranscriptionDialogOpen
   const skimRafRef = useRef<number | null>(null)
   const pendingSkimClientXRef = useRef<number | null>(null)
@@ -1160,7 +1174,7 @@ export const MediaCard = memo(function MediaCard({
       <>
         {transcribeDialog}
         <ContextMenu onOpenChange={handleContextMenuOpenChange}>
-          <ContextMenuTrigger asChild disabled={isImporting}>
+          <ContextMenuTrigger asChild disabled={isPreparingMedia}>
             <div
               style={CARD_PERF_STYLE}
               className={`
@@ -1170,14 +1184,14 @@ export const MediaCard = memo(function MediaCard({
               ? 'border-primary ring-1 ring-primary/20'
               : 'border-border hover:border-primary/50'
           }
-          ${isImporting ? 'opacity-80 cursor-default' : ''}
+          ${isPreparingMedia ? 'opacity-80 cursor-default' : ''}
         `}
-              draggable={!isImporting}
-              onDragStart={isImporting ? undefined : handleDragStart}
-              onDragEnd={isImporting ? undefined : handleDragEnd}
-              onClick={isImporting ? undefined : handleClick}
+              draggable={!isPreparingMedia}
+              onDragStart={isPreparingMedia ? undefined : handleDragStart}
+              onDragEnd={isPreparingMedia ? undefined : handleDragEnd}
+              onClick={isPreparingMedia ? undefined : handleClick}
               onDoubleClick={
-                isImporting
+                isPreparingMedia
                   ? undefined
                   : (e) => {
                       e.stopPropagation()
@@ -1202,25 +1216,25 @@ export const MediaCard = memo(function MediaCard({
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">{getIcon()}</div>
                 )}
-                {/* Importing overlay for list view thumbnail */}
-                {isImporting && (
+                {/* Preparing overlay for list view thumbnail */}
+                {isPreparingMedia && (
                   <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                     <Loader2 className="w-4 h-4 text-white animate-spin" />
                   </div>
                 )}
                 {/* Broken indicator for list view */}
-                {isBroken && !isImporting && (
+                {isBroken && !isPreparingMedia && (
                   <div className="absolute top-0.5 right-0.5 p-0.5 rounded bg-destructive/90 text-destructive-foreground">
                     <Link2Off className="w-2.5 h-2.5" />
                   </div>
                 )}
                 {/* Proxy badge for list view */}
-                {!isBroken && !isImporting && proxyStatus === 'generating' && (
+                {!isBroken && !isPreparingMedia && proxyStatus === 'generating' && (
                   <div className="absolute bottom-0.5 right-0.5 p-0.5 rounded bg-green-500/90 text-black">
                     <Loader2 className="w-2.5 h-2.5 animate-spin" />
                   </div>
                 )}
-                {!isBroken && !isImporting && isTagging && (
+                {!isBroken && !isPreparingMedia && isTagging && (
                   <div
                     className="absolute bottom-0.5 left-0.5 p-0.5 rounded bg-purple-500/90 text-white"
                     title={t('media.card.analyzingWithAI')}
@@ -1228,7 +1242,7 @@ export const MediaCard = memo(function MediaCard({
                     <Loader2 className="w-2.5 h-2.5 animate-spin" />
                   </div>
                 )}
-                {!isBroken && !isImporting && hasProxy && (
+                {!isBroken && !isPreparingMedia && hasProxy && (
                   <div className="absolute bottom-0.5 right-0.5 p-0.5 rounded bg-green-500/90 text-black">
                     <Zap className="w-2.5 h-2.5" />
                   </div>
@@ -1240,7 +1254,7 @@ export const MediaCard = memo(function MediaCard({
                   />
                 )}
                 {!isBroken &&
-                  !isImporting &&
+                  !isPreparingMedia &&
                   isTranscribing &&
                   transcriptProgressPercent !== null && (
                     <div
@@ -1287,7 +1301,7 @@ export const MediaCard = memo(function MediaCard({
               <div className="flex-1 min-w-0 flex items-center gap-1.5">
                 {isImporting ? (
                   <span className="text-[10px] text-muted-foreground">
-                    {t('media.card.importing')}
+                    {preparingLabel}
                   </span>
                 ) : (
                   <>
@@ -1309,7 +1323,7 @@ export const MediaCard = memo(function MediaCard({
               </div>
 
               {/* Actions - hidden during upload */}
-              {!isImporting && (
+              {!isPreparingMedia && (
                 <div className="flex items-center gap-0.5 flex-shrink-0">
                   <MediaInfoPopover
                     media={media}
@@ -1333,7 +1347,7 @@ export const MediaCard = memo(function MediaCard({
     <>
       {transcribeDialog}
       <ContextMenu onOpenChange={handleContextMenuOpenChange}>
-        <ContextMenuTrigger asChild disabled={isImporting}>
+        <ContextMenuTrigger asChild disabled={isPreparingMedia}>
           <div
             style={CARD_PERF_STYLE}
             className={`
@@ -1343,14 +1357,14 @@ export const MediaCard = memo(function MediaCard({
             ? 'border-primary ring-2 ring-primary/20'
             : 'border-border hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10'
         }
-        ${isImporting ? 'cursor-default' : ''}
+        ${isPreparingMedia ? 'cursor-default' : ''}
       `}
-            draggable={!isImporting}
-            onDragStart={isImporting ? undefined : handleDragStart}
-            onDragEnd={isImporting ? undefined : handleDragEnd}
-            onClick={isImporting ? undefined : handleClick}
+            draggable={!isPreparingMedia}
+            onDragStart={isPreparingMedia ? undefined : handleDragStart}
+            onDragEnd={isPreparingMedia ? undefined : handleDragEnd}
+            onClick={isPreparingMedia ? undefined : handleClick}
             onDoubleClick={
-              isImporting
+              isPreparingMedia
                 ? undefined
                 : (e) => {
                     e.stopPropagation()
@@ -1384,22 +1398,22 @@ export const MediaCard = memo(function MediaCard({
               )}
 
               {/* Selection glow - subtle overlay only */}
-              {selected && !isImporting && (
+              {selected && !isPreparingMedia && (
                 <div className="absolute inset-0 bg-primary/10 pointer-events-none" />
               )}
 
-              {/* Importing overlay */}
-              {isImporting && (
+              {/* Preparing overlay */}
+              {isPreparingMedia && (
                 <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 pointer-events-none">
                   <Loader2 className="w-6 h-6 text-white animate-spin" />
                   <div className="text-[9px] text-white/60 uppercase tracking-wider">
-                    {t('media.card.importing')}
+                    {preparingLabel}
                   </div>
                 </div>
               )}
 
               {/* Top-right badges & info */}
-              {!isImporting && (
+              {!isPreparingMedia && (
                 <div className="absolute top-1 right-1 z-10 flex flex-col items-end gap-0.5">
                   {isBroken && (
                     <div className="p-1 rounded bg-destructive/90 text-destructive-foreground">
@@ -1463,8 +1477,8 @@ export const MediaCard = memo(function MediaCard({
                 </button>
               )}
 
-              {/* Overlaid badges - hidden during upload */}
-              {!isImporting && (
+              {/* Overlaid badges - hidden during preparation */}
+              {!isPreparingMedia && (
                 <div className="absolute inset-x-0 bottom-0 px-1.5 py-1 bg-gradient-to-t from-black/60 to-transparent flex items-center justify-between gap-1 pointer-events-none">
                   {/* Type icon badge - icon only */}
                   <div className="p-0.5 rounded bg-primary/90 text-primary-foreground">
@@ -1488,7 +1502,7 @@ export const MediaCard = memo(function MediaCard({
                 />
               )}
               {!isBroken &&
-                !isImporting &&
+                !isPreparingMedia &&
                 isTranscribing &&
                 transcriptProgressPercent !== null && (
                   <div

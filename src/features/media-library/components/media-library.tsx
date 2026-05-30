@@ -71,6 +71,7 @@ import { MissingMediaDialog } from './missing-media-dialog'
 import { OrphanedClipsDialog } from './orphaned-clips-dialog'
 import { UnsupportedAudioCodecDialog } from './unsupported-audio-codec-dialog'
 import { useFilteredMediaItems, useMediaLibraryStore } from '../stores/media-library-store'
+import { useMediaPreparationStore } from '../stores/media-preparation-store'
 import {
   deleteCompoundClips,
   getCompoundClipDeletionImpact,
@@ -638,6 +639,18 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     analysisProgress && analysisProgress.total > 0
       ? (analysisProgress.completed / analysisProgress.total) * 100
       : 0
+  const preparationTasks = useMediaPreparationStore((s) => s.tasks)
+  const activePreparationTasks = useMemo(
+    () => [...preparationTasks.values()].filter((task) => task.status !== 'error'),
+    [preparationTasks],
+  )
+  const preparingCount = activePreparationTasks.length
+  const preparingAvgProgress = useMemo(() => {
+    if (activePreparationTasks.length === 0) return 0
+    const total = activePreparationTasks.reduce((sum, task) => sum + task.progress, 0)
+    return total / activePreparationTasks.length
+  }, [activePreparationTasks])
+  const hasRunningPreparationTasks = activePreparationTasks.some((task) => task.status === 'running')
 
   const transcribingCount = useMemo(() => {
     let count = 0
@@ -721,6 +734,23 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     }
     return rows
   }, [transcriptStatus, transcriptProgress, mediaById])
+
+  const preparationItemRows = useMemo(
+    () =>
+      activePreparationTasks.map((task) => ({
+        id: task.id,
+        name: mediaById[task.mediaId]?.fileName ?? task.mediaId,
+        kind:
+          task.type === 'import'
+            ? 'Import'
+            : task.type === 'filmstrip'
+              ? 'Filmstrip'
+              : 'Waveform',
+        percent: Math.round(task.progress * 100),
+        status: task.status,
+      })),
+    [activePreparationTasks, mediaById],
+  )
 
   const handleGenerateSelectedProxies = async () => {
     const selectedItems = selectedMediaIds
@@ -1542,6 +1572,41 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           }
           trailing={<Sparkles className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />}
           fillClassName="bg-purple-500"
+        />
+      )}
+
+      {/* Unified media readiness progress bar */}
+      {preparingCount > 0 && (
+        <BackgroundTaskProgress
+          icon={<Film className="w-3.5 h-3.5 text-cyan-500 flex-shrink-0" />}
+          label={`Preparing media (${preparingCount})`}
+          progressAriaLabel="Media preparation progress"
+          progressPercent={preparingAvgProgress * 100}
+          detailsToggleAriaLabel={t('media.library.perItemProgress')}
+          details={
+            preparationItemRows.length > 1
+              ? preparationItemRows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
+                  >
+                    <span className="truncate">{row.name}</span>
+                    <span className="flex flex-shrink-0 items-center gap-2">
+                      <span className="hidden sm:inline">{row.kind}</span>
+                      <span className="tabular-nums">
+                        {row.status === 'queued' ? 'Queued' : `${row.percent}%`}
+                      </span>
+                    </span>
+                  </div>
+                ))
+              : undefined
+          }
+          meta={
+            <span className="tabular-nums">
+              {hasRunningPreparationTasks ? `${Math.round(preparingAvgProgress * 100)}%` : 'Queued'}
+            </span>
+          }
+          fillClassName="bg-cyan-500"
         />
       )}
 

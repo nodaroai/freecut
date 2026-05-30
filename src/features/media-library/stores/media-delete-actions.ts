@@ -3,6 +3,7 @@ import { mediaLibraryService } from '../services/media-library-service'
 import { proxyService } from '../services/proxy-service'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { invalidateMediaCaptionThumbnails } from '../deps/scene-browser'
+import { useMediaPreparationStore } from './media-preparation-store'
 
 type Set = (
   partial:
@@ -27,6 +28,7 @@ function releaseDeletedMediaResources(ids: string[]): void {
     // result memos, and both text + image embedding maps. Disk-side
     // cleanup is already handled by the recursive `media/{id}/` removal.
     invalidateMediaCaptionThumbnails(id)
+    useMediaPreparationStore.getState().clearMedia(id)
   }
 }
 
