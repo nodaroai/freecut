@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useEffect, memo, Activity } from 'react'
+import { useCallback, useMemo, useRef, useEffect, memo, Activity, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ChevronDown,
@@ -34,8 +34,6 @@ import {
   MediaLibrary,
   setMediaDragData,
 } from '@/features/editor/deps/media-library'
-import { KeyframeGraphPanel } from '@/features/editor/deps/timeline-ui'
-import { TransitionsPanel } from './transitions-panel'
 import {
   createDefaultAdjustmentItem,
   createDefaultShapeItem,
@@ -55,7 +53,6 @@ import {
 import { useEffectPreviews } from '@/features/editor/deps/effects-contract'
 import { createLogger } from '@/shared/logging/logger'
 import { useSettingsStore } from '@/features/editor/deps/settings'
-import { AiPanel } from './ai-panel'
 import {
   TEXT_STYLE_PRESETS,
   type TextStylePresetLayout,
@@ -70,6 +67,17 @@ import {
 const logger = createLogger('MediaSidebar')
 const TEXT_TEMPLATE_PREVIEW_SHELL =
   'w-full aspect-video rounded-sm border border-border bg-slate-950'
+const LazyAiPanel = lazy(() =>
+  import('./ai-panel').then((module) => ({ default: module.AiPanel })),
+)
+const LazyTransitionsPanel = lazy(() =>
+  import('./transitions-panel').then((module) => ({ default: module.TransitionsPanel })),
+)
+const LazyKeyframeGraphPanel = lazy(() =>
+  import('@/features/timeline/components/keyframe-graph-panel').then((module) => ({
+    default: module.KeyframeGraphPanel,
+  })),
+)
 
 function renderTextTemplatePreview(preset?: TextStylePreset) {
   if (!preset) {
@@ -725,12 +733,16 @@ export const MediaSidebar = memo(function MediaSidebar() {
         {/* Use Activity for React 19 performance optimization - defers updates when hidden */}
         <Activity mode={leftSidebarOpen ? 'visible' : 'hidden'}>
           <div className="h-full min-h-0 flex flex-col" style={{ width: sidebarWidth }}>
-            <KeyframeGraphPanel
-              isOpen={keyframeEditorOpen}
-              onToggle={toggleKeyframeEditorOpen}
-              onClose={() => setKeyframeEditorOpen(false)}
-              placement="top"
-            />
+            {keyframeEditorOpen && (
+              <Suspense fallback={null}>
+                <LazyKeyframeGraphPanel
+                  isOpen={keyframeEditorOpen}
+                  onToggle={toggleKeyframeEditorOpen}
+                  onClose={() => setKeyframeEditorOpen(false)}
+                  placement="top"
+                />
+              </Suspense>
+            )}
 
             {/* Panel Header ââ‚¬” sits with the tab content, below the keyframe editor */}
             <div
@@ -1147,14 +1159,22 @@ export const MediaSidebar = memo(function MediaSidebar() {
             <div
               className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'transitions' ? 'block' : 'hidden'}`}
             >
-              <TransitionsPanel />
+              {activeTab === 'transitions' && (
+                <Suspense fallback={null}>
+                  <LazyTransitionsPanel />
+                </Suspense>
+              )}
             </div>
 
             {/* AI Tab */}
             <div
               className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'ai' ? 'block' : 'hidden'}`}
             >
-              <AiPanel />
+              {activeTab === 'ai' && (
+                <Suspense fallback={null}>
+                  <LazyAiPanel />
+                </Suspense>
+              )}
             </div>
           </div>
         </Activity>
