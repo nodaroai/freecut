@@ -58,7 +58,9 @@ const WAVEFORM_PROGRESS_NOTIFY_STEP = 2
 const WAVEFORM_NOTIFY_INTERVAL_MS = 180
 
 // Samples per second for waveform generation (highest resolution)
-const SAMPLES_PER_SECOND = WAVEFORM_LEVELS[0] // 500 samples/sec
+const SAMPLES_PER_SECOND: number = WAVEFORM_LEVELS[0] // 500 samples/sec
+const WAVEFORM_OVERVIEW_SAMPLES_PER_SECOND: number =
+  WAVEFORM_LEVELS[WAVEFORM_LEVELS.length - 1]! // 10 samples/sec
 const WAVEFORM_BIN_DURATION_SEC = 30
 const WAVEFORM_BIN_SAMPLES = SAMPLES_PER_SECOND * WAVEFORM_BIN_DURATION_SEC
 
@@ -116,6 +118,13 @@ interface QueuedGeneration {
 }
 
 type WaveformUpdateCallback = (waveform: CachedWaveform) => void
+
+interface WaveformGenerationOptions {
+  samplesPerSecond?: number
+  persistBins?: boolean
+  persistOPFS?: boolean
+  timeoutMs?: number
+}
 
 class WaveformCacheService {
   private memoryCache = new SizedAccessedMemoryCache<CachedWaveform>(MAX_CACHE_SIZE_BYTES)
@@ -358,11 +367,12 @@ class WaveformCacheService {
     stereo = false,
     maxPeak = 1,
     loadedSamples = peaks.length,
+    sampleRate = SAMPLES_PER_SECOND,
   ): CachedWaveform {
     return {
       peaks,
       duration,
-      sampleRate: SAMPLES_PER_SECOND,
+      sampleRate,
       channels,
       stereo,
       maxPeak: maxPeak > 0 ? maxPeak : 1,
@@ -389,11 +399,12 @@ class WaveformCacheService {
     peaks: Float32Array,
     duration: number,
     channels: number,
+    sourceSampleRate = SAMPLES_PER_SECOND,
   ): Promise<void> {
     try {
       const levels = waveformOPFSStorage.generateMultiResolution(
         peaks,
-        SAMPLES_PER_SECOND,
+        sourceSampleRate,
         duration,
         channels >= 2 ? 2 : 1,
       )
@@ -555,6 +566,11 @@ class WaveformCacheService {
     try {
       const level = await waveformOPFSStorage.getLevel(mediaId, 0)
       if (level) {
+        // Level 0 may be an import-time overview waveform. It is useful for
+        // display-level reads, but getWaveform() means "full detail".
+        if (level.sampleRate !== SAMPLES_PER_SECOND) {
+          return null
+        }
         const floatsPerSample = level.channels >= 2 ? 2 : 1
         const cached: CachedWaveform = {
           peaks: level.peaks,
@@ -666,8 +682,13 @@ class WaveformCacheService {
     blobUrl: string,
     requestId: string,
     onProgress?: (progress: number) => void,
+    options: WaveformGenerationOptions = {},
   ): Promise<CachedWaveform> {
     const worker = this.getWorker()
+    const samplesPerSecond = options.samplesPerSecond ?? SAMPLES_PER_SECOND
+    const persistBins = options.persistBins ?? samplesPerSecond === SAMPLES_PER_SECOND
+    const persistOPFS = options.persistOPFS ?? true
+    const timeoutMs = options.timeoutMs ?? 90_000
 
     return new Promise((resolve, reject) => {
       const pendingBinWrites: Promise<void>[] = []
@@ -746,6 +767,7 @@ class WaveformCacheService {
           stereo,
           maxPeak,
           loadedSamples,
+          samplesPerSecond,
         )
         this.addToMemoryCache(mediaId, cached)
         this.notifyUpdate(mediaId, cached)
@@ -762,7 +784,7 @@ class WaveformCacheService {
           this.workerManager.terminate()
         }
         rejectOnce(new Error('Worker timeout'))
-      }, 90000)
+      }, timeoutMs)
 
       const handleMessage = async (event: MessageEvent<WaveformWorkerResponse>) => {
         if (event.data.requestId !== requestId) return
@@ -786,28 +808,30 @@ class WaveformCacheService {
               peaks.set(chunkPeaks, startIndex)
               loadedSamples = Math.max(loadedSamples, startIndex + chunkPeaks.length)
 
-              const effectiveBinSamples = WAVEFORM_BIN_SAMPLES * (stereo ? 2 : 1)
-              const binIndex = Math.floor(startIndex / effectiveBinSamples)
               for (let i = 0; i < chunkPeaks.length; i++) {
                 const value = chunkPeaks[i] ?? 0
                 if (value > maxPeak) {
                   maxPeak = value
                 }
               }
-              const bin: WaveformBin = {
-                id: `${mediaId}:bin:${binIndex}`,
-                mediaId,
-                kind: 'bin',
-                binIndex,
-                peaks: chunkPeaks.buffer as ArrayBuffer,
-                samples: chunkPeaks.length,
-                createdAt: Date.now(),
+              if (persistBins) {
+                const effectiveBinSamples = WAVEFORM_BIN_SAMPLES * (stereo ? 2 : 1)
+                const binIndex = Math.floor(startIndex / effectiveBinSamples)
+                const bin: WaveformBin = {
+                  id: `${mediaId}:bin:${binIndex}`,
+                  mediaId,
+                  kind: 'bin',
+                  binIndex,
+                  peaks: chunkPeaks.buffer as ArrayBuffer,
+                  samples: chunkPeaks.length,
+                  createdAt: Date.now(),
+                }
+                pendingBinWrites.push(
+                  saveWaveformBinToIndexedDB(bin).catch((saveError) => {
+                    logger.warn(`Failed to persist waveform bin ${mediaId}:${binIndex}`, saveError)
+                  }),
+                )
               }
-              pendingBinWrites.push(
-                saveWaveformBinToIndexedDB(bin).catch((saveError) => {
-                  logger.warn(`Failed to persist waveform bin ${mediaId}:${binIndex}`, saveError)
-                }),
-              )
               notifyWaveformUpdate()
               break
             }
@@ -822,20 +846,22 @@ class WaveformCacheService {
               if (settled) {
                 break
               }
-              const metaBinSamples = WAVEFORM_BIN_SAMPLES * (stereo ? 2 : 1)
-              await saveWaveformMetaToIndexedDB({
-                id: mediaId,
-                mediaId,
-                kind: 'meta',
-                sampleRate: SAMPLES_PER_SECOND,
-                totalSamples: peaks.length,
-                binCount: Math.ceil(peaks.length / metaBinSamples),
-                binDurationSec: WAVEFORM_BIN_DURATION_SEC,
-                duration,
-                channels,
-                stereo: stereo || undefined,
-                createdAt: Date.now(),
-              })
+              if (persistBins) {
+                const metaBinSamples = WAVEFORM_BIN_SAMPLES * (stereo ? 2 : 1)
+                await saveWaveformMetaToIndexedDB({
+                  id: mediaId,
+                  mediaId,
+                  kind: 'meta',
+                  sampleRate: SAMPLES_PER_SECOND,
+                  totalSamples: peaks.length,
+                  binCount: Math.ceil(peaks.length / metaBinSamples),
+                  binDurationSec: WAVEFORM_BIN_DURATION_SEC,
+                  duration,
+                  channels,
+                  stereo: stereo || undefined,
+                  createdAt: Date.now(),
+                })
+              }
 
               loadedSamples = peaks.length
               maxPeak = event.data.maxPeak > 0 ? event.data.maxPeak : Math.max(maxPeak, 1)
@@ -848,8 +874,11 @@ class WaveformCacheService {
                 stereo,
                 maxPeak,
                 loadedSamples,
+                samplesPerSecond,
               )
-              void this.persistToOPFS(mediaId, peaks, duration, channels)
+              if (persistOPFS) {
+                void this.persistToOPFS(mediaId, peaks, duration, channels, samplesPerSecond)
+              }
 
               reportProgress(100, true)
               resolveOnce(cached)
@@ -888,7 +917,7 @@ class WaveformCacheService {
             ? undefined
             : (getObjectUrlBlob(blobUrl) ?? undefined),
           sourceMetadata: getObjectUrlDirectFileMetadata(blobUrl) ?? undefined,
-          samplesPerSecond: SAMPLES_PER_SECOND,
+          samplesPerSecond,
           binDurationSec: WAVEFORM_BIN_DURATION_SEC,
         })
       }
@@ -1167,7 +1196,7 @@ class WaveformCacheService {
     // to their running promise so callers do not accidentally "complete" on a
     // partial progressive snapshot.
     const memoryCached = this.getFromMemoryCache(mediaId)
-    if (memoryCached?.isComplete) {
+    if (memoryCached?.isComplete && memoryCached.sampleRate === SAMPLES_PER_SECOND) {
       return memoryCached
     }
 
@@ -1177,7 +1206,7 @@ class WaveformCacheService {
       return pending.promise
     }
 
-    if (memoryCached) {
+    if (memoryCached && memoryCached.sampleRate === SAMPLES_PER_SECOND) {
       return memoryCached
     }
 
@@ -1194,6 +1223,48 @@ class WaveformCacheService {
     }
 
     return this.enqueueGeneration(mediaId, blobUrl, onProgress)
+  }
+
+  async prepareOverviewWaveform(
+    mediaId: string,
+    blobUrl: string,
+    onProgress?: (progress: number) => void,
+  ): Promise<CachedWaveform | null> {
+    const fullMemoryCached = this.getFromMemoryCache(mediaId)
+    if (fullMemoryCached?.isComplete && fullMemoryCached.sampleRate === SAMPLES_PER_SECOND) {
+      return fullMemoryCached
+    }
+
+    const persistedMetadata = await waveformOPFSStorage.getMetadata(mediaId)
+    if (persistedMetadata) {
+      const overviewLevelIndex = Math.min(WAVEFORM_LEVELS.length - 1, persistedMetadata.levels.length - 1)
+      const level = await this.getDisplayLevel(mediaId, Math.max(0, overviewLevelIndex))
+      if (level) {
+        return this.makeCachedWaveform(
+          level.peaks,
+          level.duration,
+          level.channels,
+          true,
+          level.stereo,
+          level.maxPeak,
+          level.loadedSamples,
+          level.sampleRate,
+        )
+      }
+    }
+
+    const pending = this.pendingRequests.get(mediaId)
+    if (pending) {
+      return pending.promise
+    }
+
+    const requestId = `waveform-overview-${++this.workerRequestId}`
+    return this.generateWaveformWithWorker(mediaId, blobUrl, requestId, onProgress, {
+      samplesPerSecond: WAVEFORM_OVERVIEW_SAMPLES_PER_SECOND,
+      persistBins: false,
+      persistOPFS: true,
+      timeoutMs: 45_000,
+    })
   }
 
   /**

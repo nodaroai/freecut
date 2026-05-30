@@ -113,6 +113,17 @@ import {
 import {
   filmstripCache,
   gifFrameCache,
+  IMPORT_FILMSTRIP_HUGE_FILE_BYTES,
+  IMPORT_FILMSTRIP_LARGE_FILE_BYTES,
+  IMPORT_FILMSTRIP_LARGE_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_LONG_DURATION_SEC,
+  IMPORT_FILMSTRIP_MEDIUM_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_NORMAL_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
+  IMPORT_FILMSTRIP_SLOW_CONTAINER_MIME_TYPES,
+  IMPORT_FILMSTRIP_SLOW_PREP_TIMEOUT_MS,
+  IMPORT_FILMSTRIP_TINY_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_VERY_LONG_DURATION_SEC,
   MAX_FILMSTRIP_TARGET_FRAMES,
   waveformCache,
 } from '@/features/media-library/deps/timeline-services'
@@ -146,6 +157,7 @@ const IMPORT_BACKGROUND_COVER_WARM_DELAY_MS = 0
 const IMPORT_BACKGROUND_WARM_DELAY_MS = 600
 const IMPORT_BACKGROUND_HEAVY_DELAY_MS = 2200
 const IMPORT_BACKGROUND_PREPARE_DELAY_MS = 1200
+const IMPORT_WAVEFORM_FULL_REFINE_DELAY_MS = 2400
 const PAGE_URL_IMPORT_HOSTS = [
   'youtube.com',
   'www.youtube.com',
@@ -224,6 +236,46 @@ function extractFileNameFromUrl(input: string): string | null {
 
 function inferExtensionFromMimeType(mimeType: string): string {
   return MIME_TYPE_TO_EXTENSION[mimeType] ?? ''
+}
+
+function chooseImportFilmstripPreparation(media: MediaMetadata): {
+  targetFrameCount: number
+  timeoutMs: number
+} {
+  const isSlowContainer = IMPORT_FILMSTRIP_SLOW_CONTAINER_MIME_TYPES.has(media.mimeType)
+  const isHuge =
+    media.fileSize >= IMPORT_FILMSTRIP_HUGE_FILE_BYTES ||
+    media.duration >= IMPORT_FILMSTRIP_VERY_LONG_DURATION_SEC ||
+    isSlowContainer
+  const isLarge =
+    media.fileSize >= IMPORT_FILMSTRIP_LARGE_FILE_BYTES ||
+    media.duration >= IMPORT_FILMSTRIP_LONG_DURATION_SEC
+
+  if (isHuge) {
+    return {
+      targetFrameCount: IMPORT_FILMSTRIP_TINY_TARGET_FRAMES,
+      timeoutMs: IMPORT_FILMSTRIP_SLOW_PREP_TIMEOUT_MS,
+    }
+  }
+
+  if (isLarge) {
+    return {
+      targetFrameCount: IMPORT_FILMSTRIP_LARGE_TARGET_FRAMES,
+      timeoutMs: IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
+    }
+  }
+
+  if (media.duration >= 300) {
+    return {
+      targetFrameCount: IMPORT_FILMSTRIP_MEDIUM_TARGET_FRAMES,
+      timeoutMs: IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
+    }
+  }
+
+  return {
+    targetFrameCount: Math.min(MAX_FILMSTRIP_TARGET_FRAMES, IMPORT_FILMSTRIP_NORMAL_TARGET_FRAMES),
+    timeoutMs: IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
+  }
 }
 
 function buildImportedUrlFileName(
@@ -497,6 +549,7 @@ class MediaLibraryService {
         enqueueBackgroundMediaWork(
           async () => {
             startMediaPreparationTask(mediaMetadata.id, 'filmstrip')
+            const preparation = chooseImportFilmstripPreparation(mediaMetadata)
             const blobUrl = URL.createObjectURL(file)
             registerObjectUrl(blobUrl, file, {
               mediaId: mediaMetadata.id,
@@ -505,20 +558,49 @@ class MediaLibraryService {
               opfsPath: mediaMetadata.opfsPath,
               fileSize: mediaMetadata.fileSize,
             })
+            let timeoutId: ReturnType<typeof setTimeout> | null = null
+            let didTimeout = false
             try {
-              await filmstripCache.getFilmstrip(
+              const extraction = filmstripCache.getFilmstrip(
                 mediaMetadata.id,
                 blobUrl,
                 mediaMetadata.duration,
                 (progress) => updateMediaPreparationTask(mediaMetadata.id, 'filmstrip', progress),
                 { startIndex: 0, endIndex: Math.min(Math.ceil(mediaMetadata.duration), 4) },
-                { targetFrameCount: MAX_FILMSTRIP_TARGET_FRAMES },
+                { targetFrameCount: preparation.targetFrameCount },
               )
+              const timeout = new Promise<void>((timeoutResolve) => {
+                timeoutId = setTimeout(() => {
+                  didTimeout = true
+                  filmstripCache.abort(mediaMetadata.id)
+                  timeoutResolve()
+                }, preparation.timeoutMs)
+              })
+              const extractionResult = extraction.then(
+                () => undefined,
+                (error) => {
+                  if (didTimeout) return undefined
+                  throw error
+                },
+              )
+
+              await Promise.race([extractionResult, timeout])
+              if (!didTimeout) {
+                await extractionResult
+              }
+              updateMediaPreparationTask(mediaMetadata.id, 'filmstrip', 100)
               completeMediaPreparationTask(mediaMetadata.id, 'filmstrip')
             } catch (error) {
-              failMediaPreparationTask(mediaMetadata.id, 'filmstrip', error)
-              throw error
+              if (didTimeout) {
+                completeMediaPreparationTask(mediaMetadata.id, 'filmstrip')
+              } else {
+                failMediaPreparationTask(mediaMetadata.id, 'filmstrip', error)
+                throw error
+              }
             } finally {
+              if (timeoutId) {
+                clearTimeout(timeoutId)
+              }
               unregisterObjectUrl(blobUrl)
               URL.revokeObjectURL(blobUrl)
               resolve()
@@ -548,9 +630,10 @@ class MediaLibraryService {
               fileSize: mediaMetadata.fileSize,
             })
             try {
-              await waveformCache.getWaveform(mediaMetadata.id, blobUrl, (progress) =>
+              await waveformCache.prepareOverviewWaveform(mediaMetadata.id, blobUrl, (progress) =>
                 updateMediaPreparationTask(mediaMetadata.id, 'waveform', progress),
               )
+              updateMediaPreparationTask(mediaMetadata.id, 'waveform', 100)
               completeMediaPreparationTask(mediaMetadata.id, 'waveform')
             } catch (error) {
               failMediaPreparationTask(mediaMetadata.id, 'waveform', error)
@@ -568,6 +651,29 @@ class MediaLibraryService {
         )
       })
       this.trackPreparationPromise(mediaMetadata.id, waveformPreparationPromise)
+
+      enqueueBackgroundMediaWork(
+        async () => {
+          const blobUrl = URL.createObjectURL(file)
+          registerObjectUrl(blobUrl, file, {
+            mediaId: mediaMetadata.id,
+            storageType: mediaMetadata.storageType,
+            fileHandle: mediaMetadata.fileHandle,
+            opfsPath: mediaMetadata.opfsPath,
+            fileSize: mediaMetadata.fileSize,
+          })
+          try {
+            await waveformCache.getWaveform(mediaMetadata.id, blobUrl)
+          } finally {
+            unregisterObjectUrl(blobUrl)
+            URL.revokeObjectURL(blobUrl)
+          }
+        },
+        {
+          priority: 'heavy',
+          delayMs: IMPORT_WAVEFORM_FULL_REFINE_DELAY_MS,
+        },
+      )
     }
 
     if (needsCustomAudioDecoder(options.previewAudioCodec)) {

@@ -265,13 +265,30 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
       sourceEnd ?? effectiveStart + (visibleClipWidth / Math.max(1, renderPixelsPerSecond)) * speed,
     ),
   )
-  // No zoom-driven extraction targeting. Earlier we passed a priorityWindow +
-  // targetFrameIndices that flipped on every pps change, which made the cache
-  // mark frames as re-extracting and the tiles momentarily showed a "broken
-  // thumbnail" while the cache published refining state. Letting the cache
-  // extract its default 1fps coverage once per clip and never re-targeting on
-  // zoom keeps already-loaded thumbnails stable across every zoom step.
-  const priorityWindow = null
+  const initialPriorityWindowRef = useRef<{
+    mediaId: string
+    window: { startTime: number; endTime: number }
+  } | null>(null)
+  if (initialPriorityWindowRef.current?.mediaId !== mediaId) {
+    initialPriorityWindowRef.current = null
+  }
+  if (isVisible && !initialPriorityWindowRef.current && effectiveEnd > effectiveStart) {
+    initialPriorityWindowRef.current = {
+      mediaId,
+      window: {
+        startTime: effectiveStart,
+        endTime: Math.min(sourceDuration, Math.max(effectiveEnd, effectiveStart + 1)),
+      },
+    }
+  }
+
+  // Prioritize the first visible source window once per media item. Keeping this
+  // stable avoids the old zoom-driven target churn while still making a freshly
+  // dropped visible clip fill in the part the user can actually see first.
+  const priorityWindow =
+    initialPriorityWindowRef.current?.mediaId === mediaId
+      ? initialPriorityWindowRef.current.window
+      : null
   const targetFrameCount = undefined
   const targetFrameIndices = undefined
 

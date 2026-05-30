@@ -279,11 +279,9 @@ class WaveformOPFSStorage {
 
     for (const targetRate of WAVEFORM_LEVELS) {
       if (targetRate >= sourceSampleRate) {
-        // Can't upsample, use source directly or skip
-        if (levels.length === 0) {
-          // First level - use source as-is
-          levels.push({ sampleRate: sourceSampleRate, peaks: sourcePeaks })
-        }
+        // Can't upsample. Keep a source-rate entry for this slot so partially
+        // prepared overview files still satisfy every display-level index.
+        levels.push({ sampleRate: sourceSampleRate, peaks: sourcePeaks })
         continue
       }
 

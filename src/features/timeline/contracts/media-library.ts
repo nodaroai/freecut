@@ -29,7 +29,20 @@ export { removeItems as removeItemsFromItemsActions } from '../stores/actions/it
 export { autoMatchOrphanedClips } from '../utils/media-validation'
 export { gifFrameCache } from '../services/gif-frame-cache'
 export { filmstripCache } from '../services/filmstrip-cache'
-export { MAX_FILMSTRIP_TARGET_FRAMES } from '../services/filmstrip-cache-config'
+export {
+  IMPORT_FILMSTRIP_HUGE_FILE_BYTES,
+  IMPORT_FILMSTRIP_LARGE_FILE_BYTES,
+  IMPORT_FILMSTRIP_LARGE_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_LONG_DURATION_SEC,
+  IMPORT_FILMSTRIP_MEDIUM_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_NORMAL_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_PREP_TIMEOUT_MS,
+  IMPORT_FILMSTRIP_SLOW_CONTAINER_MIME_TYPES,
+  IMPORT_FILMSTRIP_SLOW_PREP_TIMEOUT_MS,
+  IMPORT_FILMSTRIP_TINY_TARGET_FRAMES,
+  IMPORT_FILMSTRIP_VERY_LONG_DURATION_SEC,
+  MAX_FILMSTRIP_TARGET_FRAMES,
+} from '../services/filmstrip-cache-config'
 export { waveformCache } from '../services/waveform-cache'
 export { schedulePreviewWork } from '../hooks/preview-work-budget'
 export { resolveMediaUrl, resolveMediaUrls } from '../deps/media-library-contract'

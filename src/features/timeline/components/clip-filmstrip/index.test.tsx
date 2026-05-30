@@ -163,12 +163,7 @@ describe('ClipFilmstrip', () => {
   })
 
   it('does not vary extraction targeting with zoom-derived inputs', () => {
-    // Filmstrip used to recompute targetFrameCount/targetFrameIndices/priorityWindow
-    // from clipWidth + pixelsPerSecond + visibility ratios on every zoom step.
-    // That caused the cache to re-extract on zoom and briefly show "broken"
-    // tiles. The contract is now: those request fields are all stable
-    // (undefined / null) so the cache extracts default coverage once.
-    render(
+    const { rerender } = render(
       <ClipFilmstrip
         mediaId="media-1"
         clipWidth={2000}
@@ -184,8 +179,29 @@ describe('ClipFilmstrip', () => {
       />,
     )
 
+    const firstCall = useFilmstripMock.mock.calls.at(-1)?.[0]
+    expect(firstCall?.priorityWindow).toEqual({ startTime: 0, endTime: 20 })
+    expect(firstCall?.targetFrameCount).toBeUndefined()
+    expect(firstCall?.targetFrameIndices).toBeUndefined()
+
+    rerender(
+      <ClipFilmstrip
+        mediaId="media-1"
+        clipWidth={2000}
+        sourceStart={0}
+        sourceDuration={120}
+        trimStart={0}
+        speed={1}
+        fps={31}
+        isVisible
+        visibleStartRatio={0.5}
+        visibleEndRatio={0.75}
+        pixelsPerSecond={200}
+      />,
+    )
+
     const latestCall = useFilmstripMock.mock.calls.at(-1)?.[0]
-    expect(latestCall?.priorityWindow).toBeNull()
+    expect(latestCall?.priorityWindow).toEqual(firstCall?.priorityWindow)
     expect(latestCall?.targetFrameCount).toBeUndefined()
     expect(latestCall?.targetFrameIndices).toBeUndefined()
   })
