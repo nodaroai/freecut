@@ -742,14 +742,14 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
         name: mediaById[task.mediaId]?.fileName ?? task.mediaId,
         kind:
           task.type === 'import'
-            ? 'Import'
+            ? t('media.library.preparationType.import')
             : task.type === 'filmstrip'
-              ? 'Filmstrip'
-              : 'Waveform',
+              ? t('media.library.preparationType.filmstrip')
+              : t('media.library.preparationType.waveform'),
         percent: Math.round(task.progress * 100),
         status: task.status,
       })),
-    [activePreparationTasks, mediaById],
+    [activePreparationTasks, mediaById, t],
   )
 
   const handleGenerateSelectedProxies = async () => {
@@ -1579,8 +1579,8 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
       {preparingCount > 0 && (
         <BackgroundTaskProgress
           icon={<Film className="w-3.5 h-3.5 text-cyan-500 flex-shrink-0" />}
-          label={`Preparing media (${preparingCount})`}
-          progressAriaLabel="Media preparation progress"
+          label={t('media.library.preparingMediaWithCount', { count: preparingCount })}
+          progressAriaLabel={t('media.library.mediaPreparationProgress')}
           progressPercent={preparingAvgProgress * 100}
           detailsToggleAriaLabel={t('media.library.perItemProgress')}
           details={
@@ -1594,7 +1594,9 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
                     <span className="flex flex-shrink-0 items-center gap-2">
                       <span className="hidden sm:inline">{row.kind}</span>
                       <span className="tabular-nums">
-                        {row.status === 'queued' ? 'Queued' : `${row.percent}%`}
+                        {row.status === 'queued'
+                          ? t('media.library.preparationQueued')
+                          : `${row.percent}%`}
                       </span>
                     </span>
                   </div>
@@ -1603,7 +1605,9 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           }
           meta={
             <span className="tabular-nums">
-              {hasRunningPreparationTasks ? `${Math.round(preparingAvgProgress * 100)}%` : 'Queued'}
+              {hasRunningPreparationTasks
+                ? `${Math.round(preparingAvgProgress * 100)}%`
+                : t('media.library.preparationQueued')}
             </span>
           }
           fillClassName="bg-cyan-500"
