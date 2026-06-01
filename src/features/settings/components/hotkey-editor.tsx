@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { AlertTriangle, Download, Keyboard, RotateCcw, Search, Upload, X } from 'lucide-react'
@@ -402,6 +402,7 @@ export function HotkeyEditor() {
   const resetHotkeyBinding = useSettingsStore((state) => state.resetHotkeyBinding)
   const resetHotkeys = useSettingsStore((state) => state.resetHotkeys)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const partialConflictOverrideSnapshotRef = useRef<typeof hotkeyOverrides | null>(null)
 
   const [selectedKey, setSelectedKey] = useState<HotkeyKey>('PLAY_PAUSE')
   const [activeLayer, setActiveLayer] = useState<HotkeyEditorSection | null>(null)
@@ -449,6 +450,22 @@ export function HotkeyEditor() {
   )
   const hasSearchQuery = searchQuery.trim().length > 0
 
+  const stopCapture = useCallback(
+    ({ restorePartialOverwrites = true } = {}) => {
+      const snapshot = partialConflictOverrideSnapshotRef.current
+      partialConflictOverrideSnapshotRef.current = null
+
+      if (restorePartialOverwrites && snapshot) {
+        replaceHotkeyOverrides(snapshot)
+      }
+
+      setCaptureKey(null)
+      setDraftBinding('')
+      setPreviewBinding('')
+    },
+    [replaceHotkeyOverrides],
+  )
+
   useEffect(() => {
     if (!captureKey) {
       return undefined
@@ -457,9 +474,7 @@ export function HotkeyEditor() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        setCaptureKey(null)
-        setDraftBinding('')
-        setPreviewBinding('')
+        stopCapture()
         return
       }
 
@@ -484,19 +499,23 @@ export function HotkeyEditor() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
     }
-  }, [captureKey])
+  }, [captureKey, stopCapture])
+
+  useEffect(() => {
+    return () => {
+      const snapshot = partialConflictOverrideSnapshotRef.current
+      partialConflictOverrideSnapshotRef.current = null
+
+      if (snapshot) {
+        replaceHotkeyOverrides(snapshot)
+      }
+    }
+  }, [replaceHotkeyOverrides])
 
   const startCapture = (key: HotkeyKey) => {
+    stopCapture()
     setSelectedKey(key)
     setCaptureKey(key)
-    setDraftBinding('')
-    setPreviewBinding('')
-  }
-
-  const stopCapture = () => {
-    setCaptureKey(null)
-    setDraftBinding('')
-    setPreviewBinding('')
   }
 
   const layerTokens = useMemo(() => {
@@ -563,7 +582,7 @@ export function HotkeyEditor() {
     }
 
     setHotkeyBinding(captureKey, normalizeHotkeyBinding(draftBinding))
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
   }
 
   const overwriteConflictingHotkey = (conflictKey: HotkeyKey) => {
@@ -571,12 +590,18 @@ export function HotkeyEditor() {
       return
     }
 
+    if (!partialConflictOverrideSnapshotRef.current) {
+      partialConflictOverrideSnapshotRef.current = {
+        ...useSettingsStore.getState().hotkeyOverrides,
+      }
+    }
+
     const remainingConflicts = captureConflicts.filter((key) => key !== conflictKey)
     unbindHotkeyBinding(conflictKey)
 
     if (remainingConflicts.length === 0) {
       setHotkeyBinding(captureKey, normalizeHotkeyBinding(draftBinding))
-      stopCapture()
+      stopCapture({ restorePartialOverwrites: false })
     }
   }
 
@@ -589,22 +614,22 @@ export function HotkeyEditor() {
       unbindHotkeyBinding(conflictKey)
     }
     setHotkeyBinding(captureKey, normalizeHotkeyBinding(draftBinding))
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
   }
 
   const unbindSelectedHotkey = () => {
     unbindHotkeyBinding(selectedKey)
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
   }
 
   const resetSelectedHotkey = () => {
     resetHotkeyBinding(selectedKey)
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
   }
 
   const confirmResetAllHotkeys = () => {
     resetHotkeys()
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
     toast.success(t('projects.settings.hotkeys.resetAllToast'))
   }
 
@@ -659,7 +684,7 @@ export function HotkeyEditor() {
       const importResult = parseHotkeyImportDocument(JSON.parse(contents))
 
       replaceHotkeyOverrides(importResult.overrides)
-      stopCapture()
+      stopCapture({ restorePartialOverwrites: false })
 
       const messages = [
         t('projects.settings.hotkeys.importedCommands', {
@@ -933,7 +958,12 @@ export function HotkeyEditor() {
                   >
                     {t('common.save')}
                   </Button>
-                  <Button size="sm" variant="outline" className="w-full" onClick={stopCapture}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => stopCapture()}
+                  >
                     {t('common.cancel')}
                   </Button>
                 </>

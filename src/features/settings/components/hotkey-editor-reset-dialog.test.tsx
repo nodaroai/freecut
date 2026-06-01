@@ -120,6 +120,37 @@ describe('HotkeyEditor reset all confirmation', () => {
     })
   })
 
+  it('restores partial conflict overwrites when capture is cancelled', async () => {
+    useSettingsStore.setState({
+      hotkeyOverrides: {
+        PLAY_PAUSE: 'shift+k',
+        PREVIOUS_FRAME: 'right',
+      },
+    })
+
+    click(getButton('Record'))
+    await waitForText('Listening')
+    keyDown('ArrowRight', 'ArrowRight')
+
+    await waitForBodyText('Conflicts with Previous frame')
+    await waitForBodyText('Conflicts with Next frame')
+    click(getButton('Overwrite'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(useSettingsStore.getState().hotkeyOverrides).not.toEqual({
+      PLAY_PAUSE: 'shift+k',
+      PREVIOUS_FRAME: 'right',
+    })
+
+    keyDown('Escape', 'Escape')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(useSettingsStore.getState().hotkeyOverrides).toEqual({
+      PLAY_PAUSE: 'shift+k',
+      PREVIOUS_FRAME: 'right',
+    })
+  })
+
   it('keeps unbind explicit and disables it once the selected command is unassigned', async () => {
     click(getButton('Unbind'))
     await new Promise((resolve) => setTimeout(resolve, 0))
