@@ -8,7 +8,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/shared/ui/cn'
 import {
   HOTKEYS,
-  HOTKEY_DESCRIPTIONS,
   createHotkeyExportDocument,
   findHotkeyConflicts,
   formatHotkeyBinding,
@@ -882,13 +881,17 @@ export function HotkeyEditor() {
                       <AlertTriangle className="h-3.5 w-3.5" />
                       {t('projects.settings.hotkeys.conflictDetected')}
                     </div>
-                    {captureConflicts.map((key) => (
-                      <div key={key} className="text-xs text-foreground/88">
-                        {t('projects.settings.hotkeys.conflictsWith', {
-                          action: HOTKEY_DESCRIPTIONS[key],
-                        })}
-                      </div>
-                    ))}
+                    {captureConflicts.map((key) => {
+                      const hotkeyItem = HOTKEY_ITEM_BY_KEY[key]
+
+                      return (
+                        <div key={key} className="text-xs text-foreground/88">
+                          {t('projects.settings.hotkeys.conflictsWith', {
+                            action: t(hotkeyItem.labelKey),
+                          })}
+                        </div>
+                      )
+                    })}
                     <Button
                       size="sm"
                       variant="destructive"
