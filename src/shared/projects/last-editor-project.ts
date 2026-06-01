@@ -14,11 +14,19 @@ export function getEditorProjectIdFromPathname(pathname: string): string | undef
 }
 
 export function rememberLastEditorProjectId(projectId: string): void {
-  window.localStorage.setItem(LAST_EDITOR_PROJECT_ID_KEY, projectId)
+  try {
+    window.localStorage.setItem(LAST_EDITOR_PROJECT_ID_KEY, projectId)
+  } catch {
+    // Ignore restricted-storage failures so bootstrap/reload flows do not crash.
+  }
 }
 
 export function getLastEditorProjectId(): string | undefined {
-  return window.localStorage.getItem(LAST_EDITOR_PROJECT_ID_KEY) ?? undefined
+  try {
+    return window.localStorage.getItem(LAST_EDITOR_PROJECT_ID_KEY) ?? undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function getEditorProjectReloadPathWithCacheBust(): string {
@@ -26,7 +34,7 @@ export function getEditorProjectReloadPathWithCacheBust(): string {
   const currentProjectId = getEditorProjectIdFromPathname(nextUrl.pathname)
   const projectId = currentProjectId ?? getLastEditorProjectId()
 
-  if (projectId && !currentProjectId) {
+  if (projectId && !currentProjectId && (nextUrl.pathname === '/' || nextUrl.pathname === '')) {
     nextUrl.pathname = `/editor/${encodeURIComponent(projectId)}`
   }
 

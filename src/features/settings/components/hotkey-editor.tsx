@@ -883,22 +883,20 @@ export function HotkeyEditor() {
                       {t('projects.settings.hotkeys.conflictDetected')}
                     </div>
                     {captureConflicts.map((key) => (
-                      <div key={key} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="min-w-0 text-foreground/88">
-                          {t('projects.settings.hotkeys.conflictsWith', {
-                            action: HOTKEY_DESCRIPTIONS[key],
-                          })}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          className="h-7 shrink-0 px-2 text-[11px]"
-                          onClick={overwriteConflictingHotkeys}
-                        >
-                          {t('projects.settings.hotkeys.overwrite')}
-                        </Button>
+                      <div key={key} className="text-xs text-foreground/88">
+                        {t('projects.settings.hotkeys.conflictsWith', {
+                          action: HOTKEY_DESCRIPTIONS[key],
+                        })}
                       </div>
                     ))}
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 w-full px-2 text-[11px]"
+                      onClick={overwriteConflictingHotkeys}
+                    >
+                      {t('projects.settings.hotkeys.overwriteAll')}
+                    </Button>
                   </div>
                 ) : null}
                 {pendingBrowserHotkey ? (

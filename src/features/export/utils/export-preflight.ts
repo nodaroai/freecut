@@ -18,9 +18,12 @@ export type ExportPreflightSeverity = 'ok' | 'info' | 'warning' | 'error'
 export interface ExportPreflightCheck {
   id: string
   severity: ExportPreflightSeverity
-  title: string
-  detail: string
-  fix?: string
+  titleKey: string
+  detailKey: string
+  fixKey?: string
+  titleParams?: Record<string, unknown>
+  detailParams?: Record<string, unknown>
+  fixParams?: Record<string, unknown>
 }
 
 export interface AssessExportPreflightOptions {
@@ -194,16 +197,20 @@ export async function assessExportPreflight({
     checks.push({
       id: 'empty-range',
       severity: 'error',
-      title: 'Nothing to export',
-      detail: 'The selected export range has no frames.',
-      fix: 'Add timeline content or choose a non-empty in/out range.',
+      titleKey: 'export.preflight.checks.empty-range.title',
+      detailKey: 'export.preflight.checks.empty-range.detail',
+      fixKey: 'export.preflight.checks.empty-range.fix',
     })
   } else {
     checks.push({
       id: 'export-range-ready',
       severity: 'ok',
-      title: 'Export range ready',
-      detail: `${durationFrames.toLocaleString()} frames (${estimatedDurationSeconds.toFixed(1)}s) will be exported.`,
+      titleKey: 'export.preflight.checks.export-range-ready.title',
+      detailKey: 'export.preflight.checks.export-range-ready.detail',
+      detailParams: {
+        frames: durationFrames.toLocaleString(),
+        seconds: estimatedDurationSeconds.toFixed(1),
+      },
     })
   }
 
@@ -211,9 +218,12 @@ export async function assessExportPreflight({
     checks.push({
       id: 'video-codec-unavailable',
       severity: 'error',
-      title: 'Selected format cannot be encoded',
-      detail: resolved.error ?? 'This browser cannot encode the selected export settings.',
-      fix: 'Choose a different format/codec or try a recent Chromium browser.',
+      titleKey: 'export.preflight.checks.video-codec-unavailable.title',
+      detailKey: resolved.error
+        ? 'export.preflight.checks.video-codec-unavailable.detailWithError'
+        : 'export.preflight.checks.video-codec-unavailable.detail',
+      detailParams: { error: resolved.error },
+      fixKey: 'export.preflight.checks.video-codec-unavailable.fix',
     })
 
     return {
@@ -228,23 +238,37 @@ export async function assessExportPreflight({
     checks.push({
       id: 'audio-export-ready',
       severity: 'ok',
-      title: 'Audio export ready',
-      detail: `${resolved.clientSettings.container.toUpperCase()} audio will use ${resolved.clientSettings.audioCodec ?? 'the default audio codec'}.`,
+      titleKey: 'export.preflight.checks.audio-export-ready.title',
+      detailKey: resolved.clientSettings.audioCodec
+        ? 'export.preflight.checks.audio-export-ready.detail'
+        : 'export.preflight.checks.audio-export-ready.detailDefaultCodec',
+      detailParams: {
+        container: resolved.clientSettings.container.toUpperCase(),
+        codec: resolved.clientSettings.audioCodec,
+      },
     })
   } else if (resolved.codecFallback) {
     checks.push({
       id: 'video-codec-fallback',
       severity: 'warning',
-      title: 'Codec fallback will be used',
-      detail: `The selected codec is unavailable here. FreeCut will export ${describeCodec(resolved.codecFallback)} in ${resolved.clientSettings.container.toUpperCase()} instead.`,
-      fix: 'Keep this fallback or choose another supported codec manually.',
+      titleKey: 'export.preflight.checks.video-codec-fallback.title',
+      detailKey: 'export.preflight.checks.video-codec-fallback.detail',
+      detailParams: {
+        codec: describeCodec(resolved.codecFallback),
+        container: resolved.clientSettings.container.toUpperCase(),
+      },
+      fixKey: 'export.preflight.checks.video-codec-fallback.fix',
     })
   } else {
     checks.push({
       id: 'video-codec-supported',
       severity: 'ok',
-      title: 'Video codec supported',
-      detail: `${describeCodec(resolved.clientSettings.codec)} can be encoded as ${resolved.clientSettings.container.toUpperCase()} in this browser.`,
+      titleKey: 'export.preflight.checks.video-codec-supported.title',
+      detailKey: 'export.preflight.checks.video-codec-supported.detail',
+      detailParams: {
+        codec: describeCodec(resolved.clientSettings.codec),
+        container: resolved.clientSettings.container.toUpperCase(),
+      },
     })
   }
 
@@ -256,36 +280,33 @@ export async function assessExportPreflight({
     checks.push({
       id: 'worker-unavailable-fallback',
       severity: 'info',
-      title: 'Worker export unavailable',
-      detail:
-        'This browser/session cannot start export workers, so rendering will run on the main thread.',
-      fix: 'Keep the tab focused and avoid heavy interaction during export.',
+      titleKey: 'export.preflight.checks.worker-unavailable-fallback.title',
+      detailKey: 'export.preflight.checks.worker-unavailable-fallback.detail',
+      fixKey: 'export.preflight.checks.worker-unavailable-fallback.fix',
     })
   } else if (resolved.clientSettings.mode === 'video' && hasAnimatedImage(tracks)) {
     predictedRenderPath = 'main-thread'
     checks.push({
       id: 'worker-animated-image-fallback',
       severity: 'warning',
-      title: 'Animated images require main-thread export',
-      detail:
-        'GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.',
-      fix: 'For faster worker export, replace animated images with video clips before exporting.',
+      titleKey: 'export.preflight.checks.worker-animated-image-fallback.title',
+      detailKey: 'export.preflight.checks.worker-animated-image-fallback.detail',
+      fixKey: 'export.preflight.checks.worker-animated-image-fallback.fix',
     })
   } else if (hasAudibleItem(tracks) && !offlineAudioContextAvailable) {
     predictedRenderPath = 'main-thread'
     checks.push({
       id: 'worker-audio-context-fallback',
       severity: 'info',
-      title: 'Audio mix requires main-thread fallback',
-      detail:
-        'OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread.',
+      titleKey: 'export.preflight.checks.worker-audio-context-fallback.title',
+      detailKey: 'export.preflight.checks.worker-audio-context-fallback.detail',
     })
   } else {
     checks.push({
       id: 'worker-export-ready',
       severity: 'ok',
-      title: 'Worker export path ready',
-      detail: 'The export worker can render this composition without a known main-thread fallback.',
+      titleKey: 'export.preflight.checks.worker-export-ready.title',
+      detailKey: 'export.preflight.checks.worker-export-ready.detail',
     })
   }
 

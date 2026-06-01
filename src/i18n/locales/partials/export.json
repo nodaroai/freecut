@@ -92,6 +92,61 @@
         "mov": "Apple ecosystem, best in Final Cut and QuickTime",
         "webm": "Open, modern container for web playback",
         "mkv": "Flexible container with strong subtitle support"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -188,6 +243,61 @@
         "mov": "Ecosistema Apple, ideal para Final Cut y QuickTime",
         "webm": "Contenedor abierto y moderno para web",
         "mkv": "Contenedor flexible con buen soporte de subtítulos"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -284,6 +394,61 @@
         "mov": "Écosystème Apple, idéal pour Final Cut et QuickTime",
         "webm": "Conteneur ouvert et moderne pour le web",
         "mkv": "Conteneur flexible avec prise en charge avancée des sous-titres"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -380,6 +545,61 @@
         "mov": "Apple-Ökosystem, ideal für Final Cut und QuickTime",
         "webm": "Offener, moderner Container für die Webwiedergabe",
         "mkv": "Flexibler Container mit starker Untertitelunterstützung"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -476,6 +696,61 @@
         "mov": "Ecossistema Apple, ideal para Final Cut e QuickTime",
         "webm": "Contêiner aberto e moderno para reprodução na web",
         "mkv": "Contêiner flexível com ótimo suporte a legendas"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -572,6 +847,61 @@
         "mov": "Apple ekosistemi, Final Cut ve QuickTime için ideal",
         "webm": "Web oynatma için açık ve modern bir kapsayıcı",
         "mkv": "Esnek bir kapsayıcı, güçlü altyazı desteği"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -668,6 +998,61 @@
         "mov": "Apple 環境向け、Final Cut や QuickTime に最適",
         "webm": "ウェブ再生向けのオープンで先進的なコンテナ",
         "mkv": "字幕サポートが優れた柔軟なコンテナ"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -764,6 +1149,61 @@
         "mov": "Apple 생태계, Final Cut 및 QuickTime에 적합",
         "webm": "웹 재생을 위한 개방형 최신 컨테이너",
         "mkv": "자막 지원이 강력한 유연한 컨테이너"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   },
@@ -860,6 +1300,61 @@
         "mov": "Apple 生态系统，最适合 Final Cut 与 QuickTime",
         "webm": "面向网页播放的开放式现代容器",
         "mkv": "灵活容器，字幕支持出色"
+      },
+      "preflight": {
+        "checking": "Checking export preflight…",
+        "title": "Export preflight",
+        "workerPath": "Worker path",
+        "fallback": "Main-thread fallback",
+        "checks": {
+          "empty-range": {
+            "title": "Nothing to export",
+            "detail": "The selected export range has no frames.",
+            "fix": "Add timeline content or choose a non-empty in/out range."
+          },
+          "export-range-ready": {
+            "title": "Export range ready",
+            "detail": "{{frames}} frames ({{seconds}}s) will be exported."
+          },
+          "video-codec-unavailable": {
+            "title": "Selected format cannot be encoded",
+            "detail": "This browser cannot encode the selected export settings.",
+            "detailWithError": "{{error}}",
+            "fix": "Choose a different format/codec or try a recent Chromium browser."
+          },
+          "audio-export-ready": {
+            "title": "Audio export ready",
+            "detail": "{{container}} audio will use {{codec}}.",
+            "detailDefaultCodec": "{{container}} audio will use the default audio codec."
+          },
+          "video-codec-fallback": {
+            "title": "Codec fallback will be used",
+            "detail": "The selected codec is unavailable here. FreeCut will export {{codec}} in {{container}} instead.",
+            "fix": "Keep this fallback or choose another supported codec manually."
+          },
+          "video-codec-supported": {
+            "title": "Video codec supported",
+            "detail": "{{codec}} can be encoded as {{container}} in this browser."
+          },
+          "worker-unavailable-fallback": {
+            "title": "Worker export unavailable",
+            "detail": "This browser/session cannot start export workers, so rendering will run on the main thread.",
+            "fix": "Keep the tab focused and avoid heavy interaction during export."
+          },
+          "worker-animated-image-fallback": {
+            "title": "Animated images require main-thread export",
+            "detail": "GIF/WebP image items cannot render in the export worker yet. FreeCut will fall back automatically.",
+            "fix": "For faster worker export, replace animated images with video clips before exporting."
+          },
+          "worker-audio-context-fallback": {
+            "title": "Audio mix requires main-thread fallback",
+            "detail": "OfflineAudioContext is not available in the export worker, so audio rendering will run on the main thread."
+          },
+          "worker-export-ready": {
+            "title": "Worker export path ready",
+            "detail": "The export worker can render this composition without a known main-thread fallback."
+          }
+        }
       }
     }
   }

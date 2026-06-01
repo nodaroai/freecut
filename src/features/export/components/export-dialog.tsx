@@ -227,10 +227,12 @@ function preflightIconClass(severity: ReturnType<typeof summarizePreflightSeveri
 }
 
 function ExportPreflightPanel({ preflight }: { preflight: ExportPreflightResult | null }) {
+  const { t } = useTranslation()
+
   if (!preflight) {
     return (
       <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-        Checking export preflight…
+        {t('export.preflight.checking')}
       </div>
     )
   }
@@ -248,10 +250,12 @@ function ExportPreflightPanel({ preflight }: { preflight: ExportPreflightResult 
           ) : (
             <AlertCircle className={`h-4 w-4 ${preflightIconClass(summarySeverity)}`} />
           )}
-          <span className="text-sm font-medium">Export preflight</span>
+          <span className="text-sm font-medium">{t('export.preflight.title')}</span>
         </div>
         <span className="text-xs text-muted-foreground">
-          {preflight.predictedRenderPath === 'worker' ? 'Worker path' : 'Main-thread fallback'}
+          {preflight.predictedRenderPath === 'worker'
+            ? t('export.preflight.workerPath')
+            : t('export.preflight.fallback')}
         </span>
       </div>
       <div className="space-y-1.5">
@@ -268,10 +272,15 @@ function ExportPreflightPanel({ preflight }: { preflight: ExportPreflightResult 
                       : 'text-green-500'
               }
             >
-              {check.title}
+              {t(check.titleKey, check.titleParams)}
             </span>
-            <span className="text-muted-foreground"> — {check.detail}</span>
-            {check.fix && <span className="text-muted-foreground"> {check.fix}</span>}
+            <span className="text-muted-foreground">
+              {' '}
+              — {t(check.detailKey, check.detailParams)}
+            </span>
+            {check.fixKey && (
+              <span className="text-muted-foreground"> {t(check.fixKey, check.fixParams)}</span>
+            )}
           </div>
         ))}
       </div>
@@ -698,8 +707,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
       fps,
       composition: preflightComposition,
       durationFrames: exportRange.duration,
-      supportedVideoCodecs:
-        exportMode === 'video' ? (supportedVideoCodecs ?? []) : (supportedVideoCodecs ?? []),
+      supportedVideoCodecs: supportedVideoCodecs ?? [],
     }).then((result) => {
       if (!cancelled) setPreflight(result)
     })

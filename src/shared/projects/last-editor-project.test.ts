@@ -35,4 +35,12 @@ describe('last editor project routing', () => {
       '/editor/project-123?__freecut_updated=456',
     )
   })
+
+  it('does not route non-root update reloads to the last editor project', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(456)
+    rememberLastEditorProjectId('project-123')
+    window.history.replaceState({}, '', '/projects?__freecut_updated=1780200314697')
+
+    expect(getEditorProjectReloadPathWithCacheBust()).toBe('/projects?__freecut_updated=456')
+  })
 })
