@@ -1,9 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { AlertTriangle, Download, Keyboard, RotateCcw, Upload, X } from 'lucide-react'
+import { AlertTriangle, Download, Keyboard, RotateCcw, Search, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/shared/ui/cn'
 import {
@@ -22,6 +33,8 @@ import {
 } from '@/config/hotkeys'
 import {
   HOTKEY_EDITOR_SECTIONS,
+  getHotkeyBindingDisplayLabel,
+  getHotkeyEditorSearchResults,
   type HotkeyEditorItem,
   type HotkeyEditorSection,
 } from './hotkey-editor-sections'
@@ -389,6 +402,7 @@ export function HotkeyEditor() {
   const resetHotkeyBinding = useSettingsStore((state) => state.resetHotkeyBinding)
   const resetHotkeys = useSettingsStore((state) => state.resetHotkeys)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const partialConflictOverrideSnapshotRef = useRef<typeof hotkeyOverrides | null>(null)
 
   const [selectedKey, setSelectedKey] = useState<HotkeyKey>('PLAY_PAUSE')
   const [activeLayer, setActiveLayer] = useState<HotkeyEditorSection | null>(null)
@@ -397,10 +411,13 @@ export function HotkeyEditor() {
   const [captureKey, setCaptureKey] = useState<HotkeyKey | null>(null)
   const [draftBinding, setDraftBinding] = useState('')
   const [previewBinding, setPreviewBinding] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isResetAllDialogOpen, setIsResetAllDialogOpen] = useState(false)
 
   const selectedItem = HOTKEY_ITEM_BY_KEY[selectedKey]
   const selectedSlotLabel = t(getSlotLabelKey(selectedItem, selectedKey))
   const isSelectedCustom = selectedKey in hotkeyOverrides
+  const isSelectedUnassigned = hotkeys[selectedKey] === ''
   const customCount = Object.keys(hotkeyOverrides).length
   const isCapturingSelectedKey = captureKey === selectedKey
   const activePreviewBinding = isCapturingSelectedKey
@@ -421,6 +438,33 @@ export function HotkeyEditor() {
   const selectedBrowserHotkey = getBrowserHostileHotkey(hotkeys[selectedKey])
   const pendingBrowserHotkey =
     captureKey && draftBinding ? getBrowserHostileHotkey(draftBinding) : null
+  const searchResults = useMemo(
+    () =>
+      getHotkeyEditorSearchResults({
+        query: searchQuery,
+        sections: HOTKEY_EDITOR_SECTIONS,
+        hotkeys,
+        translate: t,
+      }),
+    [hotkeys, searchQuery, t],
+  )
+  const hasSearchQuery = searchQuery.trim().length > 0
+
+  const stopCapture = useCallback(
+    ({ restorePartialOverwrites = true } = {}) => {
+      const snapshot = partialConflictOverrideSnapshotRef.current
+      partialConflictOverrideSnapshotRef.current = null
+
+      if (restorePartialOverwrites && snapshot) {
+        replaceHotkeyOverrides(snapshot)
+      }
+
+      setCaptureKey(null)
+      setDraftBinding('')
+      setPreviewBinding('')
+    },
+    [replaceHotkeyOverrides],
+  )
 
   useEffect(() => {
     if (!captureKey) {
@@ -430,9 +474,7 @@ export function HotkeyEditor() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        setCaptureKey(null)
-        setDraftBinding('')
-        setPreviewBinding('')
+        stopCapture()
         return
       }
 
@@ -457,19 +499,23 @@ export function HotkeyEditor() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
     }
-  }, [captureKey])
+  }, [captureKey, stopCapture])
+
+  useEffect(() => {
+    return () => {
+      const snapshot = partialConflictOverrideSnapshotRef.current
+      partialConflictOverrideSnapshotRef.current = null
+
+      if (snapshot) {
+        replaceHotkeyOverrides(snapshot)
+      }
+    }
+  }, [replaceHotkeyOverrides])
 
   const startCapture = (key: HotkeyKey) => {
+    stopCapture()
     setSelectedKey(key)
     setCaptureKey(key)
-    setDraftBinding('')
-    setPreviewBinding('')
-  }
-
-  const stopCapture = () => {
-    setCaptureKey(null)
-    setDraftBinding('')
-    setPreviewBinding('')
   }
 
   const layerTokens = useMemo(() => {
@@ -536,10 +582,30 @@ export function HotkeyEditor() {
     }
 
     setHotkeyBinding(captureKey, normalizeHotkeyBinding(draftBinding))
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
   }
 
-  const overwriteConflictingHotkeys = () => {
+  const overwriteConflictingHotkey = (conflictKey: HotkeyKey) => {
+    if (!captureKey || !draftBinding || !hasHotkeyPrimaryToken(draftBinding)) {
+      return
+    }
+
+    if (!partialConflictOverrideSnapshotRef.current) {
+      partialConflictOverrideSnapshotRef.current = {
+        ...useSettingsStore.getState().hotkeyOverrides,
+      }
+    }
+
+    const remainingConflicts = captureConflicts.filter((key) => key !== conflictKey)
+    unbindHotkeyBinding(conflictKey)
+
+    if (remainingConflicts.length === 0) {
+      setHotkeyBinding(captureKey, normalizeHotkeyBinding(draftBinding))
+      stopCapture({ restorePartialOverwrites: false })
+    }
+  }
+
+  const overwriteAllConflictingHotkeys = () => {
     if (!captureKey || !draftBinding || !hasHotkeyPrimaryToken(draftBinding)) {
       return
     }
@@ -548,17 +614,23 @@ export function HotkeyEditor() {
       unbindHotkeyBinding(conflictKey)
     }
     setHotkeyBinding(captureKey, normalizeHotkeyBinding(draftBinding))
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
   }
 
   const unbindSelectedHotkey = () => {
     unbindHotkeyBinding(selectedKey)
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
   }
 
   const resetSelectedHotkey = () => {
     resetHotkeyBinding(selectedKey)
-    stopCapture()
+    stopCapture({ restorePartialOverwrites: false })
+  }
+
+  const confirmResetAllHotkeys = () => {
+    resetHotkeys()
+    stopCapture({ restorePartialOverwrites: false })
+    toast.success(t('projects.settings.hotkeys.resetAllToast'))
   }
 
   const handleTokenClick = (token: string) => {
@@ -590,6 +662,11 @@ export function HotkeyEditor() {
     }
   }
 
+  const selectSearchResult = (item: HotkeyEditorItem) => {
+    stopCapture()
+    setSelectedKey(item.keys[0]!)
+  }
+
   const exportHotkeys = () => {
     try {
       const exportDocument = createHotkeyExportDocument(hotkeyOverrides)
@@ -607,7 +684,7 @@ export function HotkeyEditor() {
       const importResult = parseHotkeyImportDocument(JSON.parse(contents))
 
       replaceHotkeyOverrides(importResult.overrides)
-      stopCapture()
+      stopCapture({ restorePartialOverwrites: false })
 
       const messages = [
         t('projects.settings.hotkeys.importedCommands', {
@@ -686,42 +763,105 @@ export function HotkeyEditor() {
       <div className="px-4 pb-3 md:px-5">
         <div className="flex min-h-[380px] overflow-hidden rounded-lg border border-white/7 bg-[#0d0d0f]/90">
           {/* Section layers sidebar */}
-          <div className="flex shrink-0 flex-col gap-0.5 border-r border-white/6 p-2">
-            <button
-              type="button"
-              onClick={() => {
-                stopCapture()
-                setActiveLayer(null)
-              }}
-              className={cn(
-                'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
-                activeLayer === null
-                  ? 'bg-primary/15 text-primary'
-                  : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
-              )}
-            >
-              {t('projects.settings.hotkeys.all')}
-            </button>
-            <div className="my-1 border-t border-white/6" />
-            {HOTKEY_EDITOR_SECTIONS.map((section) => (
-              <button
-                key={section.titleKey}
-                type="button"
-                onClick={() => {
-                  stopCapture()
-                  setActiveLayer(section)
-                  setSelectedKey(section.items[0]!.keys[0]!)
-                }}
-                className={cn(
-                  'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
-                  activeLayer === section
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
-                )}
-              >
-                {t(section.titleKey)}
-              </button>
-            ))}
+          <div className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-white/6 p-2">
+            <div className="relative mb-2">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={t('projects.settings.hotkeys.searchPlaceholder')}
+                className="h-8 border-white/10 bg-white/5 pl-8 pr-2 text-xs"
+              />
+            </div>
+            {hasSearchQuery ? (
+              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+                <div className="px-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  {t('projects.settings.hotkeys.searchResultCount', {
+                    count: searchResults.length,
+                  })}
+                </div>
+                <div role="list" aria-label={t('projects.settings.hotkeys.searchResults')}>
+                  {searchResults.length > 0 ? (
+                    searchResults.map(({ section, item }) => {
+                      const resultKey = item.keys.join('|')
+                      const isSelectedResult = item.keys.includes(selectedKey)
+
+                      return (
+                        <div key={resultKey} role="listitem">
+                          <button
+                            type="button"
+                            onClick={() => selectSearchResult(item)}
+                            className={cn(
+                              'w-full rounded-lg px-2.5 py-2 text-left transition-colors duration-150 ease-out motion-reduce:transition-none',
+                              isSelectedResult
+                                ? 'bg-primary/15 text-primary'
+                                : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
+                            )}
+                          >
+                            <div className="text-[11px] font-medium leading-4 text-foreground">
+                              {t(item.labelKey)}
+                            </div>
+                            <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.14em]">
+                              {t(section.titleKey)} ·{' '}
+                              {item.keys
+                                .map((key) =>
+                                  getHotkeyBindingDisplayLabel(
+                                    hotkeys[key],
+                                    t('projects.settings.hotkeys.unassigned'),
+                                  ),
+                                )
+                                .join(' / ')}
+                            </div>
+                          </button>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="rounded-lg border border-white/8 bg-white/4 px-2.5 py-2 text-xs leading-4 text-muted-foreground">
+                      {t('projects.settings.hotkeys.noSearchResults')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopCapture()
+                    setActiveLayer(null)
+                  }}
+                  className={cn(
+                    'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
+                    activeLayer === null
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
+                  )}
+                >
+                  {t('projects.settings.hotkeys.all')}
+                </button>
+                <div className="my-1 border-t border-white/6" />
+                {HOTKEY_EDITOR_SECTIONS.map((section) => (
+                  <button
+                    key={section.titleKey}
+                    type="button"
+                    onClick={() => {
+                      stopCapture()
+                      setActiveLayer(section)
+                      setSelectedKey(section.items[0]!.keys[0]!)
+                    }}
+                    className={cn(
+                      'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
+                      activeLayer === section
+                        ? 'bg-primary/15 text-primary'
+                        : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
+                    )}
+                  >
+                    {t(section.titleKey)}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
           {/* Keyboard */}
           <div className="flex min-w-0 flex-1 flex-col justify-center p-4 md:p-5">
@@ -761,7 +901,10 @@ export function HotkeyEditor() {
                   {t('projects.settings.hotkeys.current')}
                 </div>
                 <div className="mt-1 font-medium text-foreground">
-                  {formatHotkeyBinding(hotkeys[selectedKey])}
+                  {getHotkeyBindingDisplayLabel(
+                    hotkeys[selectedKey],
+                    t('projects.settings.hotkeys.unassigned'),
+                  )}
                 </div>
               </div>
               <div>
@@ -815,7 +958,12 @@ export function HotkeyEditor() {
                   >
                     {t('common.save')}
                   </Button>
-                  <Button size="sm" variant="outline" className="w-full" onClick={stopCapture}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => stopCapture()}
+                  >
                     {t('common.cancel')}
                   </Button>
                 </>
@@ -829,7 +977,7 @@ export function HotkeyEditor() {
                     variant="outline"
                     className="w-full"
                     onClick={unbindSelectedHotkey}
-                    disabled={!hotkeys[selectedKey]}
+                    disabled={isSelectedUnassigned}
                   >
                     {t('projects.settings.hotkeys.unbind')}
                   </Button>
@@ -885,21 +1033,36 @@ export function HotkeyEditor() {
                       const hotkeyItem = HOTKEY_ITEM_BY_KEY[key]
 
                       return (
-                        <div key={key} className="text-xs text-foreground/88">
-                          {t('projects.settings.hotkeys.conflictsWith', {
-                            action: t(hotkeyItem.labelKey),
-                          })}
+                        <div
+                          key={key}
+                          className="flex items-center justify-between gap-2 text-xs text-foreground/88"
+                        >
+                          <span className="min-w-0 flex-1">
+                            {t('projects.settings.hotkeys.conflictsWith', {
+                              action: t(hotkeyItem.labelKey),
+                            })}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-6 shrink-0 px-2 text-[10px]"
+                            onClick={() => overwriteConflictingHotkey(key)}
+                          >
+                            {t('projects.settings.hotkeys.overwrite')}
+                          </Button>
                         </div>
                       )
                     })}
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="h-7 w-full px-2 text-[11px]"
-                      onClick={overwriteConflictingHotkeys}
-                    >
-                      {t('projects.settings.hotkeys.overwriteAll')}
-                    </Button>
+                    {captureConflicts.length > 1 ? (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="h-7 w-full px-2 text-[11px]"
+                        onClick={overwriteAllConflictingHotkeys}
+                      >
+                        {t('projects.settings.hotkeys.overwriteAll')}
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
                 {pendingBrowserHotkey ? (
@@ -920,19 +1083,37 @@ export function HotkeyEditor() {
             </p>
 
             <div className="border-t border-white/6 pt-3">
-              <Button
-                variant="destructive"
-                size="sm"
-                className="w-full gap-1.5"
-                onClick={() => {
-                  resetHotkeys()
-                  stopCapture()
-                }}
-                disabled={customCount === 0}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {t('projects.settings.hotkeys.resetAll')}
-              </Button>
+              <AlertDialog open={isResetAllDialogOpen} onOpenChange={setIsResetAllDialogOpen}>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="w-full gap-1.5"
+                  onClick={() => setIsResetAllDialogOpen(true)}
+                  disabled={customCount === 0}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t('projects.settings.hotkeys.resetAll')}
+                </Button>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      {t('projects.settings.hotkeys.resetAllConfirmTitle')}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t('projects.settings.hotkeys.resetAllConfirmDescription')}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={confirmResetAllHotkeys}
+                    >
+                      {t('projects.settings.hotkeys.resetAllConfirmAction')}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         </div>

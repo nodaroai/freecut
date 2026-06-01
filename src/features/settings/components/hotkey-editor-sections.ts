@@ -1,4 +1,9 @@
-import type { HotkeyKey } from '@/config/hotkeys'
+import {
+  formatHotkeyBinding,
+  normalizeHotkeyBinding,
+  type HotkeyBindingMap,
+  type HotkeyKey,
+} from '@/config/hotkeys'
 
 export interface HotkeyEditorItem {
   /** i18n key for the command label */
@@ -12,6 +17,59 @@ export interface HotkeyEditorSection {
   /** i18n key for the section blurb */
   blurbKey: string
   items: readonly HotkeyEditorItem[]
+}
+
+export interface HotkeyEditorSearchResult {
+  section: HotkeyEditorSection
+  item: HotkeyEditorItem
+}
+
+interface HotkeyEditorSearchOptions {
+  query: string
+  sections: readonly HotkeyEditorSection[]
+  hotkeys: HotkeyBindingMap
+  translate: (key: string) => string
+}
+
+export function getHotkeyBindingDisplayLabel(binding: string, unassignedLabel: string): string {
+  return binding ? formatHotkeyBinding(binding) : unassignedLabel
+}
+
+export function getHotkeyEditorSearchResults({
+  query,
+  sections,
+  hotkeys,
+  translate,
+}: HotkeyEditorSearchOptions): HotkeyEditorSearchResult[] {
+  const normalizedQuery = query.trim().toLowerCase()
+
+  if (!normalizedQuery) {
+    return []
+  }
+
+  const normalizedBindingQuery = normalizeHotkeyBinding(normalizedQuery)
+
+  return sections.flatMap((section) => {
+    const sectionLabel = translate(section.titleKey).toLowerCase()
+
+    return section.items
+      .filter((item) => {
+        const itemLabel = translate(item.labelKey).toLowerCase()
+        const bindings = item.keys.map((key) => hotkeys[key].toLowerCase())
+
+        return (
+          itemLabel.includes(normalizedQuery) ||
+          sectionLabel.includes(normalizedQuery) ||
+          item.keys.some((key) => key.toLowerCase().includes(normalizedQuery)) ||
+          bindings.some(
+            (binding) =>
+              binding.includes(normalizedQuery) ||
+              (normalizedBindingQuery.length > 0 && binding === normalizedBindingQuery),
+          )
+        )
+      })
+      .map((item) => ({ section, item }))
+  })
 }
 
 export const HOTKEY_EDITOR_SECTIONS: readonly HotkeyEditorSection[] = [

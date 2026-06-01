@@ -474,7 +474,16 @@
             "saveProject": "Save project",
             "exportVideo": "Export video",
             "openSceneBrowser": "Open Scene Browser (search AI captions)"
-          }
+          },
+          "searchPlaceholder": "Search commands or shortcuts",
+          "searchResults": "Shortcut search results",
+          "noSearchResults": "No matching commands",
+          "resetAllConfirmTitle": "Reset all shortcuts?",
+          "resetAllConfirmDescription": "This will remove all custom shortcut overrides and restore the default keybindings. This cannot be undone.",
+          "resetAllConfirmAction": "Reset all",
+          "resetAllToast": "Shortcuts reset to defaults",
+          "searchResultCount_one": "{{count}} result",
+          "searchResultCount_other": "{{count}} results"
         }
       }
     },
@@ -964,7 +973,16 @@
             "saveProject": "Guardar proyecto",
             "exportVideo": "Exportar video",
             "openSceneBrowser": "Abrir el explorador de escenas (buscar subtítulos de IA)"
-          }
+          },
+          "searchPlaceholder": "Buscar comandos o atajos",
+          "searchResults": "Resultados de búsqueda de atajos",
+          "noSearchResults": "No hay comandos coincidentes",
+          "resetAllConfirmTitle": "¿Restablecer todos los atajos?",
+          "resetAllConfirmDescription": "Esto eliminará todas las anulaciones de atajos personalizadas y restaurará los atajos predeterminados. Esta acción no se puede deshacer.",
+          "resetAllConfirmAction": "Restablecer todo",
+          "resetAllToast": "Atajos restablecidos a los valores predeterminados",
+          "searchResultCount_one": "{{count}} resultado",
+          "searchResultCount_other": "{{count}} resultados"
         }
       }
     },
@@ -1454,7 +1472,16 @@
             "saveProject": "Enregistrer le projet",
             "exportVideo": "Exporter la vidéo",
             "openSceneBrowser": "Ouvrir l'explorateur de scènes (rechercher les sous-titres IA)"
-          }
+          },
+          "searchPlaceholder": "Rechercher des commandes ou raccourcis",
+          "searchResults": "Résultats de recherche de raccourcis",
+          "noSearchResults": "Aucune commande correspondante",
+          "resetAllConfirmTitle": "Réinitialiser tous les raccourcis ?",
+          "resetAllConfirmDescription": "Cela supprimera toutes les personnalisations de raccourcis et restaurera les raccourcis par défaut. Cette action est irréversible.",
+          "resetAllConfirmAction": "Tout réinitialiser",
+          "resetAllToast": "Raccourcis réinitialisés aux valeurs par défaut",
+          "searchResultCount_one": "{{count}} résultat",
+          "searchResultCount_other": "{{count}} résultats"
         }
       }
     },
@@ -1944,7 +1971,16 @@
             "saveProject": "Projekt speichern",
             "exportVideo": "Video exportieren",
             "openSceneBrowser": "Szenenbrowser öffnen (KI-Untertitel durchsuchen)"
-          }
+          },
+          "searchPlaceholder": "Befehle oder Tastenkürzel suchen",
+          "searchResults": "Suchergebnisse für Tastenkürzel",
+          "noSearchResults": "Keine passenden Befehle",
+          "resetAllConfirmTitle": "Alle Tastenkürzel zurücksetzen?",
+          "resetAllConfirmDescription": "Dadurch werden alle benutzerdefinierten Tastenkürzel-Überschreibungen entfernt und die Standardtastenkürzel wiederhergestellt. Dies kann nicht rückgängig gemacht werden.",
+          "resetAllConfirmAction": "Alle zurücksetzen",
+          "resetAllToast": "Tastenkürzel auf Standardwerte zurückgesetzt",
+          "searchResultCount_one": "{{count}} Ergebnis",
+          "searchResultCount_other": "{{count}} Ergebnisse"
         }
       }
     },
@@ -2434,7 +2470,16 @@
             "saveProject": "Salvar projeto",
             "exportVideo": "Exportar vídeo",
             "openSceneBrowser": "Abrir o navegador de cenas (pesquisar legendas de IA)"
-          }
+          },
+          "searchPlaceholder": "Pesquisar comandos ou atalhos",
+          "searchResults": "Resultados da pesquisa de atalhos",
+          "noSearchResults": "Nenhum comando correspondente",
+          "resetAllConfirmTitle": "Redefinir todos os atalhos?",
+          "resetAllConfirmDescription": "Isso removerá todas as substituições de atalhos personalizadas e restaurará os atalhos padrão. Esta ação não pode ser desfeita.",
+          "resetAllConfirmAction": "Redefinir tudo",
+          "resetAllToast": "Atalhos redefinidos para os padrões",
+          "searchResultCount_one": "{{count}} resultado",
+          "searchResultCount_other": "{{count}} resultados"
         }
       }
     },
@@ -2924,7 +2969,16 @@
             "saveProject": "プロジェクトを保存",
             "exportVideo": "動画をエクスポート",
             "openSceneBrowser": "シーンブラウザを開く（AIキャプションを検索）"
-          }
+          },
+          "searchPlaceholder": "コマンドまたはショートカットを検索",
+          "searchResults": "ショートカット検索結果",
+          "noSearchResults": "一致するコマンドがありません",
+          "resetAllConfirmTitle": "すべてのショートカットをリセットしますか？",
+          "resetAllConfirmDescription": "すべてのカスタムショートカット設定を削除し、既定のキー割り当てに戻します。この操作は元に戻せません。",
+          "resetAllConfirmAction": "すべてリセット",
+          "resetAllToast": "ショートカットを既定値にリセットしました",
+          "searchResultCount_one": "{{count}} 件の結果",
+          "searchResultCount_other": "{{count}} 件の結果"
         }
       }
     },
@@ -3414,7 +3468,16 @@
             "saveProject": "프로젝트 저장",
             "exportVideo": "동영상 내보내기",
             "openSceneBrowser": "장면 브라우저 열기 (AI 자막 검색)"
-          }
+          },
+          "searchPlaceholder": "명령 또는 단축키 검색",
+          "searchResults": "단축키 검색 결과",
+          "noSearchResults": "일치하는 명령이 없습니다",
+          "resetAllConfirmTitle": "모든 단축키를 초기화할까요?",
+          "resetAllConfirmDescription": "모든 사용자 지정 단축키 재정의를 제거하고 기본 키 바인딩으로 복원합니다. 이 작업은 되돌릴 수 없습니다.",
+          "resetAllConfirmAction": "모두 초기화",
+          "resetAllToast": "단축키가 기본값으로 초기화되었습니다",
+          "searchResultCount_one": "결과 {{count}}개",
+          "searchResultCount_other": "결과 {{count}}개"
         }
       }
     },
@@ -3904,7 +3967,16 @@
             "saveProject": "保存项目",
             "exportVideo": "导出视频",
             "openSceneBrowser": "打开场景浏览器（搜索 AI 字幕）"
-          }
+          },
+          "searchPlaceholder": "搜索命令或快捷键",
+          "searchResults": "快捷键搜索结果",
+          "noSearchResults": "没有匹配的命令",
+          "resetAllConfirmTitle": "重置所有快捷键？",
+          "resetAllConfirmDescription": "这会移除所有自定义快捷键覆盖并恢复默认按键绑定。此操作无法撤销。",
+          "resetAllConfirmAction": "全部重置",
+          "resetAllToast": "快捷键已重置为默认值",
+          "searchResultCount_one": "{{count}} 个结果",
+          "searchResultCount_other": "{{count}} 个结果"
         }
       }
     },
@@ -4394,7 +4466,16 @@
             "saveProject": "Projeyi kaydet",
             "exportVideo": "Videoyu dışa aktar",
             "openSceneBrowser": "Sahne Tarayıcısını aç (YZ altyazılarında ara)"
-          }
+          },
+          "searchPlaceholder": "Komutları veya kısayolları ara",
+          "searchResults": "Kısayol arama sonuçları",
+          "noSearchResults": "Eşleşen komut yok",
+          "resetAllConfirmTitle": "Tüm kısayollar sıfırlansın mı?",
+          "resetAllConfirmDescription": "Bu işlem tüm özel kısayol geçersiz kılmalarını kaldırır ve varsayılan kısayolları geri yükler. Bu geri alınamaz.",
+          "resetAllConfirmAction": "Tümünü sıfırla",
+          "resetAllToast": "Kısayollar varsayılanlara sıfırlandı",
+          "searchResultCount_one": "{{count}} sonuç",
+          "searchResultCount_other": "{{count}} sonuç"
         }
       }
     },

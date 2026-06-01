@@ -157,6 +157,24 @@ describe('createHotkeyExportDocument', () => {
       }),
     )
   })
+
+  it('exports explicitly unassigned commands as custom blank bindings', () => {
+    const exportDocument = createHotkeyExportDocument({
+      DELETE_SELECTED: '',
+    })
+
+    expect(exportDocument.overrides).toEqual({
+      DELETE_SELECTED: '',
+    })
+    expect(exportDocument.commands).toContainEqual(
+      expect.objectContaining({
+        id: 'DELETE_SELECTED',
+        binding: '',
+        defaultBinding: 'delete',
+        isCustom: true,
+      }),
+    )
+  })
 })
 
 describe('parseHotkeyImportDocument', () => {
