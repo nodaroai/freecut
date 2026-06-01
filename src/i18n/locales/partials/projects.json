@@ -474,7 +474,10 @@
             "saveProject": "Save project",
             "exportVideo": "Export video",
             "openSceneBrowser": "Open Scene Browser (search AI captions)"
-          }
+          },
+          "searchPlaceholder": "Search commands or shortcuts",
+          "searchResults": "Shortcut search results",
+          "noSearchResults": "No matching commands"
         }
       }
     },
@@ -964,7 +967,10 @@
             "saveProject": "Guardar proyecto",
             "exportVideo": "Exportar video",
             "openSceneBrowser": "Abrir el explorador de escenas (buscar subtítulos de IA)"
-          }
+          },
+          "searchPlaceholder": "Buscar comandos o atajos",
+          "searchResults": "Resultados de búsqueda de atajos",
+          "noSearchResults": "No hay comandos coincidentes"
         }
       }
     },
@@ -1454,7 +1460,10 @@
             "saveProject": "Enregistrer le projet",
             "exportVideo": "Exporter la vidéo",
             "openSceneBrowser": "Ouvrir l'explorateur de scènes (rechercher les sous-titres IA)"
-          }
+          },
+          "searchPlaceholder": "Rechercher des commandes ou raccourcis",
+          "searchResults": "Résultats de recherche de raccourcis",
+          "noSearchResults": "Aucune commande correspondante"
         }
       }
     },
@@ -1944,7 +1953,10 @@
             "saveProject": "Projekt speichern",
             "exportVideo": "Video exportieren",
             "openSceneBrowser": "Szenenbrowser öffnen (KI-Untertitel durchsuchen)"
-          }
+          },
+          "searchPlaceholder": "Befehle oder Tastenkürzel suchen",
+          "searchResults": "Suchergebnisse für Tastenkürzel",
+          "noSearchResults": "Keine passenden Befehle"
         }
       }
     },
@@ -2434,7 +2446,10 @@
             "saveProject": "Salvar projeto",
             "exportVideo": "Exportar vídeo",
             "openSceneBrowser": "Abrir o navegador de cenas (pesquisar legendas de IA)"
-          }
+          },
+          "searchPlaceholder": "Pesquisar comandos ou atalhos",
+          "searchResults": "Resultados da pesquisa de atalhos",
+          "noSearchResults": "Nenhum comando correspondente"
         }
       }
     },
@@ -2924,7 +2939,10 @@
             "saveProject": "プロジェクトを保存",
             "exportVideo": "動画をエクスポート",
             "openSceneBrowser": "シーンブラウザを開く（AIキャプションを検索）"
-          }
+          },
+          "searchPlaceholder": "コマンドまたはショートカットを検索",
+          "searchResults": "ショートカット検索結果",
+          "noSearchResults": "一致するコマンドがありません"
         }
       }
     },
@@ -3414,7 +3432,10 @@
             "saveProject": "프로젝트 저장",
             "exportVideo": "동영상 내보내기",
             "openSceneBrowser": "장면 브라우저 열기 (AI 자막 검색)"
-          }
+          },
+          "searchPlaceholder": "명령 또는 단축키 검색",
+          "searchResults": "단축키 검색 결과",
+          "noSearchResults": "일치하는 명령이 없습니다"
         }
       }
     },
@@ -3904,7 +3925,10 @@
             "saveProject": "保存项目",
             "exportVideo": "导出视频",
             "openSceneBrowser": "打开场景浏览器（搜索 AI 字幕）"
-          }
+          },
+          "searchPlaceholder": "搜索命令或快捷键",
+          "searchResults": "快捷键搜索结果",
+          "noSearchResults": "没有匹配的命令"
         }
       }
     },
@@ -4394,7 +4418,10 @@
             "saveProject": "Projeyi kaydet",
             "exportVideo": "Videoyu dışa aktar",
             "openSceneBrowser": "Sahne Tarayıcısını aç (YZ altyazılarında ara)"
-          }
+          },
+          "searchPlaceholder": "Komutları veya kısayolları ara",
+          "searchResults": "Kısayol arama sonuçları",
+          "noSearchResults": "Eşleşen komut yok"
         }
       }
     },

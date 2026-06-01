@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { AlertTriangle, Download, Keyboard, RotateCcw, Upload, X } from 'lucide-react'
+import { AlertTriangle, Download, Keyboard, RotateCcw, Search, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/shared/ui/cn'
 import {
@@ -22,6 +23,7 @@ import {
 } from '@/config/hotkeys'
 import {
   HOTKEY_EDITOR_SECTIONS,
+  getHotkeyEditorSearchResults,
   type HotkeyEditorItem,
   type HotkeyEditorSection,
 } from './hotkey-editor-sections'
@@ -397,6 +399,7 @@ export function HotkeyEditor() {
   const [captureKey, setCaptureKey] = useState<HotkeyKey | null>(null)
   const [draftBinding, setDraftBinding] = useState('')
   const [previewBinding, setPreviewBinding] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
 
   const selectedItem = HOTKEY_ITEM_BY_KEY[selectedKey]
   const selectedSlotLabel = t(getSlotLabelKey(selectedItem, selectedKey))
@@ -421,6 +424,17 @@ export function HotkeyEditor() {
   const selectedBrowserHotkey = getBrowserHostileHotkey(hotkeys[selectedKey])
   const pendingBrowserHotkey =
     captureKey && draftBinding ? getBrowserHostileHotkey(draftBinding) : null
+  const searchResults = useMemo(
+    () =>
+      getHotkeyEditorSearchResults({
+        query: searchQuery,
+        sections: HOTKEY_EDITOR_SECTIONS,
+        hotkeys,
+        translate: t,
+      }),
+    [hotkeys, searchQuery, t],
+  )
+  const hasSearchQuery = searchQuery.trim().length > 0
 
   useEffect(() => {
     if (!captureKey) {
@@ -590,6 +604,11 @@ export function HotkeyEditor() {
     }
   }
 
+  const selectSearchResult = (item: HotkeyEditorItem) => {
+    stopCapture()
+    setSelectedKey(item.keys[0]!)
+  }
+
   const exportHotkeys = () => {
     try {
       const exportDocument = createHotkeyExportDocument(hotkeyOverrides)
@@ -686,42 +705,95 @@ export function HotkeyEditor() {
       <div className="px-4 pb-3 md:px-5">
         <div className="flex min-h-[380px] overflow-hidden rounded-lg border border-white/7 bg-[#0d0d0f]/90">
           {/* Section layers sidebar */}
-          <div className="flex shrink-0 flex-col gap-0.5 border-r border-white/6 p-2">
-            <button
-              type="button"
-              onClick={() => {
-                stopCapture()
-                setActiveLayer(null)
-              }}
-              className={cn(
-                'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
-                activeLayer === null
-                  ? 'bg-primary/15 text-primary'
-                  : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
-              )}
-            >
-              {t('projects.settings.hotkeys.all')}
-            </button>
-            <div className="my-1 border-t border-white/6" />
-            {HOTKEY_EDITOR_SECTIONS.map((section) => (
-              <button
-                key={section.titleKey}
-                type="button"
-                onClick={() => {
-                  stopCapture()
-                  setActiveLayer(section)
-                  setSelectedKey(section.items[0]!.keys[0]!)
-                }}
-                className={cn(
-                  'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
-                  activeLayer === section
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
-                )}
+          <div className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-white/6 p-2">
+            <div className="relative mb-2">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={t('projects.settings.hotkeys.searchPlaceholder')}
+                className="h-8 border-white/10 bg-white/5 pl-8 pr-2 text-xs"
+              />
+            </div>
+            {hasSearchQuery ? (
+              <div
+                role="list"
+                aria-label={t('projects.settings.hotkeys.searchResults')}
+                className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1"
               >
-                {t(section.titleKey)}
-              </button>
-            ))}
+                {searchResults.length > 0 ? (
+                  searchResults.map(({ section, item }) => {
+                    const resultKey = item.keys.join('|')
+                    const isSelectedResult = item.keys.includes(selectedKey)
+
+                    return (
+                      <div key={resultKey} role="listitem">
+                        <button
+                          type="button"
+                          onClick={() => selectSearchResult(item)}
+                          className={cn(
+                            'w-full rounded-lg px-2.5 py-2 text-left transition-colors duration-150 ease-out motion-reduce:transition-none',
+                            isSelectedResult
+                              ? 'bg-primary/15 text-primary'
+                              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
+                          )}
+                        >
+                          <div className="text-[11px] font-medium leading-4 text-foreground">
+                            {t(item.labelKey)}
+                          </div>
+                          <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.14em]">
+                            {t(section.titleKey)} ·{' '}
+                            {item.keys.map((key) => formatHotkeyBinding(hotkeys[key])).join(' / ')}
+                          </div>
+                        </button>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="rounded-lg border border-white/8 bg-white/4 px-2.5 py-2 text-xs leading-4 text-muted-foreground">
+                    {t('projects.settings.hotkeys.noSearchResults')}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopCapture()
+                    setActiveLayer(null)
+                  }}
+                  className={cn(
+                    'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
+                    activeLayer === null
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
+                  )}
+                >
+                  {t('projects.settings.hotkeys.all')}
+                </button>
+                <div className="my-1 border-t border-white/6" />
+                {HOTKEY_EDITOR_SECTIONS.map((section) => (
+                  <button
+                    key={section.titleKey}
+                    type="button"
+                    onClick={() => {
+                      stopCapture()
+                      setActiveLayer(section)
+                      setSelectedKey(section.items[0]!.keys[0]!)
+                    }}
+                    className={cn(
+                      'rounded-lg px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.16em] transition-colors duration-150 ease-out motion-reduce:transition-none',
+                      activeLayer === section
+                        ? 'bg-primary/15 text-primary'
+                        : 'text-muted-foreground hover:bg-white/5 hover:text-foreground/80',
+                    )}
+                  >
+                    {t(section.titleKey)}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
           {/* Keyboard */}
           <div className="flex min-w-0 flex-1 flex-col justify-center p-4 md:p-5">
