@@ -61,6 +61,7 @@ import {
 } from '@/shared/utils/transcription-cancellation'
 import { TranscribeDialog, type TranscribeDialogValues } from './transcribe-dialog'
 import { useSubtitleScanProgressStore } from '../stores/subtitle-scan-progress-store'
+import { audioScrubPreview, getAudioScrubTime } from '../utils/audio-scrub-preview'
 
 interface MediaCardProps {
   media: MediaMetadata
@@ -930,13 +931,49 @@ export const MediaCard = memo(function MediaCard({
     onSelect?.(e)
   }
 
+  const audioLoadingRef = useRef(false)
+  const audioScrubUrlRef = useRef<string | null>(null)
+  const audioScrubRequestIdRef = useRef(0)
+
+  const scrubAudioAtProgress = useCallback(
+    async (progress: number) => {
+      if (!isAudio || media.duration <= 0) return
+      const requestId = ++audioScrubRequestIdRef.current
+      let mediaUrl = audioScrubUrlRef.current
+
+      try {
+        if (!mediaUrl) {
+          const { mediaLibraryService } = await importMediaLibraryService()
+          mediaUrl = await mediaLibraryService.getMediaBlobUrl(media.id)
+          if (!mediaUrl || requestId !== audioScrubRequestIdRef.current) return
+          audioScrubUrlRef.current = mediaUrl
+        }
+
+        await audioScrubPreview.scrub({
+          mediaId: media.id,
+          mediaUrl,
+          timeSeconds: getAudioScrubTime(media.duration, progress),
+        })
+      } catch {
+        // Audio scrub preview is opportunistic; failed decode/autoplay should not
+        // block normal media-library hover or selection behavior.
+      }
+    },
+    [isAudio, media.duration, media.id],
+  )
+
+  const stopAudioScrubPreview = useCallback(() => {
+    audioScrubRequestIdRef.current += 1
+    audioScrubPreview.stop()
+  }, [])
+
   const canHoverPreview =
-    (mediaType === 'video' || mediaType === 'image') &&
+    (mediaType === 'video' || mediaType === 'audio' || mediaType === 'image') &&
     !isBroken &&
     !isPreparingMedia &&
     !isTranscriptionDialogOpen
   const canScrubPreview =
-    mediaType === 'video' &&
+    (mediaType === 'video' || mediaType === 'audio') &&
     media.duration > 0 &&
     !isBroken &&
     !isPreparingMedia &&
@@ -959,16 +996,32 @@ export const MediaCard = memo(function MediaCard({
       if (rect.width <= 0) return
 
       const progress = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      setSkimProgress(progress)
+
+      if (mediaType === 'audio') {
+        setMediaSkimPreview(media.id, 0)
+        void scrubAudioAtProgress(progress)
+        return
+      }
+
       const durationInFrames = Math.max(1, Math.round(media.duration * (media.fps || 30)))
       const frame = Math.min(
         durationInFrames - 1,
         Math.max(0, Math.round(progress * (durationInFrames - 1))),
       )
 
-      setSkimProgress(progress)
       setMediaSkimPreview(media.id, frame)
     },
-    [canHoverPreview, canScrubPreview, media.duration, media.fps, media.id, setMediaSkimPreview],
+    [
+      canHoverPreview,
+      canScrubPreview,
+      media.duration,
+      media.fps,
+      media.id,
+      mediaType,
+      scrubAudioAtProgress,
+      setMediaSkimPreview,
+    ],
   )
 
   const flushScheduledSkimPreview = useCallback(() => {
@@ -1019,19 +1072,27 @@ export const MediaCard = memo(function MediaCard({
   const handleThumbnailPointerLeave = useCallback(() => {
     if (!canHoverPreview) return
     cancelScheduledSkimPreview()
+    stopAudioScrubPreview()
     setSkimProgress(null)
     clearMediaSkimPreview()
-  }, [canHoverPreview, cancelScheduledSkimPreview, clearMediaSkimPreview])
+  }, [canHoverPreview, cancelScheduledSkimPreview, clearMediaSkimPreview, stopAudioScrubPreview])
 
   useEffect(() => {
     if (!canHoverPreview) return
     return () => {
       cancelScheduledSkimPreview()
+      stopAudioScrubPreview()
       if (useEditorStore.getState().mediaSkimPreviewMediaId === media.id) {
         clearMediaSkimPreview()
       }
     }
-  }, [canHoverPreview, cancelScheduledSkimPreview, clearMediaSkimPreview, media.id])
+  }, [
+    canHoverPreview,
+    cancelScheduledSkimPreview,
+    clearMediaSkimPreview,
+    media.id,
+    stopAudioScrubPreview,
+  ])
 
   // Cleanup audio on unmount
   useEffect(() => {
@@ -1043,8 +1104,6 @@ export const MediaCard = memo(function MediaCard({
       }
     }
   }, [])
-
-  const audioLoadingRef = useRef(false)
 
   const handleAudioToggle = useCallback(
     async (e: React.MouseEvent) => {
@@ -1312,9 +1371,7 @@ export const MediaCard = memo(function MediaCard({
               {/* Info — single row: icon + name + duration */}
               <div className="flex-1 min-w-0 flex items-center gap-1.5">
                 {isImporting ? (
-                  <span className="text-[10px] text-muted-foreground">
-                    {preparingLabel}
-                  </span>
+                  <span className="text-[10px] text-muted-foreground">{preparingLabel}</span>
                 ) : (
                   <>
                     <div className="p-0.5 rounded bg-primary/90 text-primary-foreground flex-shrink-0">
