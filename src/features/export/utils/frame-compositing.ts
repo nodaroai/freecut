@@ -216,9 +216,15 @@ export async function compositeFrameResults(deps: FrameCompositingDeps): Promise
         if (fallbackMasks.length > 0) {
           const { canvas: fallbackMaskedCanvas, ctx: fallbackMaskedCtx } = canvasPool.acquire()
           applyMasks(fallbackMaskedCtx, fallbackSource, fallbackMasks, maskSettings)
+          // Carry prior pool canvases forward only when `fallbackResult` is a
+          // re-render (≠ `result`): those canvases are invisible to the outer
+          // cleanup loop. When it's still the original `result`, the outer loop
+          // already releases `result.poolCanvases`, so spreading them here would
+          // double-release the same backing buffer.
+          const carriedPoolCanvases = fallbackResult === result ? [] : fallbackResult.poolCanvases
           fallbackResult = {
             source: fallbackMaskedCanvas,
-            poolCanvases: [...fallbackResult.poolCanvases, fallbackMaskedCanvas],
+            poolCanvases: [...carriedPoolCanvases, fallbackMaskedCanvas],
           }
           fallbackSource = fallbackMaskedCanvas
         }
