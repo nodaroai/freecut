@@ -43,10 +43,16 @@ import type { CompositeLayer } from '@/infrastructure/gpu-compositor'
 import { GpuPipelineManager } from './gpu-pipeline-manager'
 import { isItemFullyOccluding, type FrameOcclusionContext } from './frame-occlusion'
 import {
+  renderMasksToGpuTexture as renderMasksToGpuTexturePure,
+  applyTrackScopedMasks as applyTrackScopedMasksPure,
+  type RenderedTaskResult,
+} from './frame-mask-helpers'
+import {
   applyMasks,
   buildMaskFrameIndex,
   getActiveMasksForFrame,
   type MaskCanvasSettings,
+  type PreparedMask,
 } from './canvas-masks'
 import { type ActiveTransition } from './canvas-transitions'
 import { type CachedGifFrames, gifFrameCache } from '@/features/export/deps/timeline'
@@ -1296,19 +1302,18 @@ export async function createCompositionRenderer(
         })
       }
 
-      const hasGpuEffectsForItem = (item: TimelineItem): boolean => {
-        return itemHasEnabledGpuEffect(
-          item,
-          renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
-        )
-      }
       let hasAnyGpuEffects = false
       for (const track of sortedTracks) {
         if (!visibleTrackIds.has(track.id)) continue
         for (const baseItem of track.items ?? []) {
           const item = getCurrentItem(baseItem)
           if (frame < item.from || frame >= item.from + item.durationInFrames) continue
-          if (hasGpuEffectsForItem(item)) {
+          if (
+            itemHasEnabledGpuEffect(
+              item,
+              renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
+            )
+          ) {
             hasAnyGpuEffects = true
             break
           }
@@ -1686,37 +1691,8 @@ export async function createCompositionRenderer(
           ).length
         }
 
-        type RenderedTaskResult = {
-          source?: OffscreenCanvas
-          gpuTexture?: GPUTexture
-          poolCanvases: OffscreenCanvas[]
-        }
-
-        const renderMasksToGpuTexture = (
-          masks: typeof activeMasks,
-        ): { texture: GPUTexture; view: GPUTextureView } | null => {
-          if (!gpu.texturePool || masks.length === 0) return null
-          const maskSource = new OffscreenCanvas(canvasSettings.width, canvasSettings.height)
-          const maskSourceCtx = maskSource.getContext('2d')
-          if (!maskSourceCtx) return null
-          maskSourceCtx.fillStyle = 'white'
-          maskSourceCtx.fillRect(0, 0, maskSource.width, maskSource.height)
-
-          const maskedCanvas = new OffscreenCanvas(canvasSettings.width, canvasSettings.height)
-          const maskedCtx = maskedCanvas.getContext('2d')
-          if (!maskedCtx) return null
-          applyMasks(maskedCtx, maskSource, masks, maskSettings)
-
-          const texture = gpu.texturePool.acquire(canvasSettings.width, canvasSettings.height)
-          gpu
-            .effects!.getDevice()
-            .queue.copyExternalImageToTexture(
-              { source: maskedCanvas, flipY: false },
-              { texture },
-              { width: canvasSettings.width, height: canvasSettings.height },
-            )
-          return { texture, view: texture.createView() }
-        }
+        const renderMasksToGpuTexture = (masks: PreparedMask[]) =>
+          renderMasksToGpuTexturePure(masks, { gpu, canvasSettings, maskSettings })
 
         const renderTransitionFallbackCanvas = async (
           task: Extract<(typeof renderTasks)[number], { type: 'transition' }>,
@@ -1740,28 +1716,12 @@ export async function createCompositionRenderer(
           result: RenderedTaskResult | null,
           trackOrder: number,
           skipMasks: boolean,
-        ): RenderedTaskResult | null => {
-          if (!result) return null
-          if (result.gpuTexture) return result
-          if (!result.source) return null
-          if (skipMasks) {
-            return result
-          }
-
-          const applicableMasks = activeMasks.filter((mask) =>
-            doesMaskAffectTrack(mask.trackOrder, trackOrder),
-          )
-          if (applicableMasks.length === 0) {
-            return result
-          }
-
-          const { canvas: maskedCanvas, ctx: maskedCtx } = canvasPool.acquire()
-          applyMasks(maskedCtx, result.source, applicableMasks, maskSettings)
-          return {
-            source: maskedCanvas,
-            poolCanvases: [...result.poolCanvases, maskedCanvas],
-          }
-        }
+        ): RenderedTaskResult | null =>
+          applyTrackScopedMasksPure(result, trackOrder, skipMasks, {
+            activeMasks,
+            canvasPool,
+            maskSettings,
+          })
 
         const renderTask = async (
           task: (typeof renderTasks)[number],
