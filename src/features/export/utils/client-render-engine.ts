@@ -26,13 +26,12 @@ import type { ItemKeyframes } from '@/types/keyframe'
 import type { ItemEffect } from '@/types/effects'
 import type { ResolvedTransform } from '@/types/transform'
 import { createLogger } from '@/shared/logging/logger'
-import { hasMediaCrop } from '@/shared/utils/media-crop'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { resolveMediaUrl } from '@/features/export/deps/media-library'
 import { VideoSourcePool } from '@/features/export/deps/player-contract'
 
 // Import subsystems
-import { getAnimatedCrop, getAnimatedTransform, buildKeyframesMap } from './canvas-keyframes'
+import { getAnimatedTransform, buildKeyframesMap } from './canvas-keyframes'
 import {
   renderEffectsFromMaskedSource,
   getAdjustmentLayerEffects,
@@ -42,6 +41,7 @@ import {
 import { DEFAULT_LAYER_PARAMS } from '@/infrastructure/gpu-compositor'
 import type { CompositeLayer } from '@/infrastructure/gpu-compositor'
 import { GpuPipelineManager } from './gpu-pipeline-manager'
+import { isItemFullyOccluding, type FrameOcclusionContext } from './frame-occlusion'
 import {
   applyMasks,
   buildMaskFrameIndex,
@@ -1571,76 +1571,21 @@ export async function createCompositionRenderer(
       // - No transparency effects
       // - No active masks (masks could reveal content below)
 
-      const isFullyOccluding = (baseItem: TimelineItem, trackOrder: number): boolean => {
-        const item = getCurrentItem(baseItem)
-        // Only videos and images can be fully opaque
-        if (item.type !== 'video' && item.type !== 'image') return false
-
-        // Items in transitions are blended, not fully occluding
-        if (transitionClipIds.has(item.id)) return false
-
-        // Non-normal blend modes interact with layers below
-        if (item.blendMode && item.blendMode !== 'normal') return false
-
-        // Corner pin warps the shape, exposing content below
-        if (item.cornerPin) return false
-
-        // Get animated transform at current frame
-        const itemKeyframes = getCurrentKeyframes(item.id)
-        const animatedCrop = getAnimatedCrop(item, itemKeyframes, frame, canvasSettings)
-        if (hasMediaCrop(animatedCrop)) return false
-        const transform = getAnimatedTransform(item, itemKeyframes, frame, canvasSettings)
-
-        // Check opacity (must be 1.0)
-        if (transform.opacity < 1) return false
-
-        // Check rotation (only 0 or 180 can fully cover without exposing corners)
-        const rotation = transform.rotation % 360
-        if (rotation !== 0 && rotation !== 180 && rotation !== -180) return false
-
-        // Check corner radius (rounded corners expose content)
-        if (transform.cornerRadius > 0) return false
-
-        // Check if item covers entire canvas
-        const itemLeft = canvas.width / 2 + transform.x - transform.width / 2
-        const itemTop = canvas.height / 2 + transform.y - transform.height / 2
-        const itemRight = itemLeft + transform.width
-        const itemBottom = itemTop + transform.height
-
-        // Must cover entire canvas (with small tolerance for floating point)
-        const tolerance = 1
-        if (itemLeft > tolerance || itemTop > tolerance) return false
-        if (itemRight < canvas.width - tolerance || itemBottom < canvas.height - tolerance)
-          return false
-
-        // Check for effects that might add transparency
-        const itemEffects =
-          resolveAnimatedColorEffects(
-            item.effects ?? [],
-            getCurrentKeyframes(item.id),
-            frame - item.from,
-          ) ?? []
-        const adjEffects = getAdjustmentLayerEffects(
-          trackOrder,
-          adjustmentLayers,
-          frame,
-          renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
-          renderMode === 'preview' ? getLiveItemSnapshot : undefined,
-          getCurrentKeyframes,
-        )
-        const allEffects = [...itemEffects, ...adjEffects]
-
-        for (const effectWrapper of allEffects) {
-          if (!effectWrapper.enabled) continue
-          const effect = effectWrapper.effect
-          // Effects that could add transparency
-          if ('opacity' in effect && typeof effect.opacity === 'number' && effect.opacity < 1) {
-            return false
-          }
-        }
-
-        return true
+      const occlusionContext: FrameOcclusionContext = {
+        frame,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        canvasSettings,
+        renderMode,
+        transitionClipIds,
+        adjustmentLayers,
+        getCurrentItem,
+        getCurrentKeyframes,
+        getPreviewEffectsOverride,
+        getLiveItemSnapshot,
       }
+      const isFullyOccluding = (baseItem: TimelineItem, trackOrder: number): boolean =>
+        isItemFullyOccluding(baseItem, trackOrder, occlusionContext)
 
       // Find occlusion cutoff – the lowest track order with a fully occluding item
       // If masks are active, disable occlusion culling (masks could reveal content)
