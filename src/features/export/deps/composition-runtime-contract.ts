@@ -35,6 +35,7 @@ export {
   resolveOcclusionCutoffOrder,
   resolveFrameRenderScene,
 } from '@/runtime/composition-runtime/utils/scene-assembly'
+export type { FrameRenderTask } from '@/runtime/composition-runtime/utils/scene-assembly'
 export {
   calculateTransitionProgress,
   resolveTransitionFrameState,
