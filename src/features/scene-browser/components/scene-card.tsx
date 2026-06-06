@@ -19,10 +19,8 @@ interface SceneCardBaseProps {
 
 interface SceneCardVariantProps {
   scene: ScoredScene
-}
-
-interface MatchedSceneCardVariantProps extends SceneCardVariantProps {
-  rank?: SceneMatchRank
+  /** Present while a search is active; toggling it preserves the fiber instead of remounting. */
+  match?: SceneMatchState
 }
 
 type SceneMatchRank = 'top' | 'default'
@@ -188,24 +186,16 @@ function SceneCardBase({ scene, mediaName, match }: SceneCardBaseProps) {
   )
 }
 
-export const GlobalSceneCard = memo(function GlobalSceneCard({ scene }: SceneCardVariantProps) {
-  return <SceneCardBase scene={scene} mediaName="source" />
-})
-
-export const ScopedSceneCard = memo(function ScopedSceneCard({ scene }: SceneCardVariantProps) {
-  return <SceneCardBase scene={scene} mediaName="hidden" />
-})
-
-export const GlobalMatchedSceneCard = memo(function GlobalMatchedSceneCard({
+export const GlobalSceneCard = memo(function GlobalSceneCard({
   scene,
-  rank = 'default',
-}: MatchedSceneCardVariantProps) {
-  return <SceneCardBase scene={scene} mediaName="source" match={{ rank }} />
+  match,
+}: SceneCardVariantProps) {
+  return <SceneCardBase scene={scene} mediaName="source" match={match} />
 })
 
-export const ScopedMatchedSceneCard = memo(function ScopedMatchedSceneCard({
+export const ScopedSceneCard = memo(function ScopedSceneCard({
   scene,
-  rank = 'default',
-}: MatchedSceneCardVariantProps) {
-  return <SceneCardBase scene={scene} mediaName="hidden" match={{ rank }} />
+  match,
+}: SceneCardVariantProps) {
+  return <SceneCardBase scene={scene} mediaName="hidden" match={match} />
 })

@@ -20,10 +20,8 @@ interface SceneRowBaseProps {
 
 interface SceneRowVariantProps {
   scene: ScoredScene
-}
-
-interface MatchedSceneRowVariantProps extends SceneRowVariantProps {
-  rank?: SceneMatchRank
+  /** Present while a search is active; toggling it preserves the fiber instead of remounting. */
+  match?: SceneMatchState
 }
 
 type SceneMatchRank = 'top' | 'default'
@@ -222,24 +220,10 @@ function SceneRowBase({ scene, mediaName, match }: SceneRowBaseProps) {
   )
 }
 
-export const GlobalSceneRow = memo(function GlobalSceneRow({ scene }: SceneRowVariantProps) {
-  return <SceneRowBase scene={scene} mediaName="source" />
+export const GlobalSceneRow = memo(function GlobalSceneRow({ scene, match }: SceneRowVariantProps) {
+  return <SceneRowBase scene={scene} mediaName="source" match={match} />
 })
 
-export const ScopedSceneRow = memo(function ScopedSceneRow({ scene }: SceneRowVariantProps) {
-  return <SceneRowBase scene={scene} mediaName="hidden" />
-})
-
-export const GlobalMatchedSceneRow = memo(function GlobalMatchedSceneRow({
-  scene,
-  rank = 'default',
-}: MatchedSceneRowVariantProps) {
-  return <SceneRowBase scene={scene} mediaName="source" match={{ rank }} />
-})
-
-export const ScopedMatchedSceneRow = memo(function ScopedMatchedSceneRow({
-  scene,
-  rank = 'default',
-}: MatchedSceneRowVariantProps) {
-  return <SceneRowBase scene={scene} mediaName="hidden" match={{ rank }} />
+export const ScopedSceneRow = memo(function ScopedSceneRow({ scene, match }: SceneRowVariantProps) {
+  return <SceneRowBase scene={scene} mediaName="hidden" match={match} />
 })

@@ -12,7 +12,7 @@ interface GraphGridProps {
   /** Padding inside the graph area */
   padding: { top: number; right: number; bottom: number; left: number }
   /** Show axis labels */
-  labelVisibility?: 'both' | 'y-only' | 'none'
+  labelVisibility?: 'both' | 'y-only'
   /** Show X-axis (time) labels — set false when an external ruler provides them */
   /** Major grid line interval for X (frames) */
   xMajorInterval?: number
