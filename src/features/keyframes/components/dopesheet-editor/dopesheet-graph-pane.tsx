@@ -54,7 +54,7 @@ interface DopesheetGraphPaneProps {
   onNavigateToKeyframe?: (frame: number) => void
   transitionBlockedRanges?: BlockedFrameRange[]
   snapEnabled: boolean
-  showAllGraphHandles: boolean
+  graphHandleVisibility: 'selected' | 'all'
   graphRulerUnit: 'frames' | 'seconds'
   autoZoomGraphHeight: boolean
   graphVerticalZoomValue: number
@@ -99,7 +99,7 @@ export function DopesheetGraphPane({
   onNavigateToKeyframe,
   transitionBlockedRanges,
   snapEnabled,
-  showAllGraphHandles,
+  graphHandleVisibility,
   graphRulerUnit,
   autoZoomGraphHeight,
   graphVerticalZoomValue,
@@ -155,7 +155,7 @@ export function DopesheetGraphPane({
             onNavigateToKeyframe={onNavigateToKeyframe}
             transitionBlockedRanges={transitionBlockedRanges}
             snapEnabled={snapEnabled}
-            showAllHandles={showAllGraphHandles}
+            handleVisibility={graphHandleVisibility}
             rulerUnit={graphRulerUnit}
             autoZoomGraphHeight={autoZoomGraphHeight}
             externalValueZoomLevel={graphVerticalZoomValue}

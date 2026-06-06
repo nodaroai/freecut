@@ -15,7 +15,7 @@ import type { PropertyAccordionGroup } from './property-groups'
 interface DopesheetParameterMenuProps {
   disabled: boolean
   hasAvailableProperties: boolean
-  showKeyframedOnly: boolean
+  parameterFilter: 'all' | 'keyframed'
   onToggleKeyframedOnly: () => void
   allPropertyGroups: PropertyAccordionGroup[]
   visibleGroups: Record<string, boolean>
@@ -28,7 +28,7 @@ interface DopesheetParameterMenuProps {
 export function DopesheetParameterMenu({
   disabled,
   hasAvailableProperties,
-  showKeyframedOnly,
+  parameterFilter,
   onToggleKeyframedOnly,
   allPropertyGroups,
   visibleGroups,
@@ -59,7 +59,7 @@ export function DopesheetParameterMenu({
             onToggleKeyframedOnly()
           }}
         >
-          <Check className={cn('h-3.5 w-3.5', !showKeyframedOnly && 'opacity-0')} />
+          <Check className={cn('h-3.5 w-3.5', parameterFilter !== 'keyframed' && 'opacity-0')} />
           {t('timeline.keyframeEditor.displayKeyframedParameters')}
         </DropdownMenuItem>
         {allPropertyGroups.length > 0 && <DropdownMenuSeparator />}

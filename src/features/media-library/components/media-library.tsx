@@ -77,7 +77,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MarqueeOverlay } from '@/shared/marquee/marquee-overlay'
 import { cn } from '@/shared/ui/cn'
-import { MediaGrid } from './media-grid'
+import { GridMediaGrid, ListMediaGrid } from './media-grid'
 import { CompositionsSection } from './compositions-section'
 import { BackgroundTaskProgress } from './background-task-progress'
 import { MissingMediaDialog } from './missing-media-dialog'
@@ -165,11 +165,22 @@ interface MediaTypeGroupProps {
   isOpen: boolean
   onToggle: (key: string, open: boolean) => void
   onMediaSelect?: (mediaId: string) => void
-  viewMode: 'grid' | 'list'
   itemSize: number
 }
 
-const MediaTypeGroup = memo(function MediaTypeGroup({
+interface MediaTypeGroupBaseProps extends MediaTypeGroupProps {
+  Grid: typeof GridMediaGrid | typeof ListMediaGrid
+}
+
+const GridMediaTypeGroup = memo(function GridMediaTypeGroup(props: MediaTypeGroupProps) {
+  return <MediaTypeGroupBase {...props} Grid={GridMediaGrid} />
+})
+
+const ListMediaTypeGroup = memo(function ListMediaTypeGroup(props: MediaTypeGroupProps) {
+  return <MediaTypeGroupBase {...props} Grid={ListMediaGrid} />
+})
+
+const MediaTypeGroupBase = memo(function MediaTypeGroupBase({
   groupKey,
   label,
   icon,
@@ -177,9 +188,9 @@ const MediaTypeGroup = memo(function MediaTypeGroup({
   isOpen,
   onToggle,
   onMediaSelect,
-  viewMode,
   itemSize,
-}: MediaTypeGroupProps) {
+  Grid,
+}: MediaTypeGroupBaseProps) {
   const Icon = GROUP_ICONS[icon]
   return (
     <Collapsible open={isOpen} onOpenChange={(open) => onToggle(groupKey, open)}>
@@ -197,12 +208,7 @@ const MediaTypeGroup = memo(function MediaTypeGroup({
         <span className="text-[10px] tabular-nums text-muted-foreground/60">{items.length}</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-1 pb-2">
-        <MediaGrid
-          items={items}
-          onMediaSelect={onMediaSelect}
-          viewMode={viewMode}
-          itemSize={itemSize}
-        />
+        <Grid items={items} onMediaSelect={onMediaSelect} itemSize={itemSize} />
       </CollapsibleContent>
     </Collapsible>
   )
@@ -329,6 +335,8 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     return groups
   }, [filteredMediaItems, t])
   const compositions = useCompositionsStore((s) => s.compositions)
+  const MediaTypeGroupView = viewMode === 'grid' ? GridMediaTypeGroup : ListMediaTypeGroup
+  const EmptyMediaGrid = viewMode === 'grid' ? GridMediaGrid : ListMediaGrid
 
   // Composition navigation — show banner when inside a sub-comp
   const activeCompositionId = useCompositionNavigationStore((s) => s.activeCompositionId)
@@ -1546,7 +1554,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
 
           {/* Media sections — grouped by type */}
           {mediaGroups.map((group) => (
-            <MediaTypeGroup
+            <MediaTypeGroupView
               key={group.key}
               groupKey={group.key}
               label={group.label}
@@ -1562,14 +1570,13 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
                 })
               }
               onMediaSelect={onMediaSelect}
-              viewMode={viewMode}
               itemSize={mediaItemSize}
             />
           ))}
 
           {/* Loading / empty state when no groups to show */}
           {mediaGroups.length === 0 && (
-            <MediaGrid onMediaSelect={onMediaSelect} viewMode={viewMode} itemSize={mediaItemSize} />
+            <EmptyMediaGrid onMediaSelect={onMediaSelect} itemSize={mediaItemSize} />
           )}
         </div>
 

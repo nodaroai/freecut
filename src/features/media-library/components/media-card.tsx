@@ -74,7 +74,7 @@ interface MediaCardProps {
 }
 
 interface MediaCardInternalProps extends MediaCardProps {
-  viewMode: 'grid' | 'list'
+  layout: 'grid' | 'list'
 }
 
 interface MediaCardActionMenuProps {
@@ -455,11 +455,11 @@ function DeleteMediaAction({ t, onDelete }: DeleteMediaActionProps) {
 }
 
 export const GridMediaCard = memo(function GridMediaCard(props: MediaCardProps) {
-  return <MediaCardInternal {...props} viewMode="grid" />
+  return <MediaCardInternal {...props} layout="grid" />
 })
 
 export const ListMediaCard = memo(function ListMediaCard(props: MediaCardProps) {
-  return <MediaCardInternal {...props} viewMode="list" />
+  return <MediaCardInternal {...props} layout="list" />
 })
 
 const MediaCardInternal = memo(function MediaCardInternal({
@@ -470,7 +470,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
   onDoubleClick,
   onDelete,
   onRelink,
-  viewMode,
+  layout,
 }: MediaCardInternalProps) {
   const { t } = useTranslation()
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
@@ -1351,7 +1351,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
   }
 
   // List view
-  if (viewMode === 'list') {
+  if (layout === 'list') {
     return (
       <>
         {transcribeDialog}

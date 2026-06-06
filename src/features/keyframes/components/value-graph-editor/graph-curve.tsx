@@ -210,7 +210,7 @@ interface GraphPlayheadProps {
   /** Whether scrubbing is disabled */
   disabled?: boolean
   /** Whether to render the visible playhead line/marker */
-  showVisuals?: boolean
+  visuals?: 'visible' | 'hidden'
 }
 
 /**
@@ -227,7 +227,7 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   onScrubStart,
   onScrubEnd,
   disabled = false,
-  showVisuals = true,
+  visuals = 'visible',
 }: GraphPlayheadProps) {
   const { startFrame, endFrame, width, height } = viewport
 
@@ -319,7 +319,7 @@ export const GraphPlayhead = memo(function GraphPlayhead({
           style={{ cursor: 'ew-resize' }}
         />
       )}
-      {showVisuals && (
+      {visuals === 'visible' && (
         <>
           <line
             x1={x}

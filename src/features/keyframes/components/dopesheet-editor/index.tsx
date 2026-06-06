@@ -2728,7 +2728,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             <DopesheetParameterMenu
               disabled={disabled}
               hasAvailableProperties={availableProperties.length > 0}
-              showKeyframedOnly={showKeyframedOnly}
+              parameterFilter={showKeyframedOnly ? 'keyframed' : 'all'}
               onToggleKeyframedOnly={() => setShowKeyframedOnly((prev) => !prev)}
               allPropertyGroups={allPropertyGroups}
               visibleGroups={visibleGroups}
@@ -2814,8 +2814,8 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             visualizationMode={visualizationMode}
             graphRulerUnit={graphRulerUnit}
             onChangeRulerUnit={setGraphRulerUnit}
-            showAllGraphHandles={showAllGraphHandles}
-            onToggleShowAllGraphHandles={() => setShowAllGraphHandles((prev) => !prev)}
+            graphHandleVisibility={showAllGraphHandles ? 'all' : 'selected'}
+            onToggleGraphHandleVisibility={() => setShowAllGraphHandles((prev) => !prev)}
             autoZoomGraphHeight={autoZoomGraphHeight}
             onToggleAutoZoomGraphHeight={() => setAutoZoomGraphHeight((prev) => !prev)}
           />
@@ -2887,7 +2887,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               onNavigateToKeyframe={onNavigateToKeyframe}
               transitionBlockedRanges={transitionBlockedRanges}
               snapEnabled={snapEnabled}
-              showAllGraphHandles={showAllGraphHandles}
+              graphHandleVisibility={showAllGraphHandles ? 'all' : 'selected'}
               graphRulerUnit={graphRulerUnit}
               autoZoomGraphHeight={autoZoomGraphHeight}
               graphVerticalZoomValue={graphVerticalZoomValue}

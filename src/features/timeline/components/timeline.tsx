@@ -6,7 +6,7 @@ import { TimelineContent } from './timeline-content'
 import { TimelineNavigator } from './timeline-navigator'
 import { TrackHeader } from './track-header'
 import { TransitionDragTooltip } from './transition-drag-tooltip'
-import { TrackRowFrame, TrackSectionDivider } from './track-row-frame'
+import { FirstTrackRowFrame, TrackRowFrame, TrackSectionDivider } from './track-row-frame'
 import { useTimelineTracks } from '../hooks/use-timeline-tracks'
 import { useItemsStore } from '../stores/items-store'
 import { useSelectionStore } from '@/shared/state/selection'
@@ -764,7 +764,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
       zoneHeight: number
       scrollRef: React.RefObject<HTMLDivElement | null>
       dropIndicatorLocalIndex: number
-      showTopDividerForFirstTrack: boolean
+      firstTrackFrame: 'with-top-divider' | 'regular'
     },
   ) => (
     <div
@@ -783,10 +783,13 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
           )}
 
           {sectionTracks.map((track, index) => {
+            const RowFrame =
+              options.firstTrackFrame === 'with-top-divider' && index === 0
+                ? FirstTrackRowFrame
+                : TrackRowFrame
             return (
-              <TrackRowFrame
+              <RowFrame
                 key={track.id}
-                showTopDivider={options.showTopDividerForFirstTrack && index === 0}
                 onResizeMouseDown={(event) => handleTrackResizeStart(event, track.id)}
                 onResizeDoubleClick={(event) => handleTrackResizeReset(event, track.id)}
                 resizeHandleLabel={`Resize ${track.name} height`}
@@ -825,7 +828,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
                     }
                   }}
                 />
-              </TrackRowFrame>
+              </RowFrame>
             )
           })}
 
@@ -939,7 +942,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
                     zoneHeight: videoZoneHeight,
                     scrollRef: videoTrackHeadersScrollRef,
                     dropIndicatorLocalIndex: videoDropIndicatorIndex,
-                    showTopDividerForFirstTrack: true,
+                    firstTrackFrame: 'with-top-divider',
                   })}
                   <TrackSectionDivider onMouseDown={handleSectionDividerMouseDown} />
                   {renderTrackHeadersSection(audioTracks, {
@@ -948,7 +951,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
                     zoneHeight: audioZoneHeight,
                     scrollRef: audioTrackHeadersScrollRef,
                     dropIndicatorLocalIndex: audioDropIndicatorIndex,
-                    showTopDividerForFirstTrack: false,
+                    firstTrackFrame: 'regular',
                   })}
                 </>
               ) : (
@@ -958,7 +961,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
                   zoneHeight: singleSectionZoneHeight,
                   scrollRef: allTrackHeadersScrollRef,
                   dropIndicatorLocalIndex: singleDropIndicatorIndex,
-                  showTopDividerForFirstTrack: true,
+                  firstTrackFrame: 'with-top-divider',
                 })
               )}
             </div>

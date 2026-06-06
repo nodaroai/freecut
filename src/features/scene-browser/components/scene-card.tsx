@@ -11,15 +11,20 @@ import { SceneMatchBadges, SceneMatchStrength } from './scene-match-badges'
 import { ScenePaletteSwatches } from './scene-palette-swatches'
 import type { ScoredScene } from '../utils/rank'
 
-interface SceneCardProps {
+interface SceneCardBaseProps {
   scene: ScoredScene
-  /** When true, render the source filename line — hidden in per-media scope. */
-  showMediaName: boolean
-  /** True when this card is the first result for the active query. */
-  isTop?: boolean
-  /** Only render match signal chrome when a query is active. */
-  showSignals?: boolean
+  mediaName: 'source' | 'hidden'
+  match?: SceneMatchState
 }
+
+interface SceneCardVariantProps {
+  scene: ScoredScene
+  /** Present while a search is active; toggling it preserves the fiber instead of remounting. */
+  match?: SceneMatchState
+}
+
+type SceneMatchRank = 'top' | 'default'
+type SceneMatchState = { rank: SceneMatchRank }
 
 function parseCaptionIndex(sceneId: string): number | null {
   const idx = sceneId.lastIndexOf(':')
@@ -28,12 +33,7 @@ function parseCaptionIndex(sceneId: string): number | null {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
 }
 
-export const SceneCard = memo(function SceneCard({
-  scene,
-  showMediaName,
-  isTop,
-  showSignals,
-}: SceneCardProps) {
+function SceneCardBase({ scene, mediaName, match }: SceneCardBaseProps) {
   const { t } = useTranslation()
   const captionIndex = parseCaptionIndex(scene.id)
   const thumbUrl = useCaptionThumbnail(
@@ -101,6 +101,9 @@ export const SceneCard = memo(function SceneCard({
 
   const timestampLabel = formatDuration(scene.timeSec)
   const hasPalette = !!scene.palette && scene.palette.length > 0
+  const isTopMatch = match?.rank === 'top'
+  const showSourceMediaName = mediaName === 'source'
+  const showMatchSignals = match !== undefined
 
   return (
     <button
@@ -113,7 +116,7 @@ export const SceneCard = memo(function SceneCard({
         'text-left transition-colors',
         'hover:border-border/60 hover:bg-foreground/5 focus-visible:outline-none',
         'focus-visible:border-primary/60 focus-visible:bg-primary/10',
-        showSignals && isTop && 'border-primary/40 bg-primary/5',
+        isTopMatch && 'border-primary/40 bg-primary/5',
       )}
       title={t('sceneBrowser.scene.previewAndDragHint')}
     >
@@ -151,7 +154,7 @@ export const SceneCard = memo(function SceneCard({
         )}
       </div>
       <div className="min-w-0 space-y-1 px-1.5 py-1.5">
-        {showMediaName && (
+        {showSourceMediaName && (
           <div className="truncate text-[10px] text-muted-foreground" title={scene.mediaFileName}>
             {scene.mediaFileName}
           </div>
@@ -159,16 +162,20 @@ export const SceneCard = memo(function SceneCard({
         <div className="whitespace-normal break-words text-[11px] leading-snug text-foreground">
           {scene.text}
         </div>
-        {showSignals && <SceneMatchStrength signals={scene.signals} score={scene.score} />}
-        {(showSignals || (colorMode && hasPalette)) && (
+        {showMatchSignals && <SceneMatchStrength signals={scene.signals} score={scene.score} />}
+        {(showMatchSignals || (colorMode && hasPalette)) && (
           <div className="flex flex-wrap items-center gap-1">
-            {showSignals && (
-              <SceneMatchBadges signals={scene.signals} score={scene.score} isTop={isTop} />
+            {showMatchSignals && (
+              <SceneMatchBadges
+                signals={scene.signals}
+                score={scene.score}
+                rank={isTopMatch ? 'top' : 'default'}
+              />
             )}
-            {hasPalette && (colorMode || showSignals) && (
+            {hasPalette && (colorMode || showMatchSignals) && (
               <ScenePaletteSwatches
                 palette={scene.palette}
-                highlight={showSignals ? (scene.signals.colorMatch ?? null) : null}
+                highlight={showMatchSignals ? (scene.signals.colorMatch ?? null) : null}
                 onSwatchClick={handleSwatchClick}
               />
             )}
@@ -177,4 +184,18 @@ export const SceneCard = memo(function SceneCard({
       </div>
     </button>
   )
+}
+
+export const GlobalSceneCard = memo(function GlobalSceneCard({
+  scene,
+  match,
+}: SceneCardVariantProps) {
+  return <SceneCardBase scene={scene} mediaName="source" match={match} />
+})
+
+export const ScopedSceneCard = memo(function ScopedSceneCard({
+  scene,
+  match,
+}: SceneCardVariantProps) {
+  return <SceneCardBase scene={scene} mediaName="hidden" match={match} />
 })

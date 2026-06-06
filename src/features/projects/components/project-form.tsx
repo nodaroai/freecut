@@ -22,24 +22,40 @@ import {
 import { getProjectFpsOptions } from '../utils/project-fps'
 import { ProjectTemplatePicker } from './project-template-picker'
 
-interface ProjectFormProps {
+interface ProjectFormBaseProps {
   onSubmit: (data: ProjectFormData) => Promise<void> | void
   onCancel?: () => void
   defaultValues?: Partial<ProjectFormData>
-  isEditing?: boolean
   isSubmitting?: boolean
-  hideHeader?: boolean
+  mode: 'create' | 'edit'
+  surface: 'page' | 'inline'
 }
 
-export function ProjectForm({
+type ProjectFormProps = Omit<ProjectFormBaseProps, 'mode' | 'surface'>
+
+export function CreateProjectForm(props: ProjectFormProps) {
+  return <ProjectFormBase {...props} mode="create" surface="page" />
+}
+
+export function InlineCreateProjectForm(props: ProjectFormProps) {
+  return <ProjectFormBase {...props} mode="create" surface="inline" />
+}
+
+export function EditProjectForm(props: ProjectFormProps) {
+  return <ProjectFormBase {...props} mode="edit" surface="inline" />
+}
+
+function ProjectFormBase({
   onSubmit,
   onCancel,
   defaultValues,
-  isEditing = false,
   isSubmitting = false,
-  hideHeader = false,
-}: ProjectFormProps) {
+  mode,
+  surface,
+}: ProjectFormBaseProps) {
   const { t } = useTranslation()
+  const isEditing = mode === 'edit'
+  const isInlineSurface = surface === 'inline'
   const resolvedDefaultValues = useMemo(
     () => ({
       ...DEFAULT_PROJECT_VALUES,
@@ -96,7 +112,7 @@ export function ProjectForm({
   return (
     <div className="bg-background">
       {/* Header */}
-      {!hideHeader && (
+      {!isInlineSurface && (
         <div className="panel-header border-b border-border">
           <div className="max-w-[1400px] mx-auto px-6 py-5">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground mb-1">
@@ -110,12 +126,12 @@ export function ProjectForm({
       )}
 
       {/* Form */}
-      <div className={hideHeader ? '' : 'max-w-[1400px] mx-auto px-6 py-8'}>
+      <div className={isInlineSurface ? '' : 'max-w-[1400px] mx-auto px-6 py-8'}>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(320px,420px)_1fr] gap-6 items-start">
             {/* Project Details */}
             <div
-              className={`panel-bg border border-border rounded-lg p-6 ${hideHeader ? '' : 'lg:sticky lg:top-6'}`}
+              className={`panel-bg border border-border rounded-lg p-6 ${isInlineSurface ? '' : 'lg:sticky lg:top-6'}`}
             >
               <div className="flex items-center gap-3 mb-6">
                 <div className="h-8 w-1 bg-primary rounded-full" />
@@ -201,12 +217,9 @@ export function ProjectForm({
               </div>
 
               <ProjectTemplatePicker
-                selectedTemplateId={
-                  selectedTemplateId === 'custom' ? undefined : selectedTemplateId
-                }
+                selectedTemplateId={selectedTemplateId}
                 onSelectTemplate={handleSelectTemplate}
                 onSelectCustom={handleCustomSelect}
-                isCustomSelected={selectedTemplateId === 'custom'}
               />
               {selectedTemplateId === 'custom' && (
                 <div className="mt-5 flex items-center gap-3">

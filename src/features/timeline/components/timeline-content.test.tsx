@@ -68,6 +68,7 @@ vi.mock('./timeline-media-drop-zone', () => ({
 }))
 
 vi.mock('./track-row-frame', () => ({
+  FirstTrackRowFrame: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   TrackRowFrame: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   TrackSectionDivider: () => null,
 }))

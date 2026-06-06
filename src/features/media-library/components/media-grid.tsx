@@ -32,19 +32,30 @@ import {
 
 interface MediaGridProps {
   onMediaSelect?: (mediaId: string) => void
-  viewMode?: 'grid' | 'list'
   /** Grid item size (1 = largest, 5 = smallest) */
   itemSize?: number
   /** When provided, renders these items instead of pulling from the store */
   items?: MediaMetadata[]
 }
 
-export const MediaGrid = memo(function MediaGrid({
+interface MediaGridBaseProps extends MediaGridProps {
+  layout: 'grid' | 'list'
+}
+
+export const GridMediaGrid = memo(function GridMediaGrid(props: MediaGridProps) {
+  return <MediaGridBase {...props} layout="grid" />
+})
+
+export const ListMediaGrid = memo(function ListMediaGrid(props: MediaGridProps) {
+  return <MediaGridBase {...props} layout="list" />
+})
+
+const MediaGridBase = memo(function MediaGridBase({
   onMediaSelect,
-  viewMode = 'grid',
+  layout,
   itemSize = 3,
   items,
-}: MediaGridProps) {
+}: MediaGridBaseProps) {
   const { t } = useTranslation()
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [mediaIdsToDelete, setMediaIdsToDelete] = useState<string[]>([])
@@ -264,12 +275,12 @@ export const MediaGrid = memo(function MediaGrid({
       ) : (
         <div
           className={
-            viewMode === 'grid'
+            layout === 'grid'
               ? `grid ${GRID_GAP_BY_SIZE[itemSize] ?? GRID_GAP_BY_SIZE[3]}`
               : 'space-y-1'
           }
           style={
-            viewMode === 'grid'
+            layout === 'grid'
               ? {
                   gridTemplateColumns: `repeat(auto-fill, minmax(min(${GRID_MIN_SIZE_PX[itemSize] ?? GRID_MIN_SIZE_PX[3]}px, 100%), 1fr))`,
                 }
@@ -278,7 +289,7 @@ export const MediaGrid = memo(function MediaGrid({
         >
           {filteredItems.map((media) => {
             const handlers = cardHandlersById.get(media.id)
-            const Card = viewMode === 'grid' ? GridMediaCard : ListMediaCard
+            const Card = layout === 'grid' ? GridMediaCard : ListMediaCard
 
             return (
               <div key={media.id} data-media-id={media.id}>

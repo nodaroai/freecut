@@ -22,8 +22,8 @@ interface GraphHandlesProps {
   draggingHandle?: { keyframeId: string; type: 'in' | 'out' } | null
   /** Preview bezier configs during drag (overrides keyframe data for lag-free rendering) */
   previewBezierConfigs?: Record<string, BezierControlPoints> | null
-  /** Whether handles for all visible segments should be shown */
-  showAllHandles?: boolean
+  /** Which bezier handles should be visible */
+  handleVisibility?: 'selected' | 'all'
   /** Whether the graph is disabled */
   disabled?: boolean
 }
@@ -37,9 +37,11 @@ export const GraphHandles = memo(function GraphHandles({
   onHandlePointerDown,
   draggingHandle,
   previewBezierConfigs,
-  showAllHandles = false,
+  handleVisibility = 'selected',
   disabled = false,
 }: GraphHandlesProps) {
+  const showAllHandles = handleVisibility === 'all'
+
   // Sort points by frame (toSorted for immutability)
   const sortedPoints = useMemo(
     () => points.toSorted((a, b) => a.keyframe.frame - b.keyframe.frame),

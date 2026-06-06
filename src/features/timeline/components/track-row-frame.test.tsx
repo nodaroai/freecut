@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vite-plus/test'
 import { TRACK_SECTION_DIVIDER_HEIGHT } from '@/features/timeline/constants'
-import { TrackRowFrame, TrackSectionDivider } from './track-row-frame'
+import { FirstTrackRowFrame, TrackRowFrame, TrackSectionDivider } from './track-row-frame'
 
 describe('TrackRowFrame', () => {
   it('renders a divider for every wrapped row, including the last row', () => {
@@ -21,9 +21,9 @@ describe('TrackRowFrame', () => {
 
   it('anchors the divider to the row and keeps it out of hit testing', () => {
     const { container } = render(
-      <TrackRowFrame showTopDivider>
+      <FirstTrackRowFrame>
         <div>Track</div>
-      </TrackRowFrame>,
+      </FirstTrackRowFrame>,
     )
 
     const row = container.firstElementChild as HTMLDivElement | null

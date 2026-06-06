@@ -4,18 +4,17 @@ import { PROJECT_TEMPLATES, getAspectRatio, type ProjectTemplate } from '../util
 
 interface ProjectTemplatePickerProps {
   onSelectTemplate: (template: ProjectTemplate) => void
-  selectedTemplateId?: string
+  selectedTemplateId?: string | 'custom'
   onSelectCustom?: () => void
-  isCustomSelected?: boolean
 }
 
 export function ProjectTemplatePicker({
   onSelectTemplate,
   selectedTemplateId,
   onSelectCustom,
-  isCustomSelected,
 }: ProjectTemplatePickerProps) {
   const { t } = useTranslation()
+  const isCustomSelected = selectedTemplateId === 'custom'
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
       {PROJECT_TEMPLATES.map((template) => {

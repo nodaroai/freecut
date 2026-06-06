@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { createLogger } from '@/shared/logging/logger'
-import { ProjectForm } from '@/features/projects/components/project-form'
+import { InlineCreateProjectForm } from '@/features/projects/components/project-form'
 import { useCreateProject } from '@/features/projects/hooks/use-project-actions'
 import { useProjectStore } from '@/features/projects/stores/project-store'
 import { FreeCutLogo } from '@/components/brand/freecut-logo'
@@ -78,7 +78,7 @@ function NewProject() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <ProjectForm onSubmit={handleSubmit} isSubmitting={isSubmitting} hideHeader={true} />
+        <InlineCreateProjectForm onSubmit={handleSubmit} isSubmitting={isSubmitting} />
       </div>
     </div>
   )

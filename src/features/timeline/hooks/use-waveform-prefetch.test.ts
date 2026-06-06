@@ -61,11 +61,19 @@ function WaveformPrefetchProbe({ onRender }: { onRender: () => void }) {
 }
 
 async function flushPrefetchTimers() {
-  await act(async () => {
-    vi.advanceTimersByTime(120)
-    vi.runOnlyPendingTimers()
-    await Promise.resolve()
-  })
+  // Three passes drain the full prefetch chain: each store update reschedules the
+  // schedulePreviewWork debounce timer (advanceTimersByTime), the fired callback awaits
+  // a dynamic import() of the waveform-cache module, and the resolved import then queues
+  // the prefetch calls. The two Promise.resolve() drains flush the import microtask before
+  // the next pass advances timers, so any work it re-scheduled is picked up.
+  for (let i = 0; i < 3; i += 1) {
+    await act(async () => {
+      vi.advanceTimersByTime(120)
+      vi.runOnlyPendingTimers()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
 }
 
 /** Replicate the prefetch range calculation */

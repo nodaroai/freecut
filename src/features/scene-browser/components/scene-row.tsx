@@ -12,15 +12,20 @@ import { SceneMatchBadges, SceneMatchStrength } from './scene-match-badges'
 import { ScenePaletteSwatches } from './scene-palette-swatches'
 import type { ScoredScene } from '../utils/rank'
 
-interface SceneRowProps {
+interface SceneRowBaseProps {
   scene: ScoredScene
-  /** When true, render the source filename line — hidden in per-media scope. */
-  showMediaName: boolean
-  /** True when this row is the first result for the active query. */
-  isTop?: boolean
-  /** Only render match signal chrome when a query is active. */
-  showSignals?: boolean
+  mediaName: 'source' | 'hidden'
+  match?: SceneMatchState
 }
+
+interface SceneRowVariantProps {
+  scene: ScoredScene
+  /** Present while a search is active; toggling it preserves the fiber instead of remounting. */
+  match?: SceneMatchState
+}
+
+type SceneMatchRank = 'top' | 'default'
+type SceneMatchState = { rank: SceneMatchRank }
 
 function formatSceneTimestamp(sec: number): string {
   return formatDuration(sec)
@@ -33,12 +38,7 @@ function parseCaptionIndex(sceneId: string): number | null {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
 }
 
-export const SceneRow = memo(function SceneRow({
-  scene,
-  showMediaName,
-  isTop,
-  showSignals,
-}: SceneRowProps) {
+function SceneRowBase({ scene, mediaName, match }: SceneRowBaseProps) {
   const { t } = useTranslation()
   const captionIndex = parseCaptionIndex(scene.id)
   const thumbUrl = useCaptionThumbnail(
@@ -105,6 +105,9 @@ export const SceneRow = memo(function SceneRow({
   )
 
   const timestampLabel = useMemo(() => formatSceneTimestamp(scene.timeSec), [scene.timeSec])
+  const isTopMatch = match?.rank === 'top'
+  const showSourceMediaName = mediaName === 'source'
+  const showMatchSignals = match !== undefined
 
   return (
     <button
@@ -119,7 +122,7 @@ export const SceneRow = memo(function SceneRow({
         'focus-visible:border-primary/60 focus-visible:bg-primary/10',
         // A subtle backdrop on the top match so it stands out without
         // stealing focus from lower-scoring but still-relevant rows.
-        showSignals && isTop && 'bg-primary/5',
+        isTopMatch && 'bg-primary/5',
       )}
       title={t('sceneBrowser.scene.previewAndDragHint')}
     >
@@ -145,7 +148,7 @@ export const SceneRow = memo(function SceneRow({
         </span>
       </div>
       <div className="min-w-0 flex-1 space-y-0.5">
-        {showMediaName && (
+        {showSourceMediaName && (
           <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Clock className="h-2.5 w-2.5 shrink-0" />
             <span className="truncate">{scene.mediaFileName}</span>
@@ -156,11 +159,15 @@ export const SceneRow = memo(function SceneRow({
           spans={scene.matchSpans}
           className="line-clamp-3 text-[12px] leading-snug text-foreground"
         />
-        {showSignals && (
+        {showMatchSignals && (
           <div className="space-y-1 pt-0.5">
             <SceneMatchStrength signals={scene.signals} score={scene.score} />
             <div className="flex flex-wrap items-center gap-2">
-              <SceneMatchBadges signals={scene.signals} score={scene.score} isTop={isTop} />
+              <SceneMatchBadges
+                signals={scene.signals}
+                score={scene.score}
+                rank={isTopMatch ? 'top' : 'default'}
+              />
               <ScenePaletteSwatches
                 palette={scene.palette}
                 highlight={scene.signals.colorMatch ?? null}
@@ -181,7 +188,7 @@ export const SceneRow = memo(function SceneRow({
             </div>
           </div>
         )}
-        {!showSignals && colorMode && (
+        {!showMatchSignals && colorMode && (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
             {scene.palette && scene.palette.length > 0 ? (
               <>
@@ -211,4 +218,12 @@ export const SceneRow = memo(function SceneRow({
       </div>
     </button>
   )
+}
+
+export const GlobalSceneRow = memo(function GlobalSceneRow({ scene, match }: SceneRowVariantProps) {
+  return <SceneRowBase scene={scene} mediaName="source" match={match} />
+})
+
+export const ScopedSceneRow = memo(function ScopedSceneRow({ scene, match }: SceneRowVariantProps) {
+  return <SceneRowBase scene={scene} mediaName="hidden" match={match} />
 })

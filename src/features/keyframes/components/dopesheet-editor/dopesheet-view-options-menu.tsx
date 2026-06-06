@@ -15,8 +15,8 @@ interface DopesheetViewOptionsMenuProps {
   visualizationMode: 'dopesheet' | 'graph'
   graphRulerUnit: 'frames' | 'seconds'
   onChangeRulerUnit: (unit: 'frames' | 'seconds') => void
-  showAllGraphHandles: boolean
-  onToggleShowAllGraphHandles: () => void
+  graphHandleVisibility: 'selected' | 'all'
+  onToggleGraphHandleVisibility: () => void
   autoZoomGraphHeight: boolean
   onToggleAutoZoomGraphHeight: () => void
 }
@@ -26,8 +26,8 @@ export function DopesheetViewOptionsMenu({
   visualizationMode,
   graphRulerUnit,
   onChangeRulerUnit,
-  showAllGraphHandles,
-  onToggleShowAllGraphHandles,
+  graphHandleVisibility,
+  onToggleGraphHandleVisibility,
   autoZoomGraphHeight,
   onToggleAutoZoomGraphHeight,
 }: DopesheetViewOptionsMenuProps) {
@@ -76,10 +76,12 @@ export function DopesheetViewOptionsMenu({
             <DropdownMenuItem
               onSelect={(event) => {
                 event.preventDefault()
-                onToggleShowAllGraphHandles()
+                onToggleGraphHandleVisibility()
               }}
             >
-              <Check className={cn('h-3.5 w-3.5', !showAllGraphHandles && 'opacity-0')} />
+              <Check
+                className={cn('h-3.5 w-3.5', graphHandleVisibility !== 'all' && 'opacity-0')}
+              />
               {t('timeline.keyframeEditor.showAllHandles')}
             </DropdownMenuItem>
             <DropdownMenuItem

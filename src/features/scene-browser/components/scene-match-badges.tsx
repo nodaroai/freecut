@@ -86,19 +86,19 @@ function imageFraction(score: number): number {
 interface SceneMatchBadgesProps {
   signals: SceneMatchSignals
   score: number
-  /** `true` for the first scene in the list — earns a "Top" label. */
-  isTop?: boolean
+  rank?: 'top' | 'default'
   className?: string
 }
 
 export const SceneMatchBadges = memo(function SceneMatchBadges({
   signals,
   score,
-  isTop,
+  rank = 'default',
   className,
 }: SceneMatchBadgesProps) {
   const { t } = useTranslation()
   const chips: React.ReactNode[] = []
+  const isTopRank = rank === 'top'
 
   if (signals.ranker === 'keyword' && signals.keywordMatched) {
     chips.push(
@@ -194,11 +194,11 @@ export const SceneMatchBadges = memo(function SceneMatchBadges({
     }
   }
 
-  if (chips.length === 0 && !isTop) return null
+  if (chips.length === 0 && !isTopRank) return null
 
   return (
     <div className={cn('flex flex-wrap items-center gap-1', className)}>
-      {isTop && (
+      {isTopRank && (
         <Chip
           tone="top"
           icon={<Sparkles className="h-2.5 w-2.5" />}

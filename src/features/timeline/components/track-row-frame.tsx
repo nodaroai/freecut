@@ -5,12 +5,14 @@ import { cn } from '@/shared/ui/cn'
 
 interface TrackRowFrameProps extends PropsWithChildren {
   className?: string
-  showTopDivider?: boolean
-  hideBottomDivider?: boolean
   onResizeMouseDown?: (event: MouseEvent<HTMLButtonElement>) => void
   onResizeDoubleClick?: (event: MouseEvent<HTMLButtonElement>) => void
   resizeHandleLabel?: string
   resizeHandlePosition?: 'top' | 'bottom'
+}
+
+interface TrackRowFrameBaseProps extends TrackRowFrameProps {
+  dividers: 'bottom' | 'top-and-bottom'
 }
 
 interface TrackSectionDividerProps {
@@ -21,22 +23,22 @@ interface TrackSectionDividerProps {
 /**
  * Keeps the row separator outside the lane content so clips can fill the row.
  */
-export function TrackRowFrame({
+function TrackRowFrameBase({
   children,
   className,
-  showTopDivider = false,
-  hideBottomDivider = false,
   onResizeMouseDown,
   onResizeDoubleClick,
   resizeHandleLabel,
   resizeHandlePosition = 'bottom',
-}: TrackRowFrameProps) {
+  dividers,
+}: TrackRowFrameBaseProps) {
   const { t } = useTranslation()
   const resizeHandlePositionClass = resizeHandlePosition === 'top' ? 'top-0' : 'bottom-0'
+  const hasTopDivider = dividers === 'top-and-bottom'
 
   return (
     <div className={cn('relative', className)}>
-      {showTopDivider && (
+      {hasTopDivider && (
         <div
           aria-hidden="true"
           data-testid="track-row-top-divider"
@@ -44,13 +46,11 @@ export function TrackRowFrame({
         />
       )}
       {children}
-      {!hideBottomDivider && (
-        <div
-          aria-hidden="true"
-          data-testid="track-row-divider"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border"
-        />
-      )}
+      <div
+        aria-hidden="true"
+        data-testid="track-row-divider"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border"
+      />
       {onResizeMouseDown && (
         <button
           type="button"
@@ -66,6 +66,14 @@ export function TrackRowFrame({
       )}
     </div>
   )
+}
+
+export function TrackRowFrame(props: TrackRowFrameProps) {
+  return <TrackRowFrameBase {...props} dividers="bottom" />
+}
+
+export function FirstTrackRowFrame(props: TrackRowFrameProps) {
+  return <TrackRowFrameBase {...props} dividers="top-and-bottom" />
 }
 
 export function TrackSectionDivider({ className, onMouseDown }: TrackSectionDividerProps) {

@@ -308,20 +308,20 @@ interface CompositionCardProps {
 }
 
 interface CompositionCardInternalProps extends CompositionCardProps {
-  viewMode: 'grid' | 'list'
+  layout: 'grid' | 'list'
 }
 
 const GridCompositionCard = memo(function GridCompositionCard(props: CompositionCardProps) {
-  return <CompositionCardInternal {...props} viewMode="grid" />
+  return <CompositionCardInternal {...props} layout="grid" />
 })
 
 const ListCompositionCard = memo(function ListCompositionCard(props: CompositionCardProps) {
-  return <CompositionCardInternal {...props} viewMode="list" />
+  return <CompositionCardInternal {...props} layout="list" />
 })
 
 const CompositionCardInternal = memo(function CompositionCardInternal({
   composition,
-  viewMode,
+  layout,
   selected,
   isTranscriptionDialogOpen,
   dragDisabled,
@@ -473,7 +473,7 @@ const CompositionCardInternal = memo(function CompositionCardInternal({
       ? `${durationSecs.toFixed(1)}s`
       : `${Math.floor(durationSecs / 60)}:${String(Math.floor(durationSecs % 60)).padStart(2, '0')}`
 
-  if (viewMode === 'grid') {
+  if (layout === 'grid') {
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>

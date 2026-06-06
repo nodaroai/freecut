@@ -41,10 +41,6 @@ interface SequenceProps {
    * Used for preloading content like videos.
    */
   premountFor?: number
-  /**
-   * Show loop timestamps for debugging (Composition compat, ignored)
-   */
-  showLoopTimestamps?: boolean
 }
 
 /**
@@ -64,10 +60,7 @@ export const Sequence = memo<SequenceProps>(
     style,
     className,
     premountFor = 0,
-    showLoopTimestamps,
   }) => {
-    void showLoopTimestamps
-
     // Get the global frame from the clock
     const globalFrame = useClockFrame()
 

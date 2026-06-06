@@ -47,7 +47,7 @@ import { getCombinedGraphValueRange } from './value-range-utils'
 
 const OVERLAY_COLORS = ['#6366f1', '#22d3ee', '#a3e635', '#f472b6', '#fb923c', '#a78bfa', '#34d399']
 
-interface ValueGraphEditorProps {
+interface ValueGraphEditorSharedProps {
   /** Shared time viewport when split mode needs synchronized frame zoom/pan */
   frameViewport?: { startFrame: number; endFrame: number }
   /** Callback when the shared time viewport changes */
@@ -106,50 +106,40 @@ interface ValueGraphEditorProps {
   transitionBlockedRanges?: BlockedFrameRange[]
   /** Controls whether snapping is enabled */
   snapEnabled?: boolean
-  /** Whether to render the internal toolbar */
-  showToolbar?: boolean
-  /** Whether to render the drag hint footer */
-  showKeyboardHints?: boolean
-  /** Whether to remove the default graph border/radius */
-  borderless?: boolean
-  /** Whether handles for all visible segments should be shown */
-  showAllHandles?: boolean
+  /** Which bezier handles should be visible */
+  handleVisibility?: 'selected' | 'all'
   /** How to render the time ruler */
   rulerUnit?: 'frames' | 'seconds'
   /** Automatically fit the Y range to the active curve values */
   autoZoomGraphHeight?: boolean
   /** Optional externally controlled Y zoom level (0-100) */
   externalValueZoomLevel?: number
-  /** Hide X-axis labels when an external ruler provides them */
-  hideXLabels?: boolean
   /** Whether the editor is disabled */
   disabled?: boolean
   /** Additional class name */
   className?: string
 }
 
-type EmbeddedValueGraphEditorProps = Omit<
-  ValueGraphEditorProps,
-  'showToolbar' | 'showKeyboardHints' | 'borderless' | 'hideXLabels'
->
+interface ValueGraphEditorBaseProps extends ValueGraphEditorSharedProps {
+  chrome: 'full' | 'embedded'
+}
+
+type ValueGraphEditorProps = ValueGraphEditorSharedProps
+type EmbeddedValueGraphEditorProps = ValueGraphEditorSharedProps
 
 export function EmbeddedValueGraphEditor(props: EmbeddedValueGraphEditorProps) {
-  return (
-    <ValueGraphEditor
-      {...props}
-      showToolbar={false}
-      showKeyboardHints={false}
-      borderless
-      hideXLabels
-    />
-  )
+  return <ValueGraphEditorBase {...props} chrome="embedded" />
 }
 
 /**
  * Full-featured value graph editor for keyframe animation.
  * Shows keyframes as draggable points with interpolation curves.
  */
-export const ValueGraphEditor = memo(function ValueGraphEditor({
+export const ValueGraphEditor = memo(function ValueGraphEditor(props: ValueGraphEditorProps) {
+  return <ValueGraphEditorBase {...props} chrome="full" />
+})
+
+const ValueGraphEditorBase = memo(function ValueGraphEditorBase({
   frameViewport,
   onFrameViewportChange,
   itemId,
@@ -178,18 +168,20 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   onNavigateToKeyframe,
   transitionBlockedRanges = [],
   snapEnabled: controlledSnapEnabled,
-  showToolbar = true,
-  showKeyboardHints = true,
-  borderless = false,
-  showAllHandles = false,
+  handleVisibility = 'selected',
   rulerUnit = 'frames',
   autoZoomGraphHeight = false,
   externalValueZoomLevel,
-  hideXLabels = false,
   disabled = false,
   className,
-}: ValueGraphEditorProps) {
+  chrome,
+}: ValueGraphEditorBaseProps) {
   const { t } = useTranslation()
+  const isEmbedded = chrome === 'embedded'
+  const showToolbar = !isEmbedded
+  const showKeyboardHints = !isEmbedded
+  const borderless = isEmbedded
+  const hideXLabels = isEmbedded
   const padding = useMemo(
     () => (hideXLabels ? { ...DEFAULT_GRAPH_PADDING, bottom: 8 } : DEFAULT_GRAPH_PADDING),
     [hideXLabels],
@@ -1191,7 +1183,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
           padding={padding}
           rulerUnit={rulerUnit}
           fps={fps}
-          showXLabels={!hideXLabels}
+          labelVisibility={hideXLabels ? 'y-only' : 'both'}
         />
 
         {/* Dedicated hit target for empty graph-space interactions */}
@@ -1246,7 +1238,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
             onScrubStart={handlePlayheadScrubStart}
             onScrubEnd={handlePlayheadScrubEnd}
             disabled={disabled}
-            showVisuals={false}
+            visuals="hidden"
           />
 
           {/* Bezier handles (for selected keyframes with cubic-bezier easing) */}
@@ -1256,7 +1248,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
             onHandlePointerDown={handleBezierPointerDown}
             draggingHandle={draggingHandle}
             previewBezierConfigs={previewBezierConfigs}
-            showAllHandles={showAllHandles}
+            handleVisibility={handleVisibility}
             disabled={disabled}
           />
 

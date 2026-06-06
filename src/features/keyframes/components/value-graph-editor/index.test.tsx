@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { ValueGraphEditor } from './index'
+import { EmbeddedValueGraphEditor, ValueGraphEditor } from './index'
 import { DEFAULT_GRAPH_PADDING } from './types'
 
 function SelectionHarness() {
@@ -10,7 +10,7 @@ function SelectionHarness() {
 
   return (
     <TooltipProvider>
-      <ValueGraphEditor
+      <EmbeddedValueGraphEditor
         itemId="item-1"
         keyframesByProperty={{
           opacity: [
@@ -24,7 +24,6 @@ function SelectionHarness() {
         width={480}
         height={260}
         totalFrames={60}
-        showToolbar={false}
       />
       <output data-testid="selection">{[...selection].join(',')}</output>
     </TooltipProvider>
@@ -36,7 +35,7 @@ function PointSelectionHarness() {
 
   return (
     <TooltipProvider>
-      <ValueGraphEditor
+      <EmbeddedValueGraphEditor
         itemId="item-1"
         keyframesByProperty={{
           opacity: [
@@ -50,7 +49,6 @@ function PointSelectionHarness() {
         width={480}
         height={260}
         totalFrames={60}
-        showToolbar={false}
       />
       <output data-testid="point-selection">{[...selection].join(',')}</output>
     </TooltipProvider>
@@ -137,7 +135,6 @@ describe('ValueGraphEditor clipping', () => {
           totalFrames={60}
           fps={30}
           rulerUnit="seconds"
-          showToolbar={false}
         />
       </TooltipProvider>,
     )
@@ -174,12 +171,11 @@ describe('ValueGraphEditor clipping', () => {
       width: 480,
       height: 260,
       totalFrames: 60,
-      showToolbar: false,
     }
 
     const { container, rerender } = render(
       <TooltipProvider>
-        <ValueGraphEditor {...props} />
+        <EmbeddedValueGraphEditor {...props} />
       </TooltipProvider>,
     )
 
@@ -187,7 +183,11 @@ describe('ValueGraphEditor clipping', () => {
 
     rerender(
       <TooltipProvider>
-        <ValueGraphEditor {...props} selectedKeyframeIds={new Set()} showAllHandles />
+        <EmbeddedValueGraphEditor
+          {...props}
+          selectedKeyframeIds={new Set()}
+          handleVisibility="all"
+        />
       </TooltipProvider>,
     )
 
@@ -198,7 +198,7 @@ describe('ValueGraphEditor clipping', () => {
     const onPropertyChange = vi.fn()
     const { container } = render(
       <TooltipProvider>
-        <ValueGraphEditor
+        <EmbeddedValueGraphEditor
           itemId="item-1"
           keyframesByProperty={{
             x: [{ id: 'kf-x', frame: 0, value: 100, easing: 'linear' }],
@@ -209,7 +209,6 @@ describe('ValueGraphEditor clipping', () => {
           width={480}
           height={260}
           totalFrames={60}
-          showToolbar={false}
           onPropertyChange={onPropertyChange}
         />
       </TooltipProvider>,
@@ -228,7 +227,7 @@ describe('ValueGraphEditor clipping', () => {
     const onPropertyChange = vi.fn()
     const { container } = render(
       <TooltipProvider>
-        <ValueGraphEditor
+        <EmbeddedValueGraphEditor
           itemId="item-1"
           keyframesByProperty={{
             x: [{ id: 'kf-x', frame: 0, value: 100, easing: 'linear' }],
@@ -239,7 +238,6 @@ describe('ValueGraphEditor clipping', () => {
           width={480}
           height={260}
           totalFrames={60}
-          showToolbar={false}
           onPropertyChange={onPropertyChange}
         />
       </TooltipProvider>,
@@ -253,7 +251,7 @@ describe('ValueGraphEditor clipping', () => {
   it('keeps visible curves rendered after the active curve is cleared', () => {
     const { container, rerender } = render(
       <TooltipProvider>
-        <ValueGraphEditor
+        <EmbeddedValueGraphEditor
           itemId="item-1"
           keyframesByProperty={{
             x: [{ id: 'kf-x', frame: 0, value: 100, easing: 'linear' }],
@@ -264,14 +262,13 @@ describe('ValueGraphEditor clipping', () => {
           width={480}
           height={260}
           totalFrames={60}
-          showToolbar={false}
         />
       </TooltipProvider>,
     )
 
     rerender(
       <TooltipProvider>
-        <ValueGraphEditor
+        <EmbeddedValueGraphEditor
           itemId="item-1"
           keyframesByProperty={{
             x: [{ id: 'kf-x', frame: 0, value: 100, easing: 'linear' }],
@@ -282,7 +279,6 @@ describe('ValueGraphEditor clipping', () => {
           width={480}
           height={260}
           totalFrames={60}
-          showToolbar={false}
         />
       </TooltipProvider>,
     )
@@ -293,7 +289,7 @@ describe('ValueGraphEditor clipping', () => {
   it('renders a single visible handle for one-handle easing presets', () => {
     const { container } = render(
       <TooltipProvider>
-        <ValueGraphEditor
+        <EmbeddedValueGraphEditor
           itemId="item-1"
           keyframesByProperty={{
             opacity: [
@@ -306,7 +302,6 @@ describe('ValueGraphEditor clipping', () => {
           width={480}
           height={260}
           totalFrames={60}
-          showToolbar={false}
         />
       </TooltipProvider>,
     )
@@ -317,7 +312,7 @@ describe('ValueGraphEditor clipping', () => {
   it('shows handles only for the selected keyframe that owns them', () => {
     const { container } = render(
       <TooltipProvider>
-        <ValueGraphEditor
+        <EmbeddedValueGraphEditor
           itemId="item-1"
           keyframesByProperty={{
             opacity: [
@@ -339,7 +334,6 @@ describe('ValueGraphEditor clipping', () => {
           width={480}
           height={260}
           totalFrames={60}
-          showToolbar={false}
         />
       </TooltipProvider>,
     )

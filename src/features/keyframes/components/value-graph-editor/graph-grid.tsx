@@ -12,9 +12,8 @@ interface GraphGridProps {
   /** Padding inside the graph area */
   padding: { top: number; right: number; bottom: number; left: number }
   /** Show axis labels */
-  showLabels?: boolean
+  labelVisibility?: 'both' | 'y-only'
   /** Show X-axis (time) labels — set false when an external ruler provides them */
-  showXLabels?: boolean
   /** Major grid line interval for X (frames) */
   xMajorInterval?: number
   /** Major grid line interval for Y (value) */
@@ -32,13 +31,14 @@ interface GraphGridProps {
 export const GraphGrid = memo(function GraphGrid({
   viewport,
   padding,
-  showLabels = true,
-  showXLabels = true,
+  labelVisibility = 'both',
   xMajorInterval: xMajorProp,
   yMajorInterval: yMajorProp,
   rulerUnit = 'frames',
   fps = 30,
 }: GraphGridProps) {
+  const showXLabels = labelVisibility === 'both'
+  const showYLabels = labelVisibility === 'both' || labelVisibility === 'y-only'
   const { width, height, startFrame, endFrame, minValue, maxValue } = viewport
 
   // Calculate usable area
@@ -180,8 +180,7 @@ export const GraphGrid = memo(function GraphGrid({
       )}
 
       {/* X axis labels (hidden when external ruler provides them) */}
-      {showLabels &&
-        showXLabels &&
+      {showXLabels &&
         xLines
           .filter((l) => l.isMajor)
           .map(({ x, frame }) => (
@@ -200,7 +199,7 @@ export const GraphGrid = memo(function GraphGrid({
           ))}
 
       {/* Y axis labels (values) — rendered inside the graph area */}
-      {showLabels &&
+      {showYLabels &&
         yLines
           .filter((l) => l.isMajor)
           .map(({ y, value }) => (

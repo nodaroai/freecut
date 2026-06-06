@@ -40,7 +40,7 @@ import { TimelinePreviewScrubber } from './timeline-preview-scrubber'
 import { TimelineTrack } from './timeline-track'
 import { TimelineGuidelines } from './timeline-guidelines'
 import { TimelineMediaDropZone } from './timeline-media-drop-zone'
-import { TrackRowFrame, TrackSectionDivider } from './track-row-frame'
+import { FirstTrackRowFrame, TrackRowFrame, TrackSectionDivider } from './track-row-frame'
 import { MarqueeOverlay } from '@/shared/marquee/marquee-overlay'
 
 // Group utilities
@@ -563,7 +563,7 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
       height: number
       zoneHeight: number
       anchorTrackId: string | null
-      showTopDividerForFirstTrack: boolean
+      firstTrackFrame: 'with-top-divider' | 'regular'
       scrollRef?: React.RefObject<HTMLDivElement | null>
     },
   ) => (
@@ -585,14 +585,17 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
           <div aria-hidden="true" style={{ height: `${options.zoneHeight}px` }} />
         )}
 
-        {sectionTracks.map((track, index) => (
-          <TrackRowFrame
-            key={track.id}
-            showTopDivider={options.showTopDividerForFirstTrack && index === 0}
-          >
-            <TimelineTrack track={track} />
-          </TrackRowFrame>
-        ))}
+        {sectionTracks.map((track, index) => {
+          const RowFrame =
+            options.firstTrackFrame === 'with-top-divider' && index === 0
+              ? FirstTrackRowFrame
+              : TrackRowFrame
+          return (
+            <RowFrame key={track.id}>
+              <TimelineTrack track={track} />
+            </RowFrame>
+          )
+        })}
 
         {options.section === 'audio' && options.anchorTrackId && (
           <TimelineMediaDropZone
@@ -630,7 +633,7 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
             height: videoPaneHeight,
             zoneHeight: videoZoneHeight,
             anchorTrackId: topZoneAnchorTrackId,
-            showTopDividerForFirstTrack: true,
+            firstTrackFrame: 'with-top-divider',
             scrollRef: videoTracksScrollRef,
           })}
           <TrackSectionDivider onMouseDown={onSectionDividerMouseDown} />
@@ -639,7 +642,7 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
             height: audioPaneHeight,
             zoneHeight: audioZoneHeight,
             anchorTrackId: bottomZoneAnchorTrackId,
-            showTopDividerForFirstTrack: false,
+            firstTrackFrame: 'regular',
             scrollRef: audioTracksScrollRef,
           })}
         </>
@@ -649,7 +652,7 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
           height: singleSectionHeight,
           zoneHeight: singleSectionZoneHeight,
           anchorTrackId: singleSectionAnchorTrackId,
-          showTopDividerForFirstTrack: true,
+          firstTrackFrame: 'with-top-divider',
           scrollRef: allTracksScrollRef,
         })
       )}
