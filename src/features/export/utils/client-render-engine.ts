@@ -31,13 +31,8 @@ import { resolveMediaUrl } from '@/features/export/deps/media-library'
 import { VideoSourcePool } from '@/features/export/deps/player-contract'
 
 // Import subsystems
-import { getAnimatedTransform, buildKeyframesMap } from './canvas-keyframes'
-import {
-  renderEffectsFromMaskedSource,
-  getAdjustmentLayerEffects,
-  combineEffects,
-  type AdjustmentLayerWithTrackOrder,
-} from './canvas-effects'
+import { buildKeyframesMap } from './canvas-keyframes'
+import { type AdjustmentLayerWithTrackOrder } from './canvas-effects'
 import { DEFAULT_LAYER_PARAMS } from '@/infrastructure/gpu-compositor'
 import type { CompositeLayer } from '@/infrastructure/gpu-compositor'
 import { GpuPipelineManager } from './gpu-pipeline-manager'
@@ -47,7 +42,11 @@ import {
   applyTrackScopedMasks as applyTrackScopedMasksPure,
   type RenderedTaskResult,
 } from './frame-mask-helpers'
-import { renderTransitionFallbackCanvas as renderTransitionFallbackCanvasPure } from './frame-render-tasks'
+import {
+  renderTransitionFallbackCanvas as renderTransitionFallbackCanvasPure,
+  renderItemWithEffects as renderItemWithEffectsPure,
+  type FrameItemRenderDeps,
+} from './frame-render-tasks'
 import {
   applyMasks,
   buildMaskFrameIndex,
@@ -68,7 +67,6 @@ import {
   collectReachableCompositionIdsFromItems,
   collectReachableCompositionIdsFromTracks,
 } from '@/features/export/deps/timeline'
-import { resolveAnimatedColorEffects } from '@/features/export/deps/keyframes'
 
 // Item renderer
 import {
@@ -81,9 +79,6 @@ import {
   resolveFrameRenderScene,
 } from '@/features/export/deps/composition-runtime'
 import {
-  renderItem,
-  renderItemGpuEffectsToTexture,
-  renderPreviewVideoGpuEffectsToCanvas,
   renderTransitionToGpuTexture,
   type CanvasSettings,
   type WorkerLoadedImage,
@@ -1367,7 +1362,24 @@ export async function createCompositionRenderer(
        * (and canvases to release) for deferred compositing, or composites
        * immediately in export mode.
        */
-      const renderItemWithEffects = async (
+      const itemRenderDeps: FrameItemRenderDeps = {
+        frame,
+        canvasSettings,
+        maskSettings,
+        renderMode,
+        activeMasks,
+        adjustmentLayers,
+        gpu,
+        itemRenderContext,
+        canvasPool,
+        getCurrentItem,
+        getCurrentKeyframes,
+        getPreviewTransformOverride,
+        getPreviewCornerPinOverride,
+        getPreviewEffectsOverride,
+        getLiveItemSnapshot,
+      }
+      const renderItemWithEffects = (
         baseItem: TimelineItem,
         trackOrder: number,
         deferred: boolean,
@@ -1375,167 +1387,17 @@ export async function createCompositionRenderer(
         bakeMasks = true,
         preferGpuTextureOutput = false,
         allowDirectGpu = true,
-      ): Promise<{
-        source?: OffscreenCanvas
-        gpuTexture?: GPUTexture
-        poolCanvases: OffscreenCanvas[]
-      } | null> => {
-        const item = getCurrentItem(baseItem)
-        // Get animated transform
-        const itemKeyframes = getCurrentKeyframes(item.id)
-        let transform = getAnimatedTransform(item, itemKeyframes, frame, canvasSettings)
-        if (renderMode === 'preview') {
-          const previewOverride = getPreviewTransformOverride?.(item.id)
-          if (previewOverride) {
-            transform = {
-              ...transform,
-              ...previewOverride,
-              cornerRadius: previewOverride.cornerRadius ?? transform.cornerRadius,
-            }
-          }
-        }
-
-        // Apply corner pin preview override during interactive drag
-        let effectiveItem = item
-        if (renderMode === 'preview') {
-          const cornerPinOverride = getPreviewCornerPinOverride?.(item.id)
-          if (cornerPinOverride !== undefined) {
-            effectiveItem = { ...item, cornerPin: cornerPinOverride }
-          }
-        }
-
-        // Get effects (preview override → item effects + adjustment layer effects)
-        const baseItemEffects =
-          (renderMode === 'preview' ? getPreviewEffectsOverride?.(item.id) : undefined) ??
-          effectiveItem.effects
-        const itemEffects = resolveAnimatedColorEffects(
-          baseItemEffects,
-          getCurrentKeyframes(effectiveItem.id),
-          frame - effectiveItem.from,
-        )
-        const adjEffects = getAdjustmentLayerEffects(
+      ): Promise<RenderedTaskResult | null> =>
+        renderItemWithEffectsPure(
+          baseItem,
           trackOrder,
-          adjustmentLayers,
-          frame,
-          renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
-          renderMode === 'preview' ? getLiveItemSnapshot : undefined,
-          getCurrentKeyframes,
+          deferred,
+          targetCtx,
+          itemRenderDeps,
+          bakeMasks,
+          preferGpuTextureOutput,
+          allowDirectGpu,
         )
-        const combinedEffects = combineEffects(itemEffects, adjEffects)
-        const applicableMasks = activeMasks.filter((mask) =>
-          doesMaskAffectTrack(mask.trackOrder, trackOrder),
-        )
-        const renderMasks = bakeMasks ? applicableMasks : []
-
-        // NOTE: The HTMLVideoElement importExternalTexture path stays disabled because
-        // textureSampleBaseClampToEdge produces subtly different edge pixel values
-        // compared to canvas 2D's drawImage (different YUV→RGB conversion at
-        // chroma subsampling boundaries). Spatial effects like halftone amplify
-        // this into a visible bright edge. The standard canvas 2D → GPU path
-        // below handles video correctly with negligible extra cost (~1-2ms).
-
-        const canRenderDirectGpuEffects =
-          allowDirectGpu &&
-          preferGpuTextureOutput &&
-          gpu.texturePool &&
-          itemRenderContext.gpuPipeline &&
-          itemRenderContext.gpuMediaPipeline &&
-          renderMasks.length === 0 &&
-          combinedEffects.length > 0 &&
-          combinedEffects.every(
-            (effect) => effect.enabled && effect.effect.type === 'gpu-effect',
-          ) &&
-          (effectiveItem.type === 'video' || effectiveItem.type === 'image')
-        if (canRenderDirectGpuEffects && gpu.texturePool) {
-          const outputTexture = gpu.texturePool.acquire(canvasSettings.width, canvasSettings.height)
-          let renderedDirect = false
-          try {
-            renderedDirect = await renderItemGpuEffectsToTexture(
-              effectiveItem,
-              transform,
-              combinedEffects,
-              frame,
-              itemRenderContext,
-              outputTexture,
-              gpu.texturePool,
-            )
-            if (renderedDirect) {
-              return { gpuTexture: outputTexture, poolCanvases: [] }
-            }
-          } finally {
-            if (!renderedDirect) {
-              gpu.texturePool.release(outputTexture)
-            }
-          }
-        }
-
-        if (renderMasks.length === 0 && combinedEffects.length > 0) {
-          const directGpuCanvas = renderPreviewVideoGpuEffectsToCanvas(
-            effectiveItem,
-            transform,
-            combinedEffects,
-            frame,
-            itemRenderContext,
-          )
-          if (directGpuCanvas) {
-            if (deferred) {
-              return { source: directGpuCanvas, poolCanvases: [] }
-            }
-            targetCtx.drawImage(directGpuCanvas, 0, 0)
-            return null
-          }
-        }
-
-        // === PERFORMANCE: Use pooled canvas instead of creating new one ===
-        const { canvas: itemCanvas, ctx: itemCtx } = canvasPool.acquire()
-
-        // Render based on item type
-        await renderItem(
-          itemCtx,
-          effectiveItem,
-          transform,
-          frame,
-          itemRenderContext,
-          0,
-          undefined,
-          renderMasks,
-        )
-
-        // Apply effects (per-item — GPU effects applied here for both preview and export)
-        if (combinedEffects.length > 0) {
-          const hasGpu = combinedEffects.some((e) => e.enabled && e.effect.type === 'gpu-effect')
-          if (hasGpu && !itemRenderContext.gpuPipeline) {
-            itemRenderContext.gpuPipeline = await gpu.ensureEffects()
-            if (!itemRenderContext.gpuPipeline) {
-              getLog().warn('GPU pipeline init failed — GPU effects will be skipped')
-            }
-          }
-          const { source, poolCanvases } = await renderEffectsFromMaskedSource(
-            canvasPool,
-            itemCanvas,
-            combinedEffects,
-            hasCornerPin(effectiveItem.cornerPin) ? [] : renderMasks,
-            frame,
-            maskSettings,
-            itemRenderContext.gpuPipeline,
-          )
-          canvasPool.release(itemCanvas)
-
-          if (deferred) {
-            return { source, poolCanvases }
-          }
-          targetCtx.drawImage(source, 0, 0)
-          for (const effectCanvas of poolCanvases) canvasPool.release(effectCanvas)
-          return null
-        }
-
-        if (deferred) {
-          return { source: itemCanvas, poolCanvases: [itemCanvas] }
-        }
-        targetCtx.drawImage(itemCanvas, 0, 0)
-        canvasPool.release(itemCanvas)
-        return null
-      }
 
       const getEffectiveBlendMode = (item: TimelineItem): TimelineItem['blendMode'] => {
         const blendMode = item.blendMode
