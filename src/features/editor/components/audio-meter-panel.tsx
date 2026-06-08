@@ -425,14 +425,18 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       waveformsByMediaId,
     })
   }, [sources, waveformsByMediaId])
-  const estimate = audioSkimMeterLevel
+  const skimFallbackEstimate = audioSkimMeterLevel
     ? {
         left: audioSkimMeterLevel.left,
         right: audioSkimMeterLevel.right,
         resolvedSourceCount: 1,
         unresolvedSourceCount: 0,
       }
-    : waveformEstimate
+    : null
+  const estimate =
+    isAudioSkimMeterActive && waveformEstimate.resolvedSourceCount === 0 && skimFallbackEstimate
+      ? skimFallbackEstimate
+      : waveformEstimate
   const maxLevel = Math.max(estimate.left, estimate.right)
   const statusLabel = !isMeterActive
     ? 'Idle'
