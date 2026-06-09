@@ -698,6 +698,27 @@ describe('MediaCard', () => {
     expect(audioScrubPreviewMocks.stop).toHaveBeenCalledTimes(1)
   })
 
+  it('selects audio items when clicking the thumbnail instead of playing audio', () => {
+    const media = makeMedia({
+      fileName: 'song.wav',
+      mimeType: 'audio/wav',
+      duration: 10,
+      width: 0,
+      height: 0,
+      fps: 0,
+      codec: 'pcm',
+    })
+    const onSelect = vi.fn()
+    const { container } = render(<ListMediaCard media={media} onSelect={onSelect} />)
+    const thumbnail = container.querySelector('.w-12.h-9') as HTMLDivElement
+    expect(thumbnail).toBeTruthy()
+
+    fireEvent.click(thumbnail)
+
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(mediaLibraryServiceMocks.getMediaBlobUrl).not.toHaveBeenCalled()
+  })
+
   it('keeps the skim indicator inside the right edge', () => {
     const { container, thumbnail } = renderListMediaThumbnail()
 

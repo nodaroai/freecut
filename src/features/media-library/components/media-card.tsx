@@ -20,8 +20,6 @@ import {
   RefreshCw,
   Zap,
   FileText,
-  Play,
-  Square,
   Sparkles,
 } from 'lucide-react'
 import {
@@ -511,8 +509,6 @@ const MediaCardInternal = memo(function MediaCardInternal({
   const isTagging = useMediaLibraryStore((s) => s.taggingMediaIds.has(media.id))
   const isTaggable = mediaType === 'video' || mediaType === 'image'
   const hasCaptions = (media.aiCaptions?.length ?? 0) > 0
-  const [audioPlaying, setAudioPlaying] = useState(false)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
   const thumbnailRef = useRef<HTMLImageElement>(null)
   const thumbnailContainerRef = useRef<HTMLDivElement | null>(null)
   const dragImageRef = useRef<HTMLDivElement | null>(null)
@@ -1042,7 +1038,6 @@ const MediaCardInternal = memo(function MediaCardInternal({
     onSelect?.(e)
   }
 
-  const audioLoadingRef = useRef(false)
   const audioScrubUrlRef = useRef<string | null>(null)
   const audioScrubRequestIdRef = useRef(0)
 
@@ -1204,68 +1199,6 @@ const MediaCardInternal = memo(function MediaCardInternal({
     media.id,
     stopAudioScrubPreview,
   ])
-
-  // Cleanup audio on unmount
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause()
-        URL.revokeObjectURL(audioRef.current.src)
-        audioRef.current = null
-      }
-    }
-  }, [])
-
-  const handleAudioToggle = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation()
-      e.preventDefault()
-
-      if (audioPlaying && audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current.currentTime = 0
-        setAudioPlaying(false)
-        return
-      }
-
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0
-        audioRef.current.play()
-        setAudioPlaying(true)
-        return
-      }
-
-      if (audioLoadingRef.current) return
-      audioLoadingRef.current = true
-
-      try {
-        const { mediaLibraryService } = await importMediaLibraryService()
-        const blobUrl = await mediaLibraryService.getMediaBlobUrl(media.id)
-        if (!blobUrl) return
-
-        // Another toggle may have created an element while we awaited
-        const existing = audioRef.current as HTMLAudioElement | null
-        if (existing) {
-          URL.revokeObjectURL(blobUrl)
-          existing.currentTime = 0
-          existing.play()
-          setAudioPlaying(true)
-          return
-        }
-
-        const audio = new Audio(blobUrl)
-        audio.addEventListener('ended', () => {
-          setAudioPlaying(false)
-        })
-        audioRef.current = audio
-        audio.play()
-        setAudioPlaying(true)
-      } finally {
-        audioLoadingRef.current = false
-      }
-    },
-    [audioPlaying, media.id],
-  )
 
   const handleSeekToCaption = useCallback(
     (timeSec: number) => {
@@ -1453,30 +1386,6 @@ const MediaCardInternal = memo(function MediaCardInternal({
                       />
                     </div>
                   )}
-                {/* Audio play button for list view */}
-                {isAudio && (
-                  <button
-                    type="button"
-                    onClick={handleAudioToggle}
-                    aria-label={
-                      audioPlaying ? t('media.card.stopAudio') : t('media.card.playAudio')
-                    }
-                    aria-pressed={audioPlaying}
-                    className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 transition-colors"
-                  >
-                    <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                        audioPlaying ? 'bg-white/90 text-black' : 'bg-black/50 text-white'
-                      }`}
-                    >
-                      {audioPlaying ? (
-                        <Square className="w-2.5 h-2.5 fill-current" />
-                      ) : (
-                        <Play className="w-3 h-3 fill-current ml-0.5" />
-                      )}
-                    </div>
-                  </button>
-                )}
               </div>
 
               {/* Info — single row: icon + name + duration */}
@@ -1630,31 +1539,6 @@ const MediaCardInternal = memo(function MediaCardInternal({
                     <MediaInfoPopover media={media} onSeekToCaption={handleSeekToCaption} />
                   </div>
                 </div>
-              )}
-
-              {/* Audio play button */}
-              {isAudio && (
-                <button
-                  type="button"
-                  onClick={handleAudioToggle}
-                  aria-label={audioPlaying ? t('media.card.stopAudio') : t('media.card.playAudio')}
-                  aria-pressed={audioPlaying}
-                  className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/30 transition-colors group/play"
-                >
-                  <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                      audioPlaying
-                        ? 'bg-white/90 text-black'
-                        : 'bg-black/50 text-white group-hover/play:bg-white/90 group-hover/play:text-black'
-                    }`}
-                  >
-                    {audioPlaying ? (
-                      <Square className="w-4 h-4 fill-current" />
-                    ) : (
-                      <Play className="w-5 h-5 fill-current ml-0.5" />
-                    )}
-                  </div>
-                </button>
               )}
 
               {/* Overlaid badges - hidden during preparation */}
