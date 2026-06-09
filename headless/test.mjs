@@ -101,12 +101,33 @@ const SAMPLE_PROJECT = {
         type: 'text',
         text: 'hello',
         color: '#ffffff',
+        fontSize: 96,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        transform: {},
       },
     ],
     transitions: [],
     keyframes: [],
     compositions: [],
   },
+}
+
+function textProjectRenderSettings(project) {
+  const width = project.metadata?.width ?? 1280
+  const height = project.metadata?.height ?? 720
+  const fps = project.metadata?.fps ?? 30
+
+  return {
+    mode: 'video',
+    codec: 'vp9',
+    container: 'webm',
+    quality: 'medium',
+    resolution: { width, height },
+    fps,
+    videoBitrate: 2_000_000,
+  }
 }
 
 let failures = 0
@@ -159,13 +180,73 @@ async function main() {
     console.log('\nEdit:')
     const edit = await page.evaluate((input) => window.freecut.editProject(input), {
       project: SAMPLE_PROJECT,
-      ops: [{ op: 'addText', text: 'added', from: 0, durationInFrames: 30 }],
+      ops: [
+        {
+          op: 'addText',
+          id: 'caption-1',
+          text: 'added',
+          from: 30,
+          durationInFrames: 45,
+          color: '#7dd3fc',
+          fontSize: 72,
+          textAlign: 'center',
+          verticalAlign: 'middle',
+        },
+        {
+          op: 'setTransform',
+          id: 'text-1',
+          transform: { x: 24, y: -32, opacity: 0.85, rotation: 0 },
+        },
+        { op: 'addKeyframe', itemId: 'text-1', property: 'opacity', frame: 0, value: 0.2 },
+        { op: 'addKeyframe', itemId: 'text-1', property: 'opacity', frame: 30, value: 1 },
+      ],
     })
-    check('edit applied 1 op', edit.applied === 1)
-    check('edit op succeeded', edit.results?.[0]?.ok === true)
+    check('edit applied all ops', edit.applied === 4)
+    check('edit ops succeeded', edit.results?.every((result) => result.ok) === true)
     const before = SAMPLE_PROJECT.timeline.items.length
     const after = edit.project?.timeline?.items?.length ?? 0
     check('edit added an item', after === before + 1, `items ${before} -> ${after}`)
+
+    const reopenedProject = JSON.parse(JSON.stringify(edit.project))
+    const items = reopenedProject.timeline?.items ?? []
+    const keyframes = reopenedProject.timeline?.keyframes ?? []
+    const expectedEditedDurationSeconds =
+      Math.max(...items.map((item) => item.from + item.durationInFrames)) /
+      (reopenedProject.metadata?.fps ?? 30)
+    const movedTitle = items.find((item) => item.id === 'text-1')
+    const addedCaption = items.find((item) => item.id === 'caption-1')
+    const opacityKeys = keyframes
+      .find((group) => group.itemId === 'text-1')
+      ?.properties?.find((property) => property.property === 'opacity')?.keyframes
+
+    check('round-trip preserves added caption', addedCaption?.text === 'added')
+    check('round-trip preserves transform', movedTitle?.transform?.opacity === 0.85)
+    check('round-trip preserves keyframes', opacityKeys?.length === 2)
+
+    console.log('\nEdited project render:')
+    const editedDownloadPromise = page.waitForEvent('download', { timeout: 120_000 })
+    editedDownloadPromise.catch(() => {})
+    const editedSummary = await page.evaluate(
+      (input) => window.freecut.renderProject(input),
+      {
+        project: reopenedProject,
+        settings: textProjectRenderSettings(reopenedProject),
+        outputFileName: 'regression-edited.webm',
+      },
+    )
+    const editedOutPath = path.join(os.tmpdir(), 'freecut-headless-regression-edited.webm')
+    const editedDownload = await editedDownloadPromise
+    await editedDownload.saveAs(editedOutPath)
+    const editedSize = fs.existsSync(editedOutPath) ? fs.statSync(editedOutPath).size : 0
+
+    check('edited render returns ok', editedSummary.ok === true)
+    check('edited render mime is video', /video\//.test(editedSummary.mimeType), editedSummary.mimeType)
+    check(
+      'edited render duration matches timeline',
+      Math.abs(editedSummary.durationSeconds - expectedEditedDurationSeconds) < 0.3,
+      `got ${editedSummary.durationSeconds}, expected ${expectedEditedDurationSeconds}`,
+    )
+    check('edited render produced bytes (>1KB)', editedSize > 1000, `size ${editedSize}`)
   } finally {
     await browser.close()
     await server.close()
