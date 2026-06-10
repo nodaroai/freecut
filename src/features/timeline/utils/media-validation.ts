@@ -25,7 +25,7 @@ function getOrphanGroupRepresentative(
  * This detects clips that reference mediaIds which no longer exist in IndexedDB,
  * typically from loading old project snapshots saved before media was deleted.
  */
-export async function validateMediaReferences(
+async function validateMediaReferences(
   items: TimelineItem[],
   projectId: string,
 ): Promise<OrphanedClipInfo[]> {
