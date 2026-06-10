@@ -64,6 +64,9 @@ export default defineConfig({
     headers: {
       'Cross-Origin-Embedder-Policy': 'require-corp',
       'Cross-Origin-Opener-Policy': 'same-origin',
+      // Enables the JS self-profiling API (new Profiler(...)) for dev-time
+      // performance investigation, e.g. profiling play-start latency.
+      'Document-Policy': 'js-profiling',
     },
   },
   preview: {

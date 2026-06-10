@@ -25,6 +25,7 @@ import {
   registerDomVideoElement,
   unregisterDomVideoElement,
 } from '../utils/dom-video-element-registry'
+import { subscribeToWarmupActivity } from '../utils/activity-rewarm'
 import {
   applyVideoElementAudioState,
   useVideoAudioState,
@@ -93,6 +94,38 @@ const NativePreviewVideo: React.FC<{
   const forceRenderTimeoutRef = useRef<number | null>(null)
   const preWarmTimerRef = useRef<number | null>(null)
   const preWarmGenRef = useRef(0)
+
+  // Brief muted play/pause that fills the decode buffer and re-acquires the
+  // browser's media pipeline, so a subsequent play() starts in ~2 frames
+  // instead of stalling 200-300ms on pipeline re-init. Debounced; superseded
+  // or play-interrupted warms are invalidated via preWarmGenRef.
+  const schedulePreWarm = useCallback(() => {
+    if (preWarmTimerRef.current !== null) {
+      clearTimeout(preWarmTimerRef.current)
+    }
+    preWarmGenRef.current += 1
+    const gen = preWarmGenRef.current
+    preWarmTimerRef.current = window.setTimeout(() => {
+      preWarmTimerRef.current = null
+      const v = elementRef.current
+      if (v && v.paused && v.readyState >= 2 && !usePlaybackStore.getState().isPlaying) {
+        v.muted = true
+        v.play()
+          .then(() => {
+            // Only pause if this pre-warm is still current and playback hasn't started
+            if (gen === preWarmGenRef.current && !usePlaybackStore.getState().isPlaying) {
+              v.pause()
+            }
+            // Always unmute — if playback started or another scrub superseded
+            // this pre-warm, leaving muted=true causes silent playback.
+            v.muted = false
+          })
+          .catch(() => {
+            v.muted = false
+          })
+      }
+    }, 50)
+  }, [])
   const audioVolumeRef = useRef(audioVolume)
   const audioEqStagesRef = useRef(audioEqStages)
   const onErrorRef = useRef(onError)
@@ -761,36 +794,10 @@ const NativePreviewVideo: React.FC<{
           }
         }
 
-        // Pre-warm decoder at the new position (debounced). A brief muted
-        // play/pause fills the decode buffer so playback starts without
-        // stutter when the user presses play. Short debounce avoids
-        // thrashing during rapid scrubbing while keeping warm-up fast.
+        // Pre-warm decoder at the new position (debounced). Short debounce
+        // avoids thrashing during rapid scrubbing while keeping warm-up fast.
         if (!isPreviewScrubbing) {
-          if (preWarmTimerRef.current !== null) {
-            clearTimeout(preWarmTimerRef.current)
-          }
-          preWarmGenRef.current += 1
-          const gen = preWarmGenRef.current
-          preWarmTimerRef.current = window.setTimeout(() => {
-            preWarmTimerRef.current = null
-            const v = elementRef.current
-            if (v && v.paused && v.readyState >= 2 && !usePlaybackStore.getState().isPlaying) {
-              v.muted = true
-              v.play()
-                .then(() => {
-                  // Only pause if this pre-warm is still current and playback hasn't started
-                  if (gen === preWarmGenRef.current && !usePlaybackStore.getState().isPlaying) {
-                    v.pause()
-                  }
-                  // Always unmute — if playback started or another scrub superseded
-                  // this pre-warm, leaving muted=true causes silent playback.
-                  v.muted = false
-                })
-                .catch(() => {
-                  v.muted = false
-                })
-            }
-          }, 50)
+          schedulePreWarm()
         }
       }
     }
@@ -802,6 +809,7 @@ const NativePreviewVideo: React.FC<{
     playbackRate,
     reverseSourceEnd,
     safeTrimBefore,
+    schedulePreWarm,
     sharedTransitionSync,
     sourceFps,
     targetTime,
@@ -809,6 +817,16 @@ const NativePreviewVideo: React.FC<{
     shortId,
     sequenceContext?.from,
   ])
+
+  // Chrome suspends paused/backgrounded media pipelines after inactivity; the
+  // next play() then stalls 200-300ms re-initializing the decoder, during
+  // which the compositor produces no frames at all. Re-warm on the activity
+  // that naturally precedes a play press — the first input after an idle
+  // stretch, or the tab becoming visible again — so playback starts hot.
+  useEffect(() => {
+    if (isPlaying) return
+    return subscribeToWarmupActivity(schedulePreWarm)
+  }, [isPlaying, schedulePreWarm])
 
   // requestVideoFrameCallback-based drift correction.
   // Runs outside React's render cycle — the browser calls us exactly when a
