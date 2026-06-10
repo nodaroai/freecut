@@ -13,6 +13,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history so the fallow ratchet can diff against the PR base branch.
+          fetch-depth: 0
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -59,11 +62,27 @@ jobs:
       - name: Check
         run: vp run check
 
-      - name: Unit tests
-        run: vp test run
+      - name: Unit tests (with coverage floor)
+        run: vp test run --coverage
 
       - name: Preview Sync Stress (10x)
         run: vp run test:preview-sync:stress -- --runs 10
 
       - name: Build
         run: vp build
+
+      # Self-contained render+edit regression in headless Chrome (no media,
+      # no workspace, no WebGPU). Reuses the dist/ from the Build step.
+      - name: Headless smoke test
+        run: node headless/test.mjs --skip-build
+
+      # Quality ratchet: fails only on dead code / complexity / duplication
+      # INTRODUCED by the PR (gate new-only), never on inherited issues.
+      # Advisory for now (continue-on-error) — drop that line to enforce once
+      # the current develop-vs-main delta is cleaned up.
+      - name: Fallow quality ratchet
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          npm install -g fallow
+          fallow audit --base "origin/${{ github.base_ref }}" --gate new-only --ci

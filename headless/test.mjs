@@ -142,10 +142,20 @@ function check(name, condition, detail) {
 
 async function main() {
   const distDir = path.join(REPO_ROOT, 'dist')
-  console.log('Building harness (npm run build)...')
-  execSync('npm run build', { cwd: REPO_ROOT, stdio: 'inherit' })
+  // --skip-build reuses an existing dist/ (e.g. CI, where the build step
+  // already ran); without it the harness always rebuilds.
+  if (process.argv.includes('--skip-build')) {
+    console.log('Skipping build (--skip-build), using existing dist/...')
+  } else {
+    console.log('Building harness (npm run build)...')
+    execSync('npm run build', { cwd: REPO_ROOT, stdio: 'inherit' })
+  }
   if (!fs.existsSync(path.join(distDir, 'headless.html'))) {
-    throw new Error('Build did not produce dist/headless.html')
+    throw new Error(
+      process.argv.includes('--skip-build')
+        ? 'dist/headless.html missing — run npm run build first or drop --skip-build'
+        : 'Build did not produce dist/headless.html',
+    )
   }
 
   const server = await createHarnessServer({ distDir })

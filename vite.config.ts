@@ -41,6 +41,15 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      // Ratchet floor, not a target: set just below measured coverage
+      // (2026-06-10: 50.2% stmts / 43.7% branch / 54.9% funcs / 51.5% lines)
+      // so CI fails on regressions. Raise these as coverage grows.
+      thresholds: {
+        statements: 48,
+        branches: 42,
+        functions: 52,
+        lines: 49,
+      },
     },
   },
   plugins: lazyPlugins(() => [react(), tailwindcss()]),
