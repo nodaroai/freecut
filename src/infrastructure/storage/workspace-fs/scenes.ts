@@ -13,7 +13,7 @@
 import type { SceneCut } from '@/infrastructure/analysis/scene-detection'
 import { createLogger } from '@/shared/logging/logger'
 
-import { readAiOutput, writeAiOutput, deleteAiOutput } from './ai-outputs'
+import { writeAiOutput, deleteAiOutput } from './ai-outputs'
 import type { ScenesPayload, SceneCutPayload } from './ai-outputs'
 
 const logger = createLogger('WorkspaceFS:Scenes')
@@ -41,28 +41,6 @@ function cutsToPayload(cuts: SceneCut[]): SceneCutPayload[] {
     motion: cut.motion,
     verified: cut.verified,
   }))
-}
-
-function payloadToCuts(cuts: SceneCutPayload[]): SceneCut[] {
-  return cuts as unknown as SceneCut[]
-}
-
-export async function getScenes(mediaId: string): Promise<SavedScenes | undefined> {
-  try {
-    const envelope = await readAiOutput(mediaId, 'scenes')
-    if (!envelope) return undefined
-    const data: ScenesPayload = envelope.data
-    return {
-      method: data.method,
-      sampleIntervalMs: data.sampleIntervalMs,
-      verificationModel: data.verificationModel,
-      fps: data.fps,
-      cuts: payloadToCuts(data.cuts),
-    }
-  } catch (error) {
-    logger.error(`getScenes(${mediaId}) failed`, error)
-    throw new Error(`Failed to load scenes: ${mediaId}`)
-  }
 }
 
 export async function saveScenes(input: SaveScenesInput): Promise<SavedScenes> {

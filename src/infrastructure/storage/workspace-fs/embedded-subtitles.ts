@@ -17,7 +17,7 @@ import type { EmbeddedSubtitleTrack } from '@/shared/utils/matroska-subtitles'
 
 import { mediaCacheDir } from './paths'
 import { requireWorkspaceRoot } from './root'
-import { readJson, removeEntry, writeJsonAtomic } from './fs-primitives'
+import { readJson, writeJsonAtomic } from './fs-primitives'
 
 const logger = createLogger('WorkspaceFS:EmbeddedSubtitles')
 
@@ -89,14 +89,5 @@ export async function saveEmbeddedSubtitleSidecar(
   } catch (error) {
     logger.warn(`saveEmbeddedSubtitleSidecar(${mediaId}) failed`, error)
     throw new Error(`Failed to cache embedded subtitle tracks for ${mediaId}`)
-  }
-}
-
-export async function deleteEmbeddedSubtitleSidecar(mediaId: string): Promise<void> {
-  try {
-    const root = requireWorkspaceRoot()
-    await removeEntry(root, sidecarPath(mediaId))
-  } catch (error) {
-    logger.warn(`deleteEmbeddedSubtitleSidecar(${mediaId}) failed`, error)
   }
 }

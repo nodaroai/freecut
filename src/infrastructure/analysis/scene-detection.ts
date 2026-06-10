@@ -28,17 +28,6 @@ export type { VerificationModel } from './verification/registry'
  */
 const resultsCache = new Map<string, SceneCut[]>()
 
-/** Clear cached results for a specific media, or all if no id given. */
-export function clearSceneCache(mediaId?: string): void {
-  if (mediaId) {
-    for (const key of resultsCache.keys()) {
-      if (key.startsWith(`${mediaId}:`)) resultsCache.delete(key)
-    }
-  } else {
-    resultsCache.clear()
-  }
-}
-
 /** Default sampling interval in milliseconds (matches masterselects) */
 const SAMPLE_INTERVAL_MS = 500
 

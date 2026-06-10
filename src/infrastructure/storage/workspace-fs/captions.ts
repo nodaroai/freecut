@@ -137,16 +137,6 @@ async function resolveSharedCaptionCache(
   }
 }
 
-export async function getCaptions(mediaId: string): Promise<MediaCaption[] | undefined> {
-  try {
-    const envelope = await readAiOutput(mediaId, 'captions')
-    return envelope?.data.captions
-  } catch (error) {
-    logger.error(`getCaptions(${mediaId}) failed`, error)
-    throw new Error(`Failed to load captions: ${mediaId}`)
-  }
-}
-
 /**
  * Look up the shared-cache captions envelope by content hash. Used at the
  * start of analysis so the expensive captioner can be skipped when another
@@ -564,7 +554,7 @@ export async function deleteCaptionThumbnails(mediaId: string): Promise<void> {
  * subtree — captions envelope, bins, and thumbnails in one sweep. Safe to
  * call when the hash has no shared cache (returns early).
  */
-export async function deleteSharedCaptionsIfUnreferenced(
+async function deleteSharedCaptionsIfUnreferenced(
   hash: string,
   mediaId: string,
   sampleIntervalSec?: number,

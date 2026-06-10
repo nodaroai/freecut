@@ -102,12 +102,3 @@ export async function loadProjectThumbnail(projectId: string): Promise<Blob | un
     return undefined
   }
 }
-
-export async function deleteProjectThumbnail(projectId: string): Promise<void> {
-  const root = requireWorkspaceRoot()
-  try {
-    await removeEntry(root, projectThumbnailPath(projectId))
-  } catch (error) {
-    logger.error(`deleteProjectThumbnail(${projectId}) failed`, error)
-  }
-}
