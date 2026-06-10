@@ -16,10 +16,7 @@ export {
 } from '@/features/media-library/utils/media-resolver'
 export { importMediaLibraryService } from '@/features/media-library/services/media-library-service-loader'
 export { FileAccessError } from '@/features/media-library/services/file-access'
-export {
-  extractValidMediaFileEntriesFromDataTransfer,
-  supportsFileSystemDragDrop,
-} from '@/features/media-library/utils/file-drop'
+export { extractValidMediaFileEntriesFromDataTransfer } from '@/features/media-library/utils/file-drop'
 export {
   getMediaDragData,
   clearMediaDragData,

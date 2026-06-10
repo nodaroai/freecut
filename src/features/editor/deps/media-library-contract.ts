@@ -7,8 +7,6 @@ export { useMediaLibraryStore } from '@/features/media-library/stores/media-libr
 export { useEmbeddedSubtitlePickerStore } from '@/features/media-library/stores/embedded-subtitle-picker-store'
 export { useSubtitleScanProgressStore } from '@/features/media-library/stores/subtitle-scan-progress-store'
 export { getSharedProxyKey } from '@/features/media-library/utils/proxy-key'
-export { cleanupBlobUrls } from '@/features/media-library/utils/media-resolver'
-export { getMediaTranscriptionModelOptions } from '@/features/media-library/transcription/registry'
 export {
   clearMediaDragData,
   setMediaDragData,
@@ -24,4 +22,3 @@ export const importEmbeddedSubtitleTrackPickerHost = () =>
   import('@/features/media-library/components/embedded-subtitle-track-picker-host')
 export const importSubtitleScanProgressDialog = () =>
   import('@/features/media-library/components/subtitle-scan-progress-dialog')
-export const importMediaLibrary = () => import('@/features/media-library/components/media-library')

@@ -5,12 +5,7 @@
 
 import { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
 
-export {
-  resolveMediaUrl,
-  resolveMediaUrls,
-  resolveProxyUrl,
-  cleanupBlobUrls,
-} from '@/features/media-library/utils/media-resolver'
+export { resolveMediaUrl, resolveMediaUrls } from '@/features/media-library/utils/media-resolver'
 
 export function getMediaAudioCodecById(mediaId: string | undefined): string | undefined {
   if (!mediaId) return undefined

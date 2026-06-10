@@ -4,11 +4,7 @@
  */
 
 export type { AutoKeyframeOperation } from '@/features/keyframes/utils/auto-keyframe'
-export { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver'
-export {
-  getCropPropertyValue,
-  resolveAnimatedCrop,
-} from '@/features/keyframes/utils/animated-crop-resolver'
+export { getCropPropertyValue } from '@/features/keyframes/utils/animated-crop-resolver'
 export { interpolatePropertyValue } from '@/features/keyframes/utils/interpolation'
 export {
   getTextAnimatableBaseValue,
