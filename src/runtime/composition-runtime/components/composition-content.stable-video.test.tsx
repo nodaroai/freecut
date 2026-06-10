@@ -86,8 +86,8 @@ vi.mock('@/runtime/composition-runtime/deps/player', async () => {
   }
 })
 
-vi.mock('./item', () => ({
-  Item: ({ item }: { item: { id: string } }) => <div data-testid={`sub-item-${item.id}`} />,
+vi.mock('./item-content', () => ({
+  ItemContent: ({ item }: { item: { id: string } }) => <div data-testid={`sub-item-${item.id}`} />,
 }))
 
 vi.mock('./stable-video-sequence', () => ({

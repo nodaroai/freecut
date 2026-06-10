@@ -35,8 +35,8 @@ import {
 import { useNestedMediaResolutionMode } from '../contexts/nested-media-resolution-context'
 import { clearMixerLiveGain } from '@/shared/state/mixer-live-gain'
 import { appendResolvedAudioEqSources } from '@/shared/utils/audio-eq'
-import { Item } from './item'
-import type { MaskInfo } from './item'
+import { ItemContent } from './item-content'
+import type { MaskInfo, RenderCompositionContentProps } from './item-content'
 import { StableVideoSequence, type StableVideoSequenceItem } from './stable-video-sequence'
 import { resolveActiveShapeMasksAtFrame } from '../utils/frame-scene'
 import {
@@ -477,6 +477,11 @@ export const CompositionContent = React.memo<CompositionContentProps>(
       return stableMaskInfos
     }, [resolvedItems, subComp, subCompFrame, visibleTracks])
 
+    const renderCompositionContent = useCallback(
+      (props: RenderCompositionContentProps) => <CompositionContent {...props} />,
+      [],
+    )
+
     const renderVideoItem = useCallback(
       (videoItem: StableVideoSequenceItem) => (
         <AbsoluteFill
@@ -485,12 +490,13 @@ export const CompositionContent = React.memo<CompositionContentProps>(
             visibility: videoItem.trackVisible ? 'visible' : 'hidden',
           }}
         >
-          <Item
+          <ItemContent
             item={videoItem}
             muted={videoItem.muted}
             visible={videoItem.trackVisible}
             masks={getMasksForTrackOrder(activeMaskInfos, videoItem.trackOrder)}
             renderDepth={renderDepth}
+            renderCompositionContent={renderCompositionContent}
             audioGainMultiplier={effectiveAudioGainMultiplier}
             audioGainLiveItemIds={effectiveAudioGainLiveItemIds}
             audioEqStages={trackMergedEqStages.get(videoItem.trackId) ?? audioEqStages}
@@ -505,6 +511,7 @@ export const CompositionContent = React.memo<CompositionContentProps>(
         audioPitchShiftSemitones,
         effectiveAudioGainLiveItemIds,
         effectiveAudioGainMultiplier,
+        renderCompositionContent,
         renderDepth,
       ],
     )
@@ -574,12 +581,13 @@ export const CompositionContent = React.memo<CompositionContentProps>(
                         from={subItem.from}
                         durationInFrames={subItem.durationInFrames}
                       >
-                        <Item
+                        <ItemContent
                           item={subItem}
                           muted={track.muted || linkedVideoIdsWithOwnedAudio.has(subItem.id)}
                           visible={track.trackVisible}
                           masks={getMasksForTrackOrder(activeMaskInfos, track.trackOrder)}
                           renderDepth={renderDepth}
+                          renderCompositionContent={renderCompositionContent}
                           compositionRenderMode={
                             subItem.type === 'composition' &&
                             hasLinkedAudioCompanion(resolvedItems, subItem)

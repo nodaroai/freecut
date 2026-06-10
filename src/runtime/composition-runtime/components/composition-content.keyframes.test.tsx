@@ -87,11 +87,11 @@ vi.mock('../hooks/use-transition-participant-sync', () => ({
   useTransitionParticipantSync: vi.fn(),
 }))
 
-vi.mock('./item', async () => {
+vi.mock('./item-content', async () => {
   const { useItemKeyframesFromContext } = await import('../contexts/keyframes-context')
 
   return {
-    Item: ({
+    ItemContent: ({
       item,
       muted,
     }: {
