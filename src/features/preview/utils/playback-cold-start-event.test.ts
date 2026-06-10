@@ -53,7 +53,34 @@ describe('playback cold start wide event', () => {
       ms_to_first_frame_advance: 42,
       force_fast_scrub_overlay: true,
       audio_context_state: 'running',
+      visibility_state_at_play: 'visible',
+      hidden_during_measurement: false,
       outcome: 'success',
+    })
+  })
+
+  it('flags measurements that overlap a hidden-tab period', () => {
+    beginPlaybackColdStart(
+      { startFrame: 0, forceFastScrubOverlay: true, audioContextState: 'running' },
+      0,
+    )
+
+    // Simulate the tab going hidden mid-measurement (rAF-driven Clock freezes,
+    // so the resulting duration says nothing about real cold start).
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    Reflect.deleteProperty(document, 'visibilityState')
+
+    resolvePlaybackColdStartFrameAdvance(1, 2500)
+
+    const events = emittedEvents(infoSpy)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      result: 'completed',
+      hidden_during_measurement: true,
     })
   })
 

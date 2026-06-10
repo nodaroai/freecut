@@ -10,6 +10,13 @@
  *   moves past the start frame — emits the event
  * - `cancelPlaybackColdStart` when playback stops before any frame advanced —
  *   emits the event with `result: 'cancelled'` so aborted starts stay visible
+ *
+ * Visibility guard: the Clock is rAF-driven, so a hidden/occluded tab freezes
+ * frame delivery entirely and resumes with a wall-time catch-up jump. A
+ * measurement that overlaps a hidden period reports multi-second
+ * `ms_to_first_frame_advance` values that say nothing about real cold start.
+ * Such events are flagged `hidden_during_measurement: true` — exclude them
+ * when reading the metric.
  */
 import { createLogger, createOperationId, type WideEvent } from '@/shared/logging/logger'
 
@@ -25,24 +32,53 @@ interface ActivePlaybackColdStart {
   event: WideEvent
   startFrame: number
   startMs: number
+  hiddenDuringMeasurement: boolean
 }
 
 let active: ActivePlaybackColdStart | null = null
+
+function readVisibilityState(): DocumentVisibilityState | 'unknown' {
+  return typeof document !== 'undefined' ? document.visibilityState : 'unknown'
+}
+
+function handleVisibilityChange(): void {
+  if (active && readVisibilityState() === 'hidden') {
+    active.hiddenDuringMeasurement = true
+  }
+}
+
+function watchVisibility(): void {
+  if (typeof document === 'undefined') return
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+}
+
+function unwatchVisibility(): void {
+  if (typeof document === 'undefined') return
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+}
 
 export function beginPlaybackColdStart(
   ctx: PlaybackColdStartContext,
   nowMs: number = performance.now(),
 ): void {
   if (active) {
-    emitCancelled('superseded_by_new_play', nowMs)
+    emit('cancelled', 'superseded_by_new_play', nowMs)
   }
   const event = log.startEvent('playback_cold_start', createOperationId())
+  const visibility = readVisibilityState()
   event.merge({
     start_frame: ctx.startFrame,
     force_fast_scrub_overlay: ctx.forceFastScrubOverlay,
     audio_context_state: ctx.audioContextState ?? 'unavailable',
+    visibility_state_at_play: visibility,
   })
-  active = { event, startFrame: ctx.startFrame, startMs: nowMs }
+  active = {
+    event,
+    startFrame: ctx.startFrame,
+    startMs: nowMs,
+    hiddenDuringMeasurement: visibility === 'hidden',
+  }
+  watchVisibility()
 }
 
 /** Attach gate context (prewarm await ms, item counts, …) to the active measurement. */
@@ -63,21 +99,27 @@ export function resolvePlaybackColdStartFrameAdvance(
     first_advanced_frame: frame,
     ms_to_first_frame_advance: Math.round(nowMs - active.startMs),
   })
-  active.event.success({ result: 'completed' })
-  active = null
+  emit('completed', null, nowMs)
 }
 
 /** Playback stopped before any frame advanced — flush so the abort is visible. */
 export function cancelPlaybackColdStart(reason: string, nowMs: number = performance.now()): void {
   if (!active) return
-  emitCancelled(reason, nowMs)
+  emit('cancelled', reason, nowMs)
 }
 
-function emitCancelled(reason: string, nowMs: number): void {
+function emit(result: 'completed' | 'cancelled', cancelReason: string | null, nowMs: number): void {
   if (!active) return
-  active.event.merge({ ms_to_cancel: Math.round(nowMs - active.startMs) })
-  active.event.success({ result: 'cancelled', cancel_reason: reason })
+  if (result === 'cancelled') {
+    active.event.merge({ ms_to_cancel: Math.round(nowMs - active.startMs) })
+    if (cancelReason !== null) {
+      active.event.merge({ cancel_reason: cancelReason })
+    }
+  }
+  active.event.merge({ hidden_during_measurement: active.hiddenDuringMeasurement })
+  active.event.success({ result })
   active = null
+  unwatchVisibility()
 }
 
 /** Test hook: true while a measurement is awaiting its first frame advance. */

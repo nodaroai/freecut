@@ -378,6 +378,7 @@ vi.mock('@/features/preview/deps/composition-runtime', () => ({
   },
   getBestDomVideoElementForItem: vi.fn(() => null),
   getPreviewAudioContextState: vi.fn(() => null),
+  ensureAudioContextResumed: vi.fn(),
   hasCornerPin: vi.fn(
     (
       pin:

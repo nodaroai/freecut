@@ -54,7 +54,10 @@ import {
   cancelPlaybackColdStart,
   markPlaybackColdStart,
 } from '../utils/playback-cold-start-event'
-import { getPreviewAudioContextState } from '@/features/preview/deps/composition-runtime'
+import {
+  ensureAudioContextResumed,
+  getPreviewAudioContextState,
+} from '@/features/preview/deps/composition-runtime'
 import {
   resolveBoundarySourcePrewarmCacheUpdate,
   resolvePrewarmFrameQueueAfterEnqueue,
@@ -921,6 +924,11 @@ export function usePreviewRenderPump({
           forceFastScrubOverlay,
           audioContextState: getPreviewAudioContextState(),
         })
+        // This subscriber runs synchronously inside the play dispatch, so we
+        // are still within the user gesture's task — resume the shared
+        // AudioContext now instead of waiting for the first per-element
+        // effect/RVFC resume, which lands 50-100ms after first frame.
+        ensureAudioContextResumed()
       } else if (!state.isPlaying && prev.isPlaying) {
         // No-op if the measurement already resolved on a frame advance.
         cancelPlaybackColdStart('paused_before_first_frame_advance')

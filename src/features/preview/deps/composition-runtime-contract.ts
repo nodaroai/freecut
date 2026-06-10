@@ -30,6 +30,7 @@ export {
   snapSourceTime,
 } from '@/runtime/composition-runtime/utils/video-timing'
 export {
+  ensureAudioContextResumed,
   getPreviewAudioContextState,
   transitionSafePlay,
   muteTransitionElement,
