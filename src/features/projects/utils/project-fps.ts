@@ -3,7 +3,7 @@ export interface ProjectFpsOption {
   value: number
 }
 
-export const DEFAULT_PROJECT_FPS_OPTIONS: readonly ProjectFpsOption[] = [
+const DEFAULT_PROJECT_FPS_OPTIONS: readonly ProjectFpsOption[] = [
   { label: '24 fps (Film)', value: 24 },
   { label: '25 fps (PAL)', value: 25 },
   { label: '30 fps (Standard)', value: 30 },

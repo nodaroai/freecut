@@ -9,14 +9,14 @@ import { loadProject, collectMediaIds, resolveMediaFiles, resolveMediaFile, read
 import { createMediaServer } from '../media-server.mjs'
 import { createHarnessServer } from '../server.mjs'
 
-export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 const CODEC_MAP = { h264: 'avc', avc: 'avc', h265: 'hevc', hevc: 'hevc', vp9: 'vp9', vp8: 'vp8', av1: 'av1' }
 const DEFAULT_CONTAINER = { avc: 'mp4', hevc: 'mp4', vp9: 'webm', vp8: 'webm', av1: 'webm' }
 const VIDEO_BITRATE_BY_QUALITY = { low: 2_500_000, medium: 5_000_000, high: 10_000_000, ultra: 20_000_000 }
 
 /** Build ClientExportSettings from a job's options (same keys as the CLI flags). */
-export function buildSettings(project, opts) {
+function buildSettings(project, opts) {
   const meta = project.metadata ?? {}
   const fps = opts.fps ? Number(opts.fps) : (meta.fps ?? 30)
   let width = meta.width ?? 1920
@@ -61,7 +61,7 @@ export function buildSettings(project, opts) {
 }
 
 /** Compute the render range (frames) from a job's in/out-sec/duration (seconds). */
-export function computeRange(opts, fps) {
+function computeRange(opts, fps) {
   const inV = opts.in ?? opts.inSec
   const outV = opts['out-sec'] ?? opts.outSec
   const hasRange = inV !== undefined || outV !== undefined || opts.duration !== undefined

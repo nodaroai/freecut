@@ -46,7 +46,7 @@ function toConfigEntry(family: string, weights: readonly number[]): FontConfig {
   }
 }
 
-export function registerFont(
+function registerFont(
   fontKey: string,
   cssFamilyOrWeights: string | readonly number[] = fontKey,
   weights: readonly number[] = [400],
@@ -59,7 +59,7 @@ export function registerFont(
   FONT_CONFIGS.set(fontKey, toConfigEntry(fontKey, cssFamilyOrWeights))
 }
 
-export function registerFontCatalog(catalog: readonly FontCatalogEntry[]): void {
+function registerFontCatalog(catalog: readonly FontCatalogEntry[]): void {
   for (const font of catalog) {
     registerFont(font.value, font.family, font.weights)
   }

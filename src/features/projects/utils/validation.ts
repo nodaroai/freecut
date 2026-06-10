@@ -54,7 +54,7 @@ export function createProjectFormSchema(t: (key: string) => string) {
   })
 }
 
-export const projectFormSchema = createProjectFormSchema(i18n.t.bind(i18n))
+const projectFormSchema = createProjectFormSchema(i18n.t.bind(i18n))
 
 /**
  * Type inferred from the schema

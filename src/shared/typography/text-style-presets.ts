@@ -1,9 +1,9 @@
 import type { TextItem, TextSpan } from '@/types/timeline'
 import type { CanvasSettings } from '@/types/transform'
 import { buildTextItemLabelFromText } from '@/shared/utils/text-item-spans'
-import { TEXT_STYLE_PRESET_IDS, type TextStylePresetId } from './text-style-preset-ids'
+import type { TextStylePresetId } from './text-style-preset-ids'
 
-export { TEXT_STYLE_PRESET_IDS, type TextStylePresetId }
+export type { TextStylePresetId }
 
 export type TextStylePresetPreviewKind =
   | 'clean'
