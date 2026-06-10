@@ -1,5 +1,4 @@
 export {
-  cleanupBlobUrls,
   resolveMediaUrl,
   resolveMediaUrls,
   resolveProxyUrl,
@@ -8,13 +7,11 @@ export {
   clearMediaDragData,
   type CompositionDragData,
   getMediaDragData,
-  setMediaDragData,
   type TimelineTemplateDragData,
 } from './media-library-resolver-contract'
 export {
   extractValidMediaFileEntriesFromDataTransfer,
   formatMediaDropRejectionMessage,
-  supportsFileSystemDragDrop,
   type ExtractedMediaFileEntry,
 } from './media-library-resolver-contract'
 export type { OrphanedClipInfo } from './media-library-resolver-contract'
