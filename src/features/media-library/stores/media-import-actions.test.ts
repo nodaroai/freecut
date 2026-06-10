@@ -38,8 +38,8 @@ vi.mock('../services/media-library-service', () => ({
   mediaLibraryService: mediaLibraryServiceMocks,
 }))
 
-vi.mock('../services/media-library-service-loader', () => ({
-  importMediaLibraryService: vi.fn(async () => ({
+vi.mock('./media-library-service-access', () => ({
+  loadMediaLibraryService: vi.fn(async () => ({
     mediaLibraryService: mediaLibraryServiceMocks,
   })),
 }))

@@ -6,16 +6,8 @@ import type {
 } from '../types'
 import type { TimelineItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
-import { importMediaLibraryService } from '../services/media-library-service-loader'
-import {
-  getSynchronizedLinkedItems,
-  useItemsStore,
-  useTimelineSettingsStore,
-} from '@/features/media-library/deps/timeline-stores'
-import {
-  removeProjectItems,
-  updateProjectItem,
-} from '@/features/media-library/deps/timeline-actions'
+import { loadMediaLibraryService } from './media-library-service-access'
+import { getMediaRelinkingTimelineActions } from './media-relinking-timeline-actions'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { createLogger } from '@/shared/logging/logger'
 
@@ -70,13 +62,19 @@ function buildOrphanedClipRelinkUpdates(
 }
 
 function getOrphanedRelinkTargetIds(itemId: string, replacementMediaId: string): string[] {
-  const { items, itemById } = useItemsStore.getState()
+  const timelineActions = getMediaRelinkingTimelineActions()
+  if (!timelineActions) {
+    logger.error('[getOrphanedRelinkTargetIds] Timeline relinking actions are not registered')
+    return [itemId]
+  }
+
+  const { items, itemById } = timelineActions.getItemsState()
   const anchor = itemById[itemId]
   if (!anchor) {
     return [itemId]
   }
 
-  const synchronizedItems = getSynchronizedLinkedItems(items, itemId)
+  const synchronizedItems = timelineActions.getSynchronizedLinkedItems(items, itemId)
   const targetMediaId = anchor.mediaId
 
   if (!targetMediaId || targetMediaId === replacementMediaId) {
@@ -97,7 +95,8 @@ function getOrphanedRemovalTargetIds(itemIds: string[]): string[] {
   const expandedIds = new Set<string>()
 
   for (const itemId of itemIds) {
-    const anchor = useItemsStore.getState().itemById[itemId]
+    const timelineActions = getMediaRelinkingTimelineActions()
+    const anchor = timelineActions?.getItemsState().itemById[itemId]
     const targetIds = getOrphanedRelinkTargetIds(itemId, anchor?.mediaId ?? '')
     targetIds.forEach((targetId) => expandedIds.add(targetId))
   }
@@ -166,7 +165,7 @@ export function createRelinkingActions(
     relinkMedia: async (mediaId: string, newHandle: FileSystemFileHandle) => {
       try {
         // Update in service/DB
-        const { mediaLibraryService } = await importMediaLibraryService()
+        const { mediaLibraryService } = await loadMediaLibraryService()
         const updated = await mediaLibraryService.relinkMediaHandle(mediaId, newHandle)
         applySuccessfulRelink(set, get, mediaId, updated)
         get().showNotification({
@@ -188,7 +187,7 @@ export function createRelinkingActions(
     relinkMediaBatch: async (relinks) => {
       const success: string[] = []
       const failed: string[] = []
-      const { mediaLibraryService } = await importMediaLibraryService()
+      const { mediaLibraryService } = await loadMediaLibraryService()
 
       for (const { mediaId, handle } of relinks) {
         try {
@@ -229,7 +228,7 @@ export function createRelinkingActions(
     relinkOrphanedClip: async (itemId: string, newMediaId: string) => {
       try {
         // Get the new media metadata
-        const { mediaLibraryService } = await importMediaLibraryService()
+        const { mediaLibraryService } = await loadMediaLibraryService()
         const newMedia = await mediaLibraryService.getMedia(newMediaId)
         if (!newMedia) {
           logger.error(`[relinkOrphanedClip] Media not found: ${newMediaId}`)
@@ -246,7 +245,7 @@ export function createRelinkingActions(
         }
 
         const alreadyRelinked = targetItemIds.every((targetItemId) => {
-          const item = useItemsStore.getState().itemById[targetItemId]
+          const item = getMediaRelinkingTimelineActions()?.getItemsState().itemById[targetItemId]
           return item?.mediaId === newMediaId
         })
 
@@ -257,10 +256,18 @@ export function createRelinkingActions(
           return true
         }
 
-        const fps = useTimelineSettingsStore.getState().fps
-        const updates = buildOrphanedClipRelinkUpdates(newMedia, fps)
+        const timelineActions = getMediaRelinkingTimelineActions()
+        if (!timelineActions) {
+          logger.error('[relinkOrphanedClip] Timeline relinking actions are not registered')
+          get().showNotification({
+            type: 'error',
+            message: 'Timeline actions are unavailable',
+          })
+          return false
+        }
+        const updates = buildOrphanedClipRelinkUpdates(newMedia, timelineActions.getFps())
         const relinkedItemIds = targetItemIds.filter((targetItemId) =>
-          updateProjectItem(targetItemId, updates),
+          timelineActions.updateProjectItem(targetItemId, updates),
         )
 
         if (relinkedItemIds.length === 0) {
@@ -304,7 +311,16 @@ export function createRelinkingActions(
     removeOrphanedClips: (itemIds: string[]) => {
       try {
         const targetItemIds = getOrphanedRemovalTargetIds(itemIds)
-        removeProjectItems(targetItemIds)
+        const timelineActions = getMediaRelinkingTimelineActions()
+        if (!timelineActions) {
+          logger.error('[removeOrphanedClips] Timeline relinking actions are not registered')
+          get().showNotification({
+            type: 'error',
+            message: 'Timeline actions are unavailable',
+          })
+          return
+        }
+        timelineActions.removeProjectItems(targetItemIds)
 
         // Remove from orphaned clips list
         set((state) => ({

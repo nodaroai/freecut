@@ -9,7 +9,6 @@ Media-library-local adapters for external feature dependencies.
 - `timeline-stores.ts`: timeline stores/types used by media-library modules.
 - `timeline-actions-contract.ts`: narrow internal media-library->timeline action
   seam binding.
-- `timeline-actions.ts`: timeline actions used by media-library modules.
 - `timeline-caption-utils-contract.ts`: narrow internal media-library->timeline
   caption utility seam binding.
 - `timeline-utils.ts`: timeline utility helpers used by media-library modules.

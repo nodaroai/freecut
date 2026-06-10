@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, vi, type Mock } from 'vite-plus/test'
 import { createRelinkingActions } from './media-relinking-actions'
+import { registerMediaRelinkingTimelineActions } from './media-relinking-timeline-actions'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import type { MediaLibraryState, MediaLibraryActions, BrokenMediaInfo } from '../types'
 import type { MediaMetadata } from '@/types/storage'
@@ -13,34 +14,12 @@ vi.mock('../services/media-library-service', () => ({
   },
 }))
 
-vi.mock('@/features/media-library/deps/timeline-actions', () => ({
-  removeProjectItems: vi.fn(),
-  updateProjectItem: vi.fn(),
-}))
-
-vi.mock('@/features/media-library/deps/timeline-stores', () => ({
-  useTimelineSettingsStore: {
-    getState: () => ({ fps: 30 }),
-  },
-  useItemsStore: {
-    getState: vi.fn(() => ({
-      items: [],
-      itemById: {},
-    })),
-  },
-  getSynchronizedLinkedItems: vi.fn(() => []),
+vi.mock('./media-library-service-access', () => ({
+  loadMediaLibraryService: vi.fn(async () => import('../services/media-library-service')),
 }))
 
 // Import after mocks
 import { mediaLibraryService } from '../services/media-library-service'
-import {
-  removeProjectItems,
-  updateProjectItem,
-} from '@/features/media-library/deps/timeline-actions'
-import {
-  getSynchronizedLinkedItems,
-  useItemsStore,
-} from '@/features/media-library/deps/timeline-stores'
 
 // Helpers
 type RelinkingState = Partial<MediaLibraryState> & Partial<MediaLibraryActions>
@@ -123,16 +102,39 @@ function createMockState(): MediaLibraryState & MediaLibraryActions {
 }
 
 let blobUrlCounter = 0
+const updateProjectItem = vi.fn()
+const removeProjectItems = vi.fn()
+const getItemsState = vi.fn<
+  () => {
+    items: TimelineItem[]
+    itemById: Record<string, TimelineItem | undefined>
+  }
+>(() => ({
+  items: [],
+  itemById: {},
+}))
+const getSynchronizedLinkedItems = vi.fn<(items: TimelineItem[], itemId: string) => TimelineItem[]>(
+  () => [],
+)
+let unregisterTimelineActions: (() => void) | null = null
 
 beforeEach(() => {
   vi.clearAllMocks()
+  unregisterTimelineActions?.()
+  unregisterTimelineActions = registerMediaRelinkingTimelineActions({
+    updateProjectItem,
+    removeProjectItems,
+    getItemsState,
+    getFps: () => 30,
+    getSynchronizedLinkedItems,
+  })
   blobUrlManager.releaseAll()
   blobUrlCounter = 0
 
-  ;(updateProjectItem as Mock).mockReturnValue(true)
-  ;(removeProjectItems as Mock).mockReturnValue(true)
-  ;(getSynchronizedLinkedItems as Mock).mockReturnValue([])
-  ;(useItemsStore.getState as Mock).mockReturnValue({
+  updateProjectItem.mockReturnValue(true)
+  removeProjectItems.mockReturnValue(true)
+  getSynchronizedLinkedItems.mockReturnValue([])
+  getItemsState.mockReturnValue({
     items: [],
     itemById: {},
   })
@@ -388,8 +390,8 @@ describe('createRelinkingActions', () => {
       })
 
       ;(mediaLibraryService.getMedia as Mock).mockResolvedValue(replacementMedia)
-      ;(getSynchronizedLinkedItems as Mock).mockReturnValue([videoItem, audioItem])
-      ;(useItemsStore.getState as Mock).mockReturnValue({
+      getSynchronizedLinkedItems.mockReturnValue([videoItem, audioItem])
+      getItemsState.mockReturnValue({
         items: [videoItem, audioItem],
         itemById: {
           'video-1': videoItem,
@@ -469,8 +471,8 @@ describe('createRelinkingActions', () => {
       })
 
       ;(mediaLibraryService.getMedia as Mock).mockResolvedValue(replacementMedia)
-      ;(getSynchronizedLinkedItems as Mock).mockReturnValue([videoItem, audioItem])
-      ;(useItemsStore.getState as Mock).mockReturnValue({
+      getSynchronizedLinkedItems.mockReturnValue([videoItem, audioItem])
+      getItemsState.mockReturnValue({
         items: [videoItem, audioItem],
         itemById: {
           'video-1': videoItem,
@@ -531,8 +533,8 @@ describe('createRelinkingActions', () => {
         src: 'blob:audio',
       })
 
-      ;(getSynchronizedLinkedItems as Mock).mockReturnValue([videoItem, audioItem])
-      ;(useItemsStore.getState as Mock).mockReturnValue({
+      getSynchronizedLinkedItems.mockReturnValue([videoItem, audioItem])
+      getItemsState.mockReturnValue({
         items: [videoItem, audioItem],
         itemById: {
           'video-1': videoItem,

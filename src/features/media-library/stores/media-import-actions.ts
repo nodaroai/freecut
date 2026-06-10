@@ -1,6 +1,6 @@
 import type { MediaLibraryState, MediaLibraryActions, UnsupportedCodecFile } from '../types'
 import type { MediaMetadata } from '@/types/storage'
-import { importMediaLibraryService } from '../services/media-library-service-loader'
+import { loadMediaLibraryService } from './media-library-service-access'
 import { proxyService } from '../services/proxy-service'
 import { getMimeType } from '../utils/validation'
 import { getSharedProxyKey } from '../utils/proxy-key'
@@ -322,7 +322,7 @@ export function createImportActions(
   const runImportTasks = async (
     importTasks: ImportTask[],
     projectId: string,
-    serviceModulePromise: ReturnType<typeof importMediaLibraryService>,
+    serviceModulePromise: ReturnType<typeof loadMediaLibraryService>,
   ): Promise<PromiseSettledResult<CompletedImportTask>[]> => {
     const results: PromiseSettledResult<CompletedImportTask>[] = new Array(importTasks.length)
     let nextIndex = 0
@@ -373,7 +373,7 @@ export function createImportActions(
       fileCount: handles.length,
     })
 
-    const serviceModulePromise = importMediaLibraryService()
+    const serviceModulePromise = loadMediaLibraryService()
     const importTasks = await createOptimisticImportTasks(handles)
     const importResults = await runImportTasks(importTasks, currentProjectId, serviceModulePromise)
 
@@ -430,7 +430,7 @@ export function createImportActions(
         event.set('fileCount', handles.length)
 
         // Create optimistic placeholders for all files immediately
-        const serviceModulePromise = importMediaLibraryService()
+        const serviceModulePromise = loadMediaLibraryService()
         const importTasks = await createOptimisticImportTasks(handles)
         const importResults = await runImportTasks(
           importTasks,
@@ -504,7 +504,7 @@ export function createImportActions(
       }
 
       try {
-        const { mediaLibraryService } = await importMediaLibraryService()
+        const { mediaLibraryService } = await loadMediaLibraryService()
         const metadata = await mediaLibraryService.importMediaFromUrl(trimmedUrl, currentProjectId)
 
         if (metadata.isDuplicate) {

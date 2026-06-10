@@ -56,6 +56,12 @@ vi.mock('../services/media-library-service', () => ({
   mediaLibraryService: mediaLibraryServiceMocks,
 }))
 
+vi.mock('./media-library-service-access', () => ({
+  loadMediaLibraryService: vi.fn(async () => ({
+    mediaLibraryService: mediaLibraryServiceMocks,
+  })),
+}))
+
 vi.mock('../services/proxy-service', () => ({
   proxyService: proxyServiceMocks,
 }))

@@ -1,6 +1,6 @@
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { getMedia, updateMedia } from '@/infrastructure/storage'
-import { opfsService } from '@/runtime/composition-runtime/deps/media-library'
+import { opfsService } from '@/runtime/composition-runtime/deps/media-library-opfs'
 import { createLogger } from '@/shared/logging/logger'
 import type { MediaMetadata } from '@/types/storage'
 import {

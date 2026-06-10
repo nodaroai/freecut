@@ -1,6 +1,6 @@
 import type { MediaLibraryState, MediaLibraryActions } from '../types'
 import type { MediaMetadata } from '@/types/storage'
-import { importMediaLibraryService } from '../services/media-library-service-loader'
+import { loadMediaLibraryService } from './media-library-service-access'
 import { proxyService } from '../services/proxy-service'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { invalidateMediaCaptionCaches } from '../services/media-caption-cache-events'
@@ -77,7 +77,7 @@ export function createDeleteActions(
       await deleteMediaInternal(
         [id],
         async () => {
-          const { mediaLibraryService } = await importMediaLibraryService()
+          const { mediaLibraryService } = await loadMediaLibraryService()
           return currentProjectId
             ? mediaLibraryService.deleteMediaFromProject(currentProjectId, id)
             : mediaLibraryService.deleteMedia(id)
@@ -92,7 +92,7 @@ export function createDeleteActions(
       await deleteMediaInternal(
         ids,
         async () => {
-          const { mediaLibraryService } = await importMediaLibraryService()
+          const { mediaLibraryService } = await loadMediaLibraryService()
           return currentProjectId
             ? mediaLibraryService.deleteMediaBatchFromProject(currentProjectId, ids)
             : mediaLibraryService.deleteMediaBatch(ids)
