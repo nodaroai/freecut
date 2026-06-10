@@ -1,7 +1,7 @@
 import { createLogger } from '@/shared/logging/logger'
 import { TRANSITION_COMMON_WGSL } from './common'
 import type { GpuTransitionDefinition } from './types'
-import { GPU_TRANSITION_REGISTRY, getGpuTransition } from './index'
+import { GPU_TRANSITION_REGISTRY, getGpuTransition } from './registry'
 
 const log = createLogger('TransitionPipeline')
 
