@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useEffect, memo, Activity } from 'react'
+import { useCallback, useMemo, useRef, useEffect, memo, Activity, lazy, Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ChevronDown,
@@ -52,7 +52,7 @@ import { getGpuEffectDefaultParams } from '@/infrastructure/gpu-effects'
 import { useGpuEffectPreviewData } from '@/features/editor/deps/effects-contract'
 import { createLogger } from '@/shared/logging/logger'
 import { useSettingsStore } from '@/features/editor/deps/settings'
-import { AiPanel } from './ai-panel'
+const LazyAiPanel = lazy(() => import('./ai-panel').then((m) => ({ default: m.AiPanel })))
 import {
   TEXT_STYLE_PRESETS,
   type TextStylePresetLayout,
@@ -289,6 +289,11 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const setActiveTab = useEditorStore((s) => s.setActiveTab)
   const sidebarWidth = useEditorStore((s) => s.sidebarWidth)
   const setSidebarWidth = useEditorStore((s) => s.setSidebarWidth)
+
+  const [aiTabActivated, setAiTabActivated] = useState(activeTab === 'ai')
+  useEffect(() => {
+    if (activeTab === 'ai') setAiTabActivated(true)
+  }, [activeTab])
 
   // Auto-expand sidebar to 35% viewport when keyframe editor opens
   const prevKeyframeOpenRef = useRef(keyframeEditorOpen)
@@ -1143,7 +1148,11 @@ export const MediaSidebar = memo(function MediaSidebar() {
             <div
               className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'ai' ? 'block' : 'hidden'}`}
             >
-              <AiPanel />
+              {aiTabActivated && (
+                <Suspense fallback={null}>
+                  <LazyAiPanel />
+                </Suspense>
+              )}
             </div>
           </div>
         </Activity>
