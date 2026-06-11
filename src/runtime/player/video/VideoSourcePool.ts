@@ -12,12 +12,6 @@ const logger = createLogger('VideoSourcePool')
  * users split clips or have multiple clips from the same source.
  */
 
-interface SourceMetadata {
-  duration: number
-  width: number
-  height: number
-}
-
 interface EnsureReadyLanesOptions {
   targetTimeSeconds?: number[]
   warmDecode?: boolean
@@ -49,7 +43,6 @@ class SourceController {
   private primary: HTMLVideoElement | null = null
   private overflow: HTMLVideoElement[] = []
   private assignments: Map<string, HTMLVideoElement> = new Map()
-  private metadata: SourceMetadata | null = null
   private loadPromise: Promise<void> | null = null
   // Element being loaded by ensureLoaded() but not yet promoted to primary.
   // Allows acquire() to reuse it instead of creating a redundant overflow element.
@@ -300,13 +293,6 @@ class SourceController {
   }
 
   /**
-   * Get source metadata (duration, dimensions)
-   */
-  getMetadata(): SourceMetadata | null {
-    return this.metadata
-  }
-
-  /**
    * Get count of active assignments
    */
   getActiveCount(): number {
@@ -360,7 +346,6 @@ class SourceController {
     this.primary = null
     this.overflow = []
     this.assignments.clear()
-    this.metadata = null
     this.loadPromise = null
   }
 
@@ -452,13 +437,6 @@ class SourceController {
     element.muted = true // Start muted, unmute when needed
 
     element.addEventListener('loadedmetadata', () => {
-      if (!this.metadata) {
-        this.metadata = {
-          duration: element.duration,
-          width: element.videoWidth,
-          height: element.videoHeight,
-        }
-      }
       this.onElementReady?.(element)
     })
 
@@ -609,14 +587,6 @@ export class VideoSourcePool {
 
     const controller = this.sources.get(sourceUrl)
     return controller?.getAssignedElement(clipId) || null
-  }
-
-  /**
-   * Get metadata for a source
-   */
-  getSourceMetadata(sourceUrl: string): SourceMetadata | null {
-    const controller = this.sources.get(sourceUrl)
-    return controller?.getMetadata() || null
   }
 
   /**
