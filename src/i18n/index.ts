@@ -46,21 +46,6 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
   }
 }
 
-/**
- * Per-feature translation partials. Each file is shaped
- * `{ "<lang>": { ...slice of the translation tree... } }` and is deep-merged
- * over the base locale data. This lets feature modules ship their own strings
- * without everyone editing one giant JSON file.
- */
-const partialModules = import.meta.glob<{ default: Record<string, LocaleTree> }>(
-  './locales/partials/*.json',
-  { eager: true },
-)
-
-const mergedLocales: Record<string, LocaleTree> = {}
-for (const lang of SUPPORTED_LANGUAGE_CODES) {
-  mergedLocales[lang] = structuredClone(baseLocales[lang] ?? {})
-}
 function normalizePartialSlice(path: string, slice: LocaleTree): LocaleTree {
   if (path.endsWith('/effects.json') && !isPlainObject(slice.effects)) {
     return { effects: slice }
@@ -69,21 +54,29 @@ function normalizePartialSlice(path: string, slice: LocaleTree): LocaleTree {
   return slice
 }
 
-const orderedPartialModules = Object.entries(partialModules).sort(([leftPath], [rightPath]) =>
-  leftPath.localeCompare(rightPath),
-)
+// Eager: English partials only (statically imported, bundled into app-shell).
+const enPartialModules = import.meta.glob<{ default: LocaleTree }>('./locales/partials/en/*.json', {
+  eager: true,
+})
 
-for (const [path, mod] of orderedPartialModules) {
-  const partial = mod.default ?? {}
-  for (const [lang, slice] of Object.entries(partial)) {
-    if (!isPlainObject(slice)) continue
-    const dest = mergedLocales[lang] ?? (mergedLocales[lang] = {})
-    deepMerge(dest, normalizePartialSlice(path, slice))
-  }
+// Lazy: all language partial dirs — loaded on demand when switching language.
+const lazyPartialModules = import.meta.glob<{ default: LocaleTree }>('./locales/partials/*/*.json')
+
+// Build the merged English tree eagerly.
+const enMerged: LocaleTree = structuredClone(baseLocales.en ?? {})
+for (const [path, mod] of Object.entries(enPartialModules).sort(([a], [b]) => a.localeCompare(b))) {
+  deepMerge(enMerged, normalizePartialSlice(path, mod.default ?? {}))
 }
 
+// Resources: full merged en tree + base-only trees for other languages.
+// Base-only ensures untranslated-yet feature strings fall back to English.
 const resources = Object.fromEntries(
-  Object.entries(mergedLocales).map(([lang, tree]) => [lang, { translation: tree }]),
+  SUPPORTED_LANGUAGE_CODES.map((lang) => [
+    lang,
+    {
+      translation: lang === DEFAULT_LANGUAGE ? enMerged : structuredClone(baseLocales[lang] ?? {}),
+    },
+  ]),
 )
 
 void i18n
@@ -117,6 +110,42 @@ function syncDocumentLanguage(lng: string): void {
 
 syncDocumentLanguage(i18n.resolvedLanguage ?? i18n.language ?? DEFAULT_LANGUAGE)
 i18n.on('languageChanged', syncDocumentLanguage)
+
+// Track which languages have had their partials fully loaded.
+const loadedLanguages = new Set<string>([DEFAULT_LANGUAGE])
+
+export async function loadLanguageResources(lang: string): Promise<void> {
+  const resolved = resolveSupportedLanguage(lang)
+  if (loadedLanguages.has(resolved)) return
+  const prefix = `./locales/partials/${resolved}/`
+  const entries = Object.entries(lazyPartialModules)
+    .filter(([path]) => path.startsWith(prefix))
+    .sort(([a], [b]) => a.localeCompare(b))
+  const tree = structuredClone(baseLocales[resolved] ?? {})
+  for (const [path, loader] of entries) {
+    const mod = await loader()
+    deepMerge(tree, normalizePartialSlice(path, mod.default ?? {}))
+  }
+  i18n.addResourceBundle(resolved, 'translation', tree, false, true)
+  loadedLanguages.add(resolved)
+}
+
+export async function changeAppLanguage(lang: string): Promise<void> {
+  const resolved = resolveSupportedLanguage(lang)
+  await loadLanguageResources(resolved)
+  await i18n.changeLanguage(resolved)
+}
+
+// Preload the user's persisted/detected language before first render.
+// Errors are caught so the app still renders with English fallback.
+export const i18nReady: Promise<void> = (async () => {
+  const initial = resolveSupportedLanguage(
+    localStorage.getItem(I18N_STORAGE_KEY) ?? navigator.language,
+  )
+  if (initial !== DEFAULT_LANGUAGE) await loadLanguageResources(initial)
+})().catch((err) => {
+  log.error('Failed to preload language resources', err)
+})
 
 export { i18n }
 export default i18n

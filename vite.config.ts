@@ -117,7 +117,8 @@ export default defineConfig({
             normalizedId.includes('/src/app/error-boundary') ||
             normalizedId.includes('/src/app/pwa-install-prompt') ||
             isWorkspaceGateShell ||
-            normalizedId.includes('/src/i18n/')
+            (normalizedId.includes('/src/i18n/') &&
+              !normalizedId.includes('/src/i18n/locales/partials/'))
           ) {
             return 'app-shell'
           }

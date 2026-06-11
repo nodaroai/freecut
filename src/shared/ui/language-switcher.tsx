@@ -8,8 +8,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/shared/ui/cn'
-import { i18n } from '@/i18n'
-import { SUPPORTED_LANGUAGES, resolveSupportedLanguage } from '@/i18n/languages'
+import { changeAppLanguage } from '@/i18n'
+import { SUPPORTED_LANGUAGES } from '@/i18n/languages'
 
 function getLanguageButtonLabel(languageCode: string): string {
   return languageCode.split('-')[0]?.slice(0, 2).toUpperCase() || 'EN'
@@ -54,7 +54,7 @@ export function LanguageSwitcher({
             <DropdownMenuItem
               key={lng.code}
               onClick={() => {
-                void i18n.changeLanguage(resolveSupportedLanguage(lng.code))
+                void changeAppLanguage(lng.code)
               }}
               className="justify-between"
             >

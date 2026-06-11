@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { i18n } from './i18n'
+import { i18n, i18nReady } from './i18n'
 import { App } from './app'
 import { createLogger } from '@/shared/logging/logger'
 import {
@@ -242,8 +242,10 @@ if (!rootElement) {
   throw new Error('Root element not found')
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+void i18nReady.then(() => {
+  createRoot(rootElement).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+})
