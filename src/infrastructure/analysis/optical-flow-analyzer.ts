@@ -588,22 +588,6 @@ export class OpticalFlowAnalyzer {
     }
   }
 
-  /**
-   * Analyze a sequence of frames with progress callback.
-   */
-  async analyzeSequence(
-    frames: ImageBitmap[],
-    onProgress?: (index: number, result: MotionResult) => void,
-  ): Promise<MotionResult[]> {
-    const results: MotionResult[] = []
-    for (let i = 0; i < frames.length; i++) {
-      const result = await this.analyzeFrame(frames[i]!)
-      results.push(result)
-      onProgress?.(i, result)
-    }
-    return results
-  }
-
   destroy(): void {
     if (!this.initialized) return
 
