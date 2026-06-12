@@ -36,7 +36,7 @@
     "channelRed": "赤",
     "channelGreen": "緑",
     "channelBlue": "青",
-    "multiPointHint": "カーブをクリックするとポイントを追加できます。ポイントをダブルクリックすると削除されます。"
+    "multiPointHint": "{{channel}}カーブをクリックするとポイントを追加できます。ポイントをダブルクリックすると削除されます。"
   },
   "wheels": {
     "resetWheel": "{{name}}をリセット",

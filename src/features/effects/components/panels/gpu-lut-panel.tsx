@@ -1,41 +1,26 @@
 import { memo, useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eye, EyeOff, FileUp, RotateCcw, Trash2 } from 'lucide-react'
+import { FileUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { ItemEffect, GpuEffect } from '@/types/effects'
-import type { GpuEffectDefinition } from '@/infrastructure/gpu-effects'
 import {
   parseCubeLut,
   resampleCubeLut,
   encodeLutData,
 } from '@/infrastructure/gpu-effects/lut/cube-lut'
-import type { AnimatableProperty } from '@/types/keyframe'
 import { KeyframeToggle } from '@/features/effects/deps/keyframes-contract'
 import { PropertyRow, SliderInput } from '@/shared/ui/property-controls'
 import { createLogger } from '@/shared/logging/logger'
 import { getEffectDefinitionName } from '@/features/effects/utils/effect-i18n'
-import { EffectMoveButtons, type EffectMoveProps } from './effect-move-buttons'
+import { EffectPanelHeaderRow } from './effect-panel-header-actions'
+import type { GpuKeyframePanelProps, GpuParamUpdates } from './panel-props'
 
 const logger = createLogger('GpuLutPanel')
 
 /** Imported LUTs are resampled down to this grid to bound param/project size (~143KB rgba8). */
 const MAX_EMBEDDED_LUT_SIZE = 33
 
-interface GpuLutPanelProps extends EffectMoveProps {
-  itemIds: string[]
-  effect: ItemEffect
-  gpuEffect: GpuEffect
-  definition: GpuEffectDefinition
-  getKeyframeProperty: (effectId: string, paramKey: string) => AnimatableProperty | null
-  onParamChange: (effectId: string, paramKey: string, value: number | boolean | string) => void
-  onParamLiveChange: (effectId: string, paramKey: string, value: number | boolean | string) => void
-  onParamsBatchChange: (
-    effectId: string,
-    updates: Record<string, number | boolean | string>,
-  ) => void
-  onReset: (effectId: string) => void
-  onToggle: (effectId: string) => void
-  onRemove: (effectId: string) => void
+interface GpuLutPanelProps extends GpuKeyframePanelProps {
+  onParamsBatchChange: (effectId: string, updates: GpuParamUpdates) => void
 }
 
 /**
@@ -109,50 +94,18 @@ export const GpuLutPanel = memo(function GpuLutPanel({
 
   return (
     <div className="space-y-0">
-      <PropertyRow label={getEffectDefinitionName(definition)}>
-        <div className="flex items-center gap-1 min-w-0 w-full justify-end">
-          <EffectMoveButtons
-            effectId={effect.id}
-            onMove={onMove}
-            canMoveUp={canMoveUp}
-            canMoveDown={canMoveDown}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-6 w-6 flex-shrink-0 ${isDefault ? 'opacity-30' : ''}`}
-            onClick={() => onReset(effect.id)}
-            title={t('effects.panel.resetToDefaults')}
-            disabled={isDefault}
-          >
-            <RotateCcw className="w-3 h-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 flex-shrink-0"
-            onClick={() => onToggle(effect.id)}
-            title={
-              effect.enabled ? t('effects.panel.disableEffect') : t('effects.panel.enableEffect')
-            }
-          >
-            {effect.enabled ? (
-              <Eye className="w-3 h-3" />
-            ) : (
-              <EyeOff className="w-3 h-3 text-muted-foreground" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 flex-shrink-0"
-            onClick={() => onRemove(effect.id)}
-            title={t('effects.panel.removeEffect')}
-          >
-            <Trash2 className="w-3 h-3" />
-          </Button>
-        </div>
-      </PropertyRow>
+      <EffectPanelHeaderRow
+        label={getEffectDefinitionName(definition)}
+        effectId={effect.id}
+        enabled={effect.enabled}
+        isDefault={isDefault}
+        onReset={onReset}
+        onToggle={onToggle}
+        onRemove={onRemove}
+        onMove={onMove}
+        canMoveUp={canMoveUp}
+        canMoveDown={canMoveDown}
+      />
 
       <PropertyRow
         label={t('effects.lut.file')}

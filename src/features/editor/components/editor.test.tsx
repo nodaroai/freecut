@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +15,11 @@ const mocks = vi.hoisted(() => ({
   setPreviewQuality: vi.fn(),
   toggleSnap: vi.fn(),
   syncSidebarLayout: vi.fn(),
+  editorState: {
+    workspace: 'edit',
+    propertiesFullColumn: false,
+    mediaFullColumn: false,
+  },
   clearPreviewAudioCache: vi.fn(),
   importExportDialog: vi.fn().mockResolvedValue({
     ExportDialog: () => <div data-testid="export-dialog" />,
@@ -77,6 +82,14 @@ vi.mock('./properties-sidebar', () => ({
 
 vi.mock('./preview-area', () => ({
   PreviewArea: () => <div data-testid="preview-area" />,
+}))
+
+vi.mock('./color-grading-dock', () => ({
+  ColorGradingDock: () => <div data-testid="color-grading-dock" />,
+}))
+
+vi.mock('./color-timeline-navigator', () => ({
+  ColorTimelineNavigator: () => <div data-testid="color-timeline-navigator" />,
 }))
 
 vi.mock('./project-debug-panel', () => ({
@@ -211,8 +224,19 @@ vi.mock('@/shared/state/playback', () => {
 
 vi.mock('@/shared/state/editor', () => ({
   useEditorStore: (
-    selector: (state: { syncSidebarLayout: typeof mocks.syncSidebarLayout }) => unknown,
-  ) => selector({ syncSidebarLayout: mocks.syncSidebarLayout }),
+    selector: (state: {
+      syncSidebarLayout: typeof mocks.syncSidebarLayout
+      propertiesFullColumn: boolean
+      mediaFullColumn: boolean
+      workspace: string
+    }) => unknown,
+  ) =>
+    selector({
+      syncSidebarLayout: mocks.syncSidebarLayout,
+      propertiesFullColumn: mocks.editorState.propertiesFullColumn,
+      mediaFullColumn: mocks.editorState.mediaFullColumn,
+      workspace: mocks.editorState.workspace,
+    }),
 }))
 
 vi.mock('@/features/editor/deps/composition-runtime', () => ({
@@ -285,6 +309,9 @@ describe('LoadedEditor migration metadata refresh', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.editorState.workspace = 'edit'
+    mocks.editorState.propertiesFullColumn = false
+    mocks.editorState.mediaFullColumn = false
     mocks.loadTimeline.mockResolvedValue(undefined)
     mocks.loadMediaItems.mockResolvedValue(undefined)
     mocks.invalidate.mockResolvedValue(undefined)
@@ -392,5 +419,33 @@ describe('LoadedEditor migration metadata refresh', () => {
         direction: 'vertical',
       }),
     )
+  })
+
+  it('mounts the compact color navigator and fixed grading dock in the color workspace', async () => {
+    mocks.editorState.workspace = 'color'
+    mocks.editorState.propertiesFullColumn = true
+
+    render(
+      <LoadedEditor
+        projectId="project-1"
+        project={{
+          id: 'project-1',
+          name: 'Color Project',
+          width: 1920,
+          height: 1080,
+          fps: 30,
+        }}
+        migration={{
+          storedSchemaVersion: 9,
+          currentSchemaVersion: 9,
+          requiresUpgrade: false,
+        }}
+      />,
+    )
+
+    expect(await screen.findByTestId('color-grading-dock')).toBeInTheDocument()
+    expect(screen.getByTestId('color-timeline-navigator')).toBeInTheDocument()
+    expect(screen.queryByTestId('timeline')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('properties-sidebar')).not.toBeInTheDocument()
   })
 })

@@ -16,7 +16,7 @@ vi.mock('../services/waveform-cache', () => ({
   },
 }))
 
-import { useWaveformPrefetch } from './use-waveform-prefetch'
+import { _resetWaveformPrefetchForTest, useWaveformPrefetch } from './use-waveform-prefetch'
 import { _resetPreviewWorkBudgetForTest } from './preview-work-budget'
 import { useItemsStore } from '../stores/items-store'
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store'
@@ -119,6 +119,7 @@ describe('waveform prefetch filtering', () => {
   const pps = 100
 
   beforeEach(() => {
+    _resetWaveformPrefetchForTest()
     _resetPreviewWorkBudgetForTest()
     useTimelineSettingsStore.setState({
       fps,
@@ -146,6 +147,7 @@ describe('waveform prefetch filtering', () => {
   })
 
   afterEach(() => {
+    _resetWaveformPrefetchForTest()
     _resetPreviewWorkBudgetForTest()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()

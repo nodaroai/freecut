@@ -27,6 +27,10 @@ const VISIBILITY_MARGIN_PX = 200
 const PREFETCH_DELAY_MS = 90
 let waveformCacheModulePromise: Promise<typeof import('../services/waveform-cache')> | null = null
 
+export function _resetWaveformPrefetchForTest() {
+  waveformCacheModulePromise = null
+}
+
 function loadWaveformCache() {
   waveformCacheModulePromise ??= import('../services/waveform-cache')
   return waveformCacheModulePromise

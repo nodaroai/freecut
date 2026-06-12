@@ -63,7 +63,11 @@
       "loadingMedia": "Loading Media",
       "videoPreview": "Video Preview",
       "emptyTitle": "Nothing on the timeline yet",
-      "emptyDescription": "Import media, drag a clip to the timeline, then press Space to preview."
+      "emptyDescription": "Import media, drag a clip to the timeline, then press Space to preview.",
+      "gradeComparisonSplit": "Split grade comparison",
+      "gradeComparisonBefore": "Before",
+      "gradeComparisonAfter": "After",
+      "gradeComparisonWipe": "Adjust split comparison"
     },
     "zoom": {
       "ariaLabel": "ARIA Label",

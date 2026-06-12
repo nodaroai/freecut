@@ -1,13 +1,18 @@
 import { create } from 'zustand'
 import type { VisualEffect } from '@/types/effects'
 
+export interface GradeClipboardEntry {
+  effect: VisualEffect
+  enabled: boolean
+}
+
 interface GradeClipboardState {
   /** Color-grade effects copied from a clip, or null when nothing was copied. */
-  grade: VisualEffect[] | null
+  grade: GradeClipboardEntry[] | null
 }
 
 interface GradeClipboardActions {
-  setGrade: (grade: VisualEffect[]) => void
+  setGrade: (grade: GradeClipboardEntry[]) => void
 }
 
 /**

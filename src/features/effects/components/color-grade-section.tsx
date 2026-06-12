@@ -1,12 +1,13 @@
-import { useCallback, useMemo, useRef, useState, memo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, memo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Palette, CircleOff, Layers, Save } from 'lucide-react'
+import { Palette, CircleOff, Columns2, Eye, Layers, Save, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { TimelineItem } from '@/types/timeline'
 import type { ItemEffect, GpuEffect } from '@/types/effects'
 import { useTimelineStore } from '@/features/effects/deps/timeline-contract'
-import { useGizmoStore } from '@/features/effects/deps/preview-contract'
+import { useGizmoStore, useThrottledFrame } from '@/features/effects/deps/preview-contract'
 import { PropertySection } from '@/shared/ui/property-controls'
+import { cn } from '@/shared/ui/cn'
 import { GpuWheelsPanel, GpuCurvesPanel } from './panels'
 import {
   getGpuEffect,
@@ -14,6 +15,17 @@ import {
   isColorGradeEffectType,
 } from '@/infrastructure/gpu-effects'
 import { useUserPresetsStore } from '../stores/user-presets-store'
+import {
+  getAutoKeyframeOperation,
+} from '@/features/effects/deps/keyframes-contract'
+import type { AnimatableProperty } from '@/types/keyframe'
+import { useKeyframesByItemId } from '../hooks/use-keyframes-by-item-id'
+import {
+  getGpuEffectKeyframeProperty,
+  getResolvedGpuEffectForFrame,
+} from '../utils/effect-keyframes'
+import { applyGradePresetToEffectStack, hasGradePresetEffects } from '../utils/grade-presets'
+import { getEffectDefinitionName } from '../utils/effect-i18n'
 
 type GradeEffectType = 'gpu-color-wheels' | 'gpu-curves'
 type EffectParams = Record<string, number | boolean | string>
@@ -33,8 +45,29 @@ function findGradeEntry(item: TimelineItem, type: GradeEffectType): ItemEffect |
 interface ColorGradeSectionProps {
   /** Visual items (already filtered to exclude audio) */
   items: TimelineItem[]
+  /** Sidebar keeps the legacy stacked inspector; dock renders fitted color-page panes. */
+  layout?: 'sidebar' | 'dock'
   /** Optional quick action: create an adjustment layer for scene-wide grading */
   onCreateAdjustmentLayer?: () => void
+}
+
+function DockPane({
+  title,
+  className,
+  children,
+}: {
+  title: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <section className={cn('flex h-full min-h-0 flex-col overflow-hidden', className)}>
+      <div className="flex h-7 shrink-0 items-center border-b border-border/70 px-2">
+        <h3 className="truncate text-[11px] font-semibold text-muted-foreground">{title}</h3>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+    </section>
+  )
 }
 
 /**
@@ -46,21 +79,26 @@ interface ColorGradeSectionProps {
  */
 export const ColorGradeSection = memo(function ColorGradeSection({
   items,
+  layout = 'sidebar',
   onCreateAdjustmentLayer,
 }: ColorGradeSectionProps) {
   const { t } = useTranslation()
   const addEffects = useTimelineStore((s) => s.addEffects)
+  const setItemEffects = useTimelineStore((s) => s.setItemEffects)
   const updateEffect = useTimelineStore((s) => s.updateEffect)
   const removeEffect = useTimelineStore((s) => s.removeEffect)
   const toggleEffect = useTimelineStore((s) => s.toggleEffect)
+  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
   const setEffectsPreviewNew = useGizmoStore((s) => s.setEffectsPreviewNew)
   const clearPreview = useGizmoStore((s) => s.clearPreview)
-  const colorGradeBypassed = useGizmoStore((s) => s.colorGradeBypassed)
-  const toggleColorGradeBypass = useGizmoStore((s) => s.toggleColorGradeBypass)
+  const colorGradeComparisonMode = useGizmoStore((s) => s.colorGradeComparisonMode)
+  const setColorGradeComparisonMode = useGizmoStore((s) => s.setColorGradeComparisonMode)
+  const currentFrame = useThrottledFrame()
 
   const visualItems = items
   const itemIds = useMemo(() => visualItems.map((item) => item.id), [visualItems])
   const displayItem = visualItems[0] ?? null
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   // Params accumulated from live events for a grade effect that doesn't
   // exist yet (created on commit at gesture end).
@@ -103,11 +141,41 @@ export const ColorGradeSection = memo(function ColorGradeSection({
       pendingParamsRef.current[type] = undefined
 
       const createUpdates: Array<{ itemId: string; effects: GpuEffect[] }> = []
+      const autoOperations = visualItems.flatMap((item) => {
+        const entry = findGradeEntry(item, type)
+        if (!entry || entry.effect.type !== 'gpu-effect') return []
+        const itemKeyframeState = keyframesByItemId.get(item.id) ?? undefined
+        return Object.entries(updates).flatMap(([paramKey, paramValue]) => {
+          if (typeof paramValue !== 'number') return []
+          const property = getGpuEffectKeyframeProperty(entry, paramKey)
+          const operation =
+            property &&
+            getAutoKeyframeOperation(item, itemKeyframeState, property, paramValue, currentFrame)
+          return operation ? [operation] : []
+        })
+      })
+
+      if (autoOperations.length > 0) {
+        applyAutoKeyframeOperations(autoOperations)
+      }
+
       visualItems.forEach((item) => {
         const entry = findGradeEntry(item, type)
         if (entry && entry.effect.type === 'gpu-effect') {
+          const fallbackUpdates = { ...updates }
+          for (const [paramKey, paramValue] of Object.entries(updates)) {
+            const property =
+              typeof paramValue === 'number' ? getGpuEffectKeyframeProperty(entry, paramKey) : null
+            const autoHandled =
+              property &&
+              autoOperations.some(
+                (operation) => operation.itemId === item.id && operation.property === property,
+              )
+            if (autoHandled) delete fallbackUpdates[paramKey]
+          }
+          if (Object.keys(fallbackUpdates).length === 0) return
           updateEffect(item.id, entry.id, {
-            effect: { ...entry.effect, params: { ...entry.effect.params, ...updates } },
+            effect: { ...entry.effect, params: { ...entry.effect.params, ...fallbackUpdates } },
           })
           return
         }
@@ -127,7 +195,15 @@ export const ColorGradeSection = memo(function ColorGradeSection({
       }
       queueMicrotask(() => clearPreview())
     },
-    [addEffects, clearPreview, updateEffect, visualItems],
+    [
+      addEffects,
+      applyAutoKeyframeOperations,
+      clearPreview,
+      currentFrame,
+      keyframesByItemId,
+      updateEffect,
+      visualItems,
+    ],
   )
 
   // Live preview during drags. For items without the grade effect, the
@@ -246,11 +322,21 @@ export const ColorGradeSection = memo(function ColorGradeSection({
     [removeEffect, resolveGradeType, visualItems],
   )
 
-  const getKeyframeProperty = useCallback(() => null, [])
+  const getKeyframeProperty = useCallback(
+    (effectId: string, paramKey: string): AnimatableProperty | null => {
+      if (effectId.startsWith('__grade:')) return null
+      const entry = Object.values(displayEntries).find((candidate) => candidate.id === effectId)
+      return entry ? getGpuEffectKeyframeProperty(entry, paramKey) : null
+    },
+    [displayEntries],
+  )
 
   // Save the display item's current grade (its color-category effects) as a
   // named preset in the workspace.
   const addPreset = useUserPresetsStore((s) => s.addPreset)
+  const userPresets = useUserPresetsStore((s) => s.presets)
+  const loadUserPresets = useUserPresetsStore((s) => s.loadPresets)
+  const removeUserPreset = useUserPresetsStore((s) => s.removePreset)
   const [presetNameDraft, setPresetNameDraft] = useState<string | null>(null)
   const gradeEffects = useMemo(
     () =>
@@ -264,6 +350,14 @@ export const ColorGradeSection = memo(function ColorGradeSection({
         .map((entry) => entry.effect),
     [displayItem],
   )
+  const gradePresets = useMemo(
+    () => userPresets.filter((preset) => hasGradePresetEffects(preset.effects)),
+    [userPresets],
+  )
+
+  useEffect(() => {
+    void loadUserPresets()
+  }, [loadUserPresets])
 
   const handleSavePreset = useCallback(() => {
     const name = presetNameDraft?.trim()
@@ -272,107 +366,253 @@ export const ColorGradeSection = memo(function ColorGradeSection({
     setPresetNameDraft(null)
   }, [addPreset, gradeEffects, presetNameDraft])
 
+  const handleApplyGradePreset = useCallback(
+    (presetId: string) => {
+      const preset = useUserPresetsStore.getState().presets.find((candidate) => candidate.id === presetId)
+      if (!preset || !hasGradePresetEffects(preset.effects)) return
+      setItemEffects(
+        visualItems.map((item) => ({
+          itemId: item.id,
+          effects: applyGradePresetToEffectStack(item.effects, preset.effects),
+        })),
+      )
+      queueMicrotask(() => clearPreview())
+    },
+    [clearPreview, setItemEffects, visualItems],
+  )
+
   const wheelsDefinition = getGpuEffect('gpu-color-wheels')
   const curvesDefinition = getGpuEffect('gpu-curves')
+  const savePresetLabel = t('effects.colorPanel.savePresetTooltip')
 
   if (visualItems.length === 0 || !wheelsDefinition || !curvesDefinition) return null
 
   const wheelsEntry = displayEntries['gpu-color-wheels']
   const curvesEntry = displayEntries['gpu-curves']
+  const wheelsGpuEffect = getResolvedGpuEffectForFrame(
+    wheelsEntry,
+    displayItem,
+    displayItem ? (keyframesByItemId.get(displayItem.id) ?? undefined) : undefined,
+    currentFrame,
+  )
+  const curvesGpuEffect = getResolvedGpuEffectForFrame(
+    curvesEntry,
+    displayItem,
+    displayItem ? (keyframesByItemId.get(displayItem.id) ?? undefined) : undefined,
+    currentFrame,
+  )
 
-  return (
-    <PropertySection title={t('effects.colorPanel.title')} icon={Palette} defaultOpen={true}>
-      <div className="px-2 pb-2 flex gap-1">
-        <Button
-          variant={colorGradeBypassed ? 'default' : 'outline'}
-          size="sm"
-          className="flex-1 h-7 text-xs"
-          onClick={toggleColorGradeBypass}
-          title={t('effects.colorPanel.bypassTooltip')}
-          aria-pressed={colorGradeBypassed}
-        >
-          <CircleOff className="w-3 h-3 mr-1" />
-          {colorGradeBypassed ? t('effects.colorPanel.bypassOn') : t('effects.colorPanel.bypass')}
-        </Button>
-        {onCreateAdjustmentLayer && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1 h-7 text-xs"
-            onClick={onCreateAdjustmentLayer}
-            title={t('effects.colorPanel.adjustmentLayerTooltip')}
-          >
-            <Layers className="w-3 h-3 mr-1" />
-            {t('effects.colorPanel.adjustmentLayer')}
-          </Button>
-        )}
+  const compareControls = (
+    <div
+      className="grid grid-cols-3 gap-1"
+      role="group"
+      aria-label={t('effects.colorPanel.compareMode')}
+    >
+      <Button
+        variant={colorGradeComparisonMode === 'off' ? 'default' : 'outline'}
+        size="sm"
+        className="h-7 px-1 text-xs"
+        onClick={() => setColorGradeComparisonMode('off')}
+        title={t('effects.colorPanel.compareAfterTooltip')}
+        aria-label={t('effects.colorPanel.compareAfterTooltip')}
+        aria-pressed={colorGradeComparisonMode === 'off'}
+      >
+        <Eye className="mr-1 h-3 w-3" />
+        {t('effects.colorPanel.compareAfter')}
+      </Button>
+      <Button
+        variant={colorGradeComparisonMode === 'before' ? 'default' : 'outline'}
+        size="sm"
+        className="h-7 px-1 text-xs"
+        onClick={() => setColorGradeComparisonMode('before')}
+        title={t('effects.colorPanel.compareBeforeTooltip')}
+        aria-label={t('effects.colorPanel.compareBeforeTooltip')}
+        aria-pressed={colorGradeComparisonMode === 'before'}
+      >
+        <CircleOff className="mr-1 h-3 w-3" />
+        {t('effects.colorPanel.compareBefore')}
+      </Button>
+      <Button
+        variant={colorGradeComparisonMode === 'split' ? 'default' : 'outline'}
+        size="sm"
+        className="h-7 px-1 text-xs"
+        onClick={() => setColorGradeComparisonMode('split')}
+        title={t('effects.colorPanel.compareSplitTooltip')}
+        aria-label={t('effects.colorPanel.compareSplitTooltip')}
+        aria-pressed={colorGradeComparisonMode === 'split'}
+      >
+        <Columns2 className="mr-1 h-3 w-3" />
+        {t('effects.colorPanel.compareSplit')}
+      </Button>
+    </div>
+  )
+
+  const gradeActions = (
+    <div className="flex gap-1">
+      {onCreateAdjustmentLayer && (
         <Button
           variant="outline"
           size="sm"
-          className="h-7 px-2"
-          onClick={() => setPresetNameDraft((current) => (current === null ? '' : null))}
-          disabled={gradeEffects.length === 0}
-          title={t('effects.colorPanel.savePresetTooltip')}
+          className="h-7 flex-1 text-xs"
+          onClick={onCreateAdjustmentLayer}
+          title={t('effects.colorPanel.adjustmentLayerTooltip')}
         >
-          <Save className="w-3.5 h-3.5" />
+          <Layers className="mr-1 h-3 w-3" />
+          {t('effects.colorPanel.adjustmentLayer')}
         </Button>
-      </div>
-
-      {presetNameDraft !== null && (
-        <div className="px-2 pb-2 flex gap-1">
-          <input
-            type="text"
-            value={presetNameDraft}
-            onChange={(event) => setPresetNameDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') handleSavePreset()
-              if (event.key === 'Escape') setPresetNameDraft(null)
-              event.stopPropagation()
-            }}
-            placeholder={t('effects.colorPanel.presetNamePlaceholder')}
-            className="h-7 flex-1 min-w-0 rounded-sm border border-input bg-transparent px-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-          />
-          <Button
-            variant="default"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={handleSavePreset}
-            disabled={!presetNameDraft.trim()}
-          >
-            {t('effects.colorPanel.savePreset')}
-          </Button>
-        </div>
       )}
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2"
+        onClick={() => setPresetNameDraft((current) => (current === null ? '' : null))}
+        disabled={gradeEffects.length === 0}
+        title={savePresetLabel}
+        aria-label={savePresetLabel}
+      >
+        <Save className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  )
+
+  const presetNameInput = presetNameDraft !== null && (
+    <div className="flex gap-1 px-2 pb-2">
+      <input
+        type="text"
+        name="gradePresetName"
+        autoComplete="off"
+        aria-label={t('effects.colorPanel.presetNamePlaceholder')}
+        value={presetNameDraft}
+        onChange={(event) => setPresetNameDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') handleSavePreset()
+          if (event.key === 'Escape') setPresetNameDraft(null)
+          event.stopPropagation()
+        }}
+        placeholder={t('effects.colorPanel.presetNamePlaceholder')}
+        className="h-7 min-w-0 flex-1 rounded-sm border border-input bg-transparent px-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        // eslint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus
+      />
+      <Button
+        variant="default"
+        size="sm"
+        className="h-7 text-xs"
+        onClick={handleSavePreset}
+        disabled={!presetNameDraft.trim()}
+      >
+        {t('effects.colorPanel.savePreset')}
+      </Button>
+    </div>
+  )
+
+  const gradeGallery = gradePresets.length > 0 && (
+    <div className="px-2 pb-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {t('effects.colorPanel.gallery')}
+        </span>
+      </div>
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {gradePresets.map((preset) => (
+          <div
+            key={preset.id}
+            className="group relative min-w-[104px] rounded-sm border border-border/70 bg-secondary/35"
+          >
+            <button
+              type="button"
+              className="flex h-12 w-full flex-col items-start justify-between rounded-sm px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={() => handleApplyGradePreset(preset.id)}
+              title={t('effects.colorPanel.applyPresetTooltip', { name: preset.name })}
+              aria-label={t('effects.colorPanel.applyPresetTooltip', { name: preset.name })}
+            >
+              <span className="h-1 w-full rounded-full bg-gradient-to-r from-slate-500 via-amber-300 to-sky-400" />
+              <span className="max-w-[80px] truncate text-xs font-medium">{preset.name}</span>
+            </button>
+            <button
+              type="button"
+              className="absolute right-1 top-1 hidden h-4 w-4 items-center justify-center rounded-sm bg-black/55 text-white/80 hover:text-white focus:flex group-hover:flex group-focus-within:flex"
+              onClick={(event) => {
+                event.stopPropagation()
+                void removeUserPreset(preset.id)
+              }}
+              title={t('effects.colorPanel.deletePresetTooltip', { name: preset.name })}
+              aria-label={t('effects.colorPanel.deletePresetTooltip', { name: preset.name })}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  const wheelsPanel = (
+    <GpuWheelsPanel
+      itemIds={itemIds}
+      effect={wheelsEntry}
+      gpuEffect={wheelsGpuEffect}
+      definition={wheelsDefinition}
+      layout={layout}
+      getKeyframeProperty={getKeyframeProperty}
+      onParamChange={handleParamChange}
+      onParamLiveChange={handleParamLiveChange}
+      onParamsBatchChange={handleParamsBatchChange}
+      onParamsBatchLiveChange={handleParamsBatchLiveChange}
+      onReset={handleReset}
+      onToggle={handleToggle}
+      onRemove={handleRemove}
+    />
+  )
+
+  const curvesPanel = (
+    <GpuCurvesPanel
+      effect={curvesEntry}
+      gpuEffect={curvesGpuEffect}
+      definition={curvesDefinition}
+      layout={layout}
+      onParamChange={handleParamChange}
+      onParamLiveChange={handleParamLiveChange}
+      onParamsBatchChange={handleParamsBatchChange}
+      onParamsBatchLiveChange={handleParamsBatchLiveChange}
+      onReset={handleReset}
+      onToggle={handleToggle}
+      onRemove={handleRemove}
+    />
+  )
+
+  if (layout === 'dock') {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[3px] border border-border/70 bg-background/35">
+        <div className="grid shrink-0 gap-2 border-b border-border/70 p-2 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,0.75fr)]">
+          {compareControls}
+          {gradeActions}
+        </div>
+        {presetNameInput}
+        {gradeGallery}
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.28fr)_minmax(0,0.72fr)]">
+          <DockPane title={getEffectDefinitionName(wheelsDefinition)} className="border-r border-border/70">
+            {wheelsPanel}
+          </DockPane>
+          <DockPane title={getEffectDefinitionName(curvesDefinition)}>{curvesPanel}</DockPane>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <PropertySection title={t('effects.colorPanel.title')} icon={Palette} defaultOpen={true}>
+      <div className="px-2 pb-1">{compareControls}</div>
+
+      <div className="px-2 pb-2">{gradeActions}</div>
+
+      {presetNameInput}
+
+      {gradeGallery}
 
       <div className="space-y-0">
-        <GpuWheelsPanel
-          itemIds={itemIds}
-          effect={wheelsEntry}
-          gpuEffect={wheelsEntry.effect as GpuEffect}
-          definition={wheelsDefinition}
-          getKeyframeProperty={getKeyframeProperty}
-          onParamChange={handleParamChange}
-          onParamLiveChange={handleParamLiveChange}
-          onParamsBatchChange={handleParamsBatchChange}
-          onParamsBatchLiveChange={handleParamsBatchLiveChange}
-          onReset={handleReset}
-          onToggle={handleToggle}
-          onRemove={handleRemove}
-        />
-        <GpuCurvesPanel
-          effect={curvesEntry}
-          gpuEffect={curvesEntry.effect as GpuEffect}
-          definition={curvesDefinition}
-          onParamChange={handleParamChange}
-          onParamLiveChange={handleParamLiveChange}
-          onParamsBatchChange={handleParamsBatchChange}
-          onParamsBatchLiveChange={handleParamsBatchLiveChange}
-          onReset={handleReset}
-          onToggle={handleToggle}
-          onRemove={handleRemove}
-        />
+        {wheelsPanel}
+        {curvesPanel}
       </div>
     </PropertySection>
   )

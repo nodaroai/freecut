@@ -36,7 +36,7 @@
     "channelRed": "Rojo",
     "channelGreen": "Verde",
     "channelBlue": "Azul",
-    "multiPointHint": "Haz clic en la curva para añadir un punto. Haz doble clic en un punto para eliminarlo."
+    "multiPointHint": "Haz clic en la curva {{channel}} para añadir un punto. Haz doble clic en un punto para eliminarlo."
   },
   "wheels": {
     "resetWheel": "Restablecer {{name}}",

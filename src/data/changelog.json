@@ -1,7 +1,7 @@
 {
   "current": {
     "version": "current",
-    "date": "2026-05-29",
+    "date": "2026-06-12",
     "groups": {
       "added": [
         {
@@ -15,6 +15,9 @@
         },
         {
           "title": "Automatic caption styling, with per-item progress in the AI panel"
+        },
+        {
+          "title": "DaVinci-style Color workspace with wheels, curves, LUT import, grade presets, bypass, and copy/paste grading"
         }
       ],
       "fixed": [

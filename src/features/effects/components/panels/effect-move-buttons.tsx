@@ -21,6 +21,8 @@ export function EffectMoveButtons({
 }: EffectMoveProps & { effectId: string }) {
   const { t } = useTranslation()
   if (!onMove) return null
+  const moveUpLabel = t('effects.panel.moveUp')
+  const moveDownLabel = t('effects.panel.moveDown')
 
   return (
     <>
@@ -29,7 +31,8 @@ export function EffectMoveButtons({
         size="icon"
         className={`h-6 w-6 flex-shrink-0 ${canMoveUp ? '' : 'opacity-30'}`}
         onClick={() => onMove(effectId, -1)}
-        title={t('effects.panel.moveUp')}
+        title={moveUpLabel}
+        aria-label={moveUpLabel}
         disabled={!canMoveUp}
       >
         <ChevronUp className="w-3 h-3" />
@@ -39,7 +42,8 @@ export function EffectMoveButtons({
         size="icon"
         className={`h-6 w-6 flex-shrink-0 ${canMoveDown ? '' : 'opacity-30'}`}
         onClick={() => onMove(effectId, 1)}
-        title={t('effects.panel.moveDown')}
+        title={moveDownLabel}
+        aria-label={moveDownLabel}
         disabled={!canMoveDown}
       >
         <ChevronDown className="w-3 h-3" />

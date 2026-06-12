@@ -5,7 +5,7 @@ import { seedTimelineWithVideoAndAudioTracks } from '../test-helpers'
 import { useItemsStore } from '../stores/items-store'
 import { useTimelineCommandStore } from '../stores/timeline-command-store'
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
-import { addEffect } from '../stores/actions/effect-actions'
+import { addEffect, toggleEffect } from '../stores/actions/effect-actions'
 import { copyGradeFromItem, itemHasColorGrade, pasteGradeToItems } from './grade-clipboard-ops'
 
 function makeColorEffect(amount = 0.5): VisualEffect {
@@ -74,8 +74,36 @@ describe('grade clipboard ops', () => {
 
     const targetEffects = getEffects('target')
     expect(targetEffects).toHaveLength(2)
-    expect(targetEffects[0]?.effect.gpuEffectType).toBe('gpu-gaussian-blur')
-    expect(targetEffects[1]?.effect.params.amount).toBe(0.9)
+    expect(targetEffects[0]?.effect.params.amount).toBe(0.9)
+    expect(targetEffects[1]?.effect.gpuEffectType).toBe('gpu-gaussian-blur')
+  })
+
+  it('paste preserves disabled state from the copied grade', () => {
+    addEffect('source', makeColorEffect(0.9))
+    const sourceEffect = getEffects('source')[0]
+    expect(sourceEffect).toBeDefined()
+    toggleEffect('source', sourceEffect!.id)
+
+    copyGradeFromItem('source')
+    pasteGradeToItems(['target'])
+
+    expect(getEffects('target')[0]?.enabled).toBe(false)
+  })
+
+  it('paste replaces color effects at their original stack position', () => {
+    addEffect('source', makeColorEffect(0.9))
+    addEffect('target', makeColorEffect(0.1))
+    addEffect('target', makeNonColorEffect())
+
+    copyGradeFromItem('source')
+    pasteGradeToItems(['target'])
+
+    const targetEffects = getEffects('target')
+    expect(targetEffects.map((entry) => entry.effect.gpuEffectType)).toEqual([
+      'gpu-brightness',
+      'gpu-gaussian-blur',
+    ])
+    expect(targetEffects[0]?.effect.params.amount).toBe(0.9)
   })
 
   it('paste is undoable as a single step across items', () => {
@@ -105,6 +133,6 @@ describe('grade clipboard ops', () => {
 
     const clipboardGrade = useGradeClipboardStore.getState().grade
     const pasted = getEffects('target')[0]
-    expect(pasted?.effect.params).not.toBe(clipboardGrade?.[0]?.params)
+    expect(pasted?.effect.params).not.toBe(clipboardGrade?.[0]?.effect.params)
   })
 })

@@ -495,6 +495,9 @@ function resetStores() {
     preview: null,
     snapLines: [],
     canvasBackgroundPreview: null,
+    colorGradeBypassed: false,
+    colorGradeComparisonMode: 'off',
+    colorGradeSplitPosition: 0.5,
   })
   useMaskEditorStore.getState().stopEditing()
 
@@ -1352,6 +1355,54 @@ describe('VideoPreview sync behavior', () => {
       expect(getDisplayedFrame()).toBe(24)
       expect(scrubCanvas.style.visibility).toBe('visible')
     })
+  })
+
+  it('renders split grade comparison with preview-only color effects disabled', async () => {
+    setSingleVideoItemAtFrame({
+      id: 'item-graded',
+      effects: [
+        {
+          id: 'effect-grade',
+          enabled: true,
+          effect: {
+            type: 'gpu-effect',
+            gpuEffectType: 'gpu-color-wheels',
+            params: { exposure: 0.5, contrast: 1.2 },
+          },
+        },
+      ],
+    })
+
+    const { renderer, scrubCanvas } = await renderReadySingleRendererPreview(24, {
+      expectedDisplayedFrame: 24,
+    })
+
+    renderer.invalidateFrameCache.mockClear()
+    renderer.renderFrame.mockClear()
+
+    act(() => {
+      useGizmoStore.getState().setColorGradeComparisonMode('split')
+    })
+
+    await waitFor(() => {
+      expect(renderer.invalidateFrameCache).toHaveBeenCalled()
+      expect(renderer.renderFrame).toHaveBeenCalledWith(24)
+      expect(scrubCanvas.style.visibility).toBe('visible')
+      expect(scrubCanvas.style.clipPath).toBe('inset(0 50% 0 0)')
+    })
+
+    const rendererCalls = createCompositionRendererMock.mock.calls as unknown as Array<
+      [
+        unknown,
+        unknown,
+        unknown,
+        { getPreviewEffectsOverride?: (itemId: string) => Array<{ enabled: boolean }> | undefined },
+      ]
+    >
+    const rendererOptions = rendererCalls[0]?.[3]
+    const previewEffects = rendererOptions?.getPreviewEffectsOverride?.('item-graded')
+    expect(previewEffects?.[0]?.enabled).toBe(false)
+    expect(useItemsStore.getState().itemById['item-graded']?.effects?.[0]?.enabled).toBe(true)
   })
 
   it('re-renders the paused currentFrame after media resolution finishes on refresh', async () => {

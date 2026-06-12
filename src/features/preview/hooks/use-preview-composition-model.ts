@@ -192,7 +192,9 @@ export function usePreviewCompositionModel({
   const getPreviewEffectsOverride = useCallback((itemId: string): ItemEffect[] | undefined => {
     const gizmoState = useGizmoStore.getState()
     const overriddenEffects = gizmoState.preview?.[itemId]?.effects
-    if (!gizmoState.colorGradeBypassed) {
+    const shouldBypassGrade =
+      gizmoState.colorGradeBypassed || gizmoState.colorGradeComparisonMode !== 'off'
+    if (!shouldBypassGrade) {
       return overriddenEffects
     }
     // Grade bypass: disable color-category effects in the preview only.

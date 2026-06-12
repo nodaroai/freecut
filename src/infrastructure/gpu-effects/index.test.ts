@@ -126,6 +126,123 @@ describe('GPU effect registry', () => {
     ).toBe(false)
   })
 
+  it('registers color wheels with neutral primary grading defaults', () => {
+    const effect = getGpuEffect('gpu-color-wheels')
+    expect(effect).toBeDefined()
+    expect(effect?.uniformSize).toBe(112)
+
+    const defaults = getGpuEffectDefaultParams('gpu-color-wheels')
+    expect(defaults).toMatchObject({
+      shadowsHue: 0,
+      shadowsAmount: 0,
+      midtonesHue: 0,
+      midtonesAmount: 0,
+      highlightsHue: 0,
+      highlightsAmount: 0,
+      offsetHue: 0,
+      offsetAmount: 0,
+      temperature: 0,
+      tint: 0,
+      saturation: 0,
+      exposure: 0,
+      contrast: 1,
+      pivot: 0.5,
+      lift: 0,
+      gamma: 1,
+      gain: 1,
+      offset: 0,
+      blackPoint: 0,
+      whitePoint: 1,
+      midDetail: 0,
+      colorBoost: 0,
+      shadows: 0,
+      highlights: 0,
+      hue: 50,
+      lumMix: 100,
+    })
+
+    expect(Array.from(effect!.packUniforms(defaults, 1920, 1080)!)).toEqual([
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0.5, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0,
+      0, 50, 100, 0, 0,
+    ])
+  })
+
+  it('registers the secondary qualifier with HSL/luma matte controls', () => {
+    const effect = getGpuEffect('gpu-secondary-qualifier')
+    expect(effect).toBeDefined()
+    expect(effect?.category).toBe('color')
+    expect(effect?.uniformSize).toBe(64)
+
+    const defaults = getGpuEffectDefaultParams('gpu-secondary-qualifier')
+    expect(defaults).toEqual({
+      hueCenter: 0,
+      hueWidth: 35,
+      hueSoftness: 20,
+      satLow: 0,
+      satHigh: 1,
+      satSoftness: 0.1,
+      lumaLow: 0,
+      lumaHigh: 1,
+      lumaSoftness: 0.1,
+      invertMask: false,
+      showMask: false,
+      exposure: 0,
+      saturation: 0,
+      temperature: 0,
+      tint: 0,
+      strength: 1,
+    })
+
+    expect(Array.from(effect!.packUniforms(defaults, 1920, 1080)!)).toEqual(
+      Array.from(new Float32Array([0, 35, 20, 0, 1, 0.1, 0, 1, 0.1, 0, 0, 0, 0, 0, 0, 1])),
+    )
+
+    const matteDefaults = { ...defaults, invertMask: true, showMask: true }
+    const matteUniforms = Array.from(effect!.packUniforms(matteDefaults, 1920, 1080)!)
+    expect(matteUniforms[9]).toBe(1)
+    expect(matteUniforms[10]).toBe(1)
+  })
+
+  it('registers the power window with spatial matte controls', () => {
+    const effect = getGpuEffect('gpu-power-window')
+    expect(effect).toBeDefined()
+    expect(effect?.category).toBe('color')
+    expect(effect?.uniformSize).toBe(64)
+
+    const defaults = getGpuEffectDefaultParams('gpu-power-window')
+    expect(defaults).toEqual({
+      shape: 'ellipse',
+      centerX: 0.5,
+      centerY: 0.5,
+      sizeX: 0.5,
+      sizeY: 0.5,
+      rotation: 0,
+      feather: 0.15,
+      invertMask: false,
+      showMask: false,
+      exposure: 0,
+      saturation: 0,
+      temperature: 0,
+      tint: 0,
+      strength: 1,
+    })
+
+    expect(Array.from(effect!.packUniforms(defaults, 1920, 1080)!)).toEqual(
+      Array.from(
+        new Float32Array([0, 0.5, 0.5, 0.5, 0.5, 0, 0.15, 0, 0, 0, 0, 0, 0, 1, 1920, 1080]),
+      ),
+    )
+
+    const rectMatte = Array.from(
+      effect!.packUniforms({ ...defaults, shape: 'rectangle', invertMask: true, showMask: true }, 3840, 2160)!,
+    )
+    expect(rectMatte[0]).toBe(1)
+    expect(rectMatte[7]).toBe(1)
+    expect(rectMatte[8]).toBe(1)
+    expect(rectMatte[14]).toBe(3840)
+    expect(rectMatte[15]).toBe(2160)
+  })
+
   it('returns undefined for unknown effect ids without throwing', () => {
     expect(getGpuEffect('nope-not-here')).toBeUndefined()
     expect(getGpuEffect('')).toBeUndefined()

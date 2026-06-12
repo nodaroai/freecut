@@ -72,8 +72,24 @@ const logger = createLogger('VideoPreview')
 type TransitionWindow = ResolvedTransitionWindow<TimelineItem>
 type PlaybackTransitionOverlayWindows = Parameters<typeof resolvePlaybackTransitionOverlayState>[0]
 type PlaybackStoreSnapshot = ReturnType<typeof usePlaybackStore.getState>
+type GizmoStoreSnapshot = ReturnType<typeof useGizmoStore.getState>
 
 type FastScrubRenderer = CompositionRendererInstance
+
+function getGizmoPreviewInvalidation(
+  state: GizmoStoreSnapshot,
+  prev: GizmoStoreSnapshot,
+): 'all' | 'frame' | null {
+  const unifiedPreviewChanged = state.preview !== prev.preview
+  const transformPreviewChanged = state.previewTransform !== prev.previewTransform
+  const gradeBypassChanged =
+    state.colorGradeBypassed !== prev.colorGradeBypassed ||
+    state.colorGradeComparisonMode !== prev.colorGradeComparisonMode
+
+  if (gradeBypassChanged) return 'all'
+  if (unifiedPreviewChanged || (transformPreviewChanged && state.activeGizmo)) return 'frame'
+  return null
+}
 
 type PreviewPerfState = {
   fastScrubPrewarmSourceEvictions: number
@@ -1521,17 +1537,8 @@ export function usePreviewRenderPump({
       // mediabunny (exact), causing a visible frame shift — especially at
       // soft-edge crop boundaries where the content difference is amplified.
       if (!forceFastScrubOverlay) return
-      const unifiedPreviewChanged = state.preview !== prev.preview
-      const transformPreviewChanged = state.previewTransform !== prev.previewTransform
-      const gradeBypassChanged = state.colorGradeBypassed !== prev.colorGradeBypassed
-      // Gizmo transform changes require an active gizmo; effect preview changes don't.
-      if (
-        !unifiedPreviewChanged &&
-        !gradeBypassChanged &&
-        !(transformPreviewChanged && state.activeGizmo)
-      ) {
-        return
-      }
+      const invalidation = getGizmoPreviewInvalidation(state, prev)
+      if (!invalidation) return
 
       const playbackState = usePlaybackStore.getState()
       const currentFrame = playbackState.currentFrame
@@ -1541,9 +1548,9 @@ export function usePreviewRenderPump({
       // Invalidate before requesting a repaint so gizmo resize/translate and
       // live panel previews re-composite immediately. Grade bypass affects
       // every frame, so it evicts the whole cache.
-      if (gradeBypassChanged && scrubRendererRef.current) {
+      if (invalidation === 'all' && scrubRendererRef.current) {
         scrubRendererRef.current.invalidateFrameCache()
-      } else if ((unifiedPreviewChanged || transformPreviewChanged) && scrubRendererRef.current) {
+      } else if (scrubRendererRef.current) {
         scrubRendererRef.current.invalidateFrameCache({ frames: [currentFrame] })
       }
 

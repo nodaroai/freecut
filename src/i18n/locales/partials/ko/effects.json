@@ -36,7 +36,7 @@
     "channelRed": "빨강",
     "channelGreen": "초록",
     "channelBlue": "파랑",
-    "multiPointHint": "곡선을 클릭하면 포인트가 추가됩니다. 포인트를 더블 클릭하면 제거됩니다."
+    "multiPointHint": "{{channel}} 곡선을 클릭하면 포인트가 추가됩니다. 포인트를 더블 클릭하면 제거됩니다."
   },
   "wheels": {
     "resetWheel": "{{name}} 재설정",

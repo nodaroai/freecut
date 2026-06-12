@@ -549,6 +549,8 @@
       }
     },
     "colorPanel": {
+      "dockLabel": "Color grading workspace",
+      "dockTitle": "Color",
       "emptyState": "Select a clip to grade",
       "adjustmentLayerLabel": "Grade"
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vite-plus/test'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import type { CSSProperties, ReactNode, RefObject } from 'react'
 import type { CompositionInputProps } from '@/types/export'
 
@@ -66,6 +66,36 @@ function createInputProps(): CompositionInputProps {
 
 function createRef<T>(): RefObject<T | null> {
   return { current: null }
+}
+
+function renderSplitPreviewStage(
+  overrides: Partial<Parameters<typeof PreviewStage>[0]> = {},
+) {
+  const handleSplitPositionChange = vi.fn()
+  render(
+    <PreviewStage
+      backgroundRef={createRef<HTMLDivElement>()}
+      playerRef={createRef()}
+      scrubCanvasRef={createRef<HTMLCanvasElement>()}
+      gpuEffectsCanvasRef={createRef<HTMLCanvasElement>()}
+      needsOverflow={false}
+      playerSize={{ width: 1280, height: 720 }}
+      playerRenderSize={{ width: 1280, height: 720 }}
+      totalFrames={120}
+      fps={30}
+      isResolving={false}
+      isRenderedOverlayVisible={true}
+      colorGradeComparisonMode="split"
+      inputProps={createInputProps()}
+      onBackgroundClick={() => {}}
+      onFrameChange={() => {}}
+      onPlayStateChange={() => {}}
+      setPlayerContainerRefCallback={() => {}}
+      onColorGradeSplitPositionChange={handleSplitPositionChange}
+      {...overrides}
+    />,
+  )
+  return { handleSplitPositionChange }
 }
 
 describe('getPreviewPixelSnapOffset', () => {
@@ -160,5 +190,64 @@ describe('PreviewStage', () => {
       expect(canvas.style.left).toBe('')
       expect(canvas.style.top).toBe('')
     })
+  })
+
+  it('clips the preview overlay and labels before/after sides in split grade comparison mode', () => {
+    renderSplitPreviewStage()
+
+    const scrubCanvas = document.querySelectorAll('canvas')[0] as HTMLCanvasElement
+    expect(scrubCanvas.style.clipPath).toBe('inset(0 50% 0 0)')
+    expect(screen.getByLabelText('Split grade comparison')).toBeTruthy()
+    expect(screen.getByText('Before')).toBeTruthy()
+    expect(screen.getByText('After')).toBeTruthy()
+    expect(screen.getByRole('slider', { name: 'Adjust split comparison' })).toHaveAttribute(
+      'aria-valuenow',
+      '50',
+    )
+  })
+
+  it('uses a custom split comparison position and nudges it from the handle', () => {
+    const { handleSplitPositionChange } = renderSplitPreviewStage({
+      colorGradeSplitPosition: 0.35,
+    })
+
+    const scrubCanvas = document.querySelectorAll('canvas')[0] as HTMLCanvasElement
+    const wipeHandle = screen.getByRole('slider', { name: 'Adjust split comparison' })
+    expect(scrubCanvas.style.clipPath).toBe('inset(0 65% 0 0)')
+    expect(wipeHandle).toHaveAttribute('aria-valuenow', '35')
+
+    fireEvent.keyDown(wipeHandle, { key: 'ArrowRight' })
+
+    expect(handleSplitPositionChange).toHaveBeenCalledWith(0.36)
+  })
+
+  it('updates the split comparison position from pointer movement', () => {
+    const { handleSplitPositionChange } = renderSplitPreviewStage({
+      colorGradeSplitPosition: 0.5,
+    })
+
+    const playerSurface = document.querySelector('[data-player-container]') as HTMLDivElement | null
+    expect(playerSurface).not.toBeNull()
+    Object.defineProperty(playerSurface!, 'getBoundingClientRect', {
+      value: () => ({
+        x: 100,
+        y: 0,
+        top: 0,
+        left: 100,
+        right: 1380,
+        bottom: 720,
+        width: 1280,
+        height: 720,
+        toJSON: () => ({}),
+      }),
+      configurable: true,
+    })
+
+    const wipeHandle = screen.getByRole('slider', { name: 'Adjust split comparison' })
+    fireEvent.pointerDown(wipeHandle, { pointerId: 1, clientX: 420 })
+    fireEvent.pointerMove(wipeHandle, { pointerId: 1, buttons: 1, clientX: 740 })
+
+    expect(handleSplitPositionChange).toHaveBeenCalledWith(0.25)
+    expect(handleSplitPositionChange).toHaveBeenCalledWith(0.5)
   })
 })

@@ -5,6 +5,7 @@ import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { cn } from '@/shared/ui/cn'
 import { Button } from '@/components/ui/button'
 import { ScopeRenderer } from '@/infrastructure/gpu-scopes'
+import { ScopeCanvasFrame } from './color-scope-overlays'
 
 const SAMPLE_WIDTH_PAUSED = 384
 const SAMPLE_HEIGHT_PAUSED = 216
@@ -359,6 +360,7 @@ function ScopeModeBar({
               : undefined
           }
           onClick={() => onChange(m.value)}
+          aria-pressed={mode === m.value}
         >
           {m.label}
         </button>
@@ -888,6 +890,7 @@ export const ColorScopesView = memo(function ColorScopesView({
               size="sm"
               className="h-5 px-1.5 text-[10px]"
               onClick={() => setColorMatrix('bt709')}
+              aria-pressed={colorMatrix === 'bt709'}
             >
               709
             </Button>
@@ -896,6 +899,7 @@ export const ColorScopesView = memo(function ColorScopesView({
               size="sm"
               className="h-5 px-1.5 text-[10px]"
               onClick={() => setColorMatrix('bt601')}
+              aria-pressed={colorMatrix === 'bt601'}
             >
               601
             </Button>
@@ -906,6 +910,7 @@ export const ColorScopesView = memo(function ColorScopesView({
               size="sm"
               className="h-5 px-1.5 text-[10px]"
               onClick={() => setRangeMode('full')}
+              aria-pressed={rangeMode === 'full'}
             >
               Full
             </Button>
@@ -914,6 +919,7 @@ export const ColorScopesView = memo(function ColorScopesView({
               size="sm"
               className="h-5 px-1.5 text-[10px]"
               onClick={() => setRangeMode('legal')}
+              aria-pressed={rangeMode === 'legal'}
             >
               Legal
             </Button>
@@ -925,6 +931,7 @@ export const ColorScopesView = memo(function ColorScopesView({
                 size="sm"
                 className="h-5 px-1.5 text-[10px]"
                 onClick={() => setStackLayout('three-up')}
+                aria-pressed={stackLayout === 'three-up'}
               >
                 3-Up
               </Button>
@@ -933,6 +940,7 @@ export const ColorScopesView = memo(function ColorScopesView({
                 size="sm"
                 className="h-5 px-1.5 text-[10px]"
                 onClick={() => setStackLayout('all')}
+                aria-pressed={stackLayout === 'all'}
               >
                 All
               </Button>
@@ -958,22 +966,24 @@ export const ColorScopesView = memo(function ColorScopesView({
                 <div className="text-[10px] text-muted-foreground">Waveform</div>
                 {gpuReady && <ScopeModeBar mode={waveformMode} onChange={setWaveformMode} />}
               </div>
-              <div
-                ref={waveformContainerRef}
-                className="flex-1 min-h-[96px] rounded border border-border/70 bg-black/80"
+              <ScopeCanvasFrame
+                containerRef={waveformContainerRef}
+                kind="waveform"
+                className="flex-1 min-h-[96px]"
               >
                 <canvas ref={waveformCanvasRef} className="w-full h-full" />
-              </div>
+              </ScopeCanvasFrame>
             </div>
 
             <div className="flex min-h-0 flex-[1.08] flex-col">
               <div className="text-[10px] mb-1 text-muted-foreground">RGB Parade</div>
-              <div
-                ref={paradeContainerRef}
-                className="flex-1 min-h-[104px] rounded border border-border/70 bg-black/80"
+              <ScopeCanvasFrame
+                containerRef={paradeContainerRef}
+                kind="parade"
+                className="flex-1 min-h-[104px]"
               >
                 <canvas ref={paradeCanvasRef} className="w-full h-full" />
-              </div>
+              </ScopeCanvasFrame>
             </div>
 
             <div
@@ -983,10 +993,11 @@ export const ColorScopesView = memo(function ColorScopesView({
               )}
             >
               <div className="text-[10px] mb-1 text-muted-foreground">Vectorscope</div>
-              <div
-                ref={vectorscopeContainerRef}
+              <ScopeCanvasFrame
+                containerRef={vectorscopeContainerRef}
+                kind="vectorscope"
                 className={cn(
-                  'mx-auto flex min-h-0 min-w-0 w-full flex-1 items-center justify-center overflow-hidden rounded border border-border/70 bg-black/80',
+                  'mx-auto flex min-h-0 min-w-0 w-full flex-1 items-center justify-center',
                   showHistogram ? 'max-w-[272px]' : 'max-w-[320px]',
                 )}
               >
@@ -994,7 +1005,7 @@ export const ColorScopesView = memo(function ColorScopesView({
                   ref={vectorscopeCanvasRef}
                   className="max-w-full max-h-full aspect-square"
                 />
-              </div>
+              </ScopeCanvasFrame>
             </div>
 
             {showHistogram && (
@@ -1003,12 +1014,13 @@ export const ColorScopesView = memo(function ColorScopesView({
                   <div className="text-[10px] text-muted-foreground">Histogram</div>
                   {gpuReady && <ScopeModeBar mode={histogramMode} onChange={setHistogramMode} />}
                 </div>
-                <div
-                  ref={histogramContainerRef}
-                  className="flex-1 min-h-[88px] rounded border border-border/70 bg-black/80"
+                <ScopeCanvasFrame
+                  containerRef={histogramContainerRef}
+                  kind="histogram"
+                  className="flex-1 min-h-[88px]"
                 >
                   <canvas ref={histogramCanvasRef} className="w-full h-full" />
-                </div>
+                </ScopeCanvasFrame>
               </div>
             )}
           </div>
@@ -1020,46 +1032,50 @@ export const ColorScopesView = memo(function ColorScopesView({
                   <div className="text-[10px] text-muted-foreground">Waveform</div>
                   {gpuReady && <ScopeModeBar mode={waveformMode} onChange={setWaveformMode} />}
                 </div>
-                <div
-                  ref={waveformContainerRef}
-                  className="flex-1 min-h-[160px] rounded border border-border/70 bg-black/80"
+                <ScopeCanvasFrame
+                  containerRef={waveformContainerRef}
+                  kind="waveform"
+                  className="flex-1 min-h-[160px]"
                 >
                   <canvas ref={waveformCanvasRef} className="w-full h-full" />
-                </div>
+                </ScopeCanvasFrame>
               </div>
               <div className="flex min-h-0 flex-col">
                 <div className="text-[10px] mb-1 text-muted-foreground">RGB Parade</div>
-                <div
-                  ref={paradeContainerRef}
-                  className="flex-1 min-h-[160px] rounded border border-border/70 bg-black/80"
+                <ScopeCanvasFrame
+                  containerRef={paradeContainerRef}
+                  kind="parade"
+                  className="flex-1 min-h-[160px]"
                 >
                   <canvas ref={paradeCanvasRef} className="w-full h-full" />
-                </div>
+                </ScopeCanvasFrame>
               </div>
               <div className="col-span-2 flex min-h-0 flex-col">
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-[10px] text-muted-foreground">Histogram</div>
                   {gpuReady && <ScopeModeBar mode={histogramMode} onChange={setHistogramMode} />}
                 </div>
-                <div
-                  ref={histogramContainerRef}
-                  className="flex-1 min-h-[160px] rounded border border-border/70 bg-black/80"
+                <ScopeCanvasFrame
+                  containerRef={histogramContainerRef}
+                  kind="histogram"
+                  className="flex-1 min-h-[160px]"
                 >
                   <canvas ref={histogramCanvasRef} className="w-full h-full" />
-                </div>
+                </ScopeCanvasFrame>
               </div>
             </div>
             <div className="basis-[32%] min-w-[220px] max-w-[380px] flex min-h-0 flex-col">
               <div className="text-[10px] mb-1 text-muted-foreground">Vectorscope</div>
-              <div
-                ref={vectorscopeContainerRef}
-                className="flex flex-1 min-h-0 items-center justify-center rounded border border-border/70 bg-black/80"
+              <ScopeCanvasFrame
+                containerRef={vectorscopeContainerRef}
+                kind="vectorscope"
+                className="flex flex-1 min-h-0 items-center justify-center"
               >
                 <canvas
                   ref={vectorscopeCanvasRef}
                   className="max-w-full max-h-full aspect-square"
                 />
-              </div>
+              </ScopeCanvasFrame>
             </div>
           </div>
         )
@@ -1070,21 +1086,23 @@ export const ColorScopesView = memo(function ColorScopesView({
               <div className="text-[10px] text-muted-foreground">Waveform</div>
               {gpuReady && <ScopeModeBar mode={waveformMode} onChange={setWaveformMode} />}
             </div>
-            <div
-              ref={waveformContainerRef}
-              className="w-[220px] h-[110px] rounded border border-border/70 bg-black/80"
+            <ScopeCanvasFrame
+              containerRef={waveformContainerRef}
+              kind="waveform"
+              className="w-[220px] h-[110px]"
             >
               <canvas ref={waveformCanvasRef} className="w-full h-full" />
-            </div>
+            </ScopeCanvasFrame>
           </div>
           <div>
             <div className="text-[10px] mb-1 text-muted-foreground">Vectorscope</div>
-            <div
-              ref={vectorscopeContainerRef}
-              className="w-[160px] h-[160px] rounded border border-border/70 bg-black/80"
+            <ScopeCanvasFrame
+              containerRef={vectorscopeContainerRef}
+              kind="vectorscope"
+              className="w-[160px] h-[160px]"
             >
               <canvas ref={vectorscopeCanvasRef} className="w-full h-full" />
-            </div>
+            </ScopeCanvasFrame>
           </div>
         </div>
       )}

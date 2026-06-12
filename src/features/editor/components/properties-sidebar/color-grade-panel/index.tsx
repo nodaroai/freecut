@@ -4,6 +4,7 @@ import { Palette } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useItemsStore } from '@/features/editor/deps/timeline-store'
+import { KeyframeGraphPanel } from '@/features/editor/deps/timeline-contract'
 import { addAdjustmentLayer } from '@/features/editor/utils/add-adjustment-layer'
 import type { TimelineItem } from '@/types/timeline'
 
@@ -20,10 +21,18 @@ const LazyEffectsSection = lazy(() =>
 
 /**
  * Color workspace inspector: always-visible grade controls (wheels + curves)
- * on top, the full effect stack below. Shown in place of the regular clip
- * panel while the Color workspace is active.
+ * on top, with the remaining effect stack below. Shown in place of the
+ * regular clip panel while the Color workspace is active.
  */
-export const ColorGradePanel = memo(function ColorGradePanel() {
+const COLOR_PANEL_EFFECT_TYPES = ['gpu-color-wheels', 'gpu-curves'] as const
+
+interface ColorGradePanelProps {
+  layout?: 'sidebar' | 'dock'
+}
+
+export const ColorGradePanel = memo(function ColorGradePanel({
+  layout = 'sidebar',
+}: ColorGradePanelProps) {
   const { t } = useTranslation()
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
   const visualItems = useItemsStore(
@@ -47,14 +56,53 @@ export const ColorGradePanel = memo(function ColorGradePanel() {
   const handleCreateAdjustmentLayer = useCallback(() => {
     addAdjustmentLayer(undefined, t('editor.colorPanel.adjustmentLayerLabel'))
   }, [t])
+  const handleKeepKeyframesOpen = useCallback(() => {
+    // The Color page owns this dock; the shared keyframe editor needs a close
+    // callback for its sidebar placement but the color lane is intentionally fixed.
+  }, [])
 
   const hasVisualSelection = useMemo(() => visualItems.length > 0, [visualItems])
 
   if (!hasVisualSelection) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+      <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-2 px-4 py-10 text-center">
         <Palette className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         <p className="text-xs text-muted-foreground">{t('editor.colorPanel.emptyState')}</p>
+      </div>
+    )
+  }
+
+  const sectionClassName = layout === 'dock' ? 'min-h-0 overflow-hidden' : undefined
+
+  if (layout === 'dock') {
+    return (
+      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] gap-3">
+        <Suspense fallback={null}>
+          <div className={sectionClassName}>
+            <LazyColorGradeSection
+              items={visualItems}
+              layout={layout}
+              onCreateAdjustmentLayer={handleCreateAdjustmentLayer}
+            />
+          </div>
+          <div className="grid min-h-0 grid-rows-[minmax(0,0.42fr)_minmax(0,0.58fr)] overflow-hidden rounded-[3px] border border-border/70 bg-background/35">
+            <div className="min-h-0 overflow-hidden border-b border-border/70">
+              <LazyEffectsSection
+                items={visualItems}
+                hiddenGpuEffectTypes={COLOR_PANEL_EFFECT_TYPES}
+                layout="dock"
+              />
+            </div>
+            <div className="min-h-0 overflow-hidden" data-testid="color-keyframes-lane">
+              <KeyframeGraphPanel
+                isOpen={true}
+                placement="side"
+                showCloseButton={false}
+                onClose={handleKeepKeyframesOpen}
+              />
+            </div>
+          </div>
+        </Suspense>
       </div>
     )
   }
@@ -62,11 +110,16 @@ export const ColorGradePanel = memo(function ColorGradePanel() {
   return (
     <div className="space-y-3">
       <Suspense fallback={null}>
-        <LazyColorGradeSection
-          items={visualItems}
-          onCreateAdjustmentLayer={handleCreateAdjustmentLayer}
-        />
-        <LazyEffectsSection items={visualItems} />
+        <div className={sectionClassName}>
+          <LazyColorGradeSection
+            items={visualItems}
+            layout={layout}
+            onCreateAdjustmentLayer={handleCreateAdjustmentLayer}
+          />
+        </div>
+        <div className={sectionClassName}>
+          <LazyEffectsSection items={visualItems} hiddenGpuEffectTypes={COLOR_PANEL_EFFECT_TYPES} />
+        </div>
       </Suspense>
     </div>
   )

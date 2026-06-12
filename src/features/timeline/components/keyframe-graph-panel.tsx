@@ -96,7 +96,9 @@ interface KeyframeGraphPanelProps {
   /** Callback to close the panel */
   onClose: () => void
   /** Where the panel is docked in the layout */
-  placement?: 'bottom' | 'top'
+  placement?: 'bottom' | 'top' | 'side'
+  /** Side-lane docks stay persistent and should not expose a close affordance. */
+  showCloseButton?: boolean
 }
 
 type KeyframeEditorMode = 'graph' | 'dopesheet'
@@ -506,6 +508,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   isOpen,
   onClose,
   placement = 'bottom',
+  showCloseButton = true,
 }: KeyframeGraphPanelProps) {
   const { t } = useTranslation()
   const easingOptions = useMemo(
@@ -1423,8 +1426,15 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     [selectedItemForEditor],
   )
 
+  const isSidePlacement = placement === 'side'
+
   // Clamp content height when max shrinks (e.g. parent resized smaller)
   const clampedContentHeight = Math.min(contentHeight, maxContentHeight)
+  const sideContentHeight = Math.max(
+    MIN_CONTENT_HEIGHT,
+    parentHeight > 0 ? parentHeight - GRAPH_PANEL_HEADER_HEIGHT : MIN_CONTENT_HEIGHT,
+  )
+  const resolvedContentHeight = isSidePlacement ? sideContentHeight : clampedContentHeight
 
   // Calculate total panel height for proper flex sizing
   // When closed, show just the header; when open, show header + resize handle + content
@@ -1453,7 +1463,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   )
   const editorHeight = Math.max(
     0,
-    clampedContentHeight - 16 - advancedControlsHeight - (showAdvancedControls ? 8 : 0),
+    resolvedContentHeight - 16 - advancedControlsHeight - (showAdvancedControls ? 8 : 0),
   )
   // Only render the docked editor when explicitly opened from the toolbar/hotkey.
   // Selecting a clip should not surface the docked panel by itself.
@@ -1506,11 +1516,15 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
       }}
       className={cn(
         'flex-shrink-0 bg-background overflow-hidden outline-none',
-        placement === 'top' ? 'border-b border-border' : 'border-t border-border',
+        isSidePlacement
+          ? 'flex h-full min-h-0 flex-col border-0'
+          : placement === 'top'
+            ? 'border-b border-border'
+            : 'border-t border-border',
         isOpen ? 'opacity-100' : 'opacity-90',
-        !isResizing && 'transition-all duration-200',
+        !isSidePlacement && !isResizing && 'transition-all duration-200',
       )}
-      style={{ height: panelHeight }}
+      style={isSidePlacement ? undefined : { height: panelHeight }}
     >
       {placement === 'bottom' && resizeHandle}
 
@@ -1553,24 +1567,30 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
           >
             {t('timeline.keyframeEditor.sheet')}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 p-0"
-            aria-label={t('common.close')}
-            onClick={(e) => {
-              e.stopPropagation()
-              onClose()
-            }}
-          >
-            <X className="w-3 h-3" />
-          </Button>
+          {showCloseButton && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 p-0"
+              aria-label={t('common.close')}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose()
+              }}
+            >
+              <X className="w-3 h-3" />
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Keyframe editor content */}
       {isOpen && (
-        <div ref={containerRef} className="p-2" style={{ height: clampedContentHeight }}>
+        <div
+          ref={containerRef}
+          className={cn('min-h-0 p-2', isSidePlacement && 'flex-1')}
+          style={isSidePlacement ? undefined : { height: clampedContentHeight }}
+        >
           {showAdvancedControls && (
             <AdvancedEasingControls
               key={advancedControlsKey}

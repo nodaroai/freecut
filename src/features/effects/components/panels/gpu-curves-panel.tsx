@@ -1,11 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eye, EyeOff, RotateCcw, Trash2 } from 'lucide-react'
-import { EffectMoveButtons, type EffectMoveProps } from './effect-move-buttons'
 import { Button } from '@/components/ui/button'
-import type { GpuEffectDefinition } from '@/infrastructure/gpu-effects'
 import { PropertyRow } from '@/shared/ui/property-controls'
+import { cn } from '@/shared/ui/cn'
 import { evaluateMonotoneCurve } from '@/shared/utils/curve-spline'
 import {
   buildGpuCurvesChannelPoints,
@@ -22,26 +20,15 @@ import {
   type GpuCurvesChannelKey,
   type GpuCurvesControlPoint,
 } from '@/shared/utils/gpu-curves'
-import type { GpuEffect, ItemEffect } from '@/types/effects'
+import type { GpuEffect } from '@/types/effects'
 import { getEffectDefinitionName } from '@/features/effects/utils/effect-i18n'
+import { EffectPanelHeaderRow } from './effect-panel-header-actions'
+import type { GpuPanelBaseProps, GpuParamUpdates } from './panel-props'
 
-interface GpuCurvesPanelProps extends EffectMoveProps {
-  effect: ItemEffect
-  gpuEffect: GpuEffect
-  definition: GpuEffectDefinition
-  onParamChange: (effectId: string, paramKey: string, value: number | boolean | string) => void
-  onParamLiveChange: (effectId: string, paramKey: string, value: number | boolean | string) => void
-  onParamsBatchChange: (
-    effectId: string,
-    updates: Record<string, number | boolean | string>,
-  ) => void
-  onParamsBatchLiveChange: (
-    effectId: string,
-    updates: Record<string, number | boolean | string>,
-  ) => void
-  onReset: (effectId: string) => void
-  onToggle: (effectId: string) => void
-  onRemove: (effectId: string) => void
+interface GpuCurvesPanelProps extends GpuPanelBaseProps {
+  layout?: 'sidebar' | 'dock'
+  onParamsBatchChange: (effectId: string, updates: GpuParamUpdates) => void
+  onParamsBatchLiveChange: (effectId: string, updates: GpuParamUpdates) => void
 }
 
 type ChannelPointsDraft = Record<GpuCurvesChannelKey, GpuCurvesControlPoint[]>
@@ -108,10 +95,47 @@ function clampDraggedPoint(
   return { x, y }
 }
 
+function getInsertIndexForCurvePoint(
+  points: GpuCurvesControlPoint[],
+  position: GpuCurvesControlPoint,
+): number | null {
+  if (points.length >= GPU_CURVES_MAX_POINTS) return null
+
+  const firstGreaterIndex = points.findIndex((point) => position.x < point.x)
+  const rawInsertIndex = firstGreaterIndex === -1 ? points.length : firstGreaterIndex
+  const insertIndex = clamp(rawInsertIndex, 1, points.length - 1)
+  const previous = points[insertIndex - 1]
+  const next = points[insertIndex]
+  if (!previous || !next) return null
+
+  const minGap = GPU_CURVES_POINT_MIN_GAP / 2
+  if (position.x - previous.x < minGap || next.x - position.x < minGap) {
+    return null
+  }
+
+  return insertIndex
+}
+
+function getKeyboardPointDelta(
+  event: React.KeyboardEvent<SVGCircleElement>,
+): GpuCurvesControlPoint | null {
+  const step = event.shiftKey ? 0.05 : 0.01
+  if (event.key === 'ArrowLeft') return { x: -step, y: 0 }
+  if (event.key === 'ArrowRight') return { x: step, y: 0 }
+  if (event.key === 'ArrowDown') return { x: 0, y: -step }
+  if (event.key === 'ArrowUp') return { x: 0, y: step }
+  return null
+}
+
+function isRemovePointKey(key: string): boolean {
+  return key === 'Delete' || key === 'Backspace'
+}
+
 export const GpuCurvesPanel = memo(function GpuCurvesPanel({
   effect,
   gpuEffect,
   definition,
+  layout = 'sidebar',
   onParamsBatchChange,
   onParamsBatchLiveChange,
   onReset,
@@ -122,6 +146,7 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
   canMoveDown,
 }: GpuCurvesPanelProps) {
   const { t } = useTranslation()
+  const isDock = layout === 'dock'
   const svgRef = useRef<SVGSVGElement>(null)
   const [activeChannel, setActiveChannel] = useState<GpuCurvesChannelKey>('master')
   const [dragging, setDragging] = useState(false)
@@ -283,6 +308,45 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
     [activeChannel, effect.enabled, effect.id, onParamsBatchChange, updateChannelDraft],
   )
 
+  const handlePointKeyDown = useCallback(
+    (event: React.KeyboardEvent<SVGCircleElement>, index: number) => {
+      if (!effect.enabled) return
+
+      const points = draftRef.current[activeChannel]
+      const point = points[index]
+      if (!point) return
+
+      const isEndpoint = index === 0 || index === points.length - 1
+      if (isRemovePointKey(event.key) && !isEndpoint) {
+        event.preventDefault()
+        const nextPoints = points.filter((_, pointIndex) => pointIndex !== index)
+        updateChannelDraft(activeChannel, nextPoints)
+        onParamsBatchChange(effect.id, {
+          [getGpuCurvesPointsParamKey(activeChannel)]: serializeGpuCurvesChannelPoints(nextPoints),
+        })
+        return
+      }
+
+      const delta = getKeyboardPointDelta(event)
+      if (!delta) return
+      event.preventDefault()
+
+      const nextPoint = clampDraggedPoint(points, index, {
+        x: point.x + delta.x,
+        y: point.y + delta.y,
+      })
+      if (!nextPoint) return
+      const nextPoints = sanitizeGpuCurvesChannelPoints(
+        points.map((candidate, pointIndex) => (pointIndex === index ? nextPoint : candidate)),
+      )
+      updateChannelDraft(activeChannel, nextPoints)
+      onParamsBatchChange(effect.id, {
+        [getGpuCurvesPointsParamKey(activeChannel)]: serializeGpuCurvesChannelPoints(nextPoints),
+      })
+    },
+    [activeChannel, effect.enabled, effect.id, onParamsBatchChange, updateChannelDraft],
+  )
+
   const handleSvgMouseDown = useCallback(
     (event: React.MouseEvent) => {
       if (!effect.enabled || event.button !== 0 || dragRef.current) return
@@ -291,27 +355,8 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
       if (!position) return
 
       const points = draftRef.current[activeChannel]
-      if (points.length >= GPU_CURVES_MAX_POINTS) return
-
-      let insertIndex = points.length
-      for (let i = 0; i < points.length; i += 1) {
-        const point = points[i]
-        if (point && position.x < point.x) {
-          insertIndex = i
-          break
-        }
-      }
-      insertIndex = clamp(insertIndex, 1, points.length - 1)
-
-      const previous = points[insertIndex - 1]
-      const next = points[insertIndex]
-      if (!previous || !next) return
-      if (
-        position.x - previous.x < GPU_CURVES_POINT_MIN_GAP / 2 ||
-        next.x - position.x < GPU_CURVES_POINT_MIN_GAP / 2
-      ) {
-        return
-      }
+      const insertIndex = getInsertIndexForCurvePoint(points, position)
+      if (insertIndex === null) return
 
       event.preventDefault()
       const nextPoints = [
@@ -350,85 +395,75 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
     onParamsBatchChange(effect.id, updates)
   }, [activeChannel, effect.id, onParamsBatchChange, updateChannelDraft])
 
+  const channelControls = (
+    <div className="flex items-center gap-1 flex-wrap justify-end">
+      {CHANNELS.map((channel) => (
+        <Button
+          key={channel.key}
+          variant={activeChannel === channel.key ? 'secondary' : 'outline'}
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => setActiveChannel(channel.key)}
+        >
+          {t(channel.labelKey)}
+        </Button>
+      ))}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2 text-xs"
+        onClick={handleResetChannel}
+        disabled={!effect.enabled}
+      >
+        {t('effects.curves.resetChannel')}
+      </Button>
+    </div>
+  )
+
   return (
-    <div className="space-y-0">
-      <PropertyRow label={getEffectDefinitionName(definition)}>
-        <div className="flex items-center gap-1 min-w-0 w-full justify-end">
-          <EffectMoveButtons
-            effectId={effect.id}
-            onMove={onMove}
-            canMoveUp={canMoveUp}
-            canMoveDown={canMoveDown}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-6 w-6 flex-shrink-0 ${isDefault ? 'opacity-30' : ''}`}
-            onClick={() => onReset(effect.id)}
-            title={t('effects.panel.resetToDefaults')}
-            disabled={isDefault}
-          >
-            <RotateCcw className="w-3 h-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 flex-shrink-0"
-            onClick={() => onToggle(effect.id)}
-            title={
-              effect.enabled ? t('effects.panel.disableEffect') : t('effects.panel.enableEffect')
-            }
-          >
-            {effect.enabled ? (
-              <Eye className="w-3 h-3" />
-            ) : (
-              <EyeOff className="w-3 h-3 text-muted-foreground" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 flex-shrink-0"
-            onClick={() => onRemove(effect.id)}
-            title={t('effects.panel.removeEffect')}
-          >
-            <Trash2 className="w-3 h-3" />
-          </Button>
-        </div>
-      </PropertyRow>
+    <div className={cn('space-y-0', isDock && 'flex h-full min-h-0 flex-col overflow-hidden')}>
+      <EffectPanelHeaderRow
+        label={getEffectDefinitionName(definition)}
+        effectId={effect.id}
+        enabled={effect.enabled}
+        isDefault={isDefault}
+        onReset={onReset}
+        onToggle={onToggle}
+        onRemove={onRemove}
+        onMove={onMove}
+        canMoveUp={canMoveUp}
+        canMoveDown={canMoveDown}
+      />
 
-      <PropertyRow label={t('effects.curves.channel')}>
-        <div className="flex items-center gap-1 flex-wrap justify-end">
-          {CHANNELS.map((channel) => (
-            <Button
-              key={channel.key}
-              variant={activeChannel === channel.key ? 'secondary' : 'outline'}
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={() => setActiveChannel(channel.key)}
-            >
-              {t(channel.labelKey)}
-            </Button>
-          ))}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={handleResetChannel}
-            disabled={!effect.enabled}
-          >
-            {t('effects.curves.resetChannel')}
-          </Button>
+      {isDock ? (
+        <div className="flex h-9 shrink-0 items-center justify-between gap-2 px-2">
+          <span className="text-xs text-muted-foreground">{t('effects.curves.channel')}</span>
+          {channelControls}
         </div>
-      </PropertyRow>
+      ) : (
+        <PropertyRow label={t('effects.curves.channel')}>{channelControls}</PropertyRow>
+      )}
 
-      <div className="px-2">
-        <div className="relative overflow-hidden rounded border border-border/70 bg-black/50">
+      <div className={cn('px-2', isDock && 'min-h-0 flex-1 pb-2')}>
+        <div
+          className={cn(
+            'relative overflow-hidden rounded border border-border/70 bg-black/50',
+            isDock && 'flex h-full items-center justify-center',
+          )}
+        >
           <svg
             ref={svgRef}
             data-curves-editor="true"
+            aria-label={t('effects.curves.editorAriaLabel', {
+              channel: activeChannelLabel,
+              defaultValue: `${activeChannelLabel} curve editor`,
+            })}
             viewBox={`0 0 ${CURVE_SIZE} ${CURVE_SIZE}`}
-            className={`aspect-square w-full ${effect.enabled ? 'cursor-crosshair' : 'cursor-default'}`}
+            className={cn(
+              'aspect-square',
+              isDock ? 'h-full max-h-[220px] w-auto max-w-full' : 'w-full',
+              effect.enabled ? 'cursor-crosshair' : 'cursor-default',
+            )}
             onMouseDown={handleSvgMouseDown}
           >
             {[0.25, 0.5, 0.75].map((grid) => (
@@ -520,6 +555,17 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
                   />
                   <circle
                     data-curve-point={index}
+                    tabIndex={effect.enabled ? 0 : -1}
+                    role="slider"
+                    aria-label={t('effects.curves.pointAriaLabel', {
+                      channel: activeChannelLabel,
+                      index: index + 1,
+                      defaultValue: `${activeChannelLabel} curve point ${index + 1}`,
+                    })}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(point.y * 100)}
+                    aria-valuetext={`input ${Math.round(point.x * 100)}%, output ${Math.round(point.y * 100)}%`}
                     cx={x}
                     cy={y}
                     r={6}
@@ -528,15 +574,18 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
                     strokeWidth={1.5}
                     className={effect.enabled ? 'cursor-move' : 'pointer-events-none'}
                     onMouseDown={(event) => handlePointMouseDown(event, index)}
+                    onKeyDown={(event) => handlePointKeyDown(event, index)}
                   />
                 </g>
               )
             })}
           </svg>
         </div>
-        <div className="mt-1 text-center text-[10px] text-muted-foreground">
-          {t('effects.curves.multiPointHint', { channel: activeChannelLabel.toLowerCase() })}
-        </div>
+        {!isDock && (
+          <div className="mt-1 text-center text-[10px] text-muted-foreground">
+            {t('effects.curves.multiPointHint', { channel: activeChannelLabel.toLowerCase() })}
+          </div>
+        )}
       </div>
     </div>
   )

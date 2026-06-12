@@ -3,6 +3,7 @@ import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { GizmoOverlay } from './gizmo-overlay'
 import { MaskEditorContainer } from './mask-editor-container'
 import { CornerPinContainer } from './corner-pin-container'
+import { PowerWindowOverlayContainer } from './power-window-overlay'
 import { PreviewPerfPanel } from './preview-perf-panel'
 import { PreviewStage } from './preview-stage'
 import { RollingEditOverlay } from './rolling-edit-overlay'
@@ -29,6 +30,7 @@ import { usePreviewSourceWarm } from '../hooks/use-preview-source-warm'
 import { usePreviewTransitionModel } from '../hooks/use-preview-transition-model'
 import { usePreviewViewModel } from '../hooks/use-preview-view-model'
 import { usePreviewTransitionSessionController } from '../hooks/use-preview-transition-session-controller'
+import { useGizmoStore } from '../stores/gizmo-store'
 
 interface VideoPreviewProps {
   project: {
@@ -61,6 +63,9 @@ export const VideoPreview = memo(function VideoPreview({
   suspendOverlay = false,
 }: VideoPreviewProps) {
   const previewRuntimeRefs = usePreviewRuntimeRefs()
+  const colorGradeComparisonMode = useGizmoStore((s) => s.colorGradeComparisonMode)
+  const colorGradeSplitPosition = useGizmoStore((s) => s.colorGradeSplitPosition)
+  const setColorGradeSplitPosition = useGizmoStore((s) => s.setColorGradeSplitPosition)
   const {
     playerRef,
     scrubCanvasRef,
@@ -481,6 +486,12 @@ export const VideoPreview = memo(function VideoPreview({
         projectSize={{ width: project.width, height: project.height }}
         zoom={zoom}
       />
+      <PowerWindowOverlayContainer
+        containerRect={playerContainerRect}
+        playerSize={playerSize}
+        projectSize={{ width: project.width, height: project.height }}
+        zoom={zoom}
+      />
     </>
   ) : null
 
@@ -497,6 +508,9 @@ export const VideoPreview = memo(function VideoPreview({
       fps={fps}
       isResolving={isResolving}
       isRenderedOverlayVisible={isRenderedOverlayVisible}
+      colorGradeComparisonMode={colorGradeComparisonMode}
+      colorGradeSplitPosition={colorGradeSplitPosition}
+      onColorGradeSplitPositionChange={setColorGradeSplitPosition}
       inputProps={inputProps}
       onBackgroundClick={handleBackgroundClick}
       onFrameChange={handleFrameChange}

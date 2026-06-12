@@ -8,7 +8,7 @@
 import type { ItemEffect, VisualEffect } from '@/types/effects'
 import type { TimelineItem } from '@/types/timeline'
 import { isColorGradeEffectType } from '@/infrastructure/gpu-effects'
-import { useGradeClipboardStore } from '@/shared/state/grade-clipboard'
+import { useGradeClipboardStore, type GradeClipboardEntry } from '@/shared/state/grade-clipboard'
 import { useItemsStore } from '../stores/items-store'
 import { setItemEffects } from '../stores/actions/effect-actions'
 
@@ -25,6 +25,44 @@ function cloneVisualEffect(effect: VisualEffect): VisualEffect {
   return { ...effect, params: { ...effect.params } }
 }
 
+function cloneGradeEntry(entry: ItemEffect): GradeClipboardEntry {
+  return {
+    effect: cloneVisualEffect(entry.effect),
+    enabled: entry.enabled,
+  }
+}
+
+function buildPastedGradeEffects(grade: GradeClipboardEntry[]): ItemEffect[] {
+  return grade.map((entry) => ({
+    id: crypto.randomUUID(),
+    effect: cloneVisualEffect(entry.effect),
+    enabled: entry.enabled,
+  }))
+}
+
+function replaceColorEffectsInPlace(effects: ItemEffect[], grade: GradeClipboardEntry[]): ItemEffect[] {
+  const pastedEffects = buildPastedGradeEffects(grade)
+  let inserted = false
+  const nextEffects: ItemEffect[] = []
+
+  for (const entry of effects) {
+    if (!isColorGradeEntry(entry)) {
+      nextEffects.push(entry)
+      continue
+    }
+    if (!inserted) {
+      nextEffects.push(...pastedEffects)
+      inserted = true
+    }
+  }
+
+  if (!inserted) {
+    nextEffects.push(...pastedEffects)
+  }
+
+  return nextEffects
+}
+
 /** Snapshot the item's color effects into the grade clipboard. Returns false when there is nothing to copy. */
 export function copyGradeFromItem(itemId: string): boolean {
   const item = useItemsStore.getState().itemById[itemId]
@@ -32,7 +70,7 @@ export function copyGradeFromItem(itemId: string): boolean {
 
   const grade = (item.effects ?? [])
     .filter(isColorGradeEntry)
-    .map((entry) => cloneVisualEffect(entry.effect))
+    .map((entry) => cloneGradeEntry(entry))
   if (grade.length === 0) return false
 
   useGradeClipboardStore.getState().setGrade(grade)
@@ -54,13 +92,10 @@ export function pasteGradeToItems(itemIds: string[]): boolean {
     const item = itemById[itemId]
     if (!item || item.type === 'audio') continue
 
-    const keptEffects = (item.effects ?? []).filter((entry) => !isColorGradeEntry(entry))
-    const pastedEffects: ItemEffect[] = grade.map((effect) => ({
-      id: crypto.randomUUID(),
-      effect: cloneVisualEffect(effect),
-      enabled: true,
-    }))
-    updates.push({ itemId, effects: [...keptEffects, ...pastedEffects] })
+    updates.push({
+      itemId,
+      effects: replaceColorEffectsInPlace(item.effects ?? [], grade),
+    })
   }
 
   if (updates.length === 0) return false

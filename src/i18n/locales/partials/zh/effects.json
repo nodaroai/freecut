@@ -36,7 +36,7 @@
     "channelRed": "红",
     "channelGreen": "绿",
     "channelBlue": "蓝",
-    "multiPointHint": "点击曲线以添加控制点。双击控制点可将其删除。"
+    "multiPointHint": "点击 {{channel}} 曲线以添加控制点。双击控制点可将其删除。"
   },
   "wheels": {
     "resetWheel": "重置 {{name}}",

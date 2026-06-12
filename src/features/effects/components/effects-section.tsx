@@ -2,41 +2,62 @@ import { useCallback, useMemo, memo, useRef, useState, useEffect, type CSSProper
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { Sparkles, Plus, Eye, EyeOff, Search, X } from 'lucide-react'
-import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import type { TimelineItem } from '@/types/timeline'
-import type { ItemEffect, GpuEffect } from '@/types/effects'
+import type { ItemEffect, GpuEffect, VisualEffect } from '@/types/effects'
 import { EFFECT_PRESETS } from '@/types/effects'
-import { useKeyframesStore, useTimelineStore } from '@/features/effects/deps/timeline-contract'
+import { useTimelineStore } from '@/features/effects/deps/timeline-contract'
 import { useGizmoStore, useThrottledFrame } from '@/features/effects/deps/preview-contract'
 import { PropertySection } from '@/shared/ui/property-controls'
-import { GpuEffectPanel, GpuWheelsPanel, GpuCurvesPanel, GpuLutPanel } from './panels'
+import {
+  GpuEffectPanel,
+  GpuWheelsPanel,
+  GpuCurvesPanel,
+  GpuLutPanel,
+  GpuPowerWindowPanel,
+  GpuSecondaryQualifierPanel,
+} from './panels'
 import { getGpuEffect, getGpuEffectDefaultParams } from '@/infrastructure/gpu-effects'
 import { useGpuEffectPreviewData } from '../hooks/use-gpu-effect-preview-data'
 import { getMappedSelectionEffectEntry } from '../utils/effect-selection'
 import { useUserPresetsStore } from '../stores/user-presets-store'
 import {
   getAutoKeyframeOperation,
-  getResolvedAnimatedEffectParamValue,
 } from '@/features/effects/deps/keyframes-contract'
 import { buildEffectAnimatableProperty, type AnimatableProperty } from '@/types/keyframe'
 import {
   getEffectCategoryLabel,
   getEffectDefinitionName,
 } from '@/features/effects/utils/effect-i18n'
+import {
+  getGpuEffectKeyframeProperty,
+  getResolvedGpuEffectForFrame,
+} from '@/features/effects/utils/effect-keyframes'
+import { useKeyframesByItemId } from '../hooks/use-keyframes-by-item-id'
 
 interface EffectsSectionProps {
   /** Visual items (already filtered to exclude audio) */
   items: TimelineItem[]
+  /** Effect types rendered by a parent-specific control surface. */
+  hiddenGpuEffectTypes?: readonly string[]
+  /** Sidebar keeps the legacy inspector shell; dock fits inside the Color page lane. */
+  layout?: 'sidebar' | 'dock'
 }
+
+const EMPTY_HIDDEN_GPU_EFFECT_TYPES: readonly string[] = []
 
 /**
  * Effects section - GPU shader effects for visual items.
  * Only shown when selection includes video, image, text, or shape clips.
  * Memoized to prevent re-renders when items prop hasn't changed.
  */
-export const EffectsSection = memo(function EffectsSection({ items }: EffectsSectionProps) {
+export const EffectsSection = memo(function EffectsSection({
+  items,
+  hiddenGpuEffectTypes = EMPTY_HIDDEN_GPU_EFFECT_TYPES,
+  layout = 'sidebar',
+}: EffectsSectionProps) {
   const { t } = useTranslation()
+  const isDock = layout === 'dock'
   const addEffect = useTimelineStore((s) => s.addEffect)
   const addEffects = useTimelineStore((s) => s.addEffects)
   const updateEffect = useTimelineStore((s) => s.updateEffect)
@@ -55,95 +76,55 @@ export const EffectsSection = memo(function EffectsSection({ items }: EffectsSec
 
   // Memoize item IDs for stable callback dependencies
   const itemIds = useMemo(() => visualItems.map((item) => item.id), [visualItems])
+  const hiddenGpuEffectTypeSet = useMemo(
+    () => new Set(hiddenGpuEffectTypes),
+    [hiddenGpuEffectTypes],
+  )
+  const isHiddenEffectEntry = useCallback(
+    (entry: ItemEffect): boolean =>
+      entry.effect.type === 'gpu-effect' && hiddenGpuEffectTypeSet.has(entry.effect.gpuEffectType),
+    [hiddenGpuEffectTypeSet],
+  )
+  const hasHiddenGpuEffect = useCallback(
+    (presetEffects: readonly VisualEffect[]): boolean =>
+      presetEffects.some((effect) => hiddenGpuEffectTypeSet.has(effect.gpuEffectType)),
+    [hiddenGpuEffectTypeSet],
+  )
 
   // Get effects from first selected item (for display)
   // Multi-select shows first item's effects
-  const effects = useMemo<ItemEffect[]>(() => visualItems[0]?.effects ?? [], [visualItems])
-  const displayItem = visualItems[0] ?? null
-  const itemKeyframes = useKeyframesStore(
-    useShallow(
-      useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId] ?? null), [itemIds]),
-    ),
+  const effects = useMemo<ItemEffect[]>(
+    () => (visualItems[0]?.effects ?? []).filter((entry) => !isHiddenEffectEntry(entry)),
+    [isHiddenEffectEntry, visualItems],
   )
-  const keyframesByItemId = useMemo(() => {
-    const map = new Map<string, (typeof itemKeyframes)[number]>()
-    for (const [index, itemId] of itemIds.entries()) {
-      map.set(itemId, itemKeyframes[index] ?? null)
-    }
-    return map
-  }, [itemIds, itemKeyframes])
+  const displayItem = visualItems[0] ?? null
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   const getMappedEffectEntry = useCallback(
     (item: TimelineItem, displayEffectId: string): ItemEffect | null => {
-      return getMappedSelectionEffectEntry(effects, item.effects, displayEffectId)
+      return getMappedSelectionEffectEntry(
+        effects,
+        item.effects?.filter((entry) => !isHiddenEffectEntry(entry)),
+        displayEffectId,
+      )
     },
-    [effects],
+    [effects, isHiddenEffectEntry],
   )
 
   const getKeyframeProperty = useCallback(
     (effectId: string, paramKey: string): AnimatableProperty | null => {
       const effect = effects.find((entry) => entry.id === effectId)
-      if (!effect || effect.effect.type !== 'gpu-effect') {
-        return null
-      }
-
-      const definition = getGpuEffect(effect.effect.gpuEffectType)
-      const param = definition?.params[paramKey]
-      if (!definition || param?.type !== 'number' || !param.animatable) {
-        return null
-      }
-
-      return buildEffectAnimatableProperty(effect.effect.gpuEffectType, effectId, paramKey)
+      return effect ? getGpuEffectKeyframeProperty(effect, paramKey) : null
     },
     [effects],
   )
 
   const getResolvedDisplayGpuEffect = useCallback(
     (effectEntry: ItemEffect): GpuEffect => {
-      const gpuEffect = effectEntry.effect as GpuEffect
-      if (!displayItem) {
-        return gpuEffect
-      }
-
-      const definition = getGpuEffect(gpuEffect.gpuEffectType)
-      if (!definition) {
-        return gpuEffect
-      }
-
-      const itemKeyframeState = keyframesByItemId.get(displayItem.id) ?? undefined
-      const relativeFrame = currentFrame - displayItem.from
-      let nextParams = gpuEffect.params
-      let changed = false
-
-      for (const [paramKey, param] of Object.entries(definition.params)) {
-        if (param.type !== 'number' || !param.animatable) {
-          continue
-        }
-
-        const value = getResolvedAnimatedEffectParamValue(
-          effectEntry,
-          itemKeyframeState ?? undefined,
-          relativeFrame,
-          paramKey,
-        )
-        if (value === null || nextParams[paramKey] === value) {
-          continue
-        }
-
-        if (!changed) {
-          nextParams = { ...gpuEffect.params }
-          changed = true
-        }
-
-        nextParams[paramKey] = value
-      }
-
-      return changed
-        ? {
-            ...gpuEffect,
-            params: nextParams,
-          }
-        : gpuEffect
+      const itemKeyframeState = displayItem
+        ? (keyframesByItemId.get(displayItem.id) ?? undefined)
+        : undefined
+      return getResolvedGpuEffectForFrame(effectEntry, displayItem, itemKeyframeState, currentFrame)
     },
     [currentFrame, displayItem, keyframesByItemId],
   )
@@ -463,9 +444,14 @@ export const EffectsSection = memo(function EffectsSection({ items }: EffectsSec
         const targetEffect = getMappedEffectEntry(item, effectId)
         if (!targetEffect) return
         const itemEffects = item.effects ?? []
+        const visibleItemEffects = itemEffects.filter((entry) => !isHiddenEffectEntry(entry))
+        const visibleIndex = visibleItemEffects.findIndex((entry) => entry.id === targetEffect.id)
+        const swapTarget = visibleItemEffects[visibleIndex + direction]
+        if (visibleIndex < 0 || !swapTarget) return
+
         const index = itemEffects.findIndex((entry) => entry.id === targetEffect.id)
-        const swapIndex = index + direction
-        if (index < 0 || swapIndex < 0 || swapIndex >= itemEffects.length) return
+        const swapIndex = itemEffects.findIndex((entry) => entry.id === swapTarget.id)
+        if (index < 0 || swapIndex < 0) return
 
         const reordered = [...itemEffects]
         const moved = reordered[index]!
@@ -477,7 +463,7 @@ export const EffectsSection = memo(function EffectsSection({ items }: EffectsSec
         setItemEffects(updates)
       }
     },
-    [getMappedEffectEntry, setItemEffects, visualItems],
+    [getMappedEffectEntry, isHiddenEffectEntry, setItemEffects, visualItems],
   )
 
   // Remove effect
@@ -572,46 +558,60 @@ export const EffectsSection = memo(function EffectsSection({ items }: EffectsSec
 
   // Filter effects and presets by search query
   const filteredCategories = useMemo(() => {
-    if (!searchQuery.trim()) return gpuCategories
+    const visibleCategories =
+      hiddenGpuEffectTypeSet.size === 0
+        ? gpuCategories
+        : gpuCategories
+            .map(({ category, effects: catEffects }) => ({
+              category,
+              effects: catEffects.filter((def) => !hiddenGpuEffectTypeSet.has(def.id)),
+            }))
+            .filter(({ effects: catEffects }) => catEffects.length > 0)
+
+    if (!searchQuery.trim()) return visibleCategories
     const q = searchQuery.toLowerCase()
-    return gpuCategories
+    return visibleCategories
       .map(({ category, effects: catEffects }) => ({
         category,
         effects: catEffects.filter((def) => getEffectDefinitionName(def).toLowerCase().includes(q)),
       }))
       .filter(({ effects: catEffects }) => catEffects.length > 0)
-  }, [gpuCategories, searchQuery])
+  }, [gpuCategories, hiddenGpuEffectTypeSet, searchQuery])
 
   const filteredPresets = useMemo(() => {
-    if (!searchQuery.trim()) return EFFECT_PRESETS
+    const visiblePresets =
+      hiddenGpuEffectTypeSet.size === 0
+        ? EFFECT_PRESETS
+        : EFFECT_PRESETS.filter((preset) => !hasHiddenGpuEffect(preset.effects))
+    if (!searchQuery.trim()) return visiblePresets
     const q = searchQuery.toLowerCase()
-    return EFFECT_PRESETS.filter((p) => p.name.toLowerCase().includes(q))
-  }, [searchQuery])
+    return visiblePresets.filter((p) => p.name.toLowerCase().includes(q))
+  }, [hasHiddenGpuEffect, hiddenGpuEffectTypeSet, searchQuery])
 
   const filteredUserPresets = useMemo(() => {
-    if (!searchQuery.trim()) return userPresets
+    const visibleUserPresets =
+      hiddenGpuEffectTypeSet.size === 0
+        ? userPresets
+        : userPresets.filter((preset) => !hasHiddenGpuEffect(preset.effects))
+    if (!searchQuery.trim()) return visibleUserPresets
     const q = searchQuery.toLowerCase()
-    return userPresets.filter((p) => p.name.toLowerCase().includes(q))
-  }, [searchQuery, userPresets])
+    return visibleUserPresets.filter((p) => p.name.toLowerCase().includes(q))
+  }, [hasHiddenGpuEffect, hiddenGpuEffectTypeSet, searchQuery, userPresets])
 
   const hasResults =
     filteredCategories.length > 0 || filteredPresets.length > 0 || filteredUserPresets.length > 0
 
-  if (visualItems.length === 0) return null
-
-  return (
-    <PropertySection title={t('effects.section.title')} icon={Sparkles} defaultOpen={true}>
-      {/* Add Effect Picker + Toggle All */}
-      <div className="px-2 pb-2 flex gap-1">
+  const addEffectControls = (
+    <div className={isDock ? 'flex min-w-0 flex-1 gap-1' : 'px-2 pb-2 flex gap-1'}>
         <Button
           ref={triggerRef}
           variant="outline"
           size="sm"
-          className="flex-1 h-7 text-xs"
+          className="flex-1 h-7 min-w-0 text-xs"
           onClick={() => (pickerOpen ? closePicker() : openPicker())}
         >
           <Plus className="w-3 h-3 mr-1" />
-          {t('effects.section.addEffect')}
+          <span className="truncate">{t('effects.section.addEffect')}</span>
         </Button>
         {pickerOpen &&
           createPortal(
@@ -762,87 +762,89 @@ export const EffectsSection = memo(function EffectsSection({ items }: EffectsSec
             ) : (
               <Eye className="w-3.5 h-3.5" />
             )}
-          </Button>
-        )}
+            </Button>
+          )}
       </div>
+  )
 
-      {/* Active Effects List - wrapped to prevent space-y-3 from PropertySection */}
-      <div className="space-y-0">
-        {effects.map((effect, effectIndex) => {
-          if (effect.effect.type === 'gpu-effect') {
-            const gpuEff = effect.effect as GpuEffect
-            const def = getGpuEffect(gpuEff.gpuEffectType)
-            if (!def) return null
-            const displayGpuEffect = getResolvedDisplayGpuEffect(effect)
+  const effectList = (
+    <div className="space-y-0">
+      {effects.map((effect, effectIndex) => {
+        if (effect.effect.type === 'gpu-effect') {
+          const gpuEff = effect.effect as GpuEffect
+          const def = getGpuEffect(gpuEff.gpuEffectType)
+          if (!def) return null
+          const displayGpuEffect = getResolvedDisplayGpuEffect(effect)
 
-            if (gpuEff.gpuEffectType === 'gpu-curves') {
-              return (
-                <GpuCurvesPanel
-                  key={effect.id}
-                  effect={effect}
-                  gpuEffect={displayGpuEffect}
-                  definition={def}
-                  onParamChange={handleGpuParamChange}
-                  onParamLiveChange={handleGpuParamLiveChange}
-                  onParamsBatchChange={handleGpuParamsBatchChange}
-                  onParamsBatchLiveChange={handleGpuParamsBatchLiveChange}
-                  onReset={handleResetGpuEffect}
-                  onToggle={handleToggle}
-                  onRemove={handleRemove}
-                  onMove={handleMoveEffect}
-                  canMoveUp={effectIndex > 0}
-                  canMoveDown={effectIndex < effects.length - 1}
-                />
-              )
-            }
-
-            if (gpuEff.gpuEffectType === 'gpu-lut') {
-              return (
-                <GpuLutPanel
-                  key={effect.id}
-                  itemIds={itemIds}
-                  effect={effect}
-                  gpuEffect={displayGpuEffect}
-                  definition={def}
-                  getKeyframeProperty={getKeyframeProperty}
-                  onParamChange={handleGpuParamChange}
-                  onParamLiveChange={handleGpuParamLiveChange}
-                  onParamsBatchChange={handleGpuParamsBatchChange}
-                  onReset={handleResetGpuEffect}
-                  onToggle={handleToggle}
-                  onRemove={handleRemove}
-                  onMove={handleMoveEffect}
-                  canMoveUp={effectIndex > 0}
-                  canMoveDown={effectIndex < effects.length - 1}
-                />
-              )
-            }
-
-            if (gpuEff.gpuEffectType === 'gpu-color-wheels') {
-              return (
-                <GpuWheelsPanel
-                  key={effect.id}
-                  itemIds={itemIds}
-                  effect={effect}
-                  gpuEffect={displayGpuEffect}
-                  definition={def}
-                  getKeyframeProperty={getKeyframeProperty}
-                  onParamChange={handleGpuParamChange}
-                  onParamLiveChange={handleGpuParamLiveChange}
-                  onParamsBatchChange={handleGpuParamsBatchChange}
-                  onParamsBatchLiveChange={handleGpuParamsBatchLiveChange}
-                  onReset={handleResetGpuEffect}
-                  onToggle={handleToggle}
-                  onRemove={handleRemove}
-                  onMove={handleMoveEffect}
-                  canMoveUp={effectIndex > 0}
-                  canMoveDown={effectIndex < effects.length - 1}
-                />
-              )
-            }
-
+          if (gpuEff.gpuEffectType === 'gpu-curves') {
             return (
-              <GpuEffectPanel
+              <GpuCurvesPanel
+                key={effect.id}
+                effect={effect}
+                gpuEffect={displayGpuEffect}
+                definition={def}
+                onParamChange={handleGpuParamChange}
+                onParamLiveChange={handleGpuParamLiveChange}
+                onParamsBatchChange={handleGpuParamsBatchChange}
+                onParamsBatchLiveChange={handleGpuParamsBatchLiveChange}
+                onReset={handleResetGpuEffect}
+                onToggle={handleToggle}
+                onRemove={handleRemove}
+                onMove={handleMoveEffect}
+                canMoveUp={effectIndex > 0}
+                canMoveDown={effectIndex < effects.length - 1}
+              />
+            )
+          }
+
+          if (gpuEff.gpuEffectType === 'gpu-lut') {
+            return (
+              <GpuLutPanel
+                key={effect.id}
+                itemIds={itemIds}
+                effect={effect}
+                gpuEffect={displayGpuEffect}
+                definition={def}
+                getKeyframeProperty={getKeyframeProperty}
+                onParamChange={handleGpuParamChange}
+                onParamLiveChange={handleGpuParamLiveChange}
+                onParamsBatchChange={handleGpuParamsBatchChange}
+                onReset={handleResetGpuEffect}
+                onToggle={handleToggle}
+                onRemove={handleRemove}
+                onMove={handleMoveEffect}
+                canMoveUp={effectIndex > 0}
+                canMoveDown={effectIndex < effects.length - 1}
+              />
+            )
+          }
+
+          if (gpuEff.gpuEffectType === 'gpu-color-wheels') {
+            return (
+              <GpuWheelsPanel
+                key={effect.id}
+                itemIds={itemIds}
+                effect={effect}
+                gpuEffect={displayGpuEffect}
+                definition={def}
+                getKeyframeProperty={getKeyframeProperty}
+                onParamChange={handleGpuParamChange}
+                onParamLiveChange={handleGpuParamLiveChange}
+                onParamsBatchChange={handleGpuParamsBatchChange}
+                onParamsBatchLiveChange={handleGpuParamsBatchLiveChange}
+                onReset={handleResetGpuEffect}
+                onToggle={handleToggle}
+                onRemove={handleRemove}
+                onMove={handleMoveEffect}
+                canMoveUp={effectIndex > 0}
+                canMoveDown={effectIndex < effects.length - 1}
+              />
+            )
+          }
+
+          if (gpuEff.gpuEffectType === 'gpu-secondary-qualifier') {
+            return (
+              <GpuSecondaryQualifierPanel
                 key={effect.id}
                 itemIds={itemIds}
                 effect={effect}
@@ -861,16 +863,91 @@ export const EffectsSection = memo(function EffectsSection({ items }: EffectsSec
             )
           }
 
-          return null
-        })}
-      </div>
+          if (gpuEff.gpuEffectType === 'gpu-power-window') {
+            return (
+              <GpuPowerWindowPanel
+                key={effect.id}
+                itemIds={itemIds}
+                effect={effect}
+                gpuEffect={displayGpuEffect}
+                definition={def}
+                getKeyframeProperty={getKeyframeProperty}
+                onParamChange={handleGpuParamChange}
+                onParamLiveChange={handleGpuParamLiveChange}
+                onReset={handleResetGpuEffect}
+                onToggle={handleToggle}
+                onRemove={handleRemove}
+                onMove={handleMoveEffect}
+                canMoveUp={effectIndex > 0}
+                canMoveDown={effectIndex < effects.length - 1}
+              />
+            )
+          }
+
+          return (
+            <GpuEffectPanel
+              key={effect.id}
+              itemIds={itemIds}
+              effect={effect}
+              gpuEffect={displayGpuEffect}
+              definition={def}
+              getKeyframeProperty={getKeyframeProperty}
+              onParamChange={handleGpuParamChange}
+              onParamLiveChange={handleGpuParamLiveChange}
+              onReset={handleResetGpuEffect}
+              onToggle={handleToggle}
+              onRemove={handleRemove}
+              onMove={handleMoveEffect}
+              canMoveUp={effectIndex > 0}
+              canMoveDown={effectIndex < effects.length - 1}
+            />
+          )
+        }
+
+        return null
+      })}
+    </div>
+  )
+
+  const emptyState = effects.length === 0 && (
+    <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+      {t('effects.section.emptyState')}
+    </div>
+  )
+
+  if (visualItems.length === 0) return null
+
+  if (isDock) {
+    return (
+      <section
+        className="flex h-full min-h-0 flex-col overflow-hidden"
+        data-testid="effects-section-dock"
+      >
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/70 px-2">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <h3 className="min-w-[4rem] truncate text-[11px] font-semibold text-muted-foreground">
+            {t('effects.section.title')}
+          </h3>
+          {addEffectControls}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-1">
+          {effectList}
+          {emptyState}
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <PropertySection title={t('effects.section.title')} icon={Sparkles} defaultOpen={true}>
+      {/* Add Effect Picker + Toggle All */}
+      {addEffectControls}
+
+      {/* Active Effects List - wrapped to prevent space-y-3 from PropertySection */}
+      {effectList}
 
       {/* Empty state */}
-      {effects.length === 0 && (
-        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
-          {t('effects.section.emptyState')}
-        </div>
-      )}
+      {emptyState}
     </PropertySection>
   )
 })

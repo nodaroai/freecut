@@ -36,13 +36,30 @@
     "channelRed": "Red",
     "channelGreen": "Green",
     "channelBlue": "Blue",
-    "multiPointHint": "Click the curve to add a point. Double-click a point to remove it."
+    "multiPointHint": "Click the {{channel}} curve to add a point. Double-click a point to remove it."
   },
   "wheels": {
+    "adjustWheel": "Adjust {{name}} wheel",
+    "balance": "Balance",
+    "primaries": "Primaries",
+    "primariesColorWheels": "Primaries - Color Wheels",
     "resetWheel": "Reset {{name}}",
     "shadows": "Shadows",
     "midtones": "Midtones",
     "highlights": "Highlights"
+  },
+  "qualifier": {
+    "key": "Key",
+    "matte": "Matte",
+    "correction": "Correction",
+    "hueBand": "Hue range selector"
+  },
+  "powerWindow": {
+    "window": "Window",
+    "matte": "Matte",
+    "correction": "Correction",
+    "ellipse": "Ellipse",
+    "rectangle": "Rectangle"
   },
   "definitions": {
     "gpu-brightness": {
@@ -50,6 +67,12 @@
     },
     "gpu-color-wheels": {
       "name": "Color Wheels"
+    },
+    "gpu-secondary-qualifier": {
+      "name": "Secondary Qualifier"
+    },
+    "gpu-power-window": {
+      "name": "Power Window"
     },
     "gpu-contrast": {
       "name": "Contrast"
@@ -173,6 +196,17 @@
     "exposure": "Exposure (EV)",
     "offset": "Offset",
     "gamma": "Gamma",
+    "contrast": "Contrast",
+    "pivot": "Pivot",
+    "lift": "Lift",
+    "gain": "Gain",
+    "blackPoint": "Black Point",
+    "whitePoint": "White Point",
+    "midDetail": "Mid/Detail",
+    "colorBoost": "Color Boost",
+    "lumMix": "Lum Mix",
+    "offsetHue": "Offset Hue",
+    "offsetAmount": "Offset Amount",
     "inputBlack": "Input Black",
     "inputWhite": "Input White",
     "outputBlack": "Output Black",
@@ -216,7 +250,6 @@
     "colorSaturation": "Saturation",
     "asciiOpacity": "ASCII Opacity",
     "originalOpacity": "Original Opacity",
-    "contrast": "Contrast",
     "colorBack": "Back Color",
     "colorShadow": "Shadow Color",
     "colorHighlight": "Highlight Color",
@@ -245,7 +278,22 @@
     "inverted": "Inverted",
     "grid": "Grid",
     "type": "Type",
-    "grainSize": "Grain Size"
+    "grainSize": "Grain Size",
+    "shape": "Shape",
+    "sizeX": "Width",
+    "sizeY": "Height",
+    "feather": "Feather",
+    "hueCenter": "Hue Center",
+    "hueWidth": "Hue Width",
+    "hueSoftness": "Hue Softness",
+    "satLow": "Saturation Low",
+    "satHigh": "Saturation High",
+    "satSoftness": "Saturation Softness",
+    "lumaLow": "Luma Low",
+    "lumaHigh": "Luma High",
+    "lumaSoftness": "Luma Softness",
+    "invertMask": "Invert Mask",
+    "showMask": "Show Mask"
   },
   "options": {
     "standard": "Standard",
@@ -294,11 +342,21 @@
     "bypass": "Bypass grade",
     "bypassOn": "Grade bypassed",
     "bypassTooltip": "Preview-only before/after comparison. Never affects exports.",
+    "compareMode": "Grade comparison",
+    "compareAfter": "After",
+    "compareAfterTooltip": "Show the graded preview",
+    "compareBefore": "Before",
+    "compareBeforeTooltip": "Show the ungraded preview without color effects",
+    "compareSplit": "Split",
+    "compareSplitTooltip": "Show ungraded before on the left and graded after on the right",
+    "gallery": "Gallery",
+    "applyPresetTooltip": "Apply {{name}} grade",
+    "deletePresetTooltip": "Delete {{name}} grade",
     "adjustmentLayer": "Adjustment layer",
     "adjustmentLayerTooltip": "Create an adjustment layer to grade every clip below it",
     "savePreset": "Save",
     "savePresetTooltip": "Save this grade as a preset",
-    "presetNamePlaceholder": "Preset name"
+    "presetNamePlaceholder": "Preset name…"
   },
   "lut": {
     "file": "LUT",

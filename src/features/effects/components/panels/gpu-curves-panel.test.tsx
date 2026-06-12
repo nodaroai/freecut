@@ -76,6 +76,19 @@ function parsePoints(serialized: unknown): GpuCurvesControlPoint[] {
   return raw.map(([x, y]) => ({ x, y }))
 }
 
+const FOUR_POINT_CURVE: GpuCurvesControlPoint[] = [
+  { x: 0, y: 0 },
+  { x: 0.3, y: 0.4 },
+  { x: 0.7, y: 0.6 },
+  { x: 1, y: 1 },
+]
+
+function renderFourPointCurve() {
+  const props = makeProps({ masterPoints: serializeGpuCurvesChannelPoints(FOUR_POINT_CURVE) })
+  render(<GpuCurvesPanel {...props} />)
+  return props
+}
+
 describe('GpuCurvesPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
@@ -198,14 +211,7 @@ describe('GpuCurvesPanel', () => {
   })
 
   it('removes an interior point on double-click and commits immediately', () => {
-    const points: GpuCurvesControlPoint[] = [
-      { x: 0, y: 0 },
-      { x: 0.3, y: 0.4 },
-      { x: 0.7, y: 0.6 },
-      { x: 1, y: 1 },
-    ]
-    const props = makeProps({ masterPoints: serializeGpuCurvesChannelPoints(points) })
-    render(<GpuCurvesPanel {...props} />)
+    const props = renderFourPointCurve()
     setupEditorSvg()
 
     fireEvent.mouseDown(getPoint(1), { button: 0, detail: 2, clientX: 69, clientY: 138 })
@@ -213,6 +219,27 @@ describe('GpuCurvesPanel', () => {
     expect(props.onParamsBatchChange).toHaveBeenCalledTimes(1)
     const committed = parsePoints(props.onParamsBatchChange.mock.calls[0]?.[1].masterPoints)
     expect(committed).toHaveLength(3)
+    expect(committed.map((point) => point.x)).toEqual([0, 0.7, 1])
+  })
+
+  it('nudges a focused point with the keyboard and commits immediately', () => {
+    const props = renderFourPointCurve()
+
+    fireEvent.keyDown(getPoint(1), { key: 'ArrowUp' })
+
+    expect(props.onParamsBatchChange).toHaveBeenCalledTimes(1)
+    const committed = parsePoints(props.onParamsBatchChange.mock.calls[0]?.[1].masterPoints)
+    expect(committed[1]!.x).toBeCloseTo(0.3, 4)
+    expect(committed[1]!.y).toBeCloseTo(0.41, 4)
+  })
+
+  it('removes an interior point with Delete from the keyboard', () => {
+    const props = renderFourPointCurve()
+
+    fireEvent.keyDown(getPoint(1), { key: 'Delete' })
+
+    expect(props.onParamsBatchChange).toHaveBeenCalledTimes(1)
+    const committed = parsePoints(props.onParamsBatchChange.mock.calls[0]?.[1].masterPoints)
     expect(committed.map((point) => point.x)).toEqual([0, 0.7, 1])
   })
 

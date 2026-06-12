@@ -10,6 +10,8 @@ import { Toolbar } from './toolbar'
 import { MediaSidebar } from './media-sidebar'
 import { PropertiesSidebar } from './properties-sidebar'
 import { PreviewArea } from './preview-area'
+import { ColorGradingDock } from './color-grading-dock'
+import { ColorTimelineNavigator } from './color-timeline-navigator'
 import { InteractionLockRegion } from './interaction-lock-region'
 import { AudioMeterPanel } from './audio-meter-panel'
 import {
@@ -597,6 +599,7 @@ export const LoadedEditor = memo(function LoadedEditor({
   useTransitionBreakageNotifications()
 
   const timelineDuration = 30
+  const isColorWorkspace = workspace === 'color'
 
   return (
     <div
@@ -622,7 +625,7 @@ export const LoadedEditor = memo(function LoadedEditor({
       {/* Main Layout: Full-height sidebar + vertical split */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar - Media Library (full column mode) */}
-        {mediaFullColumn && (
+        {mediaFullColumn && !isColorWorkspace && (
           <InteractionLockRegion locked={isMaskEditingActive}>
             <ErrorBoundary level="feature">
               <MediaSidebar />
@@ -631,70 +634,89 @@ export const LoadedEditor = memo(function LoadedEditor({
         )}
 
         {/* Right side: Preview/Properties + Timeline */}
-        <ResizablePanelGroup
-          direction="vertical"
-          className="flex-1 min-w-0"
-          autoSaveId="editor:timeline-layout"
-        >
-          {/* Top - Preview + Properties (inline mode) */}
-          <ResizablePanel
-            defaultSize={100 - editorLayout.timelineDefaultSize}
-            minSize={100 - editorLayout.timelineMaxSize}
-            maxSize={100 - editorLayout.timelineMinSize}
-          >
-            <div className="h-full flex overflow-hidden relative">
-              {/* Left Sidebar - Media Library (inline with preview) */}
-              {!mediaFullColumn && (
-                <InteractionLockRegion locked={isMaskEditingActive}>
-                  <ErrorBoundary level="feature">
-                    <MediaSidebar />
-                  </ErrorBoundary>
-                </InteractionLockRegion>
-              )}
-
-              {/* Center - Preview */}
+        {isColorWorkspace ? (
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden">
               <ErrorBoundary level="feature">
                 <PreviewArea project={project} />
               </ErrorBoundary>
-
-              {/* Right Sidebar - Properties (inline with preview) */}
-              {!propertiesFullColumn && (
-                <InteractionLockRegion locked={isMaskEditingActive}>
-                  <ErrorBoundary level="feature">
-                    <PropertiesSidebar />
-                  </ErrorBoundary>
-                </InteractionLockRegion>
-              )}
             </div>
-          </ResizablePanel>
-
-          <ResizableHandle
-            withHandle
-            className={isMaskEditingActive ? 'pointer-events-none opacity-60' : undefined}
-          />
-
-          {/* Bottom - Timeline */}
-          <ResizablePanel
-            ref={timelinePanelRef}
-            defaultSize={editorLayout.timelineDefaultSize}
-            minSize={editorLayout.timelineMinSize}
-            maxSize={editorLayout.timelineMaxSize}
-          >
-            <InteractionLockRegion locked={isMaskEditingActive} className="h-full">
+            <ColorTimelineNavigator />
+            <InteractionLockRegion
+              locked={isMaskEditingActive}
+              className="h-[48%] min-h-[360px] max-h-[54vh]"
+            >
               <ErrorBoundary level="feature">
-                <div className="h-full flex overflow-hidden">
-                  <div className="min-w-0 flex-1">
-                    <Timeline duration={timelineDuration} />
-                  </div>
-                  <AudioMeterPanel />
-                </div>
+                <ColorGradingDock />
               </ErrorBoundary>
             </InteractionLockRegion>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+          </div>
+        ) : (
+          <ResizablePanelGroup
+            direction="vertical"
+            className="flex-1 min-w-0"
+            autoSaveId="editor:timeline-layout"
+          >
+            {/* Top - Preview + Properties (inline mode) */}
+            <ResizablePanel
+              defaultSize={100 - editorLayout.timelineDefaultSize}
+              minSize={100 - editorLayout.timelineMaxSize}
+              maxSize={100 - editorLayout.timelineMinSize}
+            >
+              <div className="h-full flex overflow-hidden relative">
+                {/* Left Sidebar - Media Library (inline with preview) */}
+                {!mediaFullColumn && (
+                  <InteractionLockRegion locked={isMaskEditingActive}>
+                    <ErrorBoundary level="feature">
+                      <MediaSidebar />
+                    </ErrorBoundary>
+                  </InteractionLockRegion>
+                )}
+
+                {/* Center - Preview */}
+                <ErrorBoundary level="feature">
+                  <PreviewArea project={project} />
+                </ErrorBoundary>
+
+                {/* Right Sidebar - Properties (inline with preview) */}
+                {!propertiesFullColumn && (
+                  <InteractionLockRegion locked={isMaskEditingActive}>
+                    <ErrorBoundary level="feature">
+                      <PropertiesSidebar />
+                    </ErrorBoundary>
+                  </InteractionLockRegion>
+                )}
+              </div>
+            </ResizablePanel>
+
+            <ResizableHandle
+              withHandle
+              className={isMaskEditingActive ? 'pointer-events-none opacity-60' : undefined}
+            />
+
+            {/* Bottom - Timeline */}
+            <ResizablePanel
+              ref={timelinePanelRef}
+              defaultSize={editorLayout.timelineDefaultSize}
+              minSize={editorLayout.timelineMinSize}
+              maxSize={editorLayout.timelineMaxSize}
+            >
+              <InteractionLockRegion locked={isMaskEditingActive} className="h-full">
+                <ErrorBoundary level="feature">
+                  <div className="h-full flex overflow-hidden">
+                    <div className="min-w-0 flex-1">
+                      <Timeline duration={timelineDuration} />
+                    </div>
+                    <AudioMeterPanel />
+                  </div>
+                </ErrorBoundary>
+              </InteractionLockRegion>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        )}
 
         {/* Right Sidebar - Properties (full column mode) */}
-        {propertiesFullColumn && (
+        {propertiesFullColumn && !isColorWorkspace && (
           <InteractionLockRegion locked={isMaskEditingActive}>
             <ErrorBoundary level="feature">
               <PropertiesSidebar />

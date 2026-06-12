@@ -36,7 +36,7 @@
     "channelRed": "Kırmızı",
     "channelGreen": "Yeşil",
     "channelBlue": "Mavi",
-    "multiPointHint": "Nokta eklemek için eğriye tıklayın. Bir noktayı kaldırmak için üzerine çift tıklayın."
+    "multiPointHint": "Nokta eklemek için {{channel}} eğrisine tıklayın. Bir noktayı kaldırmak için üzerine çift tıklayın."
   },
   "wheels": {
     "resetWheel": "{{name}} sıfırla",

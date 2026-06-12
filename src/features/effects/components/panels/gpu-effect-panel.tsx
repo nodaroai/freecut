@@ -1,6 +1,5 @@
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eye, EyeOff, Trash2, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -9,96 +8,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { ItemEffect, GpuEffect } from '@/types/effects'
-import type { GpuEffectDefinition } from '@/infrastructure/gpu-effects'
 import { KeyframeToggle } from '@/features/effects/deps/keyframes-contract'
-import type { AnimatableProperty } from '@/types/keyframe'
 import { ColorPicker, PropertyRow, SliderInput } from '@/shared/ui/property-controls'
 import {
   getEffectDefinitionName,
   getEffectOptionLabel,
   getEffectParamLabel,
 } from '@/features/effects/utils/effect-i18n'
-import { EffectMoveButtons, type EffectMoveProps } from './effect-move-buttons'
+import { EffectPanelHeaderActions } from './effect-panel-header-actions'
+import type { GpuKeyframePanelProps } from './panel-props'
 
-interface GpuEffectPanelProps extends EffectMoveProps {
-  itemIds: string[]
-  effect: ItemEffect
-  gpuEffect: GpuEffect
-  definition: GpuEffectDefinition
-  getKeyframeProperty: (effectId: string, paramKey: string) => AnimatableProperty | null
-  onParamChange: (effectId: string, paramKey: string, value: number | boolean | string) => void
-  onParamLiveChange: (effectId: string, paramKey: string, value: number | boolean | string) => void
-  onReset: (effectId: string) => void
-  onToggle: (effectId: string) => void
-  onRemove: (effectId: string) => void
-}
-
-/**
- * Action buttons shared across single-row and multi-row layouts.
- */
-function ActionButtons({
-  effectId,
-  enabled,
-  isDefault,
-  onReset,
-  onToggle,
-  onRemove,
-  onMove,
-  canMoveUp,
-  canMoveDown,
-}: EffectMoveProps & {
-  effectId: string
-  enabled: boolean
-  isDefault: boolean
-  onReset: (id: string) => void
-  onToggle: (id: string) => void
-  onRemove: (id: string) => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <>
-      <EffectMoveButtons
-        effectId={effectId}
-        onMove={onMove}
-        canMoveUp={canMoveUp}
-        canMoveDown={canMoveDown}
-      />
-      <Button
-        variant="ghost"
-        size="icon"
-        className={`h-6 w-6 flex-shrink-0 ${isDefault ? 'opacity-30' : ''}`}
-        onClick={() => onReset(effectId)}
-        title={t('effects.panel.resetToDefaults')}
-        disabled={isDefault}
-      >
-        <RotateCcw className="w-3 h-3" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-6 flex-shrink-0"
-        onClick={() => onToggle(effectId)}
-        title={enabled ? t('effects.panel.disableEffect') : t('effects.panel.enableEffect')}
-      >
-        {enabled ? (
-          <Eye className="w-3 h-3" />
-        ) : (
-          <EyeOff className="w-3 h-3 text-muted-foreground" />
-        )}
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-6 flex-shrink-0"
-        onClick={() => onRemove(effectId)}
-        title={t('effects.panel.removeEffect')}
-      >
-        <Trash2 className="w-3 h-3" />
-      </Button>
-    </>
-  )
-}
+type GpuEffectPanelProps = GpuKeyframePanelProps
 
 export const GpuEffectPanel = memo(function GpuEffectPanel({
   itemIds,
@@ -146,7 +66,7 @@ export const GpuEffectPanel = memo(function GpuEffectPanel({
               disabled={!effect.enabled}
             />
           ) : null}
-          <ActionButtons
+          <EffectPanelHeaderActions
             effectId={effect.id}
             enabled={effect.enabled}
             isDefault={isDefault}
@@ -167,7 +87,7 @@ export const GpuEffectPanel = memo(function GpuEffectPanel({
     return (
       <PropertyRow label={effectName}>
         <div className="flex items-center gap-1 min-w-0 w-full justify-end">
-          <ActionButtons
+          <EffectPanelHeaderActions
             effectId={effect.id}
             enabled={effect.enabled}
             isDefault={isDefault}
@@ -188,10 +108,10 @@ export const GpuEffectPanel = memo(function GpuEffectPanel({
     <div className="space-y-0">
       <PropertyRow label={effectName}>
         <div className="flex items-center gap-1 min-w-0 w-full justify-end">
-          <ActionButtons
-            effectId={effect.id}
-            enabled={effect.enabled}
-            isDefault={isDefault}
+            <EffectPanelHeaderActions
+              effectId={effect.id}
+              enabled={effect.enabled}
+              isDefault={isDefault}
             onReset={onReset}
             onToggle={onToggle}
             onRemove={onRemove}
