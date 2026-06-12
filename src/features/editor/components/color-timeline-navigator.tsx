@@ -19,8 +19,8 @@ interface TimelineClip {
   thumbnailUrl?: string
 }
 
-const STRIP_HEIGHT = 128
-const TRACK_LANE_HEIGHT = 24
+const STRIP_HEIGHT = 72
+const TRACK_LANE_HEIGHT = 44
 const MIN_TIMELINE_FRAMES = 300
 
 function isVisualNavigatorItem(item: TimelineItem): boolean {
@@ -114,10 +114,12 @@ const ColorTimelinePlayhead = memo(function ColorTimelinePlayhead({
     <div
       ref={playheadRef}
       className="pointer-events-none absolute bottom-0 top-0 z-20 w-0"
+      data-testid="color-timeline-playhead"
       aria-hidden="true"
     >
-      <span className="absolute bottom-0 top-0 w-0.5 -translate-x-1/2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.55)]" />
-      <span className="absolute left-0 top-[26px] h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[7px] border-x-transparent border-t-red-500 drop-shadow-[0_0_4px_rgba(239,68,68,0.6)]" />
+      <span className="absolute bottom-0 top-0 w-px -translate-x-1/2 bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.65)]" />
+      <span className="absolute left-0 top-0 h-3.5 w-2.5 -translate-x-1/2 rounded-b-[2px] border border-red-300/60 bg-red-500 shadow-[0_0_7px_rgba(239,68,68,0.55)]" />
+      <span className="absolute left-0 top-3 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[5px] border-x-transparent border-t-red-500" />
     </div>
   )
 })
@@ -133,6 +135,7 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame)
   const setScrubFrame = usePlaybackStore((s) => s.setScrubFrame)
   const setPreviewFrame = usePlaybackStore((s) => s.setPreviewFrame)
+  const pausePlayback = usePlaybackStore((s) => s.pause)
   const fps = useTimelineStore((s) => s.fps)
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
   const selectItems = useSelectionStore((s) => s.selectItems)
@@ -169,14 +172,6 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
         .sort((a, b) => b.order - a.order),
     [tracks],
   )
-  const audioTracks = useMemo<TimelineTrack[]>(
-    () =>
-      tracks
-        .filter((track) => track.kind === 'audio')
-        .slice()
-        .sort((a, b) => b.order - a.order),
-    [tracks],
-  )
   const timelineMaxFrame = resolveTimelineMaxFrame(items)
 
   const clientXToFrame = useCallback(
@@ -199,6 +194,34 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
 
   useEffect(() => cancelScrubRaf, [cancelScrubRaf])
 
+  const runScrubLoop = useCallback(() => {
+    const clientX = pendingClientXRef.current
+    const rect = scrubRectRef.current
+
+    if (!isScrubbingRef.current || clientX === null || !rect) {
+      scrubRafRef.current = null
+      return
+    }
+
+    const frame = clientXToFrame(clientX)
+    if (frame !== null) {
+      const navigatorPixelsPerSecond = (rect.width * (fps > 0 ? fps : 30)) / timelineMaxFrame
+      if (
+        shouldCommitScrubFrame({
+          state: scrubThrottleRef.current,
+          pointerX: clientX - rect.left,
+          targetFrame: frame,
+          pixelsPerSecond: navigatorPixelsPerSecond,
+          nowMs: performance.now(),
+        })
+      ) {
+        setScrubFrame(frame, null)
+      }
+    }
+
+    scrubRafRef.current = requestAnimationFrame(runScrubLoop)
+  }, [clientXToFrame, fps, setScrubFrame, timelineMaxFrame])
+
   const handleScrubStart = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return
@@ -207,43 +230,27 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
       scrubRectRef.current = event.currentTarget.getBoundingClientRect()
       const frame = clientXToFrame(event.clientX)
       if (frame === null) return
+      pausePlayback()
+      pendingClientXRef.current = event.clientX
       scrubThrottleRef.current = createScrubThrottleState({
         pointerX: event.clientX - scrubRectRef.current.left,
         frame,
         nowMs: performance.now(),
       })
       setScrubFrame(frame, null)
+      if (scrubRafRef.current === null) {
+        scrubRafRef.current = requestAnimationFrame(runScrubLoop)
+      }
     },
-    [clientXToFrame, setScrubFrame],
+    [clientXToFrame, pausePlayback, runScrubLoop, setScrubFrame],
   )
 
   const handleScrubMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!isScrubbingRef.current) return
       pendingClientXRef.current = event.clientX
-      if (scrubRafRef.current !== null) return
-      scrubRafRef.current = requestAnimationFrame(() => {
-        scrubRafRef.current = null
-        const clientX = pendingClientXRef.current
-        const rect = scrubRectRef.current
-        if (!isScrubbingRef.current || clientX === null || !rect) return
-        const frame = clientXToFrame(clientX)
-        if (frame === null) return
-        const navigatorPixelsPerSecond = (rect.width * (fps > 0 ? fps : 30)) / timelineMaxFrame
-        if (
-          shouldCommitScrubFrame({
-            state: scrubThrottleRef.current,
-            pointerX: clientX - rect.left,
-            targetFrame: frame,
-            pixelsPerSecond: navigatorPixelsPerSecond,
-            nowMs: performance.now(),
-          })
-        ) {
-          setScrubFrame(frame, null)
-        }
-      })
     },
-    [clientXToFrame, fps, setScrubFrame, timelineMaxFrame],
+    [],
   )
 
   const finishScrub = useCallback(
@@ -300,7 +307,7 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
           left: `${(clip.from / timelineMaxFrame) * 100}%`,
           width: `${Math.max(0.6, (clip.durationInFrames / timelineMaxFrame) * 100)}%`,
           top: compact ? 0 : 4,
-          height: compact ? 64 : 14,
+          height: compact ? 64 : 20,
         }}
         onClick={(event) => {
           event.stopPropagation()
@@ -348,7 +355,7 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
     >
       <div className="flex h-full">
         <div className="w-36 shrink-0 border-r border-border px-1.5 py-1">
-          <div className="relative h-[72px]">
+          <div className="relative h-11">
             {visualClips.slice(0, 4).map((clip, index) => (
               <button
                 key={clip.id}
@@ -356,7 +363,7 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
                 className={`absolute top-0 overflow-hidden rounded-[3px] border ${
                   selectedItemIdSet.has(clip.id) ? 'border-red-500' : 'border-border'
                 } bg-black`}
-                style={{ left: index * 34, width: 32, height: 56 }}
+                style={{ left: index * 28, width: 26, height: 38 }}
                 onClick={() => {
                   seekToClip(clip)
                 }}
@@ -396,7 +403,6 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
           </div>
           <div className="relative">
             {renderTrackRows(videoTracks, 'V')}
-            {renderTrackRows(audioTracks, 'A')}
           </div>
           <ColorTimelinePlayhead timelineMaxFrame={timelineMaxFrame} />
         </div>

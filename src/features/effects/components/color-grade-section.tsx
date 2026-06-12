@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Palette, CircleOff, Columns2, Eye, Layers, Save, X } from 'lucide-react'
+import { Palette, CircleOff, ClipboardPaste, Columns2, Copy, Eye, Layers, Save, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { TimelineItem } from '@/types/timeline'
 import type { ItemEffect, GpuEffect } from '@/types/effects'
 import { useTimelineStore } from '@/features/effects/deps/timeline-contract'
 import { useGizmoStore, useThrottledFrame } from '@/features/effects/deps/preview-contract'
+import { useGradeClipboardStore, type GradeClipboardEntry } from '@/shared/state/grade-clipboard'
 import { PropertySection } from '@/shared/ui/property-controls'
 import { cn } from '@/shared/ui/cn'
 import { GpuWheelsPanel, GpuCurvesPanel } from './panels'
@@ -37,6 +38,59 @@ function findGradeEntry(item: TimelineItem, type: GradeEffectType): ItemEffect |
   return (item.effects ?? []).find(
     (entry) => entry.effect.type === 'gpu-effect' && entry.effect.gpuEffectType === type,
   )
+}
+
+function isColorGradeEntry(entry: ItemEffect): boolean {
+  return entry.effect.type === 'gpu-effect' && isColorGradeEffectType(entry.effect.gpuEffectType)
+}
+
+function itemHasGrade(item: TimelineItem): boolean {
+  return (item.effects ?? []).some(isColorGradeEntry)
+}
+
+function cloneGpuEffect(effect: GpuEffect): GpuEffect {
+  return { ...effect, params: { ...effect.params } }
+}
+
+function copyGradeEntries(item: TimelineItem): GradeClipboardEntry[] {
+  return (item.effects ?? []).filter(isColorGradeEntry).map((entry) => ({
+    effect: cloneGpuEffect(entry.effect),
+    enabled: entry.enabled,
+  }))
+}
+
+function buildPastedGradeEffects(grade: GradeClipboardEntry[]): ItemEffect[] {
+  return grade.map((entry) => ({
+    id: crypto.randomUUID(),
+    effect: cloneGpuEffect(entry.effect),
+    enabled: entry.enabled,
+  }))
+}
+
+function replaceColorEffectsInPlace(
+  effects: ItemEffect[] | undefined,
+  grade: GradeClipboardEntry[],
+): ItemEffect[] {
+  const pastedEffects = buildPastedGradeEffects(grade)
+  let inserted = false
+  const nextEffects: ItemEffect[] = []
+
+  for (const entry of effects ?? []) {
+    if (!isColorGradeEntry(entry)) {
+      nextEffects.push(entry)
+      continue
+    }
+    if (!inserted) {
+      nextEffects.push(...pastedEffects)
+      inserted = true
+    }
+  }
+
+  if (!inserted) {
+    nextEffects.push(...pastedEffects)
+  }
+
+  return nextEffects
 }
 
 interface ColorGradeSectionProps {
@@ -79,6 +133,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
   const clearPreview = useGizmoStore((s) => s.clearPreview)
   const colorGradeComparisonMode = useGizmoStore((s) => s.colorGradeComparisonMode)
   const setColorGradeComparisonMode = useGizmoStore((s) => s.setColorGradeComparisonMode)
+  const hasCopiedGrade = useGradeClipboardStore((s) => s.grade !== null && s.grade.length > 0)
   const currentFrame = useThrottledFrame()
 
   const visualItems = items
@@ -336,6 +391,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
         .map((entry) => entry.effect),
     [displayItem],
   )
+  const canCopyGrade = useMemo(() => visualItems.some(itemHasGrade), [visualItems])
   const gradePresets = useMemo(
     () => userPresets.filter((preset) => hasGradePresetEffects(preset.effects)),
     [userPresets],
@@ -368,6 +424,26 @@ export const ColorGradeSection = memo(function ColorGradeSection({
     },
     [clearPreview, setItemEffects, visualItems],
   )
+
+  const handleCopyGrade = useCallback(() => {
+    const sourceItem = visualItems.find(itemHasGrade)
+    if (!sourceItem) return
+    const grade = copyGradeEntries(sourceItem)
+    if (grade.length === 0) return
+    useGradeClipboardStore.getState().setGrade(grade)
+  }, [visualItems])
+
+  const handlePasteGrade = useCallback(() => {
+    const grade = useGradeClipboardStore.getState().grade
+    if (!grade || grade.length === 0) return
+    setItemEffects(
+      visualItems.map((item) => ({
+        itemId: item.id,
+        effects: replaceColorEffectsInPlace(item.effects, grade),
+      })),
+    )
+    queueMicrotask(() => clearPreview())
+  }, [clearPreview, setItemEffects, visualItems])
 
   const wheelsDefinition = getGpuEffect('gpu-color-wheels')
   const curvesDefinition = getGpuEffect('gpu-curves')
@@ -436,12 +512,34 @@ export const ColorGradeSection = memo(function ColorGradeSection({
   )
 
   const gradeActions = (
-    <div className="flex gap-1">
+    <div className="flex flex-wrap gap-1">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 min-w-[5.75rem] flex-1 text-xs"
+        onClick={handleCopyGrade}
+        disabled={!canCopyGrade}
+        title={t('timeline.contextMenu.copyGrade')}
+      >
+        <Copy className="mr-1 h-3 w-3" />
+        {t('timeline.contextMenu.copyGrade')}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 min-w-[5.75rem] flex-1 text-xs"
+        onClick={handlePasteGrade}
+        disabled={!hasCopiedGrade}
+        title={t('timeline.contextMenu.pasteGrade')}
+      >
+        <ClipboardPaste className="mr-1 h-3 w-3" />
+        {t('timeline.contextMenu.pasteGrade')}
+      </Button>
       {onCreateAdjustmentLayer && (
         <Button
           variant="outline"
           size="sm"
-          className="h-7 flex-1 text-xs"
+          className="h-7 min-w-[7.5rem] flex-1 text-xs"
           onClick={onCreateAdjustmentLayer}
           title={t('effects.colorPanel.adjustmentLayerTooltip')}
         >

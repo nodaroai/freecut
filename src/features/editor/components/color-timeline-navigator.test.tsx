@@ -64,7 +64,7 @@ describe('ColorTimelineNavigator', () => {
 
     expect(screen.getByTestId('color-timeline-navigator')).toBeInTheDocument()
     expect(screen.getByText('V1')).toBeInTheDocument()
-    expect(screen.getByText('A1')).toBeInTheDocument()
+    expect(screen.queryByText('A1')).not.toBeInTheDocument()
     expect(screen.getAllByTitle('shot-01.mp4').length).toBeGreaterThan(0)
   })
 
@@ -82,6 +82,7 @@ describe('ColorTimelineNavigator', () => {
   })
 
   it('scrubs the compact strip while dragging and clears the preview on release', async () => {
+    usePlaybackStore.setState({ isPlaying: true })
     render(<ColorTimelineNavigator />)
 
     const scrubSurface = screen.getByTestId('color-timeline-scrub-surface')
@@ -98,6 +99,7 @@ describe('ColorTimelineNavigator', () => {
     })
 
     fireEvent.pointerDown(scrubSurface, { button: 0, clientX: 120, pointerId: 1 })
+    expect(usePlaybackStore.getState().isPlaying).toBe(false)
     expect(usePlaybackStore.getState().currentFrame).toBe(60)
     expect(usePlaybackStore.getState().previewFrame).toBe(60)
 

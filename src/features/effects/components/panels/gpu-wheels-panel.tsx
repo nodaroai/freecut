@@ -455,7 +455,7 @@ const WHEEL_DESCRIPTORS = [
 
 /**
  * Affine mapping between the stored shader param and the Resolve-style
- * display units shown in the wheel fields: display = param * scale + bias.
+ * display units shown in the dock fields: display = param * scale + bias.
  * Lift/gain read in native units, gamma reads 0-centered (param - 1), and
  * offset reads as Resolve's 25-anchored scale (-175..225 for param ±2).
  */
@@ -463,6 +463,8 @@ interface WheelDisplay {
   scale: number
   bias: number
   step: number
+  /** Display precision override; defaults to the step's decimals. */
+  decimals?: number
 }
 
 function toWheelDisplay(display: WheelDisplay, value: number): number {
@@ -471,6 +473,27 @@ function toWheelDisplay(display: WheelDisplay, value: number): number {
 
 function fromWheelDisplay(display: WheelDisplay, value: number): number {
   return (value - display.bias) / display.scale
+}
+
+function formatWheelDisplayValue(display: WheelDisplay, value: number): string {
+  return value.toFixed(display.decimals ?? getParamDecimals(display.step))
+}
+
+// Resolve-style scales and precision for the dock parameter rows: Temp reads
+// in the +/-4000 scale, Contrast/Pivot at 3 decimals, Saturation 0..100
+// anchored at 50 (param is -100..100).
+const DOCK_PARAM_DISPLAY: Record<string, WheelDisplay> = {
+  temperature: { scale: 40, bias: 0, step: 10, decimals: 1 },
+  tint: { scale: 1, bias: 0, step: 0.1, decimals: 2 },
+  contrast: { scale: 1, bias: 0, step: 0.005, decimals: 3 },
+  pivot: { scale: 1, bias: 0, step: 0.005, decimals: 3 },
+  midDetail: { scale: 1, bias: 0, step: 0.5, decimals: 2 },
+  colorBoost: { scale: 1, bias: 0, step: 0.5, decimals: 2 },
+  shadows: { scale: 1, bias: 0, step: 0.5, decimals: 2 },
+  highlights: { scale: 1, bias: 0, step: 0.5, decimals: 2 },
+  saturation: { scale: 0.5, bias: 50, step: 0.5, decimals: 2 },
+  hue: { scale: 1, bias: 0, step: 0.5, decimals: 2 },
+  lumMix: { scale: 1, bias: 0, step: 0.5, decimals: 2 },
 }
 
 const DOCK_WHEEL_DESCRIPTORS = [
@@ -651,6 +674,7 @@ const DockNumberInput = memo(function DockNumberInput({
   min,
   max,
   step = 1,
+  decimals: decimalsProp,
   disabled,
   className,
   onLive,
@@ -662,6 +686,7 @@ const DockNumberInput = memo(function DockNumberInput({
   min?: number
   max?: number
   step?: number
+  decimals?: number
   disabled: boolean
   className: string
   onLive: (raw: string) => void
@@ -679,7 +704,7 @@ const DockNumberInput = memo(function DockNumberInput({
     setDraft(raw)
   }
 
-  const decimals = getParamDecimals(step)
+  const decimals = decimalsProp ?? getParamDecimals(step)
 
   const clampValue = (next: number) => {
     let result = next
@@ -933,20 +958,25 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
     emitCommitBatch({ ...updates })
   }
 
-  const updateNumberParam = (key: string, rawValue: string, mode: 'live' | 'commit') => {
+  const updateParamFromDisplay = (
+    key: string,
+    display: WheelDisplay,
+    rawValue: string,
+    mode: 'live' | 'commit',
+  ) => {
     const param = definition.params[key]
-    if (!param || param.type !== 'number') return null
+    if (!param || param.type !== 'number') return
     const next = Number(rawValue)
-    if (!Number.isFinite(next)) return null
-    const clamped = clampParamValue(param, next)
+    if (!Number.isFinite(next)) return
+    const clamped = clampParamValue(param, fromWheelDisplay(display, next))
     if (mode === 'live') emitLiveParam(key, clamped)
     else emitCommitParam(key, clamped)
-    return clamped
   }
 
   const renderDockNumberControl = (key: string) => {
     const param = definition.params[key]
     if (!param || param.type !== 'number') return null
+    const display = DOCK_PARAM_DISPLAY[key] ?? { scale: 1, bias: 0, step: param.step ?? 1 }
     const value = (displayParams[key] as number) ?? param.default
     const label = getEffectParamLabel(t, definition, key)
 
@@ -962,13 +992,14 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
           <DockNumberInput
             ariaLabel={label}
             name={`dock-${key}`}
-            value={formatParamValue(value, param.step)}
-            min={param.min}
-            max={param.max}
-            step={param.step}
+            value={formatWheelDisplayValue(display, toWheelDisplay(display, value))}
+            min={typeof param.min === 'number' ? toWheelDisplay(display, param.min) : undefined}
+            max={typeof param.max === 'number' ? toWheelDisplay(display, param.max) : undefined}
+            step={display.step}
+            decimals={display.decimals}
             disabled={!effect.enabled}
-            onLive={(raw) => updateNumberParam(key, raw, 'live')}
-            onCommit={(raw) => updateNumberParam(key, raw, 'commit')}
+            onLive={(raw) => updateParamFromDisplay(key, display, raw, 'live')}
+            onCommit={(raw) => updateParamFromDisplay(key, display, raw, 'commit')}
             className="h-6 w-full rounded-[2px] border border-black/80 bg-black/75 px-1 text-center font-mono text-[11px] tabular-nums text-foreground shadow-inner focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
           <span

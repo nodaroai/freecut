@@ -149,6 +149,24 @@ describe('GpuWheelsPanel', () => {
     })
   })
 
+  it('shows the parameter rows in Resolve display scales', () => {
+    const props = makeProps({ temperature: 25, saturation: 0 })
+    render(<GpuWheelsPanel {...props} layout="dock" />)
+
+    // Temperature param 25 reads as 1000.0 on Resolve's +/-4000 scale
+    const temp = screen.getByLabelText('Temperature') as HTMLInputElement
+    expect(temp.value).toBe('1000.0')
+    // Saturation param 0 reads as Resolve's 50.00 (0..100 anchored at 50)
+    expect((screen.getByLabelText('Saturation') as HTMLInputElement).value).toBe('50.00')
+    expect((screen.getByLabelText('Contrast') as HTMLInputElement).value).toBe('1.000')
+    expect((screen.getByLabelText('Lum Mix') as HTMLInputElement).value).toBe('100.00')
+
+    // Typing in display units converts back to the stored param
+    fireEvent.change(temp, { target: { value: '-2000' } })
+    fireEvent.blur(temp)
+    expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'temperature', -50)
+  })
+
   it('picks a black point with the eyedropper and commits the lift', async () => {
     const windowWithEyeDropper = window as unknown as {
       EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> }

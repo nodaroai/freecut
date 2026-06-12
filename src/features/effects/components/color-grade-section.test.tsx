@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { ItemEffect } from '@/types/effects'
 import type { TimelineItem } from '@/types/timeline'
+import { useGradeClipboardStore } from '@/shared/state/grade-clipboard'
 import { ColorGradeSection } from './color-grade-section'
 
 const mocks = vi.hoisted(() => {
@@ -84,9 +85,9 @@ vi.mock('./panels', () => ({
   ),
 }))
 
-function makeVideoItem(effects: ItemEffect[] = []): TimelineItem {
+function makeVideoItem(effects: ItemEffect[] = [], id = 'clip-1'): TimelineItem {
   return {
-    id: 'clip-1',
+    id,
     type: 'video',
     trackId: 'track-1',
     from: 0,
@@ -101,7 +102,15 @@ function makeVideoItem(effects: ItemEffect[] = []): TimelineItem {
 describe('ColorGradeSection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useGradeClipboardStore.getState().setGrade([])
     mocks.gizmoState.colorGradeComparisonMode = 'off'
+  })
+
+  it('keeps copy and paste grade actions visible in the color panel', () => {
+    render(<ColorGradeSection items={[makeVideoItem()]} />)
+
+    expect(screen.getByRole('button', { name: 'Copy grade' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Paste grade' })).toBeDisabled()
   })
 
   it('previews and creates a single color wheels effect on first adjustment', () => {
@@ -158,5 +167,83 @@ describe('ColorGradeSection', () => {
       },
     })
     expect(mocks.timelineState.addEffects).not.toHaveBeenCalled()
+  })
+
+  it('copies the selected color grade and pastes it while preserving non-grade effects', () => {
+    const gradeEffect: ItemEffect = {
+      id: 'grade-1',
+      enabled: true,
+      effect: {
+        type: 'gpu-effect',
+        gpuEffectType: 'gpu-color-wheels',
+        params: { lift: 0.2 },
+      },
+    }
+    const targetGradeEffect: ItemEffect = {
+      id: 'target-grade-1',
+      enabled: true,
+      effect: {
+        type: 'gpu-effect',
+        gpuEffectType: 'gpu-curves',
+        params: { masterPoints: '[[0,0],[1,1]]' },
+      },
+    }
+    const targetBlurEffect: ItemEffect = {
+      id: 'target-blur-1',
+      enabled: true,
+      effect: {
+        type: 'gpu-effect',
+        gpuEffectType: 'gpu-blur',
+        params: { radius: 4 },
+      },
+    }
+
+    render(
+      <ColorGradeSection
+        items={[
+          makeVideoItem([gradeEffect], 'clip-source'),
+          makeVideoItem([targetGradeEffect, targetBlurEffect], 'clip-target'),
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy grade' }))
+    expect(useGradeClipboardStore.getState().grade).toEqual([
+      {
+        enabled: true,
+        effect: {
+          type: 'gpu-effect',
+          gpuEffectType: 'gpu-color-wheels',
+          params: { lift: 0.2 },
+        },
+      },
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Paste grade' }))
+    expect(mocks.timelineState.setItemEffects).toHaveBeenCalledWith([
+      {
+        itemId: 'clip-source',
+        effects: [
+          expect.objectContaining({
+            effect: expect.objectContaining({
+              gpuEffectType: 'gpu-color-wheels',
+              params: { lift: 0.2 },
+            }),
+          }),
+        ],
+      },
+      {
+        itemId: 'clip-target',
+        effects: [
+          expect.objectContaining({
+            effect: expect.objectContaining({
+              gpuEffectType: 'gpu-color-wheels',
+              params: { lift: 0.2 },
+            }),
+          }),
+          targetBlurEffect,
+        ],
+      },
+    ])
   })
 })
