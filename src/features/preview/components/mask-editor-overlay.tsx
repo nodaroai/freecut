@@ -207,6 +207,18 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
     return transformToScreenBounds(effectiveItemTransform, coordParams)
   }, [effectiveItemTransform, coordParams])
 
+  /**
+   * coordParams.containerRect is measured by the preview view-model and only
+   * refreshes on player resize/scroll — layout shifts that move the player
+   * without resizing it (e.g. the pen toolbar mounting below the preview)
+   * leave it stale. The overlay canvas is exactly aligned with the player
+   * container, so its live rect is an exact substitute.
+   */
+  const getLiveCoordParams = useCallback((): CoordinateParams => {
+    const rect = canvasRef.current?.getBoundingClientRect()
+    return rect ? { ...coordParams, containerRect: rect } : coordParams
+  }, [coordParams])
+
   /** Convert normalized vertex position to screen (overlay-local) coords */
   const normToScreen = useCallback(
     (pos: [number, number]): [number, number] => {
@@ -234,7 +246,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
   /** Convert screen position to normalized path coords */
   const screenToNorm = useCallback(
     (sx: number, sy: number): [number, number] => {
-      const canvasPos = screenToCanvas(sx, sy, coordParams)
+      const canvasPos = screenToCanvas(sx, sy, getLiveCoordParams())
       const bounds = getItemScreenBounds()
       const scale = getEffectiveScale(coordParams)
       const itemLeft = bounds.left / scale
@@ -243,7 +255,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       const itemHeight = bounds.height / scale
       return [(canvasPos.x - itemLeft) / itemWidth, (canvasPos.y - itemTop) / itemHeight]
     },
-    [coordParams, getItemScreenBounds],
+    [coordParams, getItemScreenBounds, getLiveCoordParams],
   )
 
   // ============================================================
@@ -709,7 +721,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       clientY: number,
       altKey: boolean,
     ) => {
-      const moveCanvas = screenToCanvas(clientX, clientY, coordParams)
+      const moveCanvas = screenToCanvas(clientX, clientY, getLiveCoordParams())
       const bounds = getItemScreenBounds()
       const scale = getEffectiveScale(coordParams)
       const itemWidth = bounds.width / scale
@@ -748,7 +760,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
 
       return nextVertices
     },
-    [coordParams, getItemScreenBounds],
+    [coordParams, getItemScreenBounds, getLiveCoordParams],
   )
 
   const handlePenPointerDown = useCallback(
@@ -760,7 +772,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       setPenCursorPos(norm)
 
       const hit = hitTestPenEvent(e)
-      const canvasPos = screenToCanvas(e.clientX, e.clientY, coordParams)
+      const canvasPos = screenToCanvas(e.clientX, e.clientY, getLiveCoordParams())
 
       if (hit) {
         const handleType = hit.type === 'inHandle' ? 'in' : hit.type === 'outHandle' ? 'out' : null
@@ -826,7 +838,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       screenToNorm,
       setPenCursorPos,
       hitTestPenEvent,
-      coordParams,
+      getLiveCoordParams,
       setPenDragging,
       setHover,
       startVertexDrag,
@@ -1185,6 +1197,8 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
   // Store values in refs for pointer handlers to avoid stale closures
   const coordParamsRef = useRef(coordParams)
   coordParamsRef.current = coordParams
+  const getLiveCoordParamsRef = useRef(getLiveCoordParams)
+  getLiveCoordParamsRef.current = getLiveCoordParams
   const getItemScreenBoundsRef = useRef(getItemScreenBounds)
   getItemScreenBoundsRef.current = getItemScreenBounds
   const editingItemIdRef = useRef(editingItemId)
@@ -1503,7 +1517,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       canvasRef.current!.setPointerCapture(e.pointerId)
       editDraggingRef.current = true
 
-      const canvasPos = screenToCanvas(e.clientX, e.clientY, coordParams)
+      const canvasPos = screenToCanvas(e.clientX, e.clientY, getLiveCoordParams())
 
       if (hit.type === 'vertex') {
         startVertexDrag(hit.index)
@@ -1538,7 +1552,15 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
         setHoveredShapeBody(true)
       }
     },
-    [hitTest, getVertices, coordParams, startVertexDrag, startHandleDrag, setHover, startTranslate],
+    [
+      hitTest,
+      getVertices,
+      getLiveCoordParams,
+      startVertexDrag,
+      startHandleDrag,
+      setHover,
+      startTranslate,
+    ],
   )
 
   const handleEditPointerMove = useCallback(
@@ -1573,7 +1595,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
           return
         }
 
-        const moveCanvas = screenToCanvas(e.clientX, e.clientY, coordParamsRef.current)
+        const moveCanvas = screenToCanvas(e.clientX, e.clientY, getLiveCoordParamsRef.current())
 
         if (state.type === 'shape') {
           updateInteraction(moveCanvas, e.shiftKey, e.ctrlKey, e.altKey)

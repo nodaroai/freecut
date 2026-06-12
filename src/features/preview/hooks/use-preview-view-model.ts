@@ -143,12 +143,17 @@ export function usePreviewViewModel({
     resizeObserver.observe(container)
 
     window.addEventListener('scroll', updateRect, true)
+    window.addEventListener('resize', updateRect)
 
     return () => {
       resizeObserver.disconnect()
       window.removeEventListener('scroll', updateRect, true)
+      window.removeEventListener('resize', updateRect)
     }
-  }, [suspendOverlay])
+    // isMaskEditingActive: entering/leaving mask edit mounts a toolbar below
+    // the preview, moving the player without resizing it — ResizeObserver
+    // can't see that, so re-measure when the mode toggles.
+  }, [suspendOverlay, isMaskEditingActive])
 
   const handleBackgroundClick = useCallback(
     (event: React.MouseEvent) => {
