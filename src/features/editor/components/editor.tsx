@@ -636,7 +636,7 @@ export const LoadedEditor = memo(function LoadedEditor({
         {/* Right side: Preview/Properties + Timeline */}
         {isColorWorkspace ? (
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <ErrorBoundary level="feature">
                 <PreviewArea project={project} />
               </ErrorBoundary>
@@ -644,7 +644,7 @@ export const LoadedEditor = memo(function LoadedEditor({
             <ColorTimelineNavigator />
             <InteractionLockRegion
               locked={isMaskEditingActive}
-              className="h-[48%] min-h-[360px] max-h-[54vh]"
+              className="h-[40%] min-h-[320px] max-h-[42vh] shrink-0"
             >
               <ErrorBoundary level="feature">
                 <ColorGradingDock />

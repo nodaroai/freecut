@@ -3,8 +3,11 @@
  * Editor modules should import timeline utility helpers from here.
  */
 
+export type { ScrubThrottleState } from './timeline-contract'
 export {
   createDefaultAdjustmentItem,
+  createScrubThrottleState,
+  shouldCommitScrubFrame,
   createDefaultShapeItem,
   createTextTemplateItem,
   findCompatibleTrackForItemType,

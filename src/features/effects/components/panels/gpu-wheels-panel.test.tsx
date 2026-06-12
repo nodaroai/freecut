@@ -56,13 +56,59 @@ describe('GpuWheelsPanel', () => {
     }
   })
 
-  it('commits numeric wheel value edits from the dock strip', () => {
+  it('previews numeric wheel value edits live and commits once on blur', () => {
     const props = makeProps({ lift: 0 })
     render(<GpuWheelsPanel {...props} layout="dock" />)
 
-    fireEvent.change(screen.getByLabelText('Lift'), { target: { value: '0.05' } })
+    const input = screen.getByLabelText('Lift')
+    fireEvent.change(input, { target: { value: '0.03' } })
+    fireEvent.change(input, { target: { value: '0.05' } })
+
+    expect(props.onParamLiveChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.03)
+    expect(props.onParamLiveChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.05)
+    expect(props.onParamChange).not.toHaveBeenCalled()
+
+    fireEvent.blur(input)
+
+    expect(props.onParamChange).toHaveBeenCalledTimes(1)
+    expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.05)
+  })
+
+  it('scrubs the numeric field horizontally and commits once on release', () => {
+    const props = makeProps({ lift: 0 })
+    render(<GpuWheelsPanel {...props} layout="dock" />)
+
+    // lift: step 0.005, one step per dragged pixel
+    const input = screen.getByLabelText('Lift')
+    fireEvent.pointerDown(input, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(input, { clientX: 110, pointerId: 1 })
+    fireEvent.pointerMove(input, { clientX: 120, pointerId: 1 })
 
     expect(props.onParamLiveChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.05)
-    expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.05)
+    expect(props.onParamLiveChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.1)
+    expect(props.onParamChange).not.toHaveBeenCalled()
+
+    fireEvent.pointerUp(input, { clientX: 120, pointerId: 1 })
+
+    expect(props.onParamChange).toHaveBeenCalledTimes(1)
+    expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.1)
+  })
+
+  it('scrubs wheel level values live and commits once on release', () => {
+    const props = makeProps({ lift: 0 })
+    render(<GpuWheelsPanel {...props} layout="dock" />)
+
+    const thumb = screen.getByLabelText('Lift thumb wheel')
+    fireEvent.change(thumb, { target: { value: '0.05' } })
+    fireEvent.change(thumb, { target: { value: '0.07' } })
+
+    expect(props.onParamLiveChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.05)
+    expect(props.onParamLiveChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.07)
+    expect(props.onParamChange).not.toHaveBeenCalled()
+
+    fireEvent.pointerUp(thumb)
+
+    expect(props.onParamChange).toHaveBeenCalledTimes(1)
+    expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'lift', 0.07)
   })
 })

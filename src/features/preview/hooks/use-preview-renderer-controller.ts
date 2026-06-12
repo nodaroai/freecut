@@ -45,6 +45,12 @@ import { usePreviewCaptureBridge } from './use-preview-capture-bridge'
 
 const logger = createLogger('VideoPreview')
 
+// How long a capture waits for an in-flight pump render before giving up.
+// Long enough to outlast a typical WASM-decode render (40-80ms); short
+// enough that a stuck pump can't stall capture consumers indefinitely.
+const CAPTURE_RENDER_LOCK_WAIT_MS = 150
+const CAPTURE_RENDER_LOCK_POLL_MS = 8
+
 export type PreviewCompositionRenderer = CompositionRendererInstance
 
 interface UsePreviewRendererControllerParams {
@@ -71,6 +77,7 @@ interface UsePreviewRendererControllerParams {
   scrubOffscreenCtxRef: MutableRefObject<OffscreenCanvasRenderingContext2D | null>
   scrubRendererStructureKeyRef: MutableRefObject<string | null>
   scrubRenderInFlightRef: MutableRefObject<boolean>
+  scrubRenderGenerationRef: MutableRefObject<number>
   scrubRequestedFrameRef: MutableRefObject<number | null>
   bgTransitionRendererRef: MutableRefObject<PreviewCompositionRenderer | null>
   bgTransitionInitPromiseRef: MutableRefObject<Promise<PreviewCompositionRenderer | null> | null>
@@ -143,6 +150,7 @@ export function usePreviewRendererController({
   scrubOffscreenCtxRef,
   scrubRendererStructureKeyRef,
   scrubRenderInFlightRef,
+  scrubRenderGenerationRef,
   scrubRequestedFrameRef,
   bgTransitionRendererRef,
   bgTransitionInitPromiseRef,
@@ -483,25 +491,72 @@ export function usePreviewRendererController({
     ])
   ensureFastScrubRendererRef.current = ensureFastScrubRenderer
 
+  // Captures share the offscreen canvas (and renderer) with the render pump.
+  // Sampling the canvas mid-render flashes half-composited frames into the
+  // scopes, and a second concurrent renderFrame call interleaves with the
+  // pump's (single-mutex invariant — see render-loop concurrency notes in
+  // CLAUDE.md). This helper briefly waits for the pump to go idle, runs `fn`
+  // while holding the pump's mutex, and releases it with the same generation
+  // discipline the pump uses; on timeout it returns null rather than race.
+  const withScrubRenderLock = useCallback(
+    async <T>(fn: () => Promise<T | null> | T | null): Promise<T | null> => {
+      const deadline = performance.now() + CAPTURE_RENDER_LOCK_WAIT_MS
+      while (scrubRenderInFlightRef.current) {
+        if (performance.now() >= deadline) return null
+        await new Promise((resolve) => setTimeout(resolve, CAPTURE_RENDER_LOCK_POLL_MS))
+      }
+      // The idle check and acquisition run in the same synchronous step, so
+      // no pump iteration can grab the lock in between.
+      scrubRenderInFlightRef.current = true
+      const generation = scrubRenderGenerationRef.current
+      try {
+        return await fn()
+      } finally {
+        if (scrubRenderGenerationRef.current === generation) {
+          scrubRenderInFlightRef.current = false
+          // A pump kick that arrived while we held the lock returned early —
+          // resume it so the overlay never sticks on a stale frame.
+          if (scrubRequestedFrameRef.current !== null) {
+            resumeScrubLoopRef.current()
+          }
+        }
+        // Stale generation: a playback-start force-clear re-owned the lock;
+        // leave it for the new owner (mirrors the pump's release rules).
+      }
+    },
+    [resumeScrubLoopRef, scrubRenderGenerationRef, scrubRenderInFlightRef, scrubRequestedFrameRef],
+  )
+
   const renderOffscreenFrame = useCallback(
     async (targetFrame: number): Promise<OffscreenCanvas | null> => {
-      const offscreen = scrubOffscreenCanvasRef.current
-      if (offscreen && scrubOffscreenRenderedFrameRef.current === targetFrame) {
+      // Renderer init is slow — make sure it exists before taking the lock.
+      if (
+        scrubOffscreenRenderedFrameRef.current !== targetFrame ||
+        !scrubOffscreenCanvasRef.current
+      ) {
+        const renderer = await ensureFastScrubRenderer()
+        if (!renderer || !scrubOffscreenCanvasRef.current) return null
+      }
+
+      return withScrubRenderLock(async () => {
+        const offscreen = scrubOffscreenCanvasRef.current
+        if (!offscreen) return null
+        if (scrubOffscreenRenderedFrameRef.current !== targetFrame) {
+          const renderer = scrubRendererRef.current
+          if (!renderer) return null
+          await renderer.renderFrame(targetFrame)
+          scrubOffscreenRenderedFrameRef.current = targetFrame
+        }
         return offscreen
-      }
-
-      const renderer = await ensureFastScrubRenderer()
-      const nextOffscreen = scrubOffscreenCanvasRef.current
-      if (!renderer || !nextOffscreen) return null
-
-      if (scrubOffscreenRenderedFrameRef.current !== targetFrame) {
-        await renderer.renderFrame(targetFrame)
-        scrubOffscreenRenderedFrameRef.current = targetFrame
-      }
-
-      return nextOffscreen
+      })
     },
-    [ensureFastScrubRenderer, scrubOffscreenCanvasRef, scrubOffscreenRenderedFrameRef],
+    [
+      ensureFastScrubRenderer,
+      scrubOffscreenCanvasRef,
+      scrubOffscreenRenderedFrameRef,
+      scrubRendererRef,
+      withScrubRenderLock,
+    ],
   )
 
   useEffect(() => {
@@ -1067,6 +1122,8 @@ export function usePreviewRendererController({
     ],
   )
 
+  const captureSnapshotCanvasRef = useRef<OffscreenCanvas | null>(null)
+
   const captureCanvasSource = useCallback(async (): Promise<
     OffscreenCanvas | HTMLCanvasElement | null
   > => {
@@ -1078,7 +1135,44 @@ export function usePreviewRendererController({
       try {
         const playback = usePlaybackStore.getState()
         const targetFrame = playback.previewFrame ?? playback.currentFrame
-        return await renderOffscreenFrame(targetFrame)
+
+        if (
+          scrubOffscreenRenderedFrameRef.current !== targetFrame ||
+          !scrubOffscreenCanvasRef.current
+        ) {
+          const renderer = await ensureFastScrubRenderer()
+          if (!renderer || !scrubOffscreenCanvasRef.current) return null
+        }
+
+        // Render (if stale) and snapshot inside one lock session: consumers
+        // like the scopes upload the returned canvas after further awaits,
+        // by which time the pump may be redrawing the shared offscreen.
+        // Handing out a private copy makes the sample immune to that.
+        return await withScrubRenderLock(async () => {
+          const offscreen = scrubOffscreenCanvasRef.current
+          if (!offscreen) return null
+          if (scrubOffscreenRenderedFrameRef.current !== targetFrame) {
+            const renderer = scrubRendererRef.current
+            if (!renderer) return null
+            await renderer.renderFrame(targetFrame)
+            scrubOffscreenRenderedFrameRef.current = targetFrame
+          }
+
+          let snapshot = captureSnapshotCanvasRef.current
+          if (
+            !snapshot ||
+            snapshot.width !== offscreen.width ||
+            snapshot.height !== offscreen.height
+          ) {
+            snapshot = new OffscreenCanvas(offscreen.width, offscreen.height)
+            captureSnapshotCanvasRef.current = snapshot
+          }
+          const snapshotCtx = snapshot.getContext('2d')
+          if (!snapshotCtx) return null
+          snapshotCtx.clearRect(0, 0, snapshot.width, snapshot.height)
+          snapshotCtx.drawImage(offscreen, 0, 0)
+          return snapshot
+        })
       } catch (error) {
         logger.warn('Failed to capture canvas source:', error)
         return null
@@ -1089,7 +1183,14 @@ export function usePreviewRendererController({
 
     captureCanvasSourceInFlightRef.current = task
     return task
-  }, [captureCanvasSourceInFlightRef, renderOffscreenFrame])
+  }, [
+    captureCanvasSourceInFlightRef,
+    ensureFastScrubRenderer,
+    scrubOffscreenCanvasRef,
+    scrubOffscreenRenderedFrameRef,
+    scrubRendererRef,
+    withScrubRenderLock,
+  ])
 
   usePreviewCaptureBridge({
     captureCurrentFrame,

@@ -1,10 +1,12 @@
 import { memo } from 'react'
 import { Palette } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useColorPlayheadAutoSelect } from '../hooks/use-color-playhead-auto-select'
 import { ColorGradePanel } from './properties-sidebar/color-grade-panel'
 
 export const ColorGradingDock = memo(function ColorGradingDock() {
   const { t } = useTranslation()
+  useColorPlayheadAutoSelect()
 
   return (
     <section
@@ -18,7 +20,7 @@ export const ColorGradingDock = memo(function ColorGradingDock() {
           {t('editor.colorPanel.dockTitle')}
         </h2>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden p-3">
+      <div className="min-h-0 flex-1 overflow-hidden p-2">
         <ColorGradePanel layout="dock" />
       </div>
     </section>

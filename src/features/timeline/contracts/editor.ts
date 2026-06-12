@@ -33,6 +33,8 @@ export { resolveEffectiveTrackStates } from '../utils/group-utils'
 export { linkItems } from '../stores/actions/item-actions'
 export { rateStretchItemWithoutHistory } from '../stores/actions/item-edit-actions'
 export { timelineToSourceFrames, sourceToTimelineFrames } from '../utils/source-calculations'
+export { createScrubThrottleState, shouldCommitScrubFrame } from '../utils/scrub-throttle'
+export type { ScrubThrottleState } from '../utils/scrub-throttle'
 export { initTransitionChainSubscription } from '../stores/transition-chain-store'
 
 export const importGifFrameCache = () => import('../services/gif-frame-cache')

@@ -123,6 +123,7 @@ export function usePreviewRuntimeRefs() {
       scrubOffscreenCtxRef,
       scrubRendererStructureKeyRef,
       scrubRenderInFlightRef,
+      scrubRenderGenerationRef,
       scrubRequestedFrameRef,
       bgTransitionRendererRef,
       bgTransitionInitPromiseRef,

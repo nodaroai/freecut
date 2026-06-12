@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { useTranslation } from 'react-i18next'
-import { CircleDot, Pipette, RotateCcw, SlidersHorizontal } from 'lucide-react'
+import { RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KeyframeToggle } from '@/features/effects/deps/keyframes-contract'
 import { PropertyRow, SliderInput } from '@/shared/ui/property-controls'
@@ -22,10 +22,14 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 const MAX_WHEEL_SIZE = 100
-const MAX_DOCK_WHEEL_SIZE = 220
+const MAX_DOCK_WHEEL_SIZE = 200
 const MIN_WHEEL_SIZE = 64
-const MIN_DOCK_WHEEL_SIZE = 136
+const MIN_DOCK_WHEEL_SIZE = 48
 const GRID_GAP_PX = 4
+const DOCK_WHEEL_GRID_GAP_PX = 28
+// Vertical space each dock wheel column needs besides the wheel itself:
+// header (20) + column gaps (2x8) + value chips with accents (24) + thumb wheel (16)
+const DOCK_WHEEL_EXTRAS_PX = 76
 const PUCK_RADIUS_PX = 4
 
 function getHueAmountFromClient(clientX: number, clientY: number, element: HTMLButtonElement) {
@@ -49,7 +53,7 @@ interface WheelControlProps {
   disabled: boolean
   compact?: boolean
   dock?: boolean
-  valueStrip?: React.ReactNode
+  dockFields?: React.ReactNode
   onLiveChange: (hue: number, amount: number) => void
   onCommit: (hue: number, amount: number) => void
   onReset: () => void
@@ -73,9 +77,7 @@ function getKeyboardWheelTarget(key: string, hue: number, amount: number): [numb
 }
 
 function getDockWheelShadow(dock: boolean) {
-  return dock
-    ? '0 0 0 3px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.18)'
-    : undefined
+  return dock ? '0 0 0 3px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.18)' : undefined
 }
 
 function readNumberParam(
@@ -198,7 +200,7 @@ const WheelControl = memo(function WheelControl({
   disabled,
   compact = false,
   dock = false,
-  valueStrip,
+  dockFields,
   onLiveChange,
   onCommit,
   onReset,
@@ -298,7 +300,13 @@ const WheelControl = memo(function WheelControl({
   const resetLabel = t('effects.wheels.resetWheel', { name: label })
 
   return (
-    <div className={cn('flex min-w-0 flex-col items-center gap-1', compact && 'gap-0.5')}>
+    <div
+      className={cn(
+        'flex min-w-0 flex-col items-center',
+        dock ? 'gap-2' : 'gap-1',
+        compact && 'gap-0.5',
+      )}
+    >
       <DockWheelHeader
         dock={dock}
         label={label}
@@ -344,7 +352,7 @@ const WheelControl = memo(function WheelControl({
         />
       </button>
       <SidebarWheelReadout dock={dock} label={label} hue={localHue} amount={localAmount} />
-      {dock && valueStrip}
+      {dock && dockFields}
       <SidebarResetButton
         compact={compact}
         dock={dock}
@@ -435,6 +443,251 @@ function getDockParamAccent(key: string): string {
   return 'from-zinc-300 via-red-500 to-blue-500'
 }
 
+function getDockFieldAccent(key: string): string {
+  if (key.endsWith('Hue')) return 'bg-emerald-500'
+  if (key.endsWith('Amount')) return 'bg-red-500'
+  if (key === 'lift' || key === 'gamma' || key === 'gain' || key === 'offset') {
+    return 'bg-zinc-200'
+  }
+  return 'bg-blue-500'
+}
+
+function formatWheelChipValue(key: string, value: number, step: unknown): string {
+  if (key.endsWith('Hue')) return Math.round(value).toString()
+  return formatParamValue(value, step)
+}
+
+const THUMB_WHEEL_CLASS =
+  'mt-1 h-3 w-full cursor-ew-resize appearance-none rounded-full border border-black/80 bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.22)_0_1px,rgba(0,0,0,0.65)_1px_5px)] shadow-inner disabled:cursor-not-allowed disabled:opacity-60 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-black/80 [&::-moz-range-thumb]:bg-zinc-200 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black/80 [&::-webkit-slider-thumb]:bg-zinc-200'
+
+/**
+ * Range slider that previews live while dragging and commits once on release.
+ * React fires `onChange` for range inputs on every input event, so committing
+ * there would push a timeline mutation (and undo entry) per dragged pixel —
+ * local drag state keeps the thumb responsive without re-rendering the panel.
+ */
+const DockThumbWheel = memo(function DockThumbWheel({
+  ariaLabel,
+  name,
+  value,
+  min,
+  max,
+  step,
+  disabled,
+  onLive,
+  onCommit,
+}: {
+  ariaLabel: string
+  name: string
+  value: number
+  min?: number
+  max?: number
+  step?: number
+  disabled: boolean
+  onLive: (value: string) => void
+  onCommit: (value: string) => void
+}) {
+  const [dragValue, setDragValue] = useState<string | null>(null)
+
+  const commit = (raw: string) => {
+    setDragValue(null)
+    onCommit(raw)
+  }
+
+  return (
+    <input
+      aria-label={ariaLabel}
+      type="range"
+      name={name}
+      value={dragValue ?? value}
+      min={min}
+      max={max}
+      step={step}
+      disabled={disabled}
+      onChange={(event) => {
+        const raw = event.currentTarget.value
+        setDragValue(raw)
+        onLive(raw)
+      }}
+      onPointerUp={(event) => commit(event.currentTarget.value)}
+      onPointerCancel={(event) => commit(event.currentTarget.value)}
+      onKeyDown={(event) => event.stopPropagation()}
+      onKeyUp={(event) => {
+        if (dragValue !== null) commit(event.currentTarget.value)
+      }}
+      onBlur={(event) => {
+        if (dragValue !== null) commit(event.currentTarget.value)
+      }}
+      className={THUMB_WHEEL_CLASS}
+    />
+  )
+})
+
+const SCRUB_THRESHOLD_PX = 3
+
+/**
+ * Horizontal-scrub numeric field (After Effects style): dragging anywhere on
+ * the field slides the value by one step per pixel (Shift = 0.1x fine), a
+ * plain click opens text editing. While interacting only the cheap live
+ * preview path runs; the timeline commit (undo entry + auto-keyframe scan)
+ * lands once per gesture — on release, Enter, blur, or arrow-key release.
+ */
+const DockNumberInput = memo(function DockNumberInput({
+  ariaLabel,
+  name,
+  value,
+  min,
+  max,
+  step = 1,
+  disabled,
+  className,
+  onLive,
+  onCommit,
+}: {
+  ariaLabel?: string
+  name: string
+  value: string
+  min?: number
+  max?: number
+  step?: number
+  disabled: boolean
+  className: string
+  onLive: (raw: string) => void
+  onCommit: (raw: string) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = useState<string | null>(null)
+  // Ref mirror of draft — blur fires synchronously after Enter/Escape, before
+  // React applies the state update, so guards must not read stale state.
+  const draftRef = useRef<string | null>(null)
+  const dragRef = useRef<{ startX: number; startValue: number; scrubbed: boolean } | null>(null)
+
+  const updateDraft = (raw: string | null) => {
+    draftRef.current = raw
+    setDraft(raw)
+  }
+
+  const decimals = getParamDecimals(step)
+
+  const clampValue = (next: number) => {
+    let result = next
+    if (min !== undefined) result = Math.max(min, result)
+    if (max !== undefined) result = Math.min(max, result)
+    return result
+  }
+
+  const commit = (raw: string) => {
+    updateDraft(null)
+    onCommit(raw)
+  }
+
+  const revert = () => {
+    updateDraft(null)
+    onLive(value)
+  }
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLInputElement>) => {
+    if (disabled || event.button !== 0) return
+    // Already editing — let the caret/selection behave normally.
+    if (document.activeElement === inputRef.current) return
+    // Keep focus off until release decides between scrub and click-to-edit.
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    const parsed = Number(value)
+    dragRef.current = {
+      startX: event.clientX,
+      startValue: Number.isFinite(parsed) ? parsed : 0,
+      scrubbed: false,
+    }
+  }
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLInputElement>) => {
+    const drag = dragRef.current
+    if (!drag) return
+    const dx = event.clientX - drag.startX
+    if (!drag.scrubbed && Math.abs(dx) < SCRUB_THRESHOLD_PX) return
+    drag.scrubbed = true
+    const sensitivity = event.shiftKey ? 0.1 : 1
+    const raw = clampValue(drag.startValue + dx * sensitivity * step).toFixed(decimals)
+    updateDraft(raw)
+    onLive(raw)
+  }
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLInputElement>) => {
+    const drag = dragRef.current
+    dragRef.current = null
+    if (!drag) return
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (drag.scrubbed) {
+      commit(draftRef.current ?? value)
+    } else {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }
+
+  const handlePointerCancel = () => {
+    const drag = dragRef.current
+    dragRef.current = null
+    if (drag?.scrubbed) revert()
+  }
+
+  const stepByKey = (direction: number, fine: boolean) => {
+    const parsed = Number(draftRef.current ?? value)
+    const current = Number.isFinite(parsed) ? parsed : 0
+    const raw = clampValue(current + direction * step * (fine ? 10 : 1)).toFixed(decimals)
+    updateDraft(raw)
+    onLive(raw)
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      aria-label={ariaLabel}
+      type="text"
+      name={name}
+      autoComplete="off"
+      inputMode="decimal"
+      value={draft ?? value}
+      disabled={disabled}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onChange={(event) => {
+        const raw = event.currentTarget.value
+        updateDraft(raw)
+        onLive(raw)
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.key === 'Enter') {
+          if (draftRef.current !== null) commit(event.currentTarget.value)
+          event.currentTarget.blur()
+        } else if (event.key === 'Escape') {
+          if (draftRef.current !== null) revert()
+          event.currentTarget.blur()
+        } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault()
+          stepByKey(event.key === 'ArrowUp' ? 1 : -1, event.shiftKey)
+        }
+      }}
+      onKeyUp={(event) => {
+        if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && draftRef.current !== null) {
+          commit(event.currentTarget.value)
+        }
+      }}
+      onBlur={(event) => {
+        if (draftRef.current !== null) commit(event.currentTarget.value)
+      }}
+      style={{ touchAction: 'none' }}
+      className={cn('cursor-ew-resize select-none focus:cursor-text focus:select-auto', className)}
+    />
+  )
+})
+
 export const GpuWheelsPanel = memo(function GpuWheelsPanel({
   itemIds,
   effect,
@@ -466,12 +719,24 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
     if (!el) return
 
     const updateSize = () => {
-      const width = el.clientWidth
+      const styles = getComputedStyle(el)
+      const paddingX =
+        (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0)
+      const paddingY =
+        (parseFloat(styles.paddingTop) || 0) + (parseFloat(styles.paddingBottom) || 0)
+      const width = el.clientWidth - paddingX
       const wheelCount = isDock ? DOCK_WHEEL_DESCRIPTORS.length : WHEEL_DESCRIPTORS.length
       const maxSize = isDock ? MAX_DOCK_WHEEL_SIZE : MAX_WHEEL_SIZE
       const minSize = isDock ? MIN_DOCK_WHEEL_SIZE : MIN_WHEEL_SIZE
-      const slotWidth = (width - GRID_GAP_PX * (wheelCount - 1)) / wheelCount
-      setWheelSize(clamp(Math.floor(slotWidth), minSize, maxSize))
+      const gridGap = isDock ? DOCK_WHEEL_GRID_GAP_PX : GRID_GAP_PX
+      const slotWidth = (width - gridGap * (wheelCount - 1)) / wheelCount
+      // In the dock the wheel column also stacks a header, value chips and a thumb
+      // wheel — cap the wheel diameter by the available height so the column never
+      // spills over the bottom parameter row.
+      const slotHeight = isDock
+        ? el.clientHeight - paddingY - DOCK_WHEEL_EXTRAS_PX
+        : Number.POSITIVE_INFINITY
+      setWheelSize(clamp(Math.floor(Math.min(slotWidth, slotHeight)), minSize, maxSize))
     }
 
     updateSize()
@@ -482,92 +747,118 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
     return () => observer.disconnect()
   }, [isDock])
 
-  const tonalRowClass = '[&>span]:w-[84px] [&>span]:min-w-[84px]'
-  const renderNumberControl = (key: string) => {
+  const updateNumberParam = (key: string, rawValue: string, mode: 'live' | 'commit') => {
+    const param = definition.params[key]
+    if (!param || param.type !== 'number') return null
+    const next = Number(rawValue)
+    if (!Number.isFinite(next)) return null
+    const clamped = clampParamValue(param, next)
+    if (mode === 'live') onParamLiveChange(effect.id, key, clamped)
+    else onParamChange(effect.id, key, clamped)
+    return clamped
+  }
+
+  const renderDockNumberControl = (key: string) => {
     const param = definition.params[key]
     if (!param || param.type !== 'number') return null
     const value = (gpuEffect.params[key] as number) ?? param.default
     const label = getEffectParamLabel(t, definition, key)
 
     return (
-      <label key={key} className="flex min-w-0 items-center justify-center gap-1.5">
-        <span className="truncate text-[11px] text-muted-foreground">{label}</span>
-        <span className="flex min-w-[4.25rem] flex-col items-center">
-          <input
-            aria-label={label}
-            type="number"
+      <label
+        key={key}
+        className="grid min-w-0 grid-cols-[minmax(0,1fr)_4.75rem] items-center gap-2"
+      >
+        <span className="min-w-0 truncate text-right text-[11px] text-muted-foreground">
+          {label}
+        </span>
+        <span className="flex min-w-0 flex-col items-center">
+          <DockNumberInput
+            ariaLabel={label}
+            name={`dock-${key}`}
             value={formatParamValue(value, param.step)}
             min={param.min}
             max={param.max}
             step={param.step}
             disabled={!effect.enabled}
-            onChange={(event) => {
-              const next = Number(event.currentTarget.value)
-              if (!Number.isFinite(next)) return
-              const clamped = clamp(next, param.min ?? next, param.max ?? next)
-              onParamLiveChange(effect.id, key, clamped)
-              onParamChange(effect.id, key, clamped)
-            }}
-            onKeyDown={(event) => event.stopPropagation()}
-            className="h-6 w-[4.25rem] rounded-[2px] border border-black/80 bg-black/75 px-1 text-center font-mono text-[11px] text-foreground shadow-inner outline-none focus:border-ring"
+            onLive={(raw) => updateNumberParam(key, raw, 'live')}
+            onCommit={(raw) => updateNumberParam(key, raw, 'commit')}
+            className="h-6 w-full rounded-[2px] border border-black/80 bg-black/75 px-1 text-center font-mono text-[11px] tabular-nums text-foreground shadow-inner focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
           <span
             aria-hidden="true"
-            className={cn('mt-0.5 h-0.5 w-8 rounded-full bg-gradient-to-r', getDockParamAccent(key))}
+            className={cn(
+              'mt-0.5 h-0.5 w-8 rounded-full bg-gradient-to-r',
+              getDockParamAccent(key),
+            )}
           />
         </span>
       </label>
     )
   }
 
-  const renderWheelValueStrip = (levelKey: string, hueKey: string, amountKey: string) => {
+  const renderDockWheelFields = (
+    levelKey: string,
+    hueKey: string,
+    amountKey: string,
+    wheelLabel: string,
+  ) => {
     const levelParam = definition.params[levelKey]
+    const hueParam = definition.params[hueKey]
+    const amountParam = definition.params[amountKey]
     const levelValue = readNumberParam(definition, gpuEffect.params, levelKey)
     const hue = readNumberParam(definition, gpuEffect.params, hueKey)
     const amount = readNumberParam(definition, gpuEffect.params, amountKey)
-    const chips = [
-      { value: Math.round(amount * 100).toString(), className: 'border-b-red-500' },
-      { value: Math.round(hue).toString(), className: 'border-b-green-500' },
-      { value: Math.round((amount * hue) / 360).toString(), className: 'border-b-blue-500' },
+    const fields = [
+      { key: levelKey, param: levelParam, value: levelValue },
+      { key: amountKey, param: amountParam, value: amount },
+      { key: hueKey, param: hueParam, value: hue },
     ]
 
     return (
-      <div className="mt-1 w-full px-1">
-        <div className="grid grid-cols-4 gap-1">
-          <input
-            aria-label={getEffectParamLabel(t, definition, levelKey)}
-            type="number"
-            value={formatParamValue(levelValue, levelParam?.step)}
-            min={levelParam?.min}
-            max={levelParam?.max}
-            step={levelParam?.step}
-            disabled={!effect.enabled}
-            onChange={(event) => {
-              const next = Number(event.currentTarget.value)
-              if (!Number.isFinite(next)) return
-              const clamped = clampParamValue(levelParam, next)
-              onParamLiveChange(effect.id, levelKey, clamped)
-              onParamChange(effect.id, levelKey, clamped)
-            }}
-            onKeyDown={(event) => event.stopPropagation()}
-            className="h-5 rounded-[2px] border border-black/80 border-b-white bg-black/75 px-1 text-center font-mono text-[10px] leading-5 text-foreground outline-none focus:border-ring"
-          />
-          {chips.map((chip, index) => (
-            <div
-              key={index}
-              className={cn(
-                'h-5 rounded-[2px] border border-black/80 bg-black/75 text-center font-mono text-[10px] leading-5 text-foreground',
-                chip.className,
-              )}
-            >
-              {chip.value}
-            </div>
+      <div className="w-full max-w-[11rem] px-1">
+        <div className="grid grid-cols-3 gap-1">
+          {fields.map(({ key, param, value }) => (
+            <span key={key} className="flex min-w-0 flex-col items-center">
+              <DockNumberInput
+                ariaLabel={
+                  key === levelKey
+                    ? wheelLabel
+                    : `${wheelLabel} ${getEffectParamLabel(t, definition, key)}`
+                }
+                name={`dock-${key}`}
+                value={formatWheelChipValue(key, value, param?.step)}
+                min={param?.min}
+                max={param?.max}
+                step={param?.step}
+                disabled={!effect.enabled}
+                onLive={(raw) => updateNumberParam(key, raw, 'live')}
+                onCommit={(raw) => updateNumberParam(key, raw, 'commit')}
+                className="h-5 w-full rounded-[2px] border border-black/80 bg-black/75 px-1 text-center font-mono text-[10px] leading-5 tabular-nums text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <span
+                aria-hidden="true"
+                className={cn('mt-0.5 h-0.5 w-7 rounded-full', getDockFieldAccent(key))}
+              />
+            </span>
           ))}
         </div>
-        <div className="mt-1 h-2 rounded-full border border-black/80 bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.16)_0_1px,rgba(0,0,0,0.55)_1px_4px)] shadow-inner" />
+        <DockThumbWheel
+          ariaLabel={`${wheelLabel} thumb wheel`}
+          name={`dock-${levelKey}-thumb`}
+          value={levelValue}
+          min={levelParam?.min}
+          max={levelParam?.max}
+          step={levelParam?.step}
+          disabled={!effect.enabled}
+          onLive={(raw) => updateNumberParam(levelKey, raw, 'live')}
+          onCommit={(raw) => updateNumberParam(levelKey, raw, 'commit')}
+        />
       </div>
     )
   }
+
+  const tonalRowClass = '[&>span]:w-[84px] [&>span]:min-w-[84px]'
 
   const renderParamRows = (keys: readonly string[]) =>
     keys.map((key) => {
@@ -624,18 +915,14 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
 
       {isDock ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="grid h-10 shrink-0 grid-cols-[4.25rem_repeat(5,minmax(0,1fr))] items-center gap-3 border-b border-border/70 px-3">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-muted-foreground/50 text-[10px] font-semibold">
-                A
-              </span>
-              <Pipette className="h-3.5 w-3.5" aria-hidden="true" />
-              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-            </div>
-            {DOCK_TOP_PARAMS.map(renderNumberControl)}
+          <div
+            className="grid shrink-0 items-center gap-x-3 border-b border-border/70 px-4 py-1.5"
+            style={{ gridTemplateColumns: `repeat(${DOCK_TOP_PARAMS.length}, minmax(0, 1fr))` }}
+          >
+            {DOCK_TOP_PARAMS.map(renderDockNumberControl)}
           </div>
-          <div className="min-h-0 flex-1 px-5 py-2">
-            <div ref={wheelGridRef} className="grid h-full grid-cols-4 items-center gap-5">
+          <div ref={wheelGridRef} className="min-h-0 flex-1 overflow-hidden px-6 py-3">
+            <div className="grid min-h-full grid-cols-[repeat(4,minmax(3rem,1fr))] items-center gap-7">
               {DOCK_WHEEL_DESCRIPTORS.map((desc) => (
                 <WheelControl
                   key={desc.labelKey}
@@ -645,7 +932,12 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
                   size={wheelSize}
                   disabled={!effect.enabled}
                   dock
-                  valueStrip={renderWheelValueStrip(desc.levelKey, desc.hueKey, desc.amountKey)}
+                  dockFields={renderDockWheelFields(
+                    desc.levelKey,
+                    desc.hueKey,
+                    desc.amountKey,
+                    t(desc.labelKey),
+                  )}
                   onLiveChange={(hue, amount) => {
                     onParamsBatchLiveChange(effect.id, {
                       [desc.hueKey]: hue,
@@ -668,13 +960,11 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
               ))}
             </div>
           </div>
-          <div className="grid h-10 shrink-0 grid-cols-6 items-center gap-3 border-t border-border/70 px-3">
-            {DOCK_BOTTOM_PARAMS.map(renderNumberControl)}
-          </div>
-          <div className="flex h-5 shrink-0 items-center justify-center gap-5 border-t border-border/50 bg-black/10 text-muted-foreground">
-            <CircleDot className="h-3.5 w-3.5 text-foreground" aria-hidden="true" />
-            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-            <Pipette className="h-3.5 w-3.5" aria-hidden="true" />
+          <div
+            className="grid shrink-0 items-center gap-x-3 border-t border-border/70 px-4 py-1.5"
+            style={{ gridTemplateColumns: `repeat(${DOCK_BOTTOM_PARAMS.length}, minmax(0, 1fr))` }}
+          >
+            {DOCK_BOTTOM_PARAMS.map(renderDockNumberControl)}
           </div>
         </div>
       ) : (

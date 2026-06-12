@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -81,7 +81,7 @@ describe('ColorTimelineNavigator', () => {
     expect(usePlaybackStore.getState().previewItemId).toBeNull()
   })
 
-  it('scrubs the compact strip while dragging and clears the preview on release', () => {
+  it('scrubs the compact strip while dragging and clears the preview on release', async () => {
     render(<ColorTimelineNavigator />)
 
     const scrubSurface = screen.getByTestId('color-timeline-scrub-surface')
@@ -101,8 +101,11 @@ describe('ColorTimelineNavigator', () => {
     expect(usePlaybackStore.getState().currentFrame).toBe(60)
     expect(usePlaybackStore.getState().previewFrame).toBe(60)
 
+    // Move commits are rAF-batched — wait for the scheduled frame to land.
     fireEvent.pointerMove(scrubSurface, { clientX: 300, pointerId: 1 })
-    expect(usePlaybackStore.getState().currentFrame).toBe(150)
+    await waitFor(() => {
+      expect(usePlaybackStore.getState().currentFrame).toBe(150)
+    })
     expect(usePlaybackStore.getState().previewFrame).toBe(150)
 
     fireEvent.pointerUp(scrubSurface, { clientX: 300, pointerId: 1 })

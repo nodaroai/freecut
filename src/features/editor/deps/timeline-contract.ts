@@ -2,10 +2,16 @@
  * Single import seam for editor -> timeline dependencies.
  */
 
-export type { TimelineActions, TimelineState } from '@/features/timeline/contracts/editor'
+export type {
+  TimelineActions,
+  TimelineState,
+  ScrubThrottleState,
+} from '@/features/timeline/contracts/editor'
 export {
   captureSnapshot,
   createDefaultAdjustmentItem,
+  createScrubThrottleState,
+  shouldCommitScrubFrame,
   createDefaultShapeItem,
   createTextTemplateItem,
   findCompatibleTrackForItemType,

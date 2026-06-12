@@ -960,7 +960,7 @@ export const ColorScopesView = memo(function ColorScopesView({
       </div>
       {embedded ? (
         embeddedLayout === 'stack' ? (
-          <div className="h-[calc(100%-22px)] min-h-0 flex flex-col gap-3">
+          <div className="h-[calc(100%-22px)] min-h-0 flex flex-col gap-2">
             <div className="flex min-h-0 flex-[1.02] flex-col">
               <div className="mb-1 flex items-center justify-between">
                 <div className="text-[10px] text-muted-foreground">Waveform</div>
@@ -969,7 +969,7 @@ export const ColorScopesView = memo(function ColorScopesView({
               <ScopeCanvasFrame
                 containerRef={waveformContainerRef}
                 kind="waveform"
-                className="flex-1 min-h-[96px]"
+                className="min-h-0 flex-1"
               >
                 <canvas ref={waveformCanvasRef} className="w-full h-full" />
               </ScopeCanvasFrame>
@@ -980,7 +980,7 @@ export const ColorScopesView = memo(function ColorScopesView({
               <ScopeCanvasFrame
                 containerRef={paradeContainerRef}
                 kind="parade"
-                className="flex-1 min-h-[104px]"
+                className="min-h-0 flex-1"
               >
                 <canvas ref={paradeCanvasRef} className="w-full h-full" />
               </ScopeCanvasFrame>
@@ -1017,7 +1017,7 @@ export const ColorScopesView = memo(function ColorScopesView({
                 <ScopeCanvasFrame
                   containerRef={histogramContainerRef}
                   kind="histogram"
-                  className="flex-1 min-h-[88px]"
+                  className="min-h-0 flex-1"
                 >
                   <canvas ref={histogramCanvasRef} className="w-full h-full" />
                 </ScopeCanvasFrame>

@@ -15,9 +15,7 @@ import {
   isColorGradeEffectType,
 } from '@/infrastructure/gpu-effects'
 import { useUserPresetsStore } from '../stores/user-presets-store'
-import {
-  getAutoKeyframeOperation,
-} from '@/features/effects/deps/keyframes-contract'
+import { getAutoKeyframeOperation } from '@/features/effects/deps/keyframes-contract'
 import type { AnimatableProperty } from '@/types/keyframe'
 import { useKeyframesByItemId } from '../hooks/use-keyframes-by-item-id'
 import {
@@ -25,7 +23,6 @@ import {
   getResolvedGpuEffectForFrame,
 } from '../utils/effect-keyframes'
 import { applyGradePresetToEffectStack, hasGradePresetEffects } from '../utils/grade-presets'
-import { getEffectDefinitionName } from '../utils/effect-i18n'
 
 type GradeEffectType = 'gpu-color-wheels' | 'gpu-curves'
 type EffectParams = Record<string, number | boolean | string>
@@ -51,20 +48,9 @@ interface ColorGradeSectionProps {
   onCreateAdjustmentLayer?: () => void
 }
 
-function DockPane({
-  title,
-  className,
-  children,
-}: {
-  title: string
-  className?: string
-  children: ReactNode
-}) {
+function DockPane({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <section className={cn('flex h-full min-h-0 flex-col overflow-hidden', className)}>
-      <div className="flex h-7 shrink-0 items-center border-b border-border/70 px-2">
-        <h3 className="truncate text-[11px] font-semibold text-muted-foreground">{title}</h3>
-      </div>
       <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
     </section>
   )
@@ -368,7 +354,9 @@ export const ColorGradeSection = memo(function ColorGradeSection({
 
   const handleApplyGradePreset = useCallback(
     (presetId: string) => {
-      const preset = useUserPresetsStore.getState().presets.find((candidate) => candidate.id === presetId)
+      const preset = useUserPresetsStore
+        .getState()
+        .presets.find((candidate) => candidate.id === presetId)
       if (!preset || !hasGradePresetEffects(preset.effects)) return
       setItemEffects(
         visualItems.map((item) => ({
@@ -590,11 +578,9 @@ export const ColorGradeSection = memo(function ColorGradeSection({
         </div>
         {presetNameInput}
         {gradeGallery}
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.28fr)_minmax(0,0.72fr)]">
-          <DockPane title={getEffectDefinitionName(wheelsDefinition)} className="border-r border-border/70">
-            {wheelsPanel}
-          </DockPane>
-          <DockPane title={getEffectDefinitionName(curvesDefinition)}>{curvesPanel}</DockPane>
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.5fr)_minmax(0,0.5fr)]">
+          <DockPane className="border-r border-border/70">{wheelsPanel}</DockPane>
+          <DockPane>{curvesPanel}</DockPane>
         </div>
       </div>
     )

@@ -444,11 +444,11 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
         <PropertyRow label={t('effects.curves.channel')}>{channelControls}</PropertyRow>
       )}
 
-      <div className={cn('px-2', isDock && 'min-h-0 flex-1 pb-2')}>
+      <div className={cn('px-2', isDock && 'flex min-h-0 flex-1 pb-2')}>
         <div
           className={cn(
             'relative overflow-hidden rounded border border-border/70 bg-black/50',
-            isDock && 'flex h-full items-center justify-center',
+            isDock && 'flex min-h-0 flex-1 items-center justify-center p-2',
           )}
         >
           <svg
@@ -461,7 +461,7 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
             viewBox={`0 0 ${CURVE_SIZE} ${CURVE_SIZE}`}
             className={cn(
               'aspect-square',
-              isDock ? 'h-full max-h-[220px] w-auto max-w-full' : 'w-full',
+              isDock ? 'h-full max-h-full w-auto max-w-full' : 'w-full',
               effect.enabled ? 'cursor-crosshair' : 'cursor-default',
             )}
             onMouseDown={handleSvgMouseDown}
