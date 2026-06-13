@@ -48,6 +48,10 @@ function itemHasGrade(item: TimelineItem): boolean {
   return (item.effects ?? []).some(isColorGradeEntry)
 }
 
+function itemHasEnabledGrade(item: TimelineItem): boolean {
+  return (item.effects ?? []).some((entry) => entry.enabled && isColorGradeEntry(entry))
+}
+
 function cloneGpuEffect(effect: GpuEffect): GpuEffect {
   return { ...effect, params: { ...effect.params } }
 }
@@ -392,6 +396,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
     [displayItem],
   )
   const canCopyGrade = useMemo(() => visualItems.some(itemHasGrade), [visualItems])
+  const canCompareGrade = useMemo(() => visualItems.some(itemHasEnabledGrade), [visualItems])
   const gradePresets = useMemo(
     () => userPresets.filter((preset) => hasGradePresetEffects(preset.effects)),
     [userPresets],
@@ -400,6 +405,12 @@ export const ColorGradeSection = memo(function ColorGradeSection({
   useEffect(() => {
     void loadUserPresets()
   }, [loadUserPresets])
+
+  useEffect(() => {
+    if (colorGradeComparisonMode === 'split' && !canCompareGrade) {
+      setColorGradeComparisonMode('off')
+    }
+  }, [canCompareGrade, colorGradeComparisonMode, setColorGradeComparisonMode])
 
   const handleSavePreset = useCallback(() => {
     const name = presetNameDraft?.trim()
@@ -465,6 +476,9 @@ export const ColorGradeSection = memo(function ColorGradeSection({
     displayItem ? (keyframesByItemId.get(displayItem.id) ?? undefined) : undefined,
     currentFrame,
   )
+  const splitCompareTitle = canCompareGrade
+    ? t('effects.colorPanel.compareSplitTooltip')
+    : t('effects.colorPanel.compareSplitDisabledTooltip')
 
   const compareControls = (
     <div
@@ -501,8 +515,9 @@ export const ColorGradeSection = memo(function ColorGradeSection({
         size="sm"
         className="h-7 px-1 text-xs"
         onClick={() => setColorGradeComparisonMode('split')}
-        title={t('effects.colorPanel.compareSplitTooltip')}
-        aria-label={t('effects.colorPanel.compareSplitTooltip')}
+        disabled={!canCompareGrade}
+        title={splitCompareTitle}
+        aria-label={splitCompareTitle}
         aria-pressed={colorGradeComparisonMode === 'split'}
       >
         <Columns2 className="mr-1 h-3 w-3" />

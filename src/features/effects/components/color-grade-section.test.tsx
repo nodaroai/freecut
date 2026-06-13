@@ -5,6 +5,8 @@ import type { TimelineItem } from '@/types/timeline'
 import { useGradeClipboardStore } from '@/shared/state/grade-clipboard'
 import { ColorGradeSection } from './color-grade-section'
 
+type ColorGradeComparisonMode = 'off' | 'before' | 'split'
+
 const mocks = vi.hoisted(() => {
   const timelineState = {
     addEffects: vi.fn(),
@@ -17,7 +19,7 @@ const mocks = vi.hoisted(() => {
   const gizmoState = {
     setEffectsPreviewNew: vi.fn(),
     clearPreview: vi.fn(),
-    colorGradeComparisonMode: 'off' as const,
+    colorGradeComparisonMode: 'off' as ColorGradeComparisonMode,
     setColorGradeComparisonMode: vi.fn(),
   }
   const presetsState = {
@@ -111,6 +113,66 @@ describe('ColorGradeSection', () => {
 
     expect(screen.getByRole('button', { name: 'Copy grade' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Paste grade' })).toBeDisabled()
+  })
+
+  it('disables split comparison until an enabled color grade exists', () => {
+    render(<ColorGradeSection items={[makeVideoItem()]} />)
+
+    const splitButton = screen.getByRole('button', {
+      name: 'Add or enable a color grade to use split comparison',
+    })
+    expect(splitButton).toBeDisabled()
+    fireEvent.click(splitButton)
+    expect(mocks.gizmoState.setColorGradeComparisonMode).not.toHaveBeenCalled()
+  })
+
+  it('enables split comparison for clips with an active color grade', () => {
+    const gradeEffect: ItemEffect = {
+      id: 'grade-1',
+      enabled: true,
+      effect: {
+        type: 'gpu-effect',
+        gpuEffectType: 'gpu-color-wheels',
+        params: { lift: 0.2 },
+      },
+    }
+
+    render(<ColorGradeSection items={[makeVideoItem([gradeEffect])]} />)
+
+    const splitButton = screen.getByRole('button', {
+      name: 'Show ungraded before on the left and graded after on the right',
+    })
+    expect(splitButton).toBeEnabled()
+    fireEvent.click(splitButton)
+    expect(mocks.gizmoState.setColorGradeComparisonMode).toHaveBeenCalledWith('split')
+  })
+
+  it('falls back to after when split comparison has no active grade to compare', () => {
+    mocks.gizmoState.colorGradeComparisonMode = 'split'
+
+    render(<ColorGradeSection items={[makeVideoItem()]} />)
+
+    expect(mocks.gizmoState.setColorGradeComparisonMode).toHaveBeenCalledWith('off')
+  })
+
+  it('keeps split disabled for disabled color grades', () => {
+    const disabledGradeEffect: ItemEffect = {
+      id: 'grade-1',
+      enabled: false,
+      effect: {
+        type: 'gpu-effect',
+        gpuEffectType: 'gpu-color-wheels',
+        params: { lift: 0.2 },
+      },
+    }
+
+    render(<ColorGradeSection items={[makeVideoItem([disabledGradeEffect])]} />)
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Add or enable a color grade to use split comparison',
+      }),
+    ).toBeDisabled()
   })
 
   it('previews and creates a single color wheels effect on first adjustment', () => {

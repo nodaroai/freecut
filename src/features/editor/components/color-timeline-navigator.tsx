@@ -8,7 +8,18 @@ import {
 } from '@/features/editor/deps/timeline-utils'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
+import { useGizmoStore } from '@/features/editor/deps/preview'
 import type { TimelineItem, TimelineTrack } from '@/types/timeline'
+import type { ProjectMarker } from '@/types/timeline'
+import {
+  buildTimelineAnnotationModel,
+  type TimelineAnnotationMarker,
+  type TimelineAnnotationModel,
+} from '@/shared/timeline/timeline-annotations'
+import {
+  resolveColorGradeThumbnailTreatment,
+  type ColorGradeThumbnailTreatment,
+} from '../utils/color-grade-thumbnail-treatment'
 
 interface TimelineClip {
   id: string
@@ -18,6 +29,7 @@ interface TimelineClip {
   from: number
   durationInFrames: number
   thumbnailUrl?: string
+  gradeThumbnail: ColorGradeThumbnailTreatment
 }
 
 const STRIP_HEIGHT = 164
@@ -26,6 +38,9 @@ const FILM_TILE_HEIGHT = 80
 const FILM_TILE_STRIP_HEIGHT = 88
 const MINI_TIMELINE_TRACK_AREA_HEIGHT = 52
 const MINI_TIMELINE_LABEL_WIDTH = 32
+const COLOR_IO_LANE_HEIGHT = 14
+const COLOR_IO_HANDLE_WIDTH = 6
+const COLOR_IO_HANDLE_COLOR = 'var(--color-timeline-io-handle)'
 const MIN_TIMELINE_FRAMES = 300
 const VIDEO_TRACK_NAME_REGEX = /^V\d+$/i
 
@@ -50,12 +65,19 @@ function getThumbnailUrl(item: TimelineItem): string | undefined {
   return 'thumbnailUrl' in item ? item.thumbnailUrl : undefined
 }
 
-function resolveTimelineMaxFrame(items: readonly TimelineItem[]): number {
+function resolveTimelineMaxFrame(params: {
+  items: readonly TimelineItem[]
+  markers: readonly ProjectMarker[]
+  inPoint: number | null
+  outPoint: number | null
+}): number {
+  const { items, markers, inPoint, outPoint } = params
   const itemMax = items.reduce(
     (maxFrame, item) => Math.max(maxFrame, item.from + item.durationInFrames),
     0,
   )
-  return Math.max(MIN_TIMELINE_FRAMES, itemMax)
+  const markerMax = markers.reduce((maxFrame, marker) => Math.max(maxFrame, marker.frame), 0)
+  return Math.max(MIN_TIMELINE_FRAMES, itemMax, markerMax, inPoint ?? 0, outPoint ?? 0)
 }
 
 function formatNavigatorTime(frame: number, fps: number): string {
@@ -153,6 +175,142 @@ const ColorTimelinePlayhead = memo(function ColorTimelinePlayhead({
   )
 })
 
+const ColorTimelineAnnotations = memo(function ColorTimelineAnnotations({
+  model,
+  selectedMarkerId,
+  onMarkerPress,
+}: {
+  model: TimelineAnnotationModel
+  selectedMarkerId: string | null
+  onMarkerPress: (marker: TimelineAnnotationMarker) => void
+}) {
+  const ioRangeStyle = model.ioRange
+    ? {
+        left: `${model.ioRange.startRatio * 100}%`,
+        width: `${Math.max(0.25, (model.ioRange.endRatio - model.ioRange.startRatio) * 100)}%`,
+      }
+    : null
+
+  const renderIoPost = (point: TimelineAnnotationModel['inPoint'], side: 'in' | 'out') => {
+    if (!point) return null
+    return (
+      <span
+        key={side}
+        className="pointer-events-none absolute bottom-0 top-0 z-[22] w-0"
+        data-testid={`color-timeline-${side}-point`}
+        style={{ left: `${point.positionRatio * 100}%` }}
+        title={side === 'in' ? 'In point' : 'Out point'}
+      >
+        <span
+          className="absolute bottom-0 top-0 w-px bg-cyan-200/55"
+          style={{ transform: 'translateX(-0.5px)' }}
+          aria-hidden="true"
+        />
+        <span
+          className="absolute pointer-events-none"
+          data-testid={`color-timeline-${side}-handle`}
+          style={{
+            top: 0,
+            left: side === 'in' ? 0 : -COLOR_IO_HANDLE_WIDTH,
+            width: COLOR_IO_HANDLE_WIDTH,
+            height: COLOR_IO_LANE_HEIGHT,
+            borderRadius: '2px',
+            background: `linear-gradient(to bottom, ${COLOR_IO_HANDLE_COLOR}, color-mix(in oklch, ${COLOR_IO_HANDLE_COLOR} 75%, black))`,
+            boxShadow: `0 0 6px color-mix(in oklch, ${COLOR_IO_HANDLE_COLOR} 55%, transparent)`,
+          }}
+          aria-hidden="true"
+        />
+      </span>
+    )
+  }
+
+  return (
+    <div
+      className="pointer-events-none absolute bottom-0 right-0 top-0"
+      data-testid="color-timeline-annotations"
+      style={{ left: MINI_TIMELINE_LABEL_WIDTH }}
+    >
+      {ioRangeStyle ? (
+        <>
+          <span
+            className="absolute bottom-0 top-0 z-[9]"
+            data-testid="color-timeline-io-range"
+            style={{
+              ...ioRangeStyle,
+              backgroundColor: 'oklch(0.50 0.10 220 / 0.16)',
+              borderLeft:
+                '1px solid color-mix(in oklch, var(--color-timeline-io-range-border) 45%, transparent)',
+              borderRight:
+                '1px solid color-mix(in oklch, var(--color-timeline-io-range-border) 45%, transparent)',
+            }}
+          />
+          <span
+            className="absolute z-[11] rounded-[2px]"
+            data-testid="color-timeline-io-strip"
+            style={{
+              ...ioRangeStyle,
+              top: 0,
+              height: COLOR_IO_LANE_HEIGHT,
+              background:
+                'linear-gradient(to bottom, var(--color-timeline-io-range-fill), color-mix(in oklch, var(--color-timeline-io-range-fill) 82%, black))',
+              border: '1px solid var(--color-timeline-io-range-border)',
+              boxShadow:
+                'inset 0 1px 0 color-mix(in oklch, white 22%, transparent), 0 0 8px var(--color-timeline-io-range-glow)',
+            }}
+          />
+        </>
+      ) : null}
+
+      {renderIoPost(model.inPoint, 'in')}
+      {renderIoPost(model.outPoint, 'out')}
+
+      {model.markers.map((marker) => {
+        const selected = selectedMarkerId === marker.id
+        return (
+          <button
+            key={marker.id}
+            type="button"
+            className="pointer-events-auto absolute bottom-0 top-0 z-[14] w-5 -translate-x-1/2 cursor-pointer"
+            data-testid="color-timeline-marker"
+            data-marker-id={marker.id}
+            style={{ left: `${marker.positionRatio * 100}%` }}
+            title={marker.label || `Marker at frame ${marker.frame}`}
+            aria-label={marker.label || `Marker at frame ${marker.frame}`}
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              if (event.button !== 0) return
+              onMarkerPress(marker)
+            }}
+            onClick={(event) => {
+              event.stopPropagation()
+              onMarkerPress(marker)
+            }}
+          >
+            <span
+              className={`absolute bottom-0 top-4 left-1/2 w-px -translate-x-1/2 ${
+                selected ? 'bg-white' : 'bg-white/45'
+              }`}
+              aria-hidden="true"
+            />
+            <span
+              className="absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 border-x-[6px] border-t-[9px] border-x-transparent drop-shadow"
+              style={{ borderTopColor: selected ? '#ffffff' : marker.color }}
+              aria-hidden="true"
+            />
+            {selected ? (
+              <span
+                className="absolute left-1/2 top-[2px] h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent"
+                style={{ borderTopColor: marker.color }}
+                aria-hidden="true"
+              />
+            ) : null}
+          </button>
+        )
+      })}
+    </div>
+  )
+})
+
 export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
   const { t } = useTranslation()
   const { items, tracks } = useItemsStore(
@@ -161,13 +319,23 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
       tracks: s.tracks,
     })),
   )
+  const { markers, inPoint, outPoint } = useTimelineStore(
+    useShallow((s) => ({
+      markers: s.markers,
+      inPoint: s.inPoint,
+      outPoint: s.outPoint,
+    })),
+  )
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame)
   const setScrubFrame = usePlaybackStore((s) => s.setScrubFrame)
   const setPreviewFrame = usePlaybackStore((s) => s.setPreviewFrame)
   const pausePlayback = usePlaybackStore((s) => s.pause)
   const fps = useTimelineStore((s) => s.fps)
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
+  const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId)
   const selectItems = useSelectionStore((s) => s.selectItems)
+  const selectMarker = useSelectionStore((s) => s.selectMarker)
+  const livePreviewEdits = useGizmoStore((s) => s.preview)
   const isScrubbingRef = useRef(false)
   // Scrub gesture state: rect is captured once on pointer down (no layout reads
   // per move), commits are rAF-batched and gated by the same adaptive throttle
@@ -202,11 +370,18 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
           from: item.from,
           durationInFrames: item.durationInFrames,
           thumbnailUrl: getThumbnailUrl(item),
+          gradeThumbnail: resolveColorGradeThumbnailTreatment(
+            livePreviewEdits?.[item.id]?.effects ?? item.effects,
+          ),
         }))
         .sort((a, b) => a.from - b.from || a.trackId.localeCompare(b.trackId)),
-    [items, trackNameById],
+    [items, livePreviewEdits, trackNameById],
   )
-  const timelineMaxFrame = resolveTimelineMaxFrame(items)
+  const timelineMaxFrame = resolveTimelineMaxFrame({ items, markers, inPoint, outPoint })
+  const annotationModel = useMemo(
+    () => buildTimelineAnnotationModel({ markers, inPoint, outPoint, maxFrame: timelineMaxFrame }),
+    [inPoint, markers, outPoint, timelineMaxFrame],
+  )
 
   const clientXToFrame = useCallback(
     (clientX: number): number | null => {
@@ -332,6 +507,16 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
     [pausePlayback, selectItems, setCurrentFrame, setPreviewFrame],
   )
 
+  const seekToMarker = useCallback(
+    (marker: TimelineAnnotationMarker) => {
+      pausePlayback()
+      setPreviewFrame(null)
+      setCurrentFrame(marker.frame)
+      selectMarker(marker.id)
+    },
+    [pausePlayback, selectMarker, setCurrentFrame, setPreviewFrame],
+  )
+
   const renderTimelineClip = (clip: TimelineClip) => {
     const selected = selectedItemIdSet.has(clip.id)
     const rowCount = Math.max(1, videoTrackRows.length)
@@ -408,12 +593,38 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
           <span className="ml-auto text-[9px] text-zinc-400">{clip.trackName}</span>
         </span>
 
-        <span className="relative block min-h-0 bg-black">
+        <span className="relative block min-h-0 overflow-hidden bg-black">
           {clip.thumbnailUrl ? (
-            <img src={clip.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+            <img
+              src={clip.thumbnailUrl}
+              alt=""
+              className="h-full w-full object-cover"
+              style={clip.gradeThumbnail.imageStyle}
+              data-graded-thumbnail={clip.gradeThumbnail.hasGrade ? 'true' : undefined}
+            />
           ) : (
-            <span className="block h-full w-full bg-black" />
+            <span
+              className="block h-full w-full bg-black"
+              style={clip.gradeThumbnail.imageStyle}
+            />
           )}
+          {clip.gradeThumbnail.overlayStyle ? (
+            <span
+              className="pointer-events-none absolute inset-0"
+              data-testid="color-timeline-grade-overlay"
+              style={clip.gradeThumbnail.overlayStyle}
+            />
+          ) : null}
+          {clip.gradeThumbnail.hasGrade ? (
+            <span
+              className="pointer-events-none absolute right-1 top-1 flex h-1.5 w-6 overflow-hidden rounded-full border border-black/45 shadow-sm"
+              aria-hidden="true"
+            >
+              <span className="h-full flex-1 bg-red-500" />
+              <span className="h-full flex-1 bg-lime-400" />
+              <span className="h-full flex-1 bg-sky-500" />
+            </span>
+          ) : null}
         </span>
 
         <span className="truncate border-t border-black/40 bg-[#202127] px-1.5 text-[10px] font-medium text-zinc-300">
@@ -452,6 +663,11 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
           onPointerUp={finishScrub}
           onPointerCancel={cancelScrub}
         >
+          <ColorTimelineAnnotations
+            model={annotationModel}
+            selectedMarkerId={selectedMarkerId}
+            onMarkerPress={seekToMarker}
+          />
           <div className="relative h-5 border-b border-black/40">
             <div
               className="absolute inset-y-0 right-0"

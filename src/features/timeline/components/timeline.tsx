@@ -12,7 +12,6 @@ import { useItemsStore } from '../stores/items-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useEditorStore } from '@/shared/state/editor'
 import { useTimelineStore } from '../stores/timeline-store'
-import { usePlaybackStore } from '@/shared/state/playback'
 import { HOTKEY_OPTIONS } from '@/config/hotkeys'
 import { useSettingsStore, useResolvedHotkeys } from '@/features/timeline/deps/settings'
 
@@ -530,7 +529,9 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
     }
   }, [isTrackDragging])
 
-  // Keyboard shortcuts for in/out markers
+  // Keyboard shortcut: Escape exits the active composition.
+  // In/out shortcuts are registered by useTimelineShortcuts so they remain
+  // available when the compact Color timeline replaces this component.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Another focused panel (e.g. Source Monitor) already handled this key.
@@ -554,33 +555,6 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
         }
       }
 
-      // 'I' key - Set in-point at main playhead
-      if (key === 'i' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        const { currentFrame } = usePlaybackStore.getState()
-        useTimelineStore.getState().setInPoint(currentFrame)
-      }
-
-      // 'Shift+I' key - Set in-point at skimmer playhead when available
-      else if (key === 'i' && !e.metaKey && !e.ctrlKey && e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        const { previewFrame, currentFrame } = usePlaybackStore.getState()
-        useTimelineStore.getState().setInPoint(previewFrame ?? currentFrame)
-      }
-
-      // 'O' key - Set out-point at main playhead
-      if (key === 'o' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        const { currentFrame } = usePlaybackStore.getState()
-        useTimelineStore.getState().setOutPoint(currentFrame)
-      }
-
-      // 'Shift+O' key - Set out-point at skimmer playhead when available
-      else if (key === 'o' && !e.metaKey && !e.ctrlKey && e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        const { previewFrame, currentFrame } = usePlaybackStore.getState()
-        useTimelineStore.getState().setOutPoint(previewFrame ?? currentFrame)
-      }
     }
 
     window.addEventListener('keydown', handleKeyDown)

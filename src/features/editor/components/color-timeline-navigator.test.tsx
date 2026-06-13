@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useGizmoStore } from '@/features/editor/deps/preview'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
 import type { TimelineTrack, VideoItem } from '@/types/timeline'
@@ -68,7 +69,12 @@ describe('ColorTimelineNavigator', () => {
   beforeEach(() => {
     useItemsStore.getState().setTracks([VIDEO_TRACK, AUDIO_TRACK])
     useItemsStore.getState().setItems([VIDEO_ITEM])
-    useTimelineStore.setState({ fps: 24 })
+    useTimelineStore.setState({
+      fps: 24,
+      markers: [],
+      inPoint: null,
+      outPoint: null,
+    })
     useSelectionStore.getState().clearSelection()
     usePlaybackStore.setState({
       currentFrame: 0,
@@ -78,6 +84,7 @@ describe('ColorTimelineNavigator', () => {
       currentFrameEpoch: 0,
       previewFrameEpoch: 0,
     })
+    useGizmoStore.getState().clearPreview()
   })
 
   it('renders a compact timeline strip for color mode', () => {
@@ -130,6 +137,80 @@ describe('ColorTimelineNavigator', () => {
     expect(usePlaybackStore.getState().currentFrame).toBe(48)
     expect(usePlaybackStore.getState().previewFrame).toBeNull()
     expect(usePlaybackStore.getState().previewItemId).toBeNull()
+  })
+
+  it('shows the film tile thumbnail with the applied grade treatment', () => {
+    useItemsStore.getState().setItems([
+      {
+        ...VIDEO_ITEM,
+        effects: [
+          {
+            id: 'grade-1',
+            enabled: true,
+            effect: {
+              type: 'gpu-effect',
+              gpuEffectType: 'gpu-color-wheels',
+              params: {
+                exposure: 0.5,
+                contrast: 1.25,
+                saturation: 45,
+                hue: 65,
+                temperature: 40,
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    const { container } = render(<ColorTimelineNavigator />)
+
+    const thumbnail = container.querySelector('[data-graded-thumbnail="true"]')
+    expect(thumbnail).not.toBeNull()
+    expect(thumbnail?.getAttribute('style')).toContain('filter:')
+    expect(screen.getByTestId('color-timeline-grade-overlay')).toBeInTheDocument()
+  })
+
+  it('renders timeline markers and the in/out range in the color timeline view', () => {
+    useTimelineStore.setState({
+      inPoint: 60,
+      outPoint: 180,
+      markers: [
+        { id: 'marker-1', frame: 72, color: '#f97316', label: 'Warm pass' },
+        { id: 'marker-2', frame: 144, color: '#22c55e', label: 'Skin check' },
+      ],
+    })
+
+    render(<ColorTimelineNavigator />)
+
+    expect(screen.getByTestId('color-timeline-io-range')).toBeInTheDocument()
+    expect(screen.getByTestId('color-timeline-io-strip')).toBeInTheDocument()
+    expect(screen.getByTestId('color-timeline-in-point')).toBeInTheDocument()
+    expect(screen.getByTestId('color-timeline-in-handle')).toBeInTheDocument()
+    expect(screen.getByTestId('color-timeline-out-point')).toBeInTheDocument()
+    expect(screen.getByTestId('color-timeline-out-handle')).toBeInTheDocument()
+    expect(screen.getAllByTestId('color-timeline-marker')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Warm pass' })).toBeInTheDocument()
+  })
+
+  it('selects a marker and seeks to its frame from the color timeline', () => {
+    useTimelineStore.setState({
+      markers: [{ id: 'marker-1', frame: 96, color: '#f97316', label: 'Warm pass' }],
+    })
+    useSelectionStore.getState().selectItems(['clip-1'])
+    usePlaybackStore.setState({ currentFrame: 0, previewFrame: 24, previewItemId: 'clip-1' })
+
+    render(<ColorTimelineNavigator />)
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Warm pass' }), {
+      button: 0,
+      pointerId: 1,
+    })
+
+    expect(usePlaybackStore.getState().currentFrame).toBe(96)
+    expect(usePlaybackStore.getState().previewFrame).toBeNull()
+    expect(useSelectionStore.getState().selectedMarkerId).toBe('marker-1')
+    expect(useSelectionStore.getState().selectedItemIds).toEqual([])
   })
 
   it('selects the pressed film tile immediately even with a stale preview frame', () => {

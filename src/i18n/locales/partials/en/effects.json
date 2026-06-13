@@ -353,6 +353,7 @@
     "compareBeforeTooltip": "Show the ungraded preview without color effects",
     "compareSplit": "Split",
     "compareSplitTooltip": "Show ungraded before on the left and graded after on the right",
+    "compareSplitDisabledTooltip": "Add or enable a color grade to use split comparison",
     "gallery": "Gallery",
     "applyPresetTooltip": "Apply {{name}} grade",
     "deletePresetTooltip": "Delete {{name}} grade",
