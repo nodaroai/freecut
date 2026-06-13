@@ -96,6 +96,7 @@ export class VideoFrameExtractor {
   constructor(
     private src: string,
     private itemId: string,
+    private options: { logFrameFailuresAsDebug?: boolean } = {},
   ) {}
 
   /**
@@ -116,16 +117,20 @@ export class VideoFrameExtractor {
       // Get video track
       this.videoTrack = await this.input!.getPrimaryVideoTrack()
       if (!this.videoTrack) {
-        log.warn('No video track found', { itemId: this.itemId })
+        this.logInitFailure('No video track found', { itemId: this.itemId }, 'warn')
         return false
       }
 
       if (typeof this.videoTrack.canDecode === 'function') {
         const decodable = await this.videoTrack.canDecode()
         if (!decodable) {
-          log.warn('Video track is not decodable via mediabunny/WebCodecs', {
-            itemId: this.itemId,
-          })
+          this.logInitFailure(
+            'Video track is not decodable via mediabunny/WebCodecs',
+            {
+              itemId: this.itemId,
+            },
+            'warn',
+          )
           return false
         }
       }
@@ -148,8 +153,21 @@ export class VideoFrameExtractor {
 
       return true
     } catch (error) {
-      log.error('Failed to initialize', { itemId: this.itemId, error })
+      this.logInitFailure('Failed to initialize', { itemId: this.itemId, error }, 'error')
       return false
+    }
+  }
+
+  private logInitFailure(message: string, data: Record<string, unknown>, level: 'warn' | 'error') {
+    if (this.options.logFrameFailuresAsDebug) {
+      log.debug(message, data)
+      return
+    }
+
+    if (level === 'error') {
+      log.error(message, data)
+    } else {
+      log.warn(message, data)
     }
   }
 
@@ -546,7 +564,7 @@ export class VideoFrameExtractor {
       error: error instanceof Error ? error.message : String(error),
     }
 
-    if (shouldWarn) {
+    if (shouldWarn && !this.options.logFrameFailuresAsDebug) {
       log.warn('Mediabunny frame extraction failed', logData)
     } else {
       log.debug('Mediabunny frame extraction failed', logData)

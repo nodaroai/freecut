@@ -194,7 +194,7 @@ export const DEFAULT_AUDIO_EQ_SETTINGS: Readonly<ResolvedAudioEqSettings> = Obje
   highCutSlopeDbPerOct: 12,
 })
 
-function clampFrequencyForSampleRate(frequencyHz: number, sampleRate: number): number {
+export function clampAudioEqFrequencyForSampleRate(frequencyHz: number, sampleRate: number): number {
   return Math.max(20, Math.min(frequencyHz, sampleRate * 0.45))
 }
 
@@ -1017,7 +1017,7 @@ function buildPeakingCoefficients(
   sampleRate: number,
   q: number,
 ): BiquadCoefficients {
-  const frequency = clampFrequencyForSampleRate(frequencyHz, sampleRate)
+  const frequency = clampAudioEqFrequencyForSampleRate(frequencyHz, sampleRate)
   const safeQ = clampAudioEqQ(q, AUDIO_EQ_LOW_MID_Q)
   const a = Math.pow(10, gainDb / 40)
   const w0 = 2 * Math.PI * (frequency / sampleRate)
@@ -1044,7 +1044,7 @@ function buildNotchCoefficients(
   sampleRate: number,
   q: number,
 ): BiquadCoefficients {
-  const frequency = clampFrequencyForSampleRate(frequencyHz, sampleRate)
+  const frequency = clampAudioEqFrequencyForSampleRate(frequencyHz, sampleRate)
   const safeQ = clampAudioEqQ(q, AUDIO_EQ_LOW_MID_Q)
   const w0 = 2 * Math.PI * (frequency / sampleRate)
   const cosW0 = Math.cos(w0)
@@ -1071,7 +1071,7 @@ function buildShelfCoefficients(
   gainDb: number,
   sampleRate: number,
 ): BiquadCoefficients {
-  const frequency = clampFrequencyForSampleRate(frequencyHz, sampleRate)
+  const frequency = clampAudioEqFrequencyForSampleRate(frequencyHz, sampleRate)
   const a = Math.pow(10, gainDb / 40)
   const w0 = 2 * Math.PI * (frequency / sampleRate)
   const cosW0 = Math.cos(w0)
@@ -1183,7 +1183,7 @@ function buildOnePolePassCoefficients(
   frequencyHz: number,
   sampleRate: number,
 ): OnePoleCoefficients {
-  const frequency = clampFrequencyForSampleRate(frequencyHz, sampleRate)
+  const frequency = clampAudioEqFrequencyForSampleRate(frequencyHz, sampleRate)
   const k = Math.tan(Math.PI * (frequency / sampleRate))
   const norm = 1 / (1 + k)
 
@@ -1219,7 +1219,7 @@ function evaluateBiquadMagnitudeDb(
   frequencyHz: number,
   sampleRate: number,
 ): number {
-  const frequency = clampFrequencyForSampleRate(frequencyHz, sampleRate)
+  const frequency = clampAudioEqFrequencyForSampleRate(frequencyHz, sampleRate)
   const omega = 2 * Math.PI * (frequency / sampleRate)
   const cosOmega = Math.cos(omega)
   const sinOmega = Math.sin(omega)
@@ -1245,7 +1245,7 @@ function evaluateOnePoleMagnitudeDb(
   frequencyHz: number,
   sampleRate: number,
 ): number {
-  const frequency = clampFrequencyForSampleRate(frequencyHz, sampleRate)
+  const frequency = clampAudioEqFrequencyForSampleRate(frequencyHz, sampleRate)
   const omega = 2 * Math.PI * (frequency / sampleRate)
   const cosOmega = Math.cos(omega)
   const sinOmega = Math.sin(omega)

@@ -143,13 +143,15 @@ class SharedItemVideoSource implements VideoFrameSource {
 
 export class SharedVideoExtractorPool {
   private readonly maxLanesPerSource: number
+  private readonly logFrameFailuresAsDebug: boolean
   private sourceStates = new Map<string, SourceState>()
   private itemSources = new Map<string, string>()
   private itemWrappers = new Map<string, SharedItemVideoSource>()
   private laneIdCounter = 0
 
-  constructor(options?: { maxLanesPerSource?: number }) {
+  constructor(options?: { maxLanesPerSource?: number; logFrameFailuresAsDebug?: boolean }) {
     this.maxLanesPerSource = Math.max(1, options?.maxLanesPerSource ?? DEFAULT_MAX_LANES_PER_SOURCE)
+    this.logFrameFailuresAsDebug = options?.logFrameFailuresAsDebug === true
   }
 
   getOrCreateItemExtractor(itemId: string, src: string): VideoFrameSource {
@@ -358,7 +360,9 @@ export class SharedVideoExtractorPool {
   private createLane(src: string): SourceLane {
     const extractorId = `shared-video-${++this.laneIdCounter}`
     return {
-      extractor: new VideoFrameExtractor(src, extractorId),
+      extractor: new VideoFrameExtractor(src, extractorId, {
+        logFrameFailuresAsDebug: this.logFrameFailuresAsDebug,
+      }),
       initialized: false,
       initPromise: null,
       drawLock: null,

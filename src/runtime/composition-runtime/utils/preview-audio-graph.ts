@@ -3,6 +3,7 @@ import {
   AUDIO_EQ_MID_Q,
   DEFAULT_AUDIO_EQ_SETTINGS,
   buildAudioEqPassIirCoefficients,
+  clampAudioEqFrequencyForSampleRate,
 } from '@/shared/utils/audio-eq'
 import type { ResolvedAudioEqSettings } from '@/types/audio'
 
@@ -98,10 +99,11 @@ function configureFilterNode(
   frequencyHz: number,
   gainDb: number,
   q: number,
+  sampleRate: number,
   write: (param: AudioParam, value: number) => void,
 ): void {
   applyNodeType(node, type)
-  write(node.frequency, frequencyHz)
+  write(node.frequency, clampAudioEqFrequencyForSampleRate(frequencyHz, sampleRate))
   write(node.gain, type === 'highpass' || type === 'lowpass' || type === 'notch' ? 0 : gainDb)
   write(node.Q, q)
 }
@@ -109,6 +111,7 @@ function configureFilterNode(
 function configureStageBiquads(
   stageNodes: PreviewClipAudioEqStageNodes,
   targetStage: ResolvedAudioEqSettings,
+  sampleRate: number,
   write: (param: AudioParam, value: number) => void,
 ): void {
   configureFilterNode(
@@ -121,6 +124,7 @@ function configureStageBiquads(
     targetStage.band1FrequencyHz,
     targetStage.band1GainDb,
     targetStage.band1Q,
+    sampleRate,
     write,
   )
   configureFilterNode(
@@ -137,6 +141,7 @@ function configureStageBiquads(
     targetStage.lowFrequencyHz,
     targetStage.lowEnabled ? targetStage.lowGainDb : 0,
     targetStage.lowEnabled ? targetStage.lowQ : 1,
+    sampleRate,
     write,
   )
   configureFilterNode(
@@ -153,6 +158,7 @@ function configureStageBiquads(
     targetStage.lowMidFrequencyHz,
     targetStage.lowMidEnabled ? targetStage.lowMidGainDb : 0,
     targetStage.lowMidEnabled ? targetStage.lowMidQ : 1,
+    sampleRate,
     write,
   )
   configureFilterNode(
@@ -161,6 +167,7 @@ function configureStageBiquads(
     AUDIO_EQ_MID_FREQUENCY_HZ,
     targetStage.midGainDb,
     AUDIO_EQ_MID_Q,
+    sampleRate,
     write,
   )
   configureFilterNode(
@@ -177,6 +184,7 @@ function configureStageBiquads(
     targetStage.highMidFrequencyHz,
     targetStage.highMidEnabled ? targetStage.highMidGainDb : 0,
     targetStage.highMidEnabled ? targetStage.highMidQ : 1,
+    sampleRate,
     write,
   )
   configureFilterNode(
@@ -193,6 +201,7 @@ function configureStageBiquads(
     targetStage.highFrequencyHz,
     targetStage.highEnabled ? targetStage.highGainDb : 0,
     targetStage.highEnabled ? targetStage.highQ : 1,
+    sampleRate,
     write,
   )
   configureFilterNode(
@@ -205,6 +214,7 @@ function configureStageBiquads(
     targetStage.band6FrequencyHz,
     targetStage.band6GainDb,
     targetStage.band6Q,
+    sampleRate,
     write,
   )
 }
@@ -333,7 +343,7 @@ function createPreviewClipAudioEqStage(
     resolvedStage,
   }
 
-  configureStageBiquads(stageNodes, resolvedStage, (param, value) => {
+  configureStageBiquads(stageNodes, resolvedStage, context.sampleRate, (param, value) => {
     param.value = value
   })
   configureStageOutputGain(stageNodes, resolvedStage, (param, value) => {
@@ -435,6 +445,7 @@ function rampAudioParam(
 function applyStageParams(
   stageNodes: PreviewClipAudioEqStageNodes,
   targetStage: ResolvedAudioEqSettings,
+  sampleRate: number,
   startAt?: number,
   rampSeconds?: number,
 ): void {
@@ -447,7 +458,7 @@ function applyStageParams(
           rampAudioParam(param, targetValue, startAt, rampSeconds)
         }
 
-  configureStageBiquads(stageNodes, targetStage, write)
+  configureStageBiquads(stageNodes, targetStage, sampleRate, write)
   configureStageOutputGain(stageNodes, targetStage, write)
   stageNodes.resolvedStage = targetStage
 }
@@ -536,7 +547,7 @@ export function rampPreviewClipEq(
   for (let i = 0; i < iterCount; i++) {
     const targetStage = targetStages?.[i] ?? DEFAULT_AUDIO_EQ_SETTINGS
     const stageNodes = ensurePreviewClipEqStage(graph, i, targetStage)
-    applyStageParams(stageNodes, targetStage, startAt, rampSeconds)
+    applyStageParams(stageNodes, targetStage, graph.context.sampleRate, startAt, rampSeconds)
   }
 }
 
@@ -549,6 +560,6 @@ export function setPreviewClipEq(
   for (let i = 0; i < iterCount; i++) {
     const targetStage = targetStages?.[i] ?? DEFAULT_AUDIO_EQ_SETTINGS
     const stageNodes = ensurePreviewClipEqStage(graph, i, targetStage)
-    applyStageParams(stageNodes, targetStage)
+    applyStageParams(stageNodes, targetStage, graph.context.sampleRate)
   }
 }

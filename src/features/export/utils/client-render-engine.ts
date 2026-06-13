@@ -261,6 +261,7 @@ export async function createCompositionRenderer(
     // Same-source transitions and overlaps can require multiple concurrent decode
     // timelines. Keep a small fixed lane cap to prevent per-clip duplication.
     maxLanesPerSource: 4,
+    logFrameFailuresAsDebug: renderMode === 'preview',
   })
   const videoExtractors = new Map<string, VideoFrameSource>()
   const videoSourceByItemId = new Map<string, string>()
@@ -702,12 +703,13 @@ export async function createCompositionRenderer(
       .catch(() => {})
   }
 
-  const assertPreviewStrictDecode = () => {
+  const reportPreviewDecodeCoverage = () => {
     if (previewStrictDecode && useMediabunny.size !== videoExtractors.size) {
       const failedItemIds = [...videoExtractors.keys()].filter((id) => !useMediabunny.has(id))
-      throw new Error(
-        `PREVIEW_REQUIRES_MEDIABUNNY: ${failedItemIds.length} video item(s) are not decodable (failed: ${failedItemIds.join(', ')})`,
-      )
+      getLog().debug('Preview Mediabunny coverage incomplete; fallback paths remain available', {
+        failedCount: failedItemIds.length,
+        failedItemIds,
+      })
     }
   }
 
@@ -769,7 +771,7 @@ export async function createCompositionRenderer(
         uniqueSources: new Set(videoSourceByItemId.values()).size,
       })
 
-      assertPreviewStrictDecode()
+      reportPreviewDecodeCoverage()
 
       // === Preload ALL fallback video elements ===
       // Load every video element (not just those that failed mediabunny init)
@@ -1012,7 +1014,7 @@ export async function createCompositionRenderer(
           await initializeMediabunnyForItems(remainingSubVideoItemIds)
         }
 
-        assertPreviewStrictDecode()
+        reportPreviewDecodeCoverage()
 
         // Load fallback video elements for sub-comp items that failed mediabunny init
         if (hasDom && !previewStrictDecode) {

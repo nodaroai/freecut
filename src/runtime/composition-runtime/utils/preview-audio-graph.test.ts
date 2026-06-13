@@ -249,6 +249,38 @@ describe('preview-audio-graph', () => {
     })
   })
 
+  it('clamps biquad frequency automation to the audio context sample rate', () => {
+    const graph = createPreviewClipAudioGraph({ eqStageCount: 1 })
+    expect(graph).not.toBeNull()
+
+    const mockContext = graph!.context as unknown as AudioContextMock
+    mockContext.sampleRate = 16000
+
+    setPreviewClipEq(graph!, [
+      resolveAudioEqSettings({
+        highGainDb: 3,
+        highFrequencyHz: 22000,
+      }),
+    ])
+
+    const stage = graph!.eqStageNodes[0]!
+    expect(stage.highNode.frequency.value).toBe(7200)
+
+    rampPreviewClipEq(
+      graph!,
+      [
+        resolveAudioEqSettings({
+          highGainDb: -3,
+          highFrequencyHz: 22000,
+        }),
+      ],
+      2,
+      0.25,
+    )
+
+    expect(getRampCalls(stage.highNode.frequency).at(-1)).toEqual({ value: 7200, time: 2.25 })
+  })
+
   it('hot-swaps topology-changing EQ updates without disconnecting the source input node again', () => {
     const graph = createPreviewClipAudioGraph({ eqStageCount: 1 })
     expect(graph).not.toBeNull()

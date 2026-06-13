@@ -568,8 +568,9 @@ export async function renderVideoItem(
 
       if (failureCount >= 3) {
         mediabunnyDisabledItems.add(item.id)
-        log.warn(
-          'Disabling mediabunny for item after repeated failures; using fallback for remainder of export',
+        const logDisable = isPreviewMode ? log.debug : log.warn
+        logDisable(
+          'Disabling mediabunny for item after repeated failures; using fallback for remainder of render',
           {
             itemId: item.id,
             frame,
@@ -578,7 +579,8 @@ export async function renderVideoItem(
           },
         )
       } else {
-        log.warn('Mediabunny frame draw failed, using fallback', {
+        const logDrawFailure = isPreviewMode ? log.debug : log.warn
+        logDrawFailure('Mediabunny frame draw failed, using fallback', {
           itemId: item.id,
           frame,
           sourceTime: clampedTime,
