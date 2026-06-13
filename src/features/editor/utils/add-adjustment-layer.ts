@@ -6,7 +6,12 @@
  */
 import type { AdjustmentItem } from '@/types/timeline'
 import type { VisualEffect } from '@/types/effects'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  executeTimelineCommand,
+  useItemsStore,
+  useTimelineSettingsStore,
+  useTimelineStore,
+} from '@/features/editor/deps/timeline-store'
 import {
   createClassicTrack,
   createDefaultAdjustmentItem,
@@ -23,7 +28,7 @@ const logger = createLogger('AddAdjustmentLayer')
 
 export function addAdjustmentLayer(effects?: VisualEffect[], label?: string): boolean {
   // Read all needed state from stores directly to avoid subscriptions
-  const { tracks, items, fps, addItem, setTracks } = useTimelineStore.getState()
+  const { tracks, items, fps } = useTimelineStore.getState()
   const { activeTrackId, selectItems } = useSelectionStore.getState()
 
   const referenceTrack = findCompatibleTrackForItemType({
@@ -54,6 +59,7 @@ export function addAdjustmentLayer(effects?: VisualEffect[], label?: string): bo
   )
 
   let targetTrack = topVideoTrack
+  let createdTrack = false
   if (topTrackPosition !== proposedPosition) {
     targetTrack = createClassicTrack({
       tracks,
@@ -61,7 +67,7 @@ export function addAdjustmentLayer(effects?: VisualEffect[], label?: string): bo
       order: (topVideoTrack.order ?? 0) - 1,
       height: topVideoTrack.height,
     })
-    setTracks([...tracks, targetTrack])
+    createdTrack = true
   }
 
   const adjustmentItem: AdjustmentItem = createDefaultAdjustmentItem({
@@ -72,7 +78,18 @@ export function addAdjustmentLayer(effects?: VisualEffect[], label?: string): bo
     label,
   })
 
-  addItem(adjustmentItem)
+  executeTimelineCommand(
+    'ADD_ADJUSTMENT_LAYER',
+    () => {
+      const store = useItemsStore.getState()
+      if (createdTrack) {
+        store.setTracks([...store.tracks, targetTrack])
+      }
+      store._addItem(adjustmentItem)
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { itemId: adjustmentItem.id, trackCreated: createdTrack },
+  )
   // Select the new item
   selectItems([adjustmentItem.id])
   return true

@@ -85,4 +85,23 @@ describe('addAdjustmentLayer', () => {
     expect(state.tracks.map((track) => track.id)).toContain('top')
     expect(state.tracks.map((track) => track.id)).toContain('main')
   })
+
+  it('undoes the layer and any track created for it in one step', () => {
+    const originalTracks = [makeTrack('top', 0), makeTrack('main', 1)]
+    useItemsStore.getState().setTracks(originalTracks)
+    useItemsStore.getState().setItems([
+      makeVideoItem('top-clip', 'top', 0, 90),
+      makeVideoItem('main-clip', 'main', 0, 90),
+    ])
+    useSelectionStore.getState().setActiveTrack('main')
+
+    expect(addAdjustmentLayer()).toBe(true)
+    expect(useItemsStore.getState().tracks).toHaveLength(3)
+    expect(useItemsStore.getState().items.some((item) => item.type === 'adjustment')).toBe(true)
+
+    useTimelineCommandStore.getState().undo()
+
+    expect(useItemsStore.getState().tracks.map((track) => track.id)).toEqual(['top', 'main'])
+    expect(useItemsStore.getState().items.map((item) => item.id)).toEqual(['top-clip', 'main-clip'])
+  })
 })

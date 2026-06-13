@@ -14,6 +14,7 @@ export { useReverseConformDialogStore } from '../stores/reverse-conform-dialog-s
 export { useSilenceRemovalDialogStore } from '../stores/silence-removal-dialog-store'
 export { useFillerRemovalDialogStore } from '../stores/filler-removal-dialog-store'
 export { captureSnapshot } from '../stores/commands/snapshot'
+export { execute as executeTimelineCommand } from '../stores/actions/shared'
 export { Timeline } from '../components/timeline'
 export { KeyframeGraphPanel } from '../components/keyframe-graph-panel'
 export { useTimelineShortcuts } from '../hooks/use-timeline-shortcuts'

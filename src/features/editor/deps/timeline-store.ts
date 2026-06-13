@@ -13,5 +13,6 @@ export {
   useKeyframesStore,
   useCompositionsStore,
   useTimelineCommandStore,
+  executeTimelineCommand,
   captureSnapshot,
 } from './timeline-contract'

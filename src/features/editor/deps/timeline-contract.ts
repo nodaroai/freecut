@@ -14,6 +14,7 @@ export {
   shouldCommitScrubFrame,
   createDefaultShapeItem,
   createTextTemplateItem,
+  executeTimelineCommand,
   findCompatibleTrackForItemType,
   findNearestAvailableSpace,
   getDefaultGeneratedLayerDurationInFrames,
