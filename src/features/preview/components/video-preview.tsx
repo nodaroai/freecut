@@ -78,6 +78,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   const displayedFrame = usePreviewBridgeStore((s) => s.displayedFrame)
   const livePreviewEdits = useGizmoStore((s) => s.preview)
   const [playerDisplayedFrame, setPlayerDisplayedFrame] = useState<number | null>(null)
+  const latestPlayerDisplayedFrameRef = useRef<number | null>(null)
   const [splitAfterRenderedFrame, setSplitAfterRenderedFrame] = useState<number | null>(null)
   const splitAfterRendererRef = useRef<CompositionRendererInstance | null>(null)
   const splitAfterInitPromiseRef = useRef<Promise<CompositionRendererInstance | null> | null>(null)
@@ -477,11 +478,20 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   const handleStageFrameChange = useCallback(
     (frame: number) => {
       const nextFrame = Math.max(0, Math.round(frame))
+      latestPlayerDisplayedFrameRef.current = nextFrame
       setPlayerDisplayedFrame((prevFrame) => (prevFrame === nextFrame ? prevFrame : nextFrame))
       handleFrameChange(frame)
     },
     [handleFrameChange],
   )
+
+  const getLivePlaybackFrame = useCallback(() => {
+    const playerFrame = playerRef.current?.getCurrentFrame()
+    if (playerFrame !== undefined && Number.isFinite(playerFrame)) {
+      return Math.max(0, Math.round(playerFrame))
+    }
+    return latestPlayerDisplayedFrameRef.current
+  }, [playerRef])
 
   const setCaptureCanvasSource = usePreviewBridgeStore((s) => s.setCaptureCanvasSource)
 
@@ -504,6 +514,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       getPreviewEffectsOverride,
       getPreviewCornerPinOverride,
       getPreviewPathVerticesOverride,
+      getLivePlaybackFrame,
       getLiveItemSnapshot,
       getLiveKeyframes,
       clearTransitionPlaybackSession,

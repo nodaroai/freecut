@@ -35,6 +35,7 @@ import {
 import { setActivePreviewScrubbingCache } from '../utils/preview-scrubbing-cache-bridge'
 import { warmDecoderPrewarmWorkerPool } from '../utils/decoder-prewarm'
 import { collectVisualInvalidationRanges } from '../utils/preview-frame-invalidation'
+import { resolvePreviewCaptureFrame } from '../utils/preview-capture-frame'
 import {
   isFrameInRanges,
   normalizeFrameRanges,
@@ -112,6 +113,7 @@ interface UsePreviewRendererControllerParams {
   getPreviewEffectsOverride: (itemId: string) => ItemEffect[] | undefined
   getPreviewCornerPinOverride: (itemId: string) => TimelineItem['cornerPin'] | undefined
   getPreviewPathVerticesOverride: PreviewPathVerticesOverride
+  getLivePlaybackFrame: () => number | null
   getLiveItemSnapshot: (itemId: string) => TimelineItem | undefined
   getLiveKeyframes: (itemId: string) => ItemKeyframes | undefined
   clearTransitionPlaybackSession: () => void
@@ -181,6 +183,7 @@ export function usePreviewRendererController({
   getPreviewEffectsOverride,
   getPreviewCornerPinOverride,
   getPreviewPathVerticesOverride,
+  getLivePlaybackFrame,
   getLiveItemSnapshot,
   getLiveKeyframes,
   clearTransitionPlaybackSession,
@@ -987,6 +990,16 @@ export function usePreviewRendererController({
     })
   }, [ensureFastScrubRenderer, isResolving, scrubOffscreenRenderedFrameRef])
 
+  const resolveCaptureTargetFrame = useCallback(() => {
+    const playback = usePlaybackStore.getState()
+    return resolvePreviewCaptureFrame({
+      currentFrame: playback.currentFrame,
+      previewFrame: playback.previewFrame,
+      isPlaying: playback.isPlaying,
+      livePlaybackFrame: playback.isPlaying ? getLivePlaybackFrame() : null,
+    })
+  }, [getLivePlaybackFrame])
+
   const captureCurrentFrame = useCallback(
     async (options?: CaptureOptions): Promise<string | null> => {
       if (captureInFlightRef.current) {
@@ -995,8 +1008,7 @@ export function usePreviewRendererController({
 
       const task = (async () => {
         try {
-          const playback = usePlaybackStore.getState()
-          const targetFrame = playback.previewFrame ?? playback.currentFrame
+          const targetFrame = resolveCaptureTargetFrame()
           const offscreen = await renderOffscreenFrame(targetFrame)
           if (!offscreen) return null
 
@@ -1058,7 +1070,7 @@ export function usePreviewRendererController({
       captureInFlightRef.current = task
       return task
     },
-    [captureInFlightRef, renderOffscreenFrame],
+    [captureInFlightRef, renderOffscreenFrame, resolveCaptureTargetFrame],
   )
 
   const captureCurrentFrameImageData = useCallback(
@@ -1069,8 +1081,7 @@ export function usePreviewRendererController({
 
       const task = (async () => {
         try {
-          const playback = usePlaybackStore.getState()
-          const targetFrame = playback.previewFrame ?? playback.currentFrame
+          const targetFrame = resolveCaptureTargetFrame()
           const offscreen = await renderOffscreenFrame(targetFrame)
           if (!offscreen) return null
 
@@ -1118,6 +1129,7 @@ export function usePreviewRendererController({
       captureImageDataInFlightRef,
       captureScaleCanvasRef,
       renderOffscreenFrame,
+      resolveCaptureTargetFrame,
       scrubOffscreenCtxRef,
     ],
   )
@@ -1133,8 +1145,7 @@ export function usePreviewRendererController({
 
     const task = (async () => {
       try {
-        const playback = usePlaybackStore.getState()
-        const targetFrame = playback.previewFrame ?? playback.currentFrame
+        const targetFrame = resolveCaptureTargetFrame()
 
         if (
           scrubOffscreenRenderedFrameRef.current !== targetFrame ||
@@ -1186,6 +1197,7 @@ export function usePreviewRendererController({
   }, [
     captureCanvasSourceInFlightRef,
     ensureFastScrubRenderer,
+    resolveCaptureTargetFrame,
     scrubOffscreenCanvasRef,
     scrubOffscreenRenderedFrameRef,
     scrubRendererRef,
