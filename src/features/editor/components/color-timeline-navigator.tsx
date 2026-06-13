@@ -10,7 +10,7 @@ import { useFilmstrip, type FilmstripFrame } from '@/features/editor/deps/timeli
 import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
 import type { GpuEffectInstance } from '@/infrastructure/gpu-effects'
 import type { GpuEffect, ItemEffect } from '@/types/effects'
-import { renderGradedTileFrame } from '../utils/color-grade-tile-renderer'
+import { renderGradedTileFrame } from '@/features/editor/utils/color-grade-tile-renderer'
 import {
   createScrubThrottleState,
   shouldCommitScrubFrame,
@@ -28,7 +28,7 @@ import {
 import {
   resolveColorGradeThumbnailTreatment,
   type ColorGradeThumbnailTreatment,
-} from '../utils/color-grade-thumbnail-treatment'
+} from '@/features/editor/utils/color-grade-thumbnail-treatment'
 
 interface TimelineClip {
   id: string
@@ -512,8 +512,12 @@ function useGradedTileThumbnail(
 
   useEffect(() => {
     const current = instancesRef.current
+    // Drop any previously baked frame immediately so a stale grade/source frame
+    // isn't shown while the new one renders (the revoke effect frees its URL).
+    // During an active drag this surfaces the live CSS-approximation fallback,
+    // then snaps to the precise GPU grade once the debounce settles.
+    setGradedUrl(undefined)
     if (!baseUrl || current.length === 0) {
-      setGradedUrl(undefined)
       return
     }
     let cancelled = false
