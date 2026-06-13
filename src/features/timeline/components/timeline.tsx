@@ -42,6 +42,7 @@ import {
   isDragEventOverTimelineDropTarget,
   isExternalTimelineDragEvent,
 } from '../utils/timeline-external-drag'
+import { getDefaultActiveTrackId } from '../utils/default-active-track'
 
 const logger = createLogger('Timeline')
 
@@ -382,15 +383,14 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
     [handleSectionDividerMouseDown, hasTrackSections],
   )
 
-  // Set first track as active on mount
-  // Use primitive dependencies to avoid re-running on unrelated track changes
+  // Set the default edit target on mount.
   const tracksLength = tracks.length
-  const firstTrackId = tracks[0]?.id
+  const defaultActiveTrackId = useMemo(() => getDefaultActiveTrackId(tracks), [tracks])
   useEffect(() => {
-    if (tracksLength > 0 && !activeTrackId && firstTrackId) {
-      setActiveTrack(firstTrackId)
+    if (tracksLength > 0 && !activeTrackId && defaultActiveTrackId) {
+      setActiveTrack(defaultActiveTrackId)
     }
-  }, [tracksLength, activeTrackId, firstTrackId, setActiveTrack])
+  }, [tracksLength, activeTrackId, defaultActiveTrackId, setActiveTrack])
 
   useEffect(() => {
     const syncPairs = [
