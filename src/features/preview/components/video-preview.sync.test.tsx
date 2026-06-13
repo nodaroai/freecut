@@ -1370,10 +1370,23 @@ describe('VideoPreview sync behavior', () => {
             params: { exposure: 0.5, contrast: 1.2 },
           },
         },
+        {
+          id: 'effect-blur',
+          enabled: true,
+          effect: {
+            type: 'gpu-effect',
+            gpuEffectType: 'gpu-gaussian-blur',
+            params: { radius: 8 },
+          },
+        },
       ],
     })
+    const livePreviewEffects = useItemsStore.getState().itemById['item-graded']?.effects ?? []
+    act(() => {
+      useGizmoStore.getState().setEffectsPreviewNew({ 'item-graded': livePreviewEffects })
+    })
 
-    const { renderer, scrubCanvas } = await renderReadySingleRendererPreview(24, {
+    const { container, renderer, scrubCanvas } = await renderReadySingleRendererPreview(24, {
       expectedDisplayedFrame: 24,
     })
 
@@ -1388,7 +1401,14 @@ describe('VideoPreview sync behavior', () => {
       expect(renderer.invalidateFrameCache).toHaveBeenCalled()
       expect(renderer.renderFrame).toHaveBeenCalledWith(24)
       expect(scrubCanvas.style.visibility).toBe('visible')
-      expect(scrubCanvas.style.clipPath).toBe('inset(0 50% 0 0)')
+      const beforeLayer = container.querySelector(
+        '[data-grade-comparison-before-layer="true"]',
+      ) as HTMLDivElement | null
+      expect(beforeLayer).not.toBeNull()
+      expect(beforeLayer).toHaveStyle({ width: '50%', height: '100%', overflow: 'hidden' })
+      expect(scrubCanvas).toHaveStyle({ width: '1280px', height: '720px' })
+      expect(scrubCanvas.style.clipPath).toBe('')
+      expect(container.querySelector('[data-grade-comparison-after-layer="true"]')).not.toBeNull()
     })
 
     const rendererCalls = createCompositionRendererMock.mock.calls as unknown as Array<
@@ -1402,7 +1422,116 @@ describe('VideoPreview sync behavior', () => {
     const rendererOptions = rendererCalls[0]?.[3]
     const previewEffects = rendererOptions?.getPreviewEffectsOverride?.('item-graded')
     expect(previewEffects?.[0]?.enabled).toBe(false)
+    expect(previewEffects?.[1]?.enabled).toBe(true)
+    const afterRendererOptions = rendererCalls[1]?.[3]
+    const afterPreviewEffects = afterRendererOptions?.getPreviewEffectsOverride?.('item-graded')
+    expect(afterPreviewEffects?.[0]?.enabled).toBe(true)
+    expect(afterPreviewEffects?.[1]?.enabled).toBe(true)
     expect(useItemsStore.getState().itemById['item-graded']?.effects?.[0]?.enabled).toBe(true)
+    expect(useItemsStore.getState().itemById['item-graded']?.effects?.[1]?.enabled).toBe(true)
+  })
+
+  it('renders split grade comparison from renderer-backed before and after surfaces', async () => {
+    deferPlayerSeekCompletion = true
+    setSingleVideoItemAtFrame({
+      id: 'item-graded',
+      effects: [
+        {
+          id: 'effect-grade',
+          enabled: true,
+          effect: {
+            type: 'gpu-effect',
+            gpuEffectType: 'gpu-color-wheels',
+            params: { exposure: 0.5 },
+          },
+        },
+      ],
+    })
+
+    const { container } = renderDefaultPreview()
+    const scrubCanvas = getScrubCanvas(container)
+    const renderer = await waitFor(() => {
+      expect(createCompositionRendererMock).toHaveBeenCalledTimes(1)
+      expect(rendererMockState.instances.length).toBe(1)
+      return rendererMockState.instances[0]!
+    })
+
+    await waitFor(() => {
+      expect(renderer.renderFrame).toHaveBeenCalledWith(24)
+      expect(getDisplayedFrame()).toBe(24)
+    })
+
+    renderer.invalidateFrameCache.mockClear()
+    renderer.renderFrame.mockClear()
+
+    act(() => {
+      useGizmoStore.getState().setColorGradeComparisonMode('split')
+    })
+
+    await waitFor(() => {
+      expect(renderer.invalidateFrameCache).toHaveBeenCalled()
+      expect(renderer.renderFrame).toHaveBeenCalledWith(24)
+      expect(getDisplayedFrame()).toBe(24)
+      expect(scrubCanvas.style.visibility).toBe('visible')
+      expect(screen.getByLabelText('Split grade comparison')).toBeTruthy()
+      expect(container.querySelector('[data-grade-comparison-after-layer="true"]')).not.toBeNull()
+      expect(screen.getByTestId('mock-player-frame')).toHaveTextContent('0')
+    })
+  })
+
+  it('keeps split playback synchronized to the rendered comparison frame', async () => {
+    deferPlayerSeekCompletion = true
+    setSingleVideoItemAtFrame({
+      id: 'item-graded',
+      effects: [
+        {
+          id: 'effect-grade',
+          enabled: true,
+          effect: {
+            type: 'gpu-effect',
+            gpuEffectType: 'gpu-color-wheels',
+            params: { exposure: 0.5 },
+          },
+        },
+      ],
+    })
+
+    const { container } = renderDefaultPreview()
+    const scrubCanvas = getScrubCanvas(container)
+    const renderer = await waitFor(() => {
+      expect(createCompositionRendererMock).toHaveBeenCalledTimes(1)
+      expect(rendererMockState.instances.length).toBe(1)
+      return rendererMockState.instances[0]!
+    })
+
+    await waitFor(() => {
+      expect(renderer.renderFrame).toHaveBeenCalledWith(24)
+      expect(getDisplayedFrame()).toBe(24)
+    })
+
+    act(() => {
+      useGizmoStore.getState().setColorGradeComparisonMode('split')
+    })
+
+    await waitFor(() => {
+      expect(scrubCanvas.style.visibility).toBe('visible')
+      expect(container.querySelector('[data-grade-comparison-after-layer="true"]')).not.toBeNull()
+    })
+
+    act(() => {
+      usePlaybackStore.setState((state) => ({
+        currentFrame: 27,
+        currentFrameEpoch: state.frameUpdateEpoch + 1,
+        frameUpdateEpoch: state.frameUpdateEpoch + 1,
+      }))
+    })
+
+    await waitFor(() => {
+      expect(getDisplayedFrame()).toBe(24)
+      expect(scrubCanvas.style.visibility).toBe('visible')
+      expect(container.querySelector('[data-grade-comparison-after-layer="true"]')).not.toBeNull()
+      expect(screen.getByLabelText('Split grade comparison')).toBeTruthy()
+    })
   })
 
   it('re-renders the paused currentFrame after media resolution finishes on refresh', async () => {

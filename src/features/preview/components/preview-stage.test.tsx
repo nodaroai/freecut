@@ -196,7 +196,12 @@ describe('PreviewStage', () => {
     renderSplitPreviewStage()
 
     const scrubCanvas = document.querySelectorAll('canvas')[0] as HTMLCanvasElement
-    expect(scrubCanvas.style.clipPath).toBe('inset(0 50% 0 0)')
+    const beforeLayer = document.querySelector(
+      '[data-grade-comparison-before-layer="true"]',
+    ) as HTMLDivElement
+    expect(beforeLayer).toHaveStyle({ width: '50%', height: '100%', overflow: 'hidden' })
+    expect(scrubCanvas).toHaveStyle({ width: '1280px', height: '720px' })
+    expect(scrubCanvas.style.clipPath).toBe('')
     expect(screen.getByLabelText('Split grade comparison')).toBeTruthy()
     expect(screen.getByText('Before')).toBeTruthy()
     expect(screen.getByText('After')).toBeTruthy()
@@ -212,8 +217,13 @@ describe('PreviewStage', () => {
     })
 
     const scrubCanvas = document.querySelectorAll('canvas')[0] as HTMLCanvasElement
+    const beforeLayer = document.querySelector(
+      '[data-grade-comparison-before-layer="true"]',
+    ) as HTMLDivElement
     const wipeHandle = screen.getByRole('slider', { name: 'Adjust split comparison' })
-    expect(scrubCanvas.style.clipPath).toBe('inset(0 65% 0 0)')
+    expect(beforeLayer).toHaveStyle({ width: '35%', overflow: 'hidden' })
+    expect(scrubCanvas).toHaveStyle({ width: '1280px', height: '720px' })
+    expect(scrubCanvas.style.clipPath).toBe('')
     expect(wipeHandle).toHaveAttribute('aria-valuenow', '35')
 
     fireEvent.keyDown(wipeHandle, { key: 'ArrowRight' })

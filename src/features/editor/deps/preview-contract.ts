@@ -3,7 +3,7 @@
  * Editor modules should import preview components/hooks/stores from here.
  */
 
-export { VideoPreview } from '@/features/preview/components/video-preview'
+export { ColorVideoPreview, VideoPreview } from '@/features/preview/components/video-preview'
 export { PlaybackControls } from '@/features/preview/components/playback-controls'
 export { AlignmentToolbar } from '@/features/preview/components/alignment-hud'
 export { TimecodeDisplay } from '@/features/preview/components/timecode-display'

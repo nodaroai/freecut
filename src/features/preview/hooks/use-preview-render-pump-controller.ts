@@ -1542,6 +1542,9 @@ export function usePreviewRenderPump({
 
       const playbackState = usePlaybackStore.getState()
       const currentFrame = playbackState.currentFrame
+      const gradeBypassChanged =
+        state.colorGradeBypassed !== prev.colorGradeBypassed ||
+        state.colorGradeComparisonMode !== prev.colorGradeComparisonMode
 
       // Preview-only changes don't advance the frame number, so the frame
       // cache would otherwise return the stale bitmap for the current frame.
@@ -1552,6 +1555,9 @@ export function usePreviewRenderPump({
         scrubRendererRef.current.invalidateFrameCache()
       } else if (scrubRendererRef.current) {
         scrubRendererRef.current.invalidateFrameCache({ frames: [currentFrame] })
+      }
+      if (gradeBypassChanged) {
+        setDisplayedFrame(null)
       }
 
       scrubRequestedFrameRef.current = currentFrame

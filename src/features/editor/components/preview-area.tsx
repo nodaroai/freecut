@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo, lazy, Suspense } from 'react'
 import { Columns2 } from 'lucide-react'
 import {
+  ColorVideoPreview,
   VideoPreview,
   PlaybackControls,
   AlignmentToolbar,
@@ -27,6 +28,8 @@ interface PreviewAreaProps {
     fps: number
   }
 }
+
+type PreviewChrome = 'edit' | 'color'
 
 const DEFAULT_EMPTY_TIMELINE_SECONDS = 10
 const PREVIEW_RESIZE_MIN_UPDATE_MS = 33
@@ -87,6 +90,7 @@ const ProgramPreviewSurface = memo(function ProgramPreviewSurface({
   project,
   containerSize,
   suspendOverlay,
+  chrome,
 }: {
   project: {
     width: number
@@ -99,6 +103,7 @@ const ProgramPreviewSurface = memo(function ProgramPreviewSurface({
     height: number
   }
   suspendOverlay: boolean
+  chrome: PreviewChrome
 }) {
   const mediaSkimPreviewMediaId = useEditorStore((s) => s.mediaSkimPreviewMediaId)
   const mediaSkimPreviewFrame = useEditorStore((s) => s.mediaSkimPreviewFrame)
@@ -124,10 +129,12 @@ const ProgramPreviewSurface = memo(function ProgramPreviewSurface({
     </Suspense>
   ) : null
 
+  const PreviewComponent = chrome === 'color' ? ColorVideoPreview : VideoPreview
+
   return (
     <ErrorBoundary level="component">
       <div className="relative w-full h-full">
-        <VideoPreview
+        <PreviewComponent
           project={project}
           containerSize={containerSize}
           suspendOverlay={suspendOverlay}
@@ -279,6 +286,7 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
 
   const sourcePreviewMediaId = useEditorStore((s) => s.sourcePreviewMediaId)
   const colorScopesOpen = useEditorStore((s) => s.colorScopesOpen)
+  const workspace = useEditorStore((s) => s.workspace)
 
   const [sourceSplitPercent, setSourceSplitPercent] = useState(PREVIEW_SOURCE_SPLIT_DEFAULT_PERCENT)
   const [scopesSplitPercent, setScopesSplitPercent] = useState(PREVIEW_SCOPES_SPLIT_DEFAULT_PERCENT)
@@ -469,6 +477,7 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
   }, [])
 
   const hasSidePanels = !!sourcePreviewMediaId || colorScopesOpen
+  const previewChrome: PreviewChrome = workspace === 'color' ? 'color' : 'edit'
   const programPanelPercent = Math.max(
     0,
     100 - displayedSourceSplitPercent - displayedScopesSplitPercent,
@@ -536,6 +545,7 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
               project={liveProject}
               containerSize={containerSize}
               suspendOverlay={isPanelDragging}
+              chrome={previewChrome}
             />
           </div>
 
@@ -647,12 +657,13 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
           ) : (
             <InteractionLockRegion locked={false} overlayClassName="rounded-none">
               <div className="flex flex-col flex-shrink-0">
-                {/* Alignment row */}
-                <div className="border-t border-border panel-header flex items-center justify-center px-3 h-7 overflow-hidden">
-                  <div className="flex items-center gap-0">
-                    <AlignmentToolbar projectSize={{ width, height }} />
+                {previewChrome === 'edit' && (
+                  <div className="border-t border-border panel-header flex h-7 items-center justify-center overflow-hidden px-3">
+                    <div className="flex items-center gap-0">
+                      <AlignmentToolbar projectSize={{ width, height }} />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Playback controls row */}
                 <div

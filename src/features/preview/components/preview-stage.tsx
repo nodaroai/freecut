@@ -32,6 +32,7 @@ interface PreviewStageProps {
   fps: number
   isResolving: boolean
   isRenderedOverlayVisible: boolean
+  isSplitGradeAfterVisible?: boolean
   colorGradeComparisonMode?: ColorGradeComparisonMode
   colorGradeSplitPosition?: number
   onColorGradeSplitPositionChange?: (position: number) => void
@@ -57,6 +58,7 @@ export const PreviewStage = memo(function PreviewStage({
   fps,
   isResolving,
   isRenderedOverlayVisible,
+  isSplitGradeAfterVisible = false,
   colorGradeComparisonMode = 'off',
   colorGradeSplitPosition = 0.5,
   onColorGradeSplitPositionChange,
@@ -253,30 +255,43 @@ export const PreviewStage = memo(function PreviewStage({
               </HeadlessPlayer>
 
               {FAST_SCRUB_RENDERER_ENABLED && (
-                <canvas
-                  ref={scrubCanvasRef}
-                  className="absolute inset-0 pointer-events-none"
+                <div
+                  className="absolute left-0 top-0 pointer-events-none"
+                  data-grade-comparison-before-layer={isSplitGradeComparison ? 'true' : undefined}
                   style={{
-                    width: '100%',
+                    width: isSplitGradeComparison ? `${splitPercent}%` : '100%',
                     height: '100%',
                     zIndex: 4,
                     visibility: isRenderedOverlayVisible ? 'visible' : 'hidden',
+                    overflow: isSplitGradeComparison ? 'hidden' : undefined,
                     backgroundColor: '#000',
-                    clipPath: isSplitGradeComparison
-                      ? `inset(0 ${100 - splitPercent}% 0 0)`
-                      : undefined,
                   }}
-                />
+                >
+                  <canvas
+                    ref={scrubCanvasRef}
+                    className="absolute left-0 top-0 pointer-events-none"
+                    style={{
+                      width: isSplitGradeComparison ? `${playerSize.width}px` : '100%',
+                      height: isSplitGradeComparison ? `${playerSize.height}px` : '100%',
+                      maxWidth: 'none',
+                      maxHeight: 'none',
+                      visibility: isRenderedOverlayVisible ? 'visible' : 'hidden',
+                    }}
+                  />
+                </div>
               )}
 
               <canvas
                 ref={gpuEffectsCanvasRef}
                 className="absolute inset-0 pointer-events-none"
+                data-grade-comparison-after-layer={
+                  isSplitGradeAfterVisible ? 'true' : undefined
+                }
                 style={{
                   width: '100%',
                   height: '100%',
-                  zIndex: 5,
-                  visibility: 'hidden',
+                  zIndex: isSplitGradeAfterVisible ? 3 : 5,
+                  visibility: isSplitGradeAfterVisible ? 'visible' : 'hidden',
                 }}
               />
 

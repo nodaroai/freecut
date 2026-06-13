@@ -12,6 +12,8 @@ vi.mock('@/features/editor/deps/preview', async () => {
   return {
     ...actual,
     VideoPreview: () => <div data-testid="video-preview" />,
+    ColorVideoPreview: () => <div data-testid="color-video-preview" />,
+    AlignmentToolbar: () => <div data-testid="alignment-toolbar" />,
     PlaybackControls: () => <div data-testid="playback-controls" />,
     TimecodeDisplay: () => <div data-testid="timecode-display" />,
     PreviewZoomControls: () => <div data-testid="preview-zoom-controls" />,
@@ -41,6 +43,7 @@ function resetStores() {
     compoundClipSkimPreviewCompositionId: null,
     compoundClipSkimPreviewFrame: null,
     colorScopesOpen: false,
+    workspace: 'edit',
   })
 }
 
@@ -162,6 +165,24 @@ describe('PreviewArea mask editor toolbar', () => {
 
     expect(await screen.findByTestId('inline-source-preview')).toBeInTheDocument()
     expect(screen.getByTestId('video-preview')).toBeInTheDocument()
+    expect(screen.getByTestId('playback-controls')).toBeInTheDocument()
+  })
+
+  it('uses full edit preview chrome outside color workspace', () => {
+    render(<PreviewArea project={{ width: 1920, height: 1080, fps: 30 }} />)
+
+    expect(screen.getByTestId('video-preview')).toBeInTheDocument()
+    expect(screen.getByTestId('alignment-toolbar')).toBeInTheDocument()
+    expect(screen.queryByTestId('color-video-preview')).not.toBeInTheDocument()
+  })
+
+  it('uses color preview chrome without the alignment toolbar in color workspace', () => {
+    useEditorStore.setState({ workspace: 'color' })
+
+    render(<PreviewArea project={{ width: 1920, height: 1080, fps: 30 }} />)
+
+    expect(screen.getByTestId('color-video-preview')).toBeInTheDocument()
+    expect(screen.queryByTestId('alignment-toolbar')).not.toBeInTheDocument()
     expect(screen.getByTestId('playback-controls')).toBeInTheDocument()
   })
 
