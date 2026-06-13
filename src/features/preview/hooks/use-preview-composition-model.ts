@@ -7,6 +7,7 @@ import type { TimelineItem, TimelineTrack } from '@/types/timeline'
 import type { ResolvedTransform } from '@/types/transform'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { isColorGradeEffectType } from '@/infrastructure/gpu-effects'
+import { usePlaybackStore } from '@/shared/state/playback'
 import { resolveEffectiveTrackStates } from '@/features/preview/deps/timeline-utils'
 import { useCompositionsStore, useItemsStore } from '@/features/preview/deps/timeline-store'
 import { useCornerPinStore } from '../stores/corner-pin-store'
@@ -191,9 +192,13 @@ export function usePreviewCompositionModel({
 
   const getPreviewEffectsOverride = useCallback((itemId: string): ItemEffect[] | undefined => {
     const gizmoState = useGizmoStore.getState()
+    const playbackState = usePlaybackStore.getState()
     const overriddenEffects = gizmoState.preview?.[itemId]?.effects
+    const shouldShowAfterDuringSplitPlayback =
+      playbackState.isPlaying && gizmoState.colorGradeComparisonMode === 'split'
     const shouldBypassGrade =
-      gizmoState.colorGradeBypassed || gizmoState.colorGradeComparisonMode !== 'off'
+      !shouldShowAfterDuringSplitPlayback &&
+      (gizmoState.colorGradeBypassed || gizmoState.colorGradeComparisonMode !== 'off')
     if (!shouldBypassGrade) {
       return overriddenEffects
     }

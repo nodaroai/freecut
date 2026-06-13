@@ -1390,6 +1390,19 @@ export function usePreviewRenderPump({
       previewPerfRef.current.scrubDroppedFrames += scrubDirectionPlan.scrubDroppedFrames
 
       if (
+        playStateChanged &&
+        useGizmoStore.getState().colorGradeComparisonMode === 'split' &&
+        scrubRendererRef.current
+      ) {
+        if (targetFrame !== null) {
+          scrubRendererRef.current.invalidateFrameCache({ frames: [targetFrame] })
+        } else {
+          scrubRendererRef.current.invalidateFrameCache()
+        }
+        setDisplayedFrame(null)
+      }
+
+      if (
         targetFrame !== null &&
         scrubRendererRef.current &&
         'getScrubbingCache' in scrubRendererRef.current

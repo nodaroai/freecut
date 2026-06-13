@@ -1534,6 +1534,65 @@ describe('VideoPreview sync behavior', () => {
     })
   })
 
+  it('shows graded after playback instead of before-only split playback', async () => {
+    setSingleVideoItemAtFrame({
+      id: 'item-graded',
+      effects: [
+        {
+          id: 'effect-grade',
+          enabled: true,
+          effect: {
+            type: 'gpu-effect',
+            gpuEffectType: 'gpu-color-wheels',
+            params: { exposure: 0.5 },
+          },
+        },
+      ],
+    })
+    const livePreviewEffects = useItemsStore.getState().itemById['item-graded']?.effects ?? []
+    act(() => {
+      useGizmoStore.getState().setEffectsPreviewNew({ 'item-graded': livePreviewEffects })
+    })
+
+    const { container, renderer, scrubCanvas } = await renderReadySingleRendererPreview(24, {
+      expectedDisplayedFrame: 24,
+    })
+
+    act(() => {
+      useGizmoStore.getState().setColorGradeComparisonMode('split')
+    })
+
+    await waitFor(() => {
+      expect(scrubCanvas.style.visibility).toBe('visible')
+      expect(screen.getByLabelText('Split grade comparison')).toBeTruthy()
+      expect(container.querySelector('[data-grade-comparison-after-layer="true"]')).not.toBeNull()
+    })
+
+    renderer.invalidateFrameCache.mockClear()
+
+    act(() => {
+      usePlaybackStore.getState().play()
+    })
+
+    await waitFor(() => {
+      expect(renderer.invalidateFrameCache).toHaveBeenCalled()
+      expect(screen.queryByLabelText('Split grade comparison')).toBeNull()
+      expect(container.querySelector('[data-grade-comparison-after-layer="true"]')).toBeNull()
+    })
+
+    const rendererCalls = createCompositionRendererMock.mock.calls as unknown as Array<
+      [
+        unknown,
+        unknown,
+        unknown,
+        { getPreviewEffectsOverride?: (itemId: string) => Array<{ enabled: boolean }> | undefined },
+      ]
+    >
+    const rendererOptions = rendererCalls[0]?.[3]
+    const playbackEffects = rendererOptions?.getPreviewEffectsOverride?.('item-graded')
+    expect(playbackEffects?.[0]?.enabled).toBe(true)
+  })
+
   it('re-renders the paused currentFrame after media resolution finishes on refresh', async () => {
     const mediaId = 'media-effected'
     setMockBlobUrl(mediaId, 'blob:effected-video')

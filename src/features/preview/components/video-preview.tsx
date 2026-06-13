@@ -618,14 +618,18 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       />
     </>
   ) : null
+  const shouldShowAfterDuringSplitPlayback = isPlaying && colorGradeComparisonMode === 'split'
+  const stageColorGradeComparisonMode = shouldShowAfterDuringSplitPlayback
+    ? 'off'
+    : colorGradeComparisonMode
   const baseComparisonTargetFrame = Math.max(0, Math.round(previewFrame ?? currentFrame))
   const comparisonTargetFrame =
-    colorGradeComparisonMode === 'split' && displayedFrame !== null
+    stageColorGradeComparisonMode === 'split' && displayedFrame !== null
       ? displayedFrame
       : baseComparisonTargetFrame
 
   useEffect(() => {
-    if (colorGradeComparisonMode !== 'split') {
+    if (stageColorGradeComparisonMode !== 'split') {
       disposeSplitAfterRenderer()
       return
     }
@@ -660,12 +664,12 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       cancelled = true
     }
   }, [
-    colorGradeComparisonMode,
     comparisonTargetFrame,
     disposeSplitAfterRenderer,
     ensureSplitAfterRenderer,
     gpuEffectsCanvasRef,
     livePreviewEdits,
+    stageColorGradeComparisonMode,
   ])
 
   useEffect(() => () => disposeSplitAfterRenderer(), [disposeSplitAfterRenderer])
@@ -676,13 +680,14 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       ? null
       : Math.max(0, Math.round(livePlayerFrame))
   const effectivePlayerDisplayedFrame = playerDisplayedFrame ?? normalizedLivePlayerFrame
-  const isColorGradeComparisonActive = colorGradeComparisonMode !== 'off'
-  const isSplitGradeComparison = colorGradeComparisonMode === 'split'
+  const isColorGradeComparisonActive = stageColorGradeComparisonMode !== 'off'
+  const isSplitGradeComparison = stageColorGradeComparisonMode === 'split'
   const isColorGradeComparisonFrameReady =
     displayedFrame === comparisonTargetFrame &&
     (isSplitGradeComparison
       ? splitAfterRenderedFrame === comparisonTargetFrame
-      : colorGradeComparisonMode === 'before' || effectivePlayerDisplayedFrame === comparisonTargetFrame)
+      : stageColorGradeComparisonMode === 'before' ||
+        effectivePlayerDisplayedFrame === comparisonTargetFrame)
   const stageRenderedOverlayVisible = isColorGradeComparisonActive
     ? isRenderedOverlayVisible && isColorGradeComparisonFrameReady
     : isRenderedOverlayVisible
@@ -702,7 +707,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       isResolving={isResolving}
       isRenderedOverlayVisible={stageRenderedOverlayVisible}
       isSplitGradeAfterVisible={isSplitAfterVisible}
-      colorGradeComparisonMode={colorGradeComparisonMode}
+      colorGradeComparisonMode={stageColorGradeComparisonMode}
       colorGradeSplitPosition={colorGradeSplitPosition}
       onColorGradeSplitPositionChange={setColorGradeSplitPosition}
       inputProps={inputProps}
