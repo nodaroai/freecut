@@ -623,4 +623,38 @@ describe('DopesheetEditor property groups', () => {
       },
     ])
   })
+
+  it('signals that an unlocked row keyframe is draggable', () => {
+    renderEditor({
+      keyframesByProperty: {
+        x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }],
+      },
+      propertyValues: { x: 100 },
+      totalFrames: 100,
+    })
+
+    const rowKeyframe = screen.getByTestId('row-keyframe-x-kx-1')
+
+    expect(rowKeyframe.className).toContain('cursor-grab')
+    expect(rowKeyframe.getAttribute('title')).toContain('drag to retime')
+    expect(rowKeyframe).not.toBeDisabled()
+  })
+
+  it('shows a locked row keyframe as not draggable', () => {
+    renderEditor({
+      keyframesByProperty: {
+        x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }],
+      },
+      propertyValues: { x: 100 },
+      totalFrames: 100,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /lock x position row/i }))
+
+    const rowKeyframe = screen.getByTestId('row-keyframe-x-kx-1')
+
+    expect(rowKeyframe.className).toContain('cursor-not-allowed')
+    expect(rowKeyframe.className).not.toContain('cursor-grab')
+    expect(rowKeyframe).toBeDisabled()
+  })
 })

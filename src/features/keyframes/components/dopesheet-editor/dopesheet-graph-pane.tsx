@@ -14,11 +14,13 @@ import type {
 import type { BlockedFrameRange } from '../../utils/transition-region'
 import { EmbeddedValueGraphEditor } from '../value-graph-editor'
 import { PROPERTY_COLUMN_WIDTH, RULER_HEIGHT } from './dopesheet-constants'
+import { DopesheetEmptyState } from './dopesheet-empty-state'
 import type { Viewport } from './dopesheet-types'
 
 interface DopesheetGraphPaneProps {
   hasRows: boolean
   emptyStateMessage: string
+  showEmptyGuidance: boolean
   propertyColumnElements: ReactNode
   graphPaneRef: React.RefObject<HTMLDivElement | null>
   disabled: boolean
@@ -66,6 +68,7 @@ const propertyColumnStyle: CSSProperties = { width: PROPERTY_COLUMN_WIDTH }
 export function DopesheetGraphPane({
   hasRows,
   emptyStateMessage,
+  showEmptyGuidance,
   propertyColumnElements,
   graphPaneRef,
   disabled,
@@ -106,9 +109,7 @@ export function DopesheetGraphPane({
 }: DopesheetGraphPaneProps) {
   if (!hasRows) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        {emptyStateMessage}
-      </div>
+      <DopesheetEmptyState showGuidance={showEmptyGuidance} fallbackMessage={emptyStateMessage} />
     )
   }
 

@@ -23,6 +23,13 @@
       "property": "Property",
       "noParametersMatch": "No parameters match the current view",
       "noKeyframesToDisplay": "No keyframes to display",
+      "emptyState": {
+        "title": "No keyframes yet",
+        "intro": "Animate this clip by adding keyframes to any parameter.",
+        "hintValue": "Type a value next to a parameter and press Enter to set a keyframe at the playhead.",
+        "hintDiamond": "Or click the diamond on a parameter row to add a keyframe at the current frame.",
+        "hintAutoKey": "Turn on auto-key (the timer icon) to capture every value change automatically."
+      },
       "copySelectedKeyframes": "Copy selected keyframes",
       "cutSelectedKeyframes": "Cut selected keyframes",
       "moveKeyframesFromClipboard": "Move keyframes from clipboard",
@@ -43,6 +50,26 @@
         "easeIn": "Ease In",
         "easeInOut": "Ease In/Out",
         "easeOut": "Ease Out"
+      },
+      "legend": {
+        "trigger": "What do these icons mean?",
+        "title": "Editor guide",
+        "modesHeading": "Views",
+        "graphMode": "Graph — edit each parameter's value curve and easing over time.",
+        "sheetMode": "Sheet — see and move every parameter's keyframes on one grid.",
+        "iconsHeading": "Row controls",
+        "iconCurve": "Show this parameter's curve in Graph view.",
+        "iconLock": "Lock the row so its keyframes can't be moved or edited.",
+        "iconAutoKey": "Auto-key: capture a keyframe automatically whenever you change this value.",
+        "iconDiamond": "Add or remove a keyframe at the playhead.",
+        "colorsHeading": "Keyframes",
+        "colorDefault": "Orange diamond: a keyframe.",
+        "colorSelected": "Bright orange with a ring: selected keyframe."
+      },
+      "keyframeMarker": {
+        "rowLabel": "Keyframe at frame {{frame}} — drag to retime, Alt-drag to duplicate",
+        "groupLabel": "{{group}} keyframe at frame {{frame}} — drag to retime, Alt-drag to duplicate",
+        "locked": "Keyframe at frame {{frame}} (row locked)"
       }
     }
   },

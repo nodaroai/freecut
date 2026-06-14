@@ -23,6 +23,13 @@
       "property": "属性",
       "noParametersMatch": "没有匹配当前视图的参数",
       "noKeyframesToDisplay": "没有可显示的关键帧",
+      "emptyState": {
+        "title": "尚无关键帧",
+        "intro": "为任意参数添加关键帧来为此片段制作动画。",
+        "hintValue": "在参数旁输入数值并按回车键，即可在播放头处设置关键帧。",
+        "hintDiamond": "或点击参数行上的菱形，在当前帧添加关键帧。",
+        "hintAutoKey": "开启自动关键帧（计时器图标），自动捕捉每次数值变化。"
+      },
       "copySelectedKeyframes": "复制所选关键帧",
       "cutSelectedKeyframes": "剪切所选关键帧",
       "moveKeyframesFromClipboard": "从剪贴板移动关键帧",
@@ -43,6 +50,26 @@
         "easeIn": "缓入",
         "easeInOut": "缓入缓出",
         "easeOut": "缓出"
+      },
+      "legend": {
+        "trigger": "这些图标是什么意思？",
+        "title": "编辑器指南",
+        "modesHeading": "视图",
+        "graphMode": "曲线 — 随时间编辑每个参数的数值曲线和缓动。",
+        "sheetMode": "表格 — 在一个网格中查看并移动所有参数的关键帧。",
+        "iconsHeading": "行控件",
+        "iconCurve": "在曲线视图中显示此参数的曲线。",
+        "iconLock": "锁定该行，使其关键帧无法移动或编辑。",
+        "iconAutoKey": "自动关键帧：每当你更改此数值时自动记录一个关键帧。",
+        "iconDiamond": "在播放头处添加或移除关键帧。",
+        "colorsHeading": "关键帧",
+        "colorDefault": "橙色菱形：一个关键帧。",
+        "colorSelected": "带光环的亮橙色：已选中的关键帧。"
+      },
+      "keyframeMarker": {
+        "rowLabel": "第 {{frame}} 帧的关键帧 — 拖动可调整时间，按住 Alt 拖动可复制",
+        "groupLabel": "第 {{frame}} 帧的 {{group}} 关键帧 — 拖动可调整时间，按住 Alt 拖动可复制",
+        "locked": "第 {{frame}} 帧的关键帧（行已锁定）"
       }
     }
   },

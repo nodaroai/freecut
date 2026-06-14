@@ -77,7 +77,7 @@ describe('DopesheetEditor drag preview', () => {
       />,
     )
 
-    const keyframe = screen.getByRole('button', { name: 'Keyframe at frame 20' })
+    const keyframe = screen.getByTestId('row-keyframe-x-kf-1')
     const initialStyle = keyframe.getAttribute('style')
 
     fireEvent.pointerDown(keyframe, { button: 0, pointerId: 1, clientX: 100 })

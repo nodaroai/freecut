@@ -23,6 +23,13 @@
       "property": "Propriedade",
       "noParametersMatch": "Nenhum parâmetro corresponde à visualização atual",
       "noKeyframesToDisplay": "Nenhum keyframe para exibir",
+      "emptyState": {
+        "title": "Nenhum keyframe ainda",
+        "intro": "Anime este clipe adicionando keyframes a qualquer parâmetro.",
+        "hintValue": "Digite um valor ao lado de um parâmetro e pressione Enter para criar um keyframe no cursor de reprodução.",
+        "hintDiamond": "Ou clique no losango em uma linha de parâmetro para adicionar um keyframe no quadro atual.",
+        "hintAutoKey": "Ative a chave automática (o ícone do cronômetro) para capturar cada mudança de valor automaticamente."
+      },
       "copySelectedKeyframes": "Copiar keyframes selecionados",
       "cutSelectedKeyframes": "Recortar keyframes selecionados",
       "moveKeyframesFromClipboard": "Mover keyframes da área de transferência",
@@ -43,6 +50,26 @@
         "easeIn": "Entrada suave",
         "easeInOut": "Entrada/saída suave",
         "easeOut": "Saída suave"
+      },
+      "legend": {
+        "trigger": "O que significam estes ícones?",
+        "title": "Guia do editor",
+        "modesHeading": "Visualizações",
+        "graphMode": "Gráfico — edite a curva de valor e a suavização de cada parâmetro ao longo do tempo.",
+        "sheetMode": "Planilha — veja e mova os quadros-chave de todos os parâmetros em uma única grade.",
+        "iconsHeading": "Controles da linha",
+        "iconCurve": "Mostrar a curva deste parâmetro na visualização de gráfico.",
+        "iconLock": "Bloqueia a linha para que seus quadros-chave não possam ser movidos nem editados.",
+        "iconAutoKey": "Chave automática: captura um quadro-chave automaticamente sempre que você altera este valor.",
+        "iconDiamond": "Adicionar ou remover um quadro-chave no cursor de reprodução.",
+        "colorsHeading": "Quadros-chave",
+        "colorDefault": "Losango laranja: um quadro-chave.",
+        "colorSelected": "Laranja brilhante com um anel: quadro-chave selecionado."
+      },
+      "keyframeMarker": {
+        "rowLabel": "Quadro-chave no frame {{frame}} — arraste para reposicionar, Alt+arrastar para duplicar",
+        "groupLabel": "Quadro-chave de {{group}} no frame {{frame}} — arraste para reposicionar, Alt+arrastar para duplicar",
+        "locked": "Quadro-chave no frame {{frame}} (linha bloqueada)"
       }
     }
   },

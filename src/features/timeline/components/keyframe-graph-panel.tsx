@@ -1596,6 +1596,8 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
             variant={editorMode === 'graph' ? 'secondary' : 'ghost'}
             size="sm"
             className="h-5 px-1.5 text-[10px]"
+            title={t('timeline.keyframeEditor.legend.graphMode')}
+            aria-label={t('timeline.keyframeEditor.legend.graphMode')}
             onClick={(e) => {
               e.stopPropagation()
               setEditorMode('graph')
@@ -1607,6 +1609,8 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
             variant={editorMode === 'dopesheet' ? 'secondary' : 'ghost'}
             size="sm"
             className="h-5 px-1.5 text-[10px]"
+            title={t('timeline.keyframeEditor.legend.sheetMode')}
+            aria-label={t('timeline.keyframeEditor.legend.sheetMode')}
             onClick={(e) => {
               e.stopPropagation()
               setEditorMode('dopesheet')
