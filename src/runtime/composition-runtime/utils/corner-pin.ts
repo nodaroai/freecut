@@ -453,17 +453,29 @@ function sampleBilinear(
   return [r / aOut, g / aOut, b / aOut, aOut * 255]
 }
 
-function drawCornerPinImageProjective(
-  ctx: OffscreenCanvasRenderingContext2D,
+/**
+ * Result of a projective corner-pin warp, in source-local space (computed as if
+ * the source were drawn at the origin). `offsetX/offsetY` are where the warped
+ * bitmap's top-left sits relative to the destination origin — so the caller
+ * places it at `(dstX + offsetX, dstY + offsetY)`. Because the warp is computed
+ * position-independently, the returned bitmap depends only on the source pixels,
+ * size and pin offsets — making it safe to cache across frames for static
+ * content (e.g. corner-pinned text during scrub).
+ */
+export interface ProjectiveCornerPinWarp {
+  canvas: OffscreenCanvas | HTMLCanvasElement
+  offsetX: number
+  offsetY: number
+}
+
+export function computeProjectiveCornerPinWarp(
   source: CanvasImageSource,
   srcW: number,
   srcH: number,
-  dstX: number,
-  dstY: number,
   pin: CornerPinOffsets,
-): void {
+): ProjectiveCornerPinWarp | null {
   const sourceCanvas = createWarpCanvas(srcW, srcH)
-  if (!sourceCanvas) return
+  if (!sourceCanvas) return null
 
   sourceCanvas.ctx.clearRect(0, 0, srcW, srcH)
   sourceCanvas.ctx.drawImage(source, 0, 0, srcW, srcH)
@@ -472,14 +484,15 @@ function drawCornerPinImageProjective(
   try {
     sourceImage = sourceCanvas.ctx.getImageData(0, 0, srcW, srcH)
   } catch {
-    return
+    return null
   }
 
+  // Corners computed with the destination origin at (0, 0); the caller offsets.
   const corners: [number, number][] = [
-    [dstX + pin.topLeft[0], dstY + pin.topLeft[1]],
-    [dstX + srcW + pin.topRight[0], dstY + pin.topRight[1]],
-    [dstX + srcW + pin.bottomRight[0], dstY + srcH + pin.bottomRight[1]],
-    [dstX + pin.bottomLeft[0], dstY + srcH + pin.bottomLeft[1]],
+    [pin.topLeft[0], pin.topLeft[1]],
+    [srcW + pin.topRight[0], pin.topRight[1]],
+    [srcW + pin.bottomRight[0], srcH + pin.bottomRight[1]],
+    [pin.bottomLeft[0], srcH + pin.bottomLeft[1]],
   ]
   const minX = Math.floor(Math.min(...corners.map(([x]) => x))) - 1
   const minY = Math.floor(Math.min(...corners.map(([, y]) => y))) - 1
@@ -488,16 +501,16 @@ function drawCornerPinImageProjective(
   const outW = Math.max(1, maxX - minX)
   const outH = Math.max(1, maxY - minY)
   const outputCanvas = createWarpCanvas(outW, outH)
-  if (!outputCanvas) return
+  if (!outputCanvas) return null
 
   const outputImage = outputCanvas.ctx.createImageData(outW, outH)
   const inverse = invertCornerPinHomography(computeCornerPinHomography(srcW, srcH, pin))
-  if (!inverse) return
+  if (!inverse) return null
 
   for (let y = 0; y < outH; y++) {
-    const dy = minY + y - dstY + 0.5
+    const dy = minY + y + 0.5
     for (let x = 0; x < outW; x++) {
-      const dx = minX + x - dstX + 0.5
+      const dx = minX + x + 0.5
       const [sx, sy] = projectPoint(inverse, dx, dy)
       if (sx < 0 || sy < 0 || sx > srcW - 1 || sy > srcH - 1) continue
 
@@ -511,5 +524,19 @@ function drawCornerPinImageProjective(
   }
 
   outputCanvas.ctx.putImageData(outputImage, 0, 0)
-  ctx.drawImage(outputCanvas.canvas, minX, minY)
+  return { canvas: outputCanvas.canvas, offsetX: minX, offsetY: minY }
+}
+
+function drawCornerPinImageProjective(
+  ctx: OffscreenCanvasRenderingContext2D,
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
+  dstX: number,
+  dstY: number,
+  pin: CornerPinOffsets,
+): void {
+  const warp = computeProjectiveCornerPinWarp(source, srcW, srcH, pin)
+  if (!warp) return
+  ctx.drawImage(warp.canvas, dstX + warp.offsetX, dstY + warp.offsetY)
 }

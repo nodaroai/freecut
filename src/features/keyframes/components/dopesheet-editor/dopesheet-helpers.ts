@@ -2,6 +2,33 @@ import type { AnimatableProperty, Keyframe } from '@/types/keyframe'
 import { getPropertyAccordionGroups } from './property-groups'
 import type { DopesheetPropertyGroup, DopesheetPropertyRow } from './dopesheet-types'
 
+/** Minimal row shape needed to build the frame-independent group structure. */
+interface GroupableRow {
+  property: AnimatableProperty
+  keyframes: Keyframe[]
+}
+
+type GroupFrameGroups = Array<{
+  frame: number
+  keyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>
+}>
+
+/** Frame-independent portion of a property group (stable across playhead scrubs). */
+export interface DopesheetPropertyGroupStructure<R extends GroupableRow = DopesheetPropertyRow> {
+  id: string
+  label: string
+  rows: R[]
+  frameGroups: GroupFrameGroups
+}
+
+/** Playhead-derived group state — cheap to recompute as the current frame changes. */
+export interface GroupFrameState {
+  currentKeyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>
+  hasKeyframeAtCurrentFrame: boolean
+  prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null
+  nextKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null
+}
+
 export function getNiceTickStep(frameRange: number): number {
   const rough = Math.max(1, frameRange / 10)
   const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))
@@ -30,13 +57,16 @@ export function arePreviewFramesEqual(
   return true
 }
 
-export function buildGroupedPropertyRows(
-  rows: DopesheetPropertyRow[],
-  currentFrame: number,
-): DopesheetPropertyGroup[] {
-  const rowByProperty = new Map<AnimatableProperty, DopesheetPropertyRow>(
-    rows.map((row) => [row.property, row]),
-  )
+/**
+ * Builds the frame-independent group structure (membership + keyframe frame
+ * groups). The result only changes when properties/keyframes change, so callers
+ * can memoize it across playhead scrubs and keep stable references for the
+ * (expensive) timeline grid render.
+ */
+export function buildGroupedPropertyStructure<R extends GroupableRow>(
+  rows: R[],
+): DopesheetPropertyGroupStructure<R>[] {
+  const rowByProperty = new Map<AnimatableProperty, R>(rows.map((row) => [row.property, row]))
 
   return getPropertyAccordionGroups(rows.map((row) => row.property))
     .map((group) => {
@@ -47,12 +77,7 @@ export function buildGroupedPropertyRows(
       const keyframeEntries = groupedRows
         .flatMap((row) => row.keyframes.map((keyframe) => ({ property: row.property, keyframe })))
         .toSorted((a, b) => a.keyframe.frame - b.keyframe.frame)
-      const frameGroups = keyframeEntries.reduce<
-        Array<{
-          frame: number
-          keyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>
-        }>
-      >((groups, entry) => {
+      const frameGroups = keyframeEntries.reduce<GroupFrameGroups>((groups, entry) => {
         const lastGroup = groups.at(-1)
         if (lastGroup && lastGroup.frame === entry.keyframe.frame) {
           lastGroup.keyframes.push(entry)
@@ -64,37 +89,57 @@ export function buildGroupedPropertyRows(
         }
         return groups
       }, [])
-      const currentKeyframes =
-        frameGroups.find((groupEntries) => groupEntries.frame === currentFrame)?.keyframes ?? []
-
-      let prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null
-      let nextKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null
-
-      for (let index = frameGroups.length - 1; index >= 0; index -= 1) {
-        const frameGroup = frameGroups[index]
-        if (frameGroup && frameGroup.frame < currentFrame) {
-          prevKeyframe = frameGroup.keyframes[0] ?? null
-          break
-        }
-      }
-
-      for (const frameGroup of frameGroups) {
-        if (frameGroup.frame > currentFrame) {
-          nextKeyframe = frameGroup.keyframes[0] ?? null
-          break
-        }
-      }
 
       return {
         id: group.id,
         label: group.label,
         rows: groupedRows,
         frameGroups,
-        currentKeyframes,
-        hasKeyframeAtCurrentFrame: currentKeyframes.length > 0,
-        prevKeyframe,
-        nextKeyframe,
       }
     })
     .filter((group) => group.rows.length > 0)
+}
+
+/** Derives the playhead-relative state for a group's frame groups. */
+export function computeGroupFrameState(
+  frameGroups: GroupFrameGroups,
+  currentFrame: number,
+): GroupFrameState {
+  const currentKeyframes =
+    frameGroups.find((groupEntries) => groupEntries.frame === currentFrame)?.keyframes ?? []
+
+  let prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null
+  let nextKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null
+
+  for (let index = frameGroups.length - 1; index >= 0; index -= 1) {
+    const frameGroup = frameGroups[index]
+    if (frameGroup && frameGroup.frame < currentFrame) {
+      prevKeyframe = frameGroup.keyframes[0] ?? null
+      break
+    }
+  }
+
+  for (const frameGroup of frameGroups) {
+    if (frameGroup.frame > currentFrame) {
+      nextKeyframe = frameGroup.keyframes[0] ?? null
+      break
+    }
+  }
+
+  return {
+    currentKeyframes,
+    hasKeyframeAtCurrentFrame: currentKeyframes.length > 0,
+    prevKeyframe,
+    nextKeyframe,
+  }
+}
+
+export function buildGroupedPropertyRows(
+  rows: DopesheetPropertyRow[],
+  currentFrame: number,
+): DopesheetPropertyGroup[] {
+  return buildGroupedPropertyStructure(rows).map((group) => ({
+    ...group,
+    ...computeGroupFrameState(group.frameGroups, currentFrame),
+  }))
 }

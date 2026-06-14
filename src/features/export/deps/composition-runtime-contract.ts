@@ -26,6 +26,7 @@ export {
   computeCornerPinHomography,
   invertCornerPinHomography,
   drawCornerPinImage,
+  computeProjectiveCornerPinWarp,
   resolveCornerPinTargetRect,
   resolveCornerPinForSize,
 } from '@/runtime/composition-runtime/utils/corner-pin'

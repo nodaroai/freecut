@@ -155,6 +155,18 @@ export interface ItemRenderContext {
   // Cached text glyph/layout textures for GPU transition participants.
   gpuTextTextureCache?: Map<string, GpuTextTextureCacheEntry>
 
+  // Cached CPU-rasterized text blocks (preview only). Keyed on the text's
+  // content/style/box-size — NOT on frame/opacity/transform — so a static text
+  // item isn't re-laid-out and re-rasterized (expensive at large font sizes /
+  // shadow blur) on every scrub frame. Map insertion order doubles as LRU.
+  textRasterCache?: Map<string, TextRasterCacheEntry>
+
+  // Cached projective corner-pin warp output for text (preview only). The CPU
+  // per-pixel projective warp is the dominant cost for corner-pinned text; its
+  // output is frame-invariant for static text/pin/size, so it's cached and
+  // re-blitted across scrub frames. Map insertion order doubles as LRU.
+  cornerPinWarpCache?: Map<string, CornerPinWarpCacheEntry>
+
   // Cached CPU-rasterized bitmap masks uploaded for GPU sub-composition layers.
   gpuBitmapMaskTextureCache?: Map<string, GpuBitmapMaskTextureCacheEntry>
 
@@ -198,6 +210,24 @@ export interface GpuTextTextureCacheEntry {
   texture: GPUTexture
   width: number
   height: number
+  bytes: number
+}
+
+export interface TextRasterCacheEntry {
+  /** Pre-rasterized text box (content + shadow), padded for shadow/glyph overflow. */
+  canvas: OffscreenCanvas
+  /** Padding baked around the box origin so shadow/overflow isn't clipped. */
+  padX: number
+  padY: number
+  bytes: number
+}
+
+export interface CornerPinWarpCacheEntry {
+  /** Warped bitmap in source-local space. */
+  canvas: OffscreenCanvas | HTMLCanvasElement
+  /** Placement offset relative to the destination origin (dstX/dstY). */
+  offsetX: number
+  offsetY: number
   bytes: number
 }
 

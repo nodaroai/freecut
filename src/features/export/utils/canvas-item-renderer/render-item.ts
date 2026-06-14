@@ -15,6 +15,7 @@ import type {
 } from '@/types/timeline'
 import {
   applyPreviewPathVerticesToItem,
+  computeProjectiveCornerPinWarp,
   drawCornerPinImage,
   expandTextTransformToFitContent,
   hasCornerPin,
@@ -34,8 +35,22 @@ import {
 } from './shared'
 import { renderVideoItem } from './video'
 import { renderImageItem } from './image'
-import { renderSubtitleSegmentItem, renderTextItem } from './text'
+import { getTextRasterCacheKey, renderSubtitleSegmentItem, renderTextItem } from './text'
 import { renderCompositionItem } from './composition'
+import type { CornerPinWarpCacheEntry } from './types'
+
+/** Total RAM budget for the preview corner-pin warp cache. */
+const CORNER_PIN_WARP_CACHE_MAX_BYTES = 256_000_000 // ~256MB
+
+function pruneCornerPinWarpCache(cache: Map<string, CornerPinWarpCacheEntry>): void {
+  let total = 0
+  for (const entry of cache.values()) total += entry.bytes
+  for (const [key, entry] of cache) {
+    if (total <= CORNER_PIN_WARP_CACHE_MAX_BYTES || cache.size <= 1) break
+    cache.delete(key)
+    total -= entry.bytes
+  }
+}
 
 /**
  * Render a single timeline item to the given canvas context.
@@ -311,14 +326,52 @@ async function renderItemWithCornerPin(
   }
 
   const cornerPinRenderer = item.type === 'text' ? 'projective' : 'mesh'
+  const pinDstX = left + cornerPinTargetRect.x
+  const pinDstY = top + cornerPinTargetRect.y
   const drawPinnedImage = (targetCtx: OffscreenCanvasRenderingContext2D): void => {
+    // Preview fast path: the projective warp is a CPU per-pixel pass and the
+    // dominant cost for corner-pinned text. Its output is frame-invariant for
+    // static text/pin/size, so cache & re-blit it across scrub frames.
+    const warpCache = rctx.cornerPinWarpCache
+    if (cornerPinRenderer === 'projective' && rctx.renderMode === 'preview' && warpCache) {
+      const key = `${getTextRasterCacheKey(item as TextItem, transform.width, transform.height)}|cp:${JSON.stringify(
+        resolvedCornerPin,
+      )}|${pinSourceWidth}x${pinSourceHeight}`
+      let entry: CornerPinWarpCacheEntry | null | undefined = warpCache.get(key)
+      if (entry) {
+        warpCache.delete(key)
+        warpCache.set(key, entry)
+      } else {
+        const warp = computeProjectiveCornerPinWarp(
+          pinCanvas,
+          pinSourceWidth,
+          pinSourceHeight,
+          resolvedCornerPin,
+        )
+        if (warp) {
+          entry = {
+            canvas: warp.canvas,
+            offsetX: warp.offsetX,
+            offsetY: warp.offsetY,
+            bytes: warp.canvas.width * warp.canvas.height * 4,
+          }
+          warpCache.set(key, entry)
+          pruneCornerPinWarpCache(warpCache)
+        }
+      }
+      if (entry) {
+        targetCtx.drawImage(entry.canvas, pinDstX + entry.offsetX, pinDstY + entry.offsetY)
+        return
+      }
+    }
+
     const args = [
       targetCtx,
       pinCanvas,
       pinSourceWidth,
       pinSourceHeight,
-      left + cornerPinTargetRect.x,
-      top + cornerPinTargetRect.y,
+      pinDstX,
+      pinDstY,
       resolvedCornerPin,
     ] as const
 

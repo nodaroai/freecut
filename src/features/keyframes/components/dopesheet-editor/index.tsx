@@ -46,8 +46,11 @@ import { setPointerCaptureSafely } from './dopesheet-utils'
 import {
   arePreviewFramesEqual,
   buildGroupedPropertyRows,
+  buildGroupedPropertyStructure,
   getNiceTickStep,
 } from './dopesheet-helpers'
+import type { DopesheetPropertyGroupStructure } from './dopesheet-helpers'
+import { GroupTimelineCell, PropertyTimelineCell } from './dopesheet-timeline-cells'
 import {
   DRAG_THRESHOLD,
   EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
@@ -87,7 +90,6 @@ import {
   getRemovableGroupCurrentKeyframes,
   removeSelectionIds,
 } from './row-action-helpers'
-import { getDisplayedGroupFrameGroups as getDisplayedGroupFrameGroupsState } from './sheet-preview-frame-groups'
 import {
   getKeyframeGroupLabel,
   getKeyframePropertyLabel,
@@ -183,6 +185,13 @@ interface DopesheetEditorProps {
   /** Additional class name */
   className?: string
 }
+
+type StructureRow = { property: AnimatableProperty; keyframes: Keyframe[] }
+
+// Stable empty fallbacks so memoized timeline cells don't see fresh `[]` refs.
+const EMPTY_KEYFRAMES: Keyframe[] = []
+const EMPTY_STRUCTURE_ROWS: StructureRow[] = []
+const EMPTY_FRAME_GROUPS: DopesheetPropertyGroupStructure<StructureRow>['frameGroups'] = []
 
 export const DopesheetEditor = memo(function DopesheetEditor({
   frameViewport,
@@ -339,39 +348,56 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const hasPropertyFilters =
     showKeyframedOnly || allPropertyGroups.some((group) => visibleGroups[group.id] === false)
 
-  const sheetRows = useMemo<DopesheetPropertyRow[]>(
+  // Frame-independent keyframe data. These references only change when the
+  // properties or keyframes change — NOT when the playhead moves — so the
+  // memoized timeline grid cells can skip re-rendering during scrubs.
+  const sheetKeyframesByProperty = useMemo(() => {
+    const map = new Map<AnimatableProperty, Keyframe[]>()
+    for (const property of visibleProperties) {
+      map.set(
+        property,
+        (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
+      )
+    }
+    return map
+  }, [visibleProperties, keyframesByProperty])
+
+  const sheetRowsStructure = useMemo(
     () =>
       visibleProperties.map((property) => ({
         property,
-        keyframes: (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
-        controls: getDopesheetRowControlState(
-          (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
-          currentFrame,
-        ),
+        keyframes: sheetKeyframesByProperty.get(property) ?? [],
       })),
-    [visibleProperties, keyframesByProperty, currentFrame],
+    [visibleProperties, sheetKeyframesByProperty],
   )
 
-  const propertyRows = useMemo<DopesheetPropertyRow[]>(
+  // Stable, frame-independent group structure keyed by group id — used to feed
+  // the memoized group timeline cells.
+  const groupTimelineById = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof buildGroupedPropertyStructure>[number]>()
+    for (const group of buildGroupedPropertyStructure(sheetRowsStructure)) {
+      map.set(group.id, group)
+    }
+    return map
+  }, [sheetRowsStructure])
+
+  // Playhead-dependent rows (carry the per-frame `controls`). `propertyColumnProperties`
+  // is the same list as `visibleProperties`, so the column/sheet rows are identical.
+  const sheetRows = useMemo<DopesheetPropertyRow[]>(
     () =>
-      propertyColumnProperties.map((property) => ({
-        property,
-        keyframes: (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
-        controls: getDopesheetRowControlState(
-          (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
-          currentFrame,
-        ),
+      sheetRowsStructure.map((row) => ({
+        ...row,
+        controls: getDopesheetRowControlState(row.keyframes, currentFrame),
       })),
-    [propertyColumnProperties, keyframesByProperty, currentFrame],
+    [sheetRowsStructure, currentFrame],
   )
+
+  const propertyRows = sheetRows
   const groupedSheetRows = useMemo(
     () => buildGroupedPropertyRows(sheetRows, currentFrame),
     [currentFrame, sheetRows],
   )
-  const groupedPropertyRows = useMemo(
-    () => buildGroupedPropertyRows(propertyRows, currentFrame),
-    [currentFrame, propertyRows],
-  )
+  const groupedPropertyRows = groupedSheetRows
   const propertyRowByProperty = useMemo(
     () => new Map(propertyRows.map((row) => [row.property, row])),
     [propertyRows],
@@ -425,23 +451,17 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       return changed ? nextDrafts : prev
     })
   }, [propertyColumnProperties, propertyValues, editingValueProperty, formatPropertyValue])
-  const rowKeyframesByProperty = useMemo(() => {
-    const map = new Map<AnimatableProperty, Keyframe[]>()
-    for (const row of sheetRows) {
-      map.set(row.property, row.keyframes)
-    }
-    return map
-  }, [sheetRows])
+  const rowKeyframesByProperty = sheetKeyframesByProperty
 
   const keyframeMetaById = useMemo(() => {
     const map = new Map<string, KeyframeMeta>()
-    for (const row of sheetRows) {
+    for (const row of sheetRowsStructure) {
       for (const keyframe of row.keyframes) {
         map.set(keyframe.id, { property: row.property, keyframe })
       }
     }
     return map
-  }, [sheetRows])
+  }, [sheetRowsStructure])
 
   const keyframeMetaByIdRef = useRef(keyframeMetaById)
   keyframeMetaByIdRef.current = keyframeMetaById
@@ -642,7 +662,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   )
   const renderedKeyframeXById = useMemo(() => {
     const positions = new Map<string, number>()
-    for (const row of sheetRows) {
+    for (const row of sheetRowsStructure) {
       for (const keyframe of row.keyframes) {
         const x = getRenderedKeyframeX(keyframe.frame)
         if (x !== null) {
@@ -651,7 +671,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       }
     }
     return positions
-  }, [sheetRows, getRenderedKeyframeX])
+  }, [sheetRowsStructure, getRenderedKeyframeX])
   const renderedSheetEntries = useMemo(() => {
     const entries: RenderedSheetEntry[] = []
     let top = 0
@@ -1491,17 +1511,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       selectedKeyframeIds,
     ],
   )
-  const getDisplayedGroupFrameGroups = useCallback(
-    (group: DopesheetPropertyGroup) => {
-      return getDisplayedGroupFrameGroupsState({
-        group,
-        sheetPreviewFrames,
-        sheetPreviewDuplicateKeyframeIds,
-      })
-    },
-    [sheetPreviewDuplicateKeyframeIds, sheetPreviewFrames],
-  )
-
   const handleRowPointerDown = useCallback(
     (property: AnimatableProperty, event: React.PointerEvent<HTMLDivElement>) => {
       if (disabled) return
@@ -2507,89 +2516,24 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               style={{ ...propertyGridStyle, height: GROUP_HEADER_HEIGHT }}
             >
               {renderGroupHeaderContent(entry.group)}
-              <div
-                className="relative border-l border-border/60 bg-muted/20 overflow-hidden"
-                onPointerDown={handleTimelineBackgroundPointerDown}
-              >
-                {ticks.map((frame) => (
-                  <div
-                    key={`${entry.group.id}-tick-${frame}`}
-                    className="absolute inset-y-0 border-l border-border/30 pointer-events-none"
-                    style={{ left: frameToX(frame) }}
-                  />
-                ))}
-
-                {(sheetPreviewDuplicateKeyframeIds
-                  ? entry.group.frameGroups
-                  : getDisplayedGroupFrameGroups(entry.group)
-                ).map((frameGroup) => {
-                  const renderedX = getRenderedKeyframeX(frameGroup.frame)
-                  if (renderedX === null) {
-                    return null
-                  }
-
-                  const movableEntries = frameGroup.keyframes.filter(
-                    ({ property }) => !isPropertyLocked(property),
-                  )
-                  const isSelected = movableEntries.some(({ keyframe }) =>
-                    selectedKeyframeIds.has(keyframe.id),
-                  )
-
-                  return (
-                    <button
-                      key={`${entry.group.id}-${frameGroup.frame}`}
-                      type="button"
-                      data-testid={`group-keyframe-${entry.group.id}-${frameGroup.frame}`}
-                      className={cn(
-                        'group absolute z-10 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center',
-                        movableEntries.length > 0 && 'cursor-grab active:cursor-grabbing',
-                        movableEntries.length === 0 && 'cursor-not-allowed opacity-50',
-                      )}
-                      style={{
-                        left: renderedX,
-                        top: '50%',
-                      }}
-                      disabled={movableEntries.length === 0 || disabled}
-                      onPointerDown={(event) => handleGroupKeyframePointerDown(frameGroup, event)}
-                      onClick={(event) => event.stopPropagation()}
-                      title={t('timeline.keyframeEditor.keyframeMarker.groupLabel', {
-                        group: getKeyframeGroupLabel(t, entry.group.id, entry.group.label),
-                        frame: frameGroup.frame,
-                      })}
-                      aria-label={t('timeline.keyframeEditor.keyframeMarker.groupLabel', {
-                        group: getKeyframeGroupLabel(t, entry.group.id, entry.group.label),
-                        frame: frameGroup.frame,
-                      })}
-                    >
-                      <span
-                        className={cn(
-                          'pointer-events-none block h-2 w-2 rotate-45 border transition-colors',
-                          isSelected
-                            ? 'border-orange-50 bg-orange-500 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
-                            : 'border-transparent bg-orange-500 group-hover:bg-orange-400',
-                        )}
-                      />
-                    </button>
-                  )
-                })}
-                {sheetPreviewDuplicateKeyframeIds &&
-                  getDisplayedGroupFrameGroups(entry.group).map((frameGroup) => {
-                    const renderedX = getRenderedKeyframeX(frameGroup.frame)
-                    if (renderedX === null) {
-                      return null
-                    }
-
-                    return (
-                      <div
-                        key={`preview-${entry.group.id}-${frameGroup.frame}`}
-                        className="absolute z-20 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center pointer-events-none"
-                        style={{ left: renderedX, top: '50%' }}
-                      >
-                        <span className="block h-2 w-2 rotate-45 border border-primary/70 bg-primary/70 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]" />
-                      </div>
-                    )
-                  })}
-              </div>
+              <GroupTimelineCell
+                groupId={entry.group.id}
+                groupLabel={entry.group.label}
+                frameGroups={
+                  groupTimelineById.get(entry.group.id)?.frameGroups ?? EMPTY_FRAME_GROUPS
+                }
+                rows={groupTimelineById.get(entry.group.id)?.rows ?? EMPTY_STRUCTURE_ROWS}
+                ticks={ticks}
+                frameToX={frameToX}
+                getRenderedKeyframeX={getRenderedKeyframeX}
+                selectedKeyframeIds={selectedKeyframeIds}
+                disabled={disabled}
+                isPropertyLocked={isPropertyLocked}
+                onGroupKeyframePointerDown={handleGroupKeyframePointerDown}
+                onBackgroundPointerDown={handleTimelineBackgroundPointerDown}
+                sheetPreviewFrames={sheetPreviewFrames}
+                sheetPreviewDuplicateKeyframeIds={sheetPreviewDuplicateKeyframeIds}
+              />
             </div>
           )
         }
@@ -2603,120 +2547,35 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             style={{ ...propertyGridStyle, height: ROW_HEIGHT }}
           >
             {renderPropertyRowContent(row, { indented: true })}
-            <div
-              className="relative border-l border-border/60 overflow-hidden"
-              onPointerDown={(event) => handleRowPointerDown(row.property, event)}
-            >
-              {ticks.map((frame) => (
-                <div
-                  key={frame}
-                  className="absolute inset-y-0 border-l border-border/30 pointer-events-none"
-                  style={{ left: frameToX(frame) }}
-                />
-              ))}
-
-              {transitionBlockedRanges.map((range, index) => (
-                <div
-                  key={`${row.property}-${index}-${range.start}-${range.end}`}
-                  className="absolute inset-y-0 bg-destructive/10 border-x border-destructive/20 pointer-events-none"
-                  style={{
-                    left: frameToX(range.start),
-                    width: frameToX(range.end) - frameToX(range.start),
-                  }}
-                />
-              ))}
-
-              {row.keyframes.map((keyframe) => {
-                const renderedX = renderedKeyframeXById.get(keyframe.id)
-                if (renderedX === undefined) return null
-                const selected = selectedKeyframeIds.has(keyframe.id)
-                return (
-                  <button
-                    key={keyframe.id}
-                    ref={(node) => setKeyframeButtonRef(keyframe.id, node)}
-                    type="button"
-                    data-testid={`row-keyframe-${row.property}-${keyframe.id}`}
-                    className={cn(
-                      'group absolute z-10 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center',
-                      !rowLocked && 'cursor-grab active:cursor-grabbing',
-                      rowLocked && 'cursor-not-allowed opacity-50',
-                    )}
-                    style={{
-                      left: renderedX,
-                      top: '50%',
-                    }}
-                    disabled={rowLocked || disabled}
-                    onPointerDown={(event) =>
-                      handleKeyframePointerDown(row.property, keyframe.id, event)
-                    }
-                    onClick={(event) => event.stopPropagation()}
-                    title={
-                      rowLocked
-                        ? t('timeline.keyframeEditor.keyframeMarker.locked', {
-                            frame: keyframe.frame,
-                          })
-                        : t('timeline.keyframeEditor.keyframeMarker.rowLabel', {
-                            frame: keyframe.frame,
-                          })
-                    }
-                    aria-label={
-                      rowLocked
-                        ? t('timeline.keyframeEditor.keyframeMarker.locked', {
-                            frame: keyframe.frame,
-                          })
-                        : t('timeline.keyframeEditor.keyframeMarker.rowLabel', {
-                            frame: keyframe.frame,
-                          })
-                    }
-                  >
-                    <span
-                      className={cn(
-                        'pointer-events-none block h-2 w-2 rotate-45 border transition-colors',
-                        selected
-                          ? 'border-orange-50 bg-orange-500 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
-                          : 'border-transparent bg-orange-500 group-hover:bg-orange-400',
-                      )}
-                    />
-                  </button>
-                )
-              })}
-              {sheetPreviewDuplicateKeyframeIds?.flatMap((keyframeId) => {
-                const meta = keyframeMetaByIdRef.current.get(keyframeId)
-                if (!meta || meta.property !== row.property) {
-                  return []
-                }
-
-                const previewFrame = sheetPreviewFrames?.[keyframeId]
-                if (previewFrame === undefined) {
-                  return []
-                }
-
-                const renderedX = getRenderedKeyframeX(previewFrame)
-                if (renderedX === null) {
-                  return []
-                }
-
-                return [
-                  <div
-                    key={`preview-${row.property}-${keyframeId}`}
-                    className="absolute z-20 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center pointer-events-none"
-                    style={{ left: renderedX, top: '50%' }}
-                  >
-                    <span className="block h-2 w-2 rotate-45 border border-primary/70 bg-primary/70 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]" />
-                  </div>,
-                ]
-              })}
-            </div>
+            <PropertyTimelineCell
+              property={row.property}
+              keyframes={rowKeyframesByProperty.get(row.property) ?? EMPTY_KEYFRAMES}
+              locked={rowLocked}
+              ticks={ticks}
+              frameToX={frameToX}
+              getRenderedKeyframeX={getRenderedKeyframeX}
+              renderedKeyframeXById={renderedKeyframeXById}
+              transitionBlockedRanges={transitionBlockedRanges}
+              selectedKeyframeIds={selectedKeyframeIds}
+              disabled={disabled}
+              onRowPointerDown={handleRowPointerDown}
+              onKeyframePointerDown={handleKeyframePointerDown}
+              setKeyframeButtonRef={setKeyframeButtonRef}
+              keyframeMetaByIdRef={keyframeMetaByIdRef}
+              sheetPreviewFrames={sheetPreviewFrames}
+              sheetPreviewDuplicateKeyframeIds={sheetPreviewDuplicateKeyframeIds}
+            />
           </div>
         )
       }),
     [
       renderedSheetEntries.entries,
       propertyGridStyle,
+      groupTimelineById,
+      rowKeyframesByProperty,
       handleRowPointerDown,
       handleTimelineBackgroundPointerDown,
       handleGroupKeyframePointerDown,
-      getDisplayedGroupFrameGroups,
       renderGroupHeaderContent,
       renderPropertyRowContent,
       getRenderedKeyframeX,
@@ -2731,7 +2590,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       sheetPreviewFrames,
       handleKeyframePointerDown,
       setKeyframeButtonRef,
-      t,
+      keyframeMetaByIdRef,
     ],
   )
   const propertyColumnElements = useMemo(

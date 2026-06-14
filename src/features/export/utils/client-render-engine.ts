@@ -129,6 +129,45 @@ export { subCompositionRenderDataHasGpuEffects }
 // CachedGifFrames structure used for GIF.
 
 // ---------------------------------------------------------------------------
+// Scrub perf instrumentation (DEV diagnostics, opt-in)
+// ---------------------------------------------------------------------------
+//
+// Gated on `window.__SCRUB_PERF__ = true` (off by default → zero overhead).
+// When on, every `renderFrame` call records its wall-time + which path it took
+// (cache-hit / direct / full) into `window.__scrubPerf` and emits a
+// `scrub.renderFrame.<path>` User Timing measure so it shows up on the
+// Performance panel's Timings track. Read with:
+//   window.__scrubPerf            // raw ring buffer
+//   — or record a Performance profile and look for `scrub.renderFrame.*`.
+interface ScrubPerfSample {
+  f: number
+  path: 'cache-hit' | 'direct' | 'full'
+  ms: number
+}
+type ScrubPerfGlobal = {
+  __SCRUB_PERF__?: boolean
+  __scrubPerf?: ScrubPerfSample[]
+}
+
+function scrubPerfStart(): number {
+  return (globalThis as ScrubPerfGlobal).__SCRUB_PERF__ ? performance.now() : -1
+}
+
+function recordScrubPerf(frame: number, path: ScrubPerfSample['path'], startMs: number): void {
+  if (startMs < 0) return
+  const w = globalThis as ScrubPerfGlobal
+  const ms = Number((performance.now() - startMs).toFixed(2))
+  const buffer = (w.__scrubPerf ??= [])
+  buffer.push({ f: frame, path, ms })
+  if (buffer.length > 3000) buffer.shift()
+  try {
+    performance.measure(`scrub.renderFrame.${path}`, { start: startMs })
+  } catch {
+    /* User Timing unavailable — ignore */
+  }
+}
+
+// ---------------------------------------------------------------------------
 // createCompositionRenderer
 // ---------------------------------------------------------------------------
 
@@ -527,6 +566,11 @@ export async function createCompositionRenderer(
     gpuMaskCombinePipeline: null,
     gpuTextTextureCache: gpu.textTextureCache,
     gpuBitmapMaskTextureCache: gpu.bitmapMaskTextureCache,
+    // Cross-frame text raster cache (preview scrub). Only populated in preview
+    // mode; export renders each frame once so caching there only wastes RAM.
+    textRasterCache: renderMode === 'preview' ? new Map() : undefined,
+    // Cross-frame corner-pin warp cache for text (preview scrub only).
+    cornerPinWarpCache: renderMode === 'preview' ? new Map() : undefined,
     gpuScratchTexturePool: {
       acquire: (width, height, format) =>
         gpu.texturePool?.acquire(width, height, format) ??
@@ -1185,6 +1229,7 @@ export async function createCompositionRenderer(
     },
 
     async renderFrame(frame: number) {
+      const scrubPerfStartMs = scrubPerfStart()
       // 3-tier cache lookup (preview only)
       // Tier 1 (GPU texture) → Tier 3 (RAM ImageBitmap) → miss → full render
       if (scrubbingCache) {
@@ -1192,6 +1237,7 @@ export async function createCompositionRenderer(
         if (cached) {
           ctx.clearRect(0, 0, canvas.width, canvas.height)
           ctx.drawImage(cached, 0, 0)
+          recordScrubPerf(frame, 'cache-hit', scrubPerfStartMs)
           return
         }
       }
@@ -1495,6 +1541,7 @@ export async function createCompositionRenderer(
         }
 
         cacheRenderedFrame(frame)
+        recordScrubPerf(frame, 'direct', scrubPerfStartMs)
         return
       }
 
@@ -1636,6 +1683,7 @@ export async function createCompositionRenderer(
       // Release content canvas back to pool
       canvasPool.release(contentCanvas)
       cacheRenderedFrame(frame)
+      recordScrubPerf(frame, 'full', scrubPerfStartMs)
     },
 
     async prewarmFrame(frame: number) {

@@ -290,11 +290,27 @@ function useKeyframeEditorPlaybackFrame(selectedItemId: string | null): number {
 
   useEffect(() => {
     let wasPlaying = usePlaybackStore.getState().isPlaying
+    let rafId: number | null = null
+    let pendingFrame: number | null = null
 
-    const commitFrame = (nextFrame: number) => {
+    // Coalesce rapid scrub updates to one commit per animation frame. Pointer
+    // moves can fire several store updates per frame; without this the keyframe
+    // editor (dopesheet/graph) re-renders multiple times per displayed frame.
+    const flush = () => {
+      rafId = null
+      if (pendingFrame === null) return
+      const nextFrame = pendingFrame
+      pendingFrame = null
       if (frameRef.current === nextFrame) return
       frameRef.current = nextFrame
       setFrame(nextFrame)
+    }
+
+    const commitFrame = (nextFrame: number) => {
+      pendingFrame = nextFrame
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flush)
+      }
     }
 
     const unsubscribe = usePlaybackStore.subscribe((state) => {
@@ -318,7 +334,12 @@ function useKeyframeEditorPlaybackFrame(selectedItemId: string | null): number {
       }
     })
 
-    return unsubscribe
+    return () => {
+      unsubscribe()
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+      }
+    }
   }, [selectedItemId])
 
   return frame
