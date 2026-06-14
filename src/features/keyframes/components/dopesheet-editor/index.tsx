@@ -1829,11 +1829,13 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       const rowLocked = isPropertyLocked(row.property)
       const curveVisible = graphVisibleProperties.has(row.property)
       const rowLabel = getKeyframePropertyLabel(t, row.property)
+      const showLeftClusterAtRest =
+        (autoKeyEnabledByProperty[row.property] ?? false) || rowLocked || curveVisible
 
       return (
         <div
           className={cn(
-            'h-full px-1 flex items-center gap-px bg-muted/8',
+            'group h-full px-1 flex items-center gap-px bg-muted/8',
             options?.indented && 'pl-3',
             row.controls.hasKeyframeAtCurrentFrame && 'bg-primary/10',
             visualizationMode === 'graph' &&
@@ -1848,7 +1850,13 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               : undefined
           }
         >
-          <div className="flex items-center gap-px self-stretch">
+          <div
+            className={cn(
+              'flex items-center gap-px self-stretch',
+              !showLeftClusterAtRest &&
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+            )}
+          >
             <Button
               type="button"
               variant="ghost"
@@ -2015,7 +2023,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground"
+                className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
                 onClick={() => handleRowNavigate(row.property, row.controls.prevKeyframe)}
                 disabled={disabled || row.controls.prevKeyframe === null || !onNavigateToKeyframe}
                 title={t('timeline.keyframeEditor.previousPropertyKeyframe', {
@@ -2085,7 +2093,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground"
+                className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
                 onClick={() => handleRowNavigate(row.property, row.controls.nextKeyframe)}
                 disabled={disabled || row.controls.nextKeyframe === null || !onNavigateToKeyframe}
                 title={t('timeline.keyframeEditor.nextPropertyKeyframe', {
@@ -2104,7 +2112,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground"
+              className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
               onClick={(event) => {
                 event.stopPropagation()
                 handleClearProperty(row.property)
@@ -2171,9 +2179,17 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       const hasUnlockedCurrentKeyframes = unlockedCurrentKeyframes.length > 0
       const canToggleCurrentFrame = hasUnlockedCurrentKeyframes ? !!onRemoveKeyframes : canAddAny
 
+      const showGroupLeftClusterAtRest = curveVisible || allRowsLocked || groupAutoKeyEnabled
+
       return (
-        <div className="flex h-full items-center gap-px bg-muted/40 pl-3 pr-0.5">
-          <div className="flex items-center gap-px self-stretch">
+        <div className="group flex h-full items-center gap-px bg-muted/40 pl-3 pr-0.5">
+          <div
+            className={cn(
+              'flex items-center gap-px self-stretch',
+              !showGroupLeftClusterAtRest &&
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+            )}
+          >
             <Button
               type="button"
               variant="ghost"
@@ -2325,7 +2341,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               type="button"
               variant="ghost"
               size="sm"
-              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'text-muted-foreground hover:text-foreground',
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+              )}
               onClick={(event) => {
                 event.stopPropagation()
                 handleRowNavigate(
@@ -2400,7 +2420,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               type="button"
               variant="ghost"
               size="sm"
-              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'text-muted-foreground hover:text-foreground',
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+              )}
               onClick={(event) => {
                 event.stopPropagation()
                 handleRowNavigate(
@@ -2425,7 +2449,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               type="button"
               variant="ghost"
               size="sm"
-              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'text-muted-foreground hover:text-foreground',
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+              )}
               onClick={(event) => {
                 event.stopPropagation()
                 handleClearGroup(group)
