@@ -23,6 +23,13 @@
       "property": "Property",
       "noParametersMatch": "No parameters match the current view",
       "noKeyframesToDisplay": "No keyframes to display",
+      "emptyState": {
+        "title": "No keyframes yet",
+        "intro": "Animate this clip by adding keyframes to any parameter.",
+        "hintValue": "Type a value next to a parameter and press Enter to set a keyframe at the playhead.",
+        "hintDiamond": "Or click the diamond on a parameter row to add a keyframe at the current frame.",
+        "hintAutoKey": "Turn on auto-key (the timer icon) to capture every value change automatically."
+      },
       "copySelectedKeyframes": "Copy selected keyframes",
       "cutSelectedKeyframes": "Cut selected keyframes",
       "moveKeyframesFromClipboard": "Move keyframes from clipboard",

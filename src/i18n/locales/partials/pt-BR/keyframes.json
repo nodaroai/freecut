@@ -23,6 +23,13 @@
       "property": "Propriedade",
       "noParametersMatch": "Nenhum parâmetro corresponde à visualização atual",
       "noKeyframesToDisplay": "Nenhum keyframe para exibir",
+      "emptyState": {
+        "title": "Nenhum keyframe ainda",
+        "intro": "Anime este clipe adicionando keyframes a qualquer parâmetro.",
+        "hintValue": "Digite um valor ao lado de um parâmetro e pressione Enter para criar um keyframe no cursor de reprodução.",
+        "hintDiamond": "Ou clique no losango em uma linha de parâmetro para adicionar um keyframe no quadro atual.",
+        "hintAutoKey": "Ative a chave automática (o ícone do cronômetro) para capturar cada mudança de valor automaticamente."
+      },
       "copySelectedKeyframes": "Copiar keyframes selecionados",
       "cutSelectedKeyframes": "Recortar keyframes selecionados",
       "moveKeyframesFromClipboard": "Mover keyframes da área de transferência",

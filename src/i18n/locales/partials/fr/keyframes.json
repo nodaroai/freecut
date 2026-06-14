@@ -23,6 +23,13 @@
       "property": "Propriété",
       "noParametersMatch": "Aucun paramètre ne correspond à la vue actuelle",
       "noKeyframesToDisplay": "Aucune image clé à afficher",
+      "emptyState": {
+        "title": "Aucune image clé pour le moment",
+        "intro": "Animez ce clip en ajoutant des images clés à n’importe quel paramètre.",
+        "hintValue": "Saisissez une valeur à côté d’un paramètre et appuyez sur Entrée pour créer une image clé à la tête de lecture.",
+        "hintDiamond": "Ou cliquez sur le losange d’une ligne de paramètre pour ajouter une image clé à l’image actuelle.",
+        "hintAutoKey": "Activez la clé automatique (l’icône du minuteur) pour capturer automatiquement chaque changement de valeur."
+      },
       "copySelectedKeyframes": "Copier les images clés sélectionnées",
       "cutSelectedKeyframes": "Couper les images clés sélectionnées",
       "moveKeyframesFromClipboard": "Déplacer les images clés depuis le presse-papiers",

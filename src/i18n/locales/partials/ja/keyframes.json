@@ -23,6 +23,13 @@
       "property": "プロパティ",
       "noParametersMatch": "現在の表示に一致するパラメーターはありません",
       "noKeyframesToDisplay": "表示するキーフレームはありません",
+      "emptyState": {
+        "title": "キーフレームがまだありません",
+        "intro": "任意のパラメーターにキーフレームを追加して、このクリップをアニメーション化します。",
+        "hintValue": "パラメーターの横に値を入力してEnterを押すと、再生ヘッドの位置にキーフレームが設定されます。",
+        "hintDiamond": "または、パラメーター行のダイヤモンドをクリックすると、現在のフレームにキーフレームが追加されます。",
+        "hintAutoKey": "自動キー（タイマーアイコン）をオンにすると、すべての値の変更が自動的に記録されます。"
+      },
       "copySelectedKeyframes": "選択したキーフレームをコピー",
       "cutSelectedKeyframes": "選択したキーフレームを切り取り",
       "moveKeyframesFromClipboard": "クリップボードからキーフレームを移動",

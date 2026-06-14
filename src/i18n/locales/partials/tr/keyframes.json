@@ -23,6 +23,13 @@
       "property": "Özellik",
       "noParametersMatch": "Geçerli görünümle eşleşen parametre yok",
       "noKeyframesToDisplay": "Gösterilecek anahtar kare yok",
+      "emptyState": {
+        "title": "Henüz anahtar kare yok",
+        "intro": "Herhangi bir parametreye anahtar kare ekleyerek bu klibi canlandırın.",
+        "hintValue": "Bir parametrenin yanına bir değer yazın ve oynatma kafasında anahtar kare oluşturmak için Enter tuşuna basın.",
+        "hintDiamond": "Veya geçerli karede anahtar kare eklemek için bir parametre satırındaki baklava simgesine tıklayın.",
+        "hintAutoKey": "Her değer değişikliğini otomatik olarak yakalamak için otomatik anahtarı (zamanlayıcı simgesi) açın."
+      },
       "copySelectedKeyframes": "Seçili anahtar kareleri kopyala",
       "cutSelectedKeyframes": "Seçili anahtar kareleri kes",
       "moveKeyframesFromClipboard": "Anahtar kareleri panodan taşı",

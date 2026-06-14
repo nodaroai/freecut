@@ -23,6 +23,13 @@
       "property": "Propiedad",
       "noParametersMatch": "Ningún parámetro coincide con la vista actual",
       "noKeyframesToDisplay": "No hay fotogramas clave para mostrar",
+      "emptyState": {
+        "title": "Aún no hay fotogramas clave",
+        "intro": "Anima este clip añadiendo fotogramas clave a cualquier parámetro.",
+        "hintValue": "Escribe un valor junto a un parámetro y pulsa Intro para crear un fotograma clave en el cabezal de reproducción.",
+        "hintDiamond": "O haz clic en el rombo de una fila de parámetro para añadir un fotograma clave en el fotograma actual.",
+        "hintAutoKey": "Activa la clave automática (el icono del temporizador) para capturar cada cambio de valor automáticamente."
+      },
       "copySelectedKeyframes": "Copiar fotogramas clave seleccionados",
       "cutSelectedKeyframes": "Cortar fotogramas clave seleccionados",
       "moveKeyframesFromClipboard": "Mover fotogramas clave desde el portapapeles",

@@ -23,6 +23,13 @@
       "property": "속성",
       "noParametersMatch": "현재 보기에 일치하는 매개변수가 없습니다",
       "noKeyframesToDisplay": "표시할 키프레임이 없습니다",
+      "emptyState": {
+        "title": "아직 키프레임이 없습니다",
+        "intro": "원하는 매개변수에 키프레임을 추가하여 이 클립을 애니메이션화하세요.",
+        "hintValue": "매개변수 옆에 값을 입력하고 Enter를 누르면 재생 헤드 위치에 키프레임이 설정됩니다.",
+        "hintDiamond": "또는 매개변수 행의 다이아몬드를 클릭하면 현재 프레임에 키프레임이 추가됩니다.",
+        "hintAutoKey": "자동 키(타이머 아이콘)를 켜면 모든 값 변경이 자동으로 기록됩니다."
+      },
       "copySelectedKeyframes": "선택한 키프레임 복사",
       "cutSelectedKeyframes": "선택한 키프레임 잘라내기",
       "moveKeyframesFromClipboard": "클립보드에서 키프레임 이동",

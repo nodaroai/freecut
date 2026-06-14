@@ -2709,6 +2709,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const emptyStateMessage = hasPropertyFilters
     ? t('timeline.keyframeEditor.noParametersMatch')
     : t('timeline.keyframeEditor.noKeyframesToDisplay')
+  const showEmptyGuidance = !hasPropertyFilters
 
   return (
     <div
@@ -2850,6 +2851,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             <DopesheetGraphPane
               hasRows={propertyRows.length > 0}
               emptyStateMessage={emptyStateMessage}
+              showEmptyGuidance={showEmptyGuidance}
               propertyColumnElements={propertyColumnElements}
               graphPaneRef={graphPaneRef}
               disabled={disabled}
@@ -2904,6 +2906,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               scrollAreaRef={scrollAreaRef}
               hasRows={sheetRows.length > 0}
               emptyStateMessage={emptyStateMessage}
+              showEmptyGuidance={showEmptyGuidance}
               rowElements={rowElements}
               marqueeRect={marqueeRect}
               marqueeJustEnded={marqueeJustEndedRef.current}

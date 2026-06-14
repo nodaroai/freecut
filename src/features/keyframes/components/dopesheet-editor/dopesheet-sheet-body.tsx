@@ -1,11 +1,13 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { KeyframeMarqueeOverlay, type KeyframeMarqueeRect } from '../keyframe-marquee'
 import { PROPERTY_COLUMN_WIDTH, RULER_HEIGHT } from './dopesheet-constants'
+import { DopesheetEmptyState } from './dopesheet-empty-state'
 
 interface DopesheetSheetBodyProps {
   scrollAreaRef: React.RefObject<HTMLDivElement | null>
   hasRows: boolean
   emptyStateMessage: string
+  showEmptyGuidance: boolean
   rowElements: ReactNode
   marqueeRect: KeyframeMarqueeRect | null
   marqueeJustEnded: boolean
@@ -16,6 +18,7 @@ export function DopesheetSheetBody({
   scrollAreaRef,
   hasRows,
   emptyStateMessage,
+  showEmptyGuidance,
   rowElements,
   marqueeRect,
   marqueeJustEnded,
@@ -28,9 +31,7 @@ export function DopesheetSheetBody({
       style={{ height: `calc(100% - ${RULER_HEIGHT}px)` }}
     >
       {!hasRows ? (
-        <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-          {emptyStateMessage}
-        </div>
+        <DopesheetEmptyState showGuidance={showEmptyGuidance} fallbackMessage={emptyStateMessage} />
       ) : (
         <div className="relative min-h-full">
           <div
