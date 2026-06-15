@@ -643,7 +643,15 @@ export function usePreviewRenderPump({
                 ),
               )
             } else {
-              renderer.setDomVideoElementProvider?.(undefined)
+              // Scrubbing (paused): the composited render normally decodes video
+              // via mediabunny on the main thread, which is slow (cold ~1-2s) and
+              // makes scrubbing over clips that sit under text/effects lag badly.
+              // The DOM <video> elements are already being seeked to the scrub
+              // frame by the composition runtime (video-content.tsx), so expose
+              // them here for zero-copy compositing. renderVideoItem still checks
+              // freshness (0.2s drift) and falls back to mediabunny on large
+              // jumps where the element hasn't caught up.
+              renderer.setDomVideoElementProvider?.(getBestDomVideoElementForItem)
             }
           }
 
