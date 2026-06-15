@@ -5,7 +5,7 @@
  * Integrates with the timeline to provide visual keyframe editing.
  */
 
-import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { memo, useState, useCallback, useMemo, useRef, useEffect, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { X } from 'lucide-react'
@@ -278,7 +278,10 @@ function toSpringDraft(params: SpringParameters): Record<SpringInputKey, string>
   }
 }
 
-function useKeyframeEditorPlaybackFrame(selectedItemId: string | null): number {
+function useKeyframeEditorPlaybackFrame(
+  selectedItemId: string | null,
+  editorScrubbingRef: RefObject<boolean>,
+): number {
   const [frame, setFrame] = useState(() => usePlaybackStore.getState().currentFrame)
   const frameRef = useRef(frame)
 
@@ -332,8 +335,7 @@ function useKeyframeEditorPlaybackFrame(selectedItemId: string | null): number {
       }
 
       const isSettledSeek = state.previewFrame === null
-      const isPanelScrub = selectedItemId !== null && state.previewItemId === selectedItemId
-      if (isSettledSeek || isPanelScrub) {
+      if (isSettledSeek && !editorScrubbingRef.current) {
         commitFrame(nextFrame)
       }
     })
@@ -344,7 +346,7 @@ function useKeyframeEditorPlaybackFrame(selectedItemId: string | null): number {
         cancelAnimationFrame(rafId)
       }
     }
-  }, [selectedItemId])
+  }, [editorScrubbingRef, selectedItemId])
 
   return frame
 }
@@ -763,9 +765,11 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   const cutSelectedKeyframes = useKeyframeSelectionStore((s) => s.cutSelectedKeyframes)
   const clearKeyframeClipboard = useKeyframeSelectionStore((s) => s.clearClipboard)
 
-  // Playback state: follow this panel's own scrubs live, but defer external
-  // timeline scrubs until release so the Color workspace dock stays out of the hot path.
-  const currentFrame = useKeyframeEditorPlaybackFrame(selectedItemForEditor?.id ?? null)
+  const keyframeEditorScrubbingRef = useRef(false)
+  const currentFrame = useKeyframeEditorPlaybackFrame(
+    selectedItemForEditor?.id ?? null,
+    keyframeEditorScrubbingRef,
+  )
 
   // Track selected property for graph editor
   const [selectedProperty, setSelectedProperty] = useState<AnimatableProperty | null>(null)
@@ -1349,8 +1353,13 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     },
     [selectedItemForEditor],
   )
+  const handleScrubStart = useCallback(() => {
+    keyframeEditorScrubbingRef.current = true
+    usePlaybackStore.getState().pause()
+  }, [])
 
   const handleScrubEnd = useCallback(() => {
+    keyframeEditorScrubbingRef.current = false
     usePlaybackStore.getState().setPreviewFrame(null)
   }, [])
 
@@ -1701,6 +1710,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
                 onPropertyChange={handlePropertyChange}
                 onActivePropertyChange={setSelectedProperty}
                 onScrub={handleScrub}
+                onScrubStart={handleScrubStart}
                 onScrubEnd={handleScrubEnd}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}

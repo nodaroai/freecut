@@ -93,6 +93,8 @@ interface ValueGraphEditorSharedProps {
   onPropertyChange?: (property: AnimatableProperty | null) => void
   /** Callback when playhead is scrubbed (frame is clip-relative) */
   onScrub?: (frame: number) => void
+  /** Callback when scrubbing starts */
+  onScrubStart?: () => void
   /** Callback when scrubbing ends */
   onScrubEnd?: () => void
   /** Callback when drag starts (for undo batching) */
@@ -164,6 +166,7 @@ const ValueGraphEditorBase = memo(function ValueGraphEditorBase({
   onSelectionChange,
   onPropertyChange,
   onScrub,
+  onScrubStart,
   onScrubEnd,
   onDragStart,
   onDragEnd,
@@ -857,7 +860,8 @@ const ValueGraphEditorBase = memo(function ValueGraphEditorBase({
   // Wrapped scrub handler that tracks scrubbing state
   const handlePlayheadScrubStart = useCallback(() => {
     isScrrubbingRef.current = true
-  }, [])
+    onScrubStart?.()
+  }, [onScrubStart])
 
   const handlePlayheadScrubEnd = useCallback(() => {
     onScrubEnd?.()
@@ -1235,6 +1239,7 @@ const ValueGraphEditorBase = memo(function ValueGraphEditorBase({
             viewport={viewport}
             padding={padding}
             totalFrames={totalFrames}
+            fps={fps}
             onScrub={onScrub}
             onScrubStart={handlePlayheadScrubStart}
             onScrubEnd={handlePlayheadScrubEnd}

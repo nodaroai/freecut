@@ -95,6 +95,7 @@ import {
   getKeyframeGroupLabel,
   getKeyframePropertyLabel,
 } from '@/features/keyframes/utils/property-i18n'
+import { useCoalescedScrub } from '../use-coalesced-scrub'
 
 interface DopesheetEditorProps {
   /** Shared time viewport when split mode needs synchronized frame zoom/pan */
@@ -135,6 +136,8 @@ interface DopesheetEditorProps {
   onActivePropertyChange?: (property: AnimatableProperty) => void
   /** Callback when playhead is scrubbed (frame is clip-relative) */
   onScrub?: (frame: number) => void
+  /** Callback when scrubbing starts */
+  onScrubStart?: () => void
   /** Callback when scrubbing ends */
   onScrubEnd?: () => void
   /** Callback when drag starts (for undo batching) */
@@ -216,6 +219,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   onPropertyChange,
   onActivePropertyChange,
   onScrub,
+  onScrubStart,
   onScrubEnd,
   onDragStart,
   onDragEnd,
@@ -593,6 +597,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   )
   const fallbackTimelineWidth = Math.max(width - PROPERTY_COLUMN_WIDTH, 1)
   const effectiveTimelineWidth = Math.max(timelineWidth || fallbackTimelineWidth, 1)
+  const timelinePixelsPerSecond = useMemo(
+    () => (effectiveTimelineWidth / frameRange) * fps,
+    [effectiveTimelineWidth, frameRange, fps],
+  )
 
   const frameToX = useCallback(
     (frame: number) => getFrameAxisX(frame, viewport, effectiveTimelineWidth),
@@ -1636,6 +1644,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
   const scrubPointerIdRef = useRef<number | null>(null)
   const lastScrubbedFrameRef = useRef<number | null>(null)
+  const {
+    startScrub: startRulerScrub,
+    queueScrub: queueRulerScrub,
+    flushPendingScrub: flushPendingRulerScrub,
+  } = useCoalescedScrub(onScrub)
   const handleRulerPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (disabled) return
@@ -1644,9 +1657,21 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       setPointerCaptureSafely(event.currentTarget, event.pointerId)
       const frame = getFrameFromClientX(event.clientX)
       lastScrubbedFrameRef.current = frame
-      onScrub?.(frame)
+      onScrubStart?.()
+      startRulerScrub({
+        frame,
+        pointerX: getTimelineXFromClientX(event.clientX),
+        pixelsPerSecond: timelinePixelsPerSecond,
+      })
     },
-    [disabled, onScrub, getFrameFromClientX],
+    [
+      disabled,
+      getFrameFromClientX,
+      getTimelineXFromClientX,
+      onScrubStart,
+      startRulerScrub,
+      timelinePixelsPerSecond,
+    ],
   )
 
   const handleRulerPointerMove = useCallback(
@@ -1656,9 +1681,19 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       const frame = getFrameFromClientX(event.clientX)
       if (frame === lastScrubbedFrameRef.current) return
       lastScrubbedFrameRef.current = frame
-      onScrub?.(frame)
+      queueRulerScrub({
+        frame,
+        pointerX: getTimelineXFromClientX(event.clientX),
+        pixelsPerSecond: timelinePixelsPerSecond,
+      })
     },
-    [disabled, onScrub, getFrameFromClientX],
+    [
+      disabled,
+      getFrameFromClientX,
+      getTimelineXFromClientX,
+      queueRulerScrub,
+      timelinePixelsPerSecond,
+    ],
   )
 
   const handleRulerPointerUp = useCallback(
@@ -1671,9 +1706,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       }
       scrubPointerIdRef.current = null
       lastScrubbedFrameRef.current = null
+      flushPendingRulerScrub(true)
       onScrubEnd?.()
     },
-    [onScrubEnd],
+    [flushPendingRulerScrub, onScrubEnd],
   )
 
   const handleWheel = useCallback(
@@ -2804,6 +2840,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               onSelectionChange={onSelectionChange}
               onPropertyChange={onPropertyChange}
               onScrub={onScrub}
+              onScrubStart={onScrubStart}
               onScrubEnd={onScrubEnd}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}

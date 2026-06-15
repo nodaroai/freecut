@@ -8,6 +8,7 @@ import type { GraphKeyframePoint, GraphViewport, GraphPadding } from './types'
 import type { EasingConfig } from '@/types/keyframe'
 import { applyEasingConfig } from '../../utils/easing'
 import { usePlaybackStore } from '@/shared/state/playback'
+import { useCoalescedScrub } from '../use-coalesced-scrub'
 
 interface GraphCurveProps {
   /** Start keyframe point */
@@ -204,6 +205,8 @@ interface GraphPlayheadProps {
   padding: GraphPadding
   /** Total frames in the clip (for display) */
   totalFrames?: number
+  /** Timeline FPS used to scale scrub throttling by horizontal density */
+  fps?: number
   /** Callback when playhead is scrubbed (dragged) */
   onScrub?: (frame: number) => void
   /** Callback when scrubbing starts */
@@ -227,6 +230,7 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   viewport,
   padding,
   totalFrames,
+  fps = 30,
   onScrub,
   onScrubStart,
   onScrubEnd,
@@ -239,10 +243,12 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   const graphTop = padding.top
   const graphWidth = width - padding.left - padding.right
   const graphHeight = height - padding.top - padding.bottom
+  const frameRange = Math.max(1, endFrame - startFrame)
+  const graphPixelsPerSecond = (graphWidth / frameRange) * fps
 
   // Clip-relative frame → clamped x in the graph's own coordinate space.
   const frameToGraphX = (relFrame: number): number => {
-    const rawX = graphLeft + ((relFrame - startFrame) / (endFrame - startFrame)) * graphWidth
+    const rawX = graphLeft + ((relFrame - startFrame) / frameRange) * graphWidth
     return Math.max(graphLeft, Math.min(graphLeft + graphWidth, rawX))
   }
   const x = frameToGraphX(frame)
@@ -250,10 +256,17 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   // The visuals are rendered at local x=0 inside a translated group so the
   // playhead can be moved during playback by writing the group transform via
   // ref — no React re-render of the graph (which is kept off the playback hot
-  // path). On scrub/seek/zoom the editor re-renders and the layout effect below
-  // repositions from the `frame` prop.
+  // path). During active editor scrubs the parent intentionally avoids pushing
+  // every frame through React, so this group also follows the scrub store
+  // directly. On settled seek/zoom the editor re-renders and the layout effect
+  // below repositions from the `frame` prop.
   const groupRef = useRef<SVGGElement>(null)
   const labelRef = useRef<SVGTextElement>(null)
+  const {
+    startScrub: startPlayheadScrub,
+    queueScrub: queuePlayheadScrub,
+    flushPendingScrub: flushPendingPlayheadScrub,
+  } = useCoalescedScrub(onScrub)
 
   useLayoutEffect(() => {
     groupRef.current?.setAttribute('transform', `translate(${x}, 0)`)
@@ -262,9 +275,11 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   useEffect(() => {
     const update = () => {
       const state = usePlaybackStore.getState()
-      if (!state.isPlaying) return
+      const isPreviewing = state.previewFrame !== null
+      if (!state.isPlaying && !isPreviewing) return
       const lastFrame = totalFrames ? totalFrames - 1 : endFrame - 1
-      const rel = Math.max(0, Math.min(lastFrame, state.currentFrame - itemFrom))
+      const frame = state.previewFrame ?? state.currentFrame
+      const rel = Math.max(0, Math.min(lastFrame, frame - itemFrom))
       groupRef.current?.setAttribute('transform', `translate(${frameToGraphX(rel)}, 0)`)
       if (labelRef.current) {
         labelRef.current.textContent = totalFrames
@@ -280,7 +295,7 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   const screenXToFrame = (screenX: number): number => {
     const relativeX = screenX - graphLeft
     const normalizedX = Math.max(0, Math.min(1, relativeX / graphWidth))
-    const calculatedFrame = Math.round(startFrame + normalizedX * (endFrame - startFrame))
+    const calculatedFrame = Math.round(startFrame + normalizedX * frameRange)
     // Clamp to valid frame range [0, totalFrames - 1] (last valid frame is totalFrames - 1)
     // This prevents scrubbing past the clip boundary which would deselect the clip
     const maxValidFrame = totalFrames ? totalFrames - 1 : endFrame - 1
@@ -314,7 +329,11 @@ export const GraphPlayhead = memo(function GraphPlayhead({
         return
       }
       lastScrubbedFrame = newFrame
-      onScrub(newFrame)
+      queuePlayheadScrub({
+        frame: newFrame,
+        pointerX: localX,
+        pixelsPerSecond: graphPixelsPerSecond,
+      })
     }
 
     const handlePointerUp = (e: PointerEvent) => {
@@ -323,6 +342,7 @@ export const GraphPlayhead = memo(function GraphPlayhead({
       svg.releasePointerCapture(event.pointerId)
       svg.removeEventListener('pointermove', handlePointerMove)
       svg.removeEventListener('pointerup', handlePointerUp)
+      flushPendingPlayheadScrub(true)
 
       // Notify scrub end
       onScrubEnd?.()
@@ -330,6 +350,11 @@ export const GraphPlayhead = memo(function GraphPlayhead({
 
     svg.addEventListener('pointermove', handlePointerMove)
     svg.addEventListener('pointerup', handlePointerUp)
+    startPlayheadScrub({
+      frame,
+      pointerX: x,
+      pixelsPerSecond: graphPixelsPerSecond,
+    })
   }
 
   const isInteractive = !disabled && !!onScrub

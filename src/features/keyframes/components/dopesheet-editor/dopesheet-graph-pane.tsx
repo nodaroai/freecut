@@ -49,6 +49,7 @@ interface DopesheetGraphPaneProps {
   onSelectionChange?: (keyframeIds: Set<string>) => void
   onPropertyChange?: (property: AnimatableProperty | null) => void
   onScrub?: (frame: number) => void
+  onScrubStart?: () => void
   onScrubEnd?: () => void
   onDragStart?: () => void
   onDragEnd?: () => void
@@ -96,6 +97,7 @@ export function DopesheetGraphPane({
   onSelectionChange,
   onPropertyChange,
   onScrub,
+  onScrubStart,
   onScrubEnd,
   onDragStart,
   onDragEnd,
@@ -151,6 +153,7 @@ export function DopesheetGraphPane({
             onSelectionChange={onSelectionChange}
             onPropertyChange={onPropertyChange}
             onScrub={onScrub}
+            onScrubStart={onScrubStart}
             onScrubEnd={onScrubEnd}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}

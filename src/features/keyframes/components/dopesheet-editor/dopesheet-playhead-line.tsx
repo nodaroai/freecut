@@ -42,13 +42,17 @@ export function DopesheetPlayheadLine({
     if (ref.current) ref.current.style.left = `${clampLeft(relativeFrame)}px`
   })
 
-  // Playback: move via direct DOM on each store frame change (no editor render).
+  // Playback and active editor scrubs: move via direct DOM on each store frame
+  // change (no editor render). React reconciles to the final frame when the
+  // scrub preview clears.
   useEffect(() => {
     const update = () => {
       const state = usePlaybackStore.getState()
-      if (!state.isPlaying) return
+      const isPreviewing = state.previewFrame !== null
+      if (!state.isPlaying && !isPreviewing) return
       const lastFrame = Math.max(0, (totalFrames || 1) - 1)
-      const rel = Math.max(0, Math.min(lastFrame, state.currentFrame - itemFrom))
+      const frame = state.previewFrame ?? state.currentFrame
+      const rel = Math.max(0, Math.min(lastFrame, frame - itemFrom))
       if (ref.current) ref.current.style.left = `${clampLeft(rel)}px`
     }
     return usePlaybackStore.subscribe(update)
