@@ -59,6 +59,7 @@ import {
   MINI_ICON_BUTTON_CLASS,
   MINI_ICON_CLASS,
   PROPERTY_COLUMN_WIDTH,
+  SPACIOUS_PROPERTY_COLUMN_WIDTH,
   ROW_HEIGHT,
   SNAP_THRESHOLD_PX,
   ZOOM_IN_FACTOR,
@@ -190,6 +191,9 @@ interface DopesheetEditorProps {
    *  sheet body and the curve/graph pane at once (Animate workspace placement),
    *  sharing a single frame viewport and playhead so they cannot desync. */
   visualizationMode?: 'dopesheet' | 'graph' | 'split'
+  /** Use the wider property column + value inputs (Animate workspace, where
+   *  there is room). Defaults to the compact sidebar sizing. */
+  spacious?: boolean
   /** Additional class name */
   className?: string
 }
@@ -244,6 +248,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   transitionBlockedRanges = [],
   disabled = false,
   visualizationMode = 'dopesheet',
+  spacious = false,
   className,
 }: DopesheetEditorProps) {
   const { t } = useTranslation()
@@ -253,6 +258,8 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const showSheetPane = visualizationMode !== 'graph'
   const showGraphPane = visualizationMode !== 'dopesheet'
   const isSplitView = visualizationMode === 'split'
+  // Wider property column + value inputs when there is room (Animate workspace).
+  const columnWidth = spacious ? SPACIOUS_PROPERTY_COLUMN_WIDTH : PROPERTY_COLUMN_WIDTH
   const timelineRef = useRef<HTMLDivElement>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const graphPaneRef = useRef<HTMLDivElement>(null)
@@ -603,7 +610,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     () => Math.max(1, graphBaseValueSpan / graphMinZoomValueSpan),
     [graphBaseValueSpan, graphMinZoomValueSpan],
   )
-  const fallbackTimelineWidth = Math.max(width - PROPERTY_COLUMN_WIDTH, 1)
+  const fallbackTimelineWidth = Math.max(width - columnWidth, 1)
   const effectiveTimelineWidth = Math.max(timelineWidth || fallbackTimelineWidth, 1)
   const timelinePixelsPerSecond = useMemo(
     () => (effectiveTimelineWidth / frameRange) * fps,
@@ -804,8 +811,8 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   }, [viewport.startFrame, viewport.endFrame, frameRange])
 
   const propertyGridStyle = useMemo(() => {
-    return { gridTemplateColumns: `${PROPERTY_COLUMN_WIDTH}px 1fr` }
-  }, [])
+    return { gridTemplateColumns: `${columnWidth}px 1fr` }
+  }, [columnWidth])
 
   const selectedRefs = useMemo(() => {
     const refs: KeyframeRef[] = []
@@ -2057,7 +2064,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               min={PROPERTY_VALUE_RANGES[row.property]?.min}
               max={PROPERTY_VALUE_RANGES[row.property]?.max}
               inputMode="decimal"
-              className="h-[18px] w-[44px] border-border/70 bg-background/85 px-1 py-0 text-right text-[9px] leading-none tabular-nums md:text-[9px]"
+              className={cn(
+                'h-[18px] border-border/70 bg-background/85 px-1 py-0 text-right text-[9px] leading-none tabular-nums md:text-[9px]',
+                spacious ? 'w-[64px]' : 'w-[44px]',
+              )}
               disabled={
                 disabled ||
                 rowLocked ||
@@ -2208,6 +2218,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       toggleLockedProperty,
       valueDrafts,
       showGraphPane,
+      spacious,
     ],
   )
   const renderGroupHeaderContent = useCallback(
@@ -2684,7 +2695,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     <div
       data-testid="dopesheet-playhead-clip"
       className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
-      style={{ left: PROPERTY_COLUMN_WIDTH }}
+      style={{ left: columnWidth }}
     >
       <DopesheetPlayheadLine
         relativeFrame={currentFrame}
@@ -2705,6 +2716,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       rowElements={rowElements}
       marqueeRect={marqueeRect}
       marqueeJustEnded={marqueeJustEndedRef.current}
+      propertyColumnWidth={columnWidth}
       onTimelineBackgroundPointerDown={handleTimelineBackgroundPointerDown}
     />
   )
@@ -2714,6 +2726,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       emptyStateMessage={emptyStateMessage}
       showEmptyGuidance={showEmptyGuidance}
       propertyColumnElements={propertyColumnElements}
+      propertyColumnWidth={columnWidth}
       graphPaneRef={graphPaneRef}
       disabled={disabled}
       graphDisplayPropertyLocked={graphDisplayPropertyLocked}

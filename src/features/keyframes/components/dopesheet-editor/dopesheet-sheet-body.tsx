@@ -11,6 +11,7 @@ interface DopesheetSheetBodyProps {
   rowElements: ReactNode
   marqueeRect: KeyframeMarqueeRect | null
   marqueeJustEnded: boolean
+  propertyColumnWidth?: number
   onTimelineBackgroundPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void
 }
 
@@ -22,6 +23,7 @@ export function DopesheetSheetBody({
   rowElements,
   marqueeRect,
   marqueeJustEnded,
+  propertyColumnWidth = PROPERTY_COLUMN_WIDTH,
   onTimelineBackgroundPointerDown,
 }: DopesheetSheetBodyProps) {
   return (
@@ -37,7 +39,7 @@ export function DopesheetSheetBody({
           <div
             data-testid="dopesheet-selection-surface"
             className="absolute inset-y-0 right-0 z-0"
-            style={{ left: PROPERTY_COLUMN_WIDTH }}
+            style={{ left: propertyColumnWidth }}
             onPointerDown={onTimelineBackgroundPointerDown}
           />
           <div className="relative z-10">{rowElements}</div>
@@ -45,7 +47,7 @@ export function DopesheetSheetBody({
             <KeyframeMarqueeOverlay
               rect={{
                 ...marqueeRect,
-                x: PROPERTY_COLUMN_WIDTH + marqueeRect.x,
+                x: propertyColumnWidth + marqueeRect.x,
               }}
             />
           )}

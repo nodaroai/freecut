@@ -1745,6 +1745,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
                 visualizationMode={
                   splitView ? 'split' : editorMode === 'graph' ? 'graph' : 'dopesheet'
                 }
+                spacious={splitView}
               />
             </ErrorBoundary>
           ) : (

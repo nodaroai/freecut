@@ -1,6 +1,9 @@
 import type { AnimatableProperty } from '@/types/keyframe'
 
 export const PROPERTY_COLUMN_WIDTH = 248
+/** Wider property column for the Animate workspace (`spacious`), where the
+ *  freed real estate lets labels and value inputs render without cropping. */
+export const SPACIOUS_PROPERTY_COLUMN_WIDTH = 312
 export const MIN_VISIBLE_FRAMES = 20
 export const SNAP_THRESHOLD_PX = 8
 export const GROUP_HEADER_HEIGHT = 22

@@ -22,6 +22,7 @@ interface DopesheetGraphPaneProps {
   emptyStateMessage: string
   showEmptyGuidance: boolean
   propertyColumnElements: ReactNode
+  propertyColumnWidth?: number
   graphPaneRef: React.RefObject<HTMLDivElement | null>
   disabled: boolean
   graphDisplayPropertyLocked: boolean
@@ -65,13 +66,13 @@ interface DopesheetGraphPaneProps {
 }
 
 const panelStyle: CSSProperties = { height: `calc(100% - ${RULER_HEIGHT}px)` }
-const propertyColumnStyle: CSSProperties = { width: PROPERTY_COLUMN_WIDTH }
 
 export function DopesheetGraphPane({
   hasRows,
   emptyStateMessage,
   showEmptyGuidance,
   propertyColumnElements,
+  propertyColumnWidth = PROPERTY_COLUMN_WIDTH,
   graphPaneRef,
   disabled,
   graphDisplayPropertyLocked,
@@ -119,7 +120,7 @@ export function DopesheetGraphPane({
 
   return (
     <div className="flex min-h-0" style={panelStyle}>
-      <div className="flex-shrink-0 overflow-auto" style={propertyColumnStyle}>
+      <div className="flex-shrink-0 overflow-auto" style={{ width: propertyColumnWidth }}>
         {propertyColumnElements}
       </div>
       <div
