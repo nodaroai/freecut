@@ -317,6 +317,10 @@ function useKeyframeEditorPlaybackFrame(selectedItemId: string | null): number {
       const nextFrame = state.currentFrame
 
       if (state.isPlaying) {
+        // Keep the (relatively expensive) full editor re-render out of the
+        // playback hot path. The playhead line still tracks playback via a
+        // self-subscribing overlay (see DopesheetPlayheadLine / GraphPlayhead),
+        // which moves it by direct DOM without re-rendering the editor.
         wasPlaying = true
         return
       }
@@ -1686,6 +1690,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
                 selectedKeyframeIds={selectedKeyframeIds}
                 currentFrame={relativeFrame}
                 globalFrame={currentFrame}
+                itemFrom={selectedItemForEditor.from}
                 totalFrames={selectedItemForEditor.durationInFrames}
                 fps={canvas.fps}
                 width={editorWidth}

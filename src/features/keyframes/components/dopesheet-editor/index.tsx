@@ -51,6 +51,7 @@ import {
 } from './dopesheet-helpers'
 import type { DopesheetPropertyGroupStructure } from './dopesheet-helpers'
 import { GroupTimelineCell, PropertyTimelineCell } from './dopesheet-timeline-cells'
+import { DopesheetPlayheadLine } from './dopesheet-playhead-line'
 import {
   DRAG_THRESHOLD,
   EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
@@ -112,6 +113,8 @@ interface DopesheetEditorProps {
   currentFrame?: number
   /** Global timeline frame for the same playhead position */
   globalFrame?: number | null
+  /** Absolute timeline frame where the edited item starts (for live playhead) */
+  itemFrom?: number
   /** Total duration in frames */
   totalFrames?: number
   /** Timeline FPS used for ruler display */
@@ -202,6 +205,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   selectedKeyframeIds = new Set(),
   currentFrame = 0,
   globalFrame = null,
+  itemFrom = 0,
   totalFrames = 300,
   fps = 30,
   width = 600,
@@ -1692,7 +1696,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [disabled, getFrameFromClientX, zoomAroundFrame, panFrames, effectiveTimelineWidth, frameRange],
   )
 
-  const playheadLeft = Math.max(0, Math.min(effectiveTimelineWidth - 1, frameToX(currentFrame)))
   const graphDisplayProperty = useMemo(() => {
     if (graphVisibleProperties.size === 0) return null
     if (activeSelectedProperty && graphVisibleProperties.has(activeSelectedProperty)) {
@@ -2747,10 +2750,13 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
           style={{ left: PROPERTY_COLUMN_WIDTH }}
         >
-          <div
-            data-testid="dopesheet-playhead-line"
+          <DopesheetPlayheadLine
+            relativeFrame={currentFrame}
+            itemFrom={itemFrom}
+            totalFrames={totalFrames}
+            frameToX={frameToX}
+            maxLeft={effectiveTimelineWidth - 1}
             className="absolute top-0 bottom-0 w-px bg-primary/80"
-            style={{ left: playheadLeft }}
           />
         </div>
         {visualizationMode === 'graph' ? (
