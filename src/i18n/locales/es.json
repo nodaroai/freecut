@@ -39,7 +39,8 @@
     "workspaces": {
       "label": "Espacios de trabajo",
       "edit": "Edición",
-      "color": "Color"
+      "color": "Color",
+      "animate": "Animación"
     },
     "backToProjects": "Volver a proyectos",
     "backToProjectsAria": "Volver a proyectos",

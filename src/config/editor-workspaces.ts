@@ -7,7 +7,7 @@
  * panel inside a workspace, and their per-workspace tweaks are persisted
  * by the editor store (`editor:workspaceLayout:<id>` in localStorage).
  */
-export type EditorWorkspaceId = 'edit' | 'color'
+export type EditorWorkspaceId = 'edit' | 'color' | 'animate'
 
 export type EditorSidebarTab = 'media' | 'text' | 'shapes' | 'effects' | 'transitions' | 'ai'
 export type EditorClipInspectorTab = 'video' | 'audio' | 'effects'
@@ -35,6 +35,15 @@ const EDITOR_WORKSPACE_PRESETS: Record<EditorWorkspaceId, EditorWorkspaceLayout>
     // the full column height by default.
     propertiesFullColumn: true,
   },
+  animate: {
+    // Animate renders its own imperative layout (small preview + thin strip +
+    // dopesheet + graph) and hides the media sidebar, so these panel hints are
+    // mostly vestigial — keep edit-like defaults for when the user leaves.
+    colorScopesOpen: false,
+    clipInspectorTab: 'video',
+    activeTab: 'media',
+    propertiesFullColumn: false,
+  },
 }
 
 /**
@@ -45,12 +54,18 @@ const EDITOR_WORKSPACE_PRESETS: Record<EditorWorkspaceId, EditorWorkspaceLayout>
 export const EDITOR_WORKSPACE_TIMELINE_SIZE: Record<EditorWorkspaceId, number | null> = {
   edit: null,
   color: 18,
+  // Animate replaces the resizable preview/timeline split with its own fixed
+  // layout (small preview + thin strip + keyframe editors), so the resizable
+  // timeline panel is never mounted — the density default is unused here.
+  animate: null,
 }
 
 const DEFAULT_EDITOR_WORKSPACE: EditorWorkspaceId = 'edit'
 
 export function normalizeEditorWorkspaceId(value: unknown): EditorWorkspaceId {
-  return value === 'color' ? 'color' : DEFAULT_EDITOR_WORKSPACE
+  if (value === 'color') return 'color'
+  if (value === 'animate') return 'animate'
+  return DEFAULT_EDITOR_WORKSPACE
 }
 
 const SIDEBAR_TABS: readonly EditorSidebarTab[] = [

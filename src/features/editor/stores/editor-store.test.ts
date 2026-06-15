@@ -16,6 +16,10 @@ describe('editor-store', () => {
     localStorage.removeItem('editor:workspace')
     localStorage.removeItem('editor:workspaceLayout:edit')
     localStorage.removeItem('editor:workspaceLayout:color')
+    localStorage.removeItem('editor:workspaceLayout:animate')
+    localStorage.removeItem('editor:workspaceTimelineSize:edit')
+    localStorage.removeItem('editor:workspaceTimelineSize:color')
+    localStorage.removeItem('editor:workspaceTimelineSize:animate')
     localStorage.removeItem('editor:propertiesFullColumn')
 
     // Reset store to defaults between tests

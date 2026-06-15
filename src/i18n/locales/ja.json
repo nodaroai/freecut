@@ -39,7 +39,8 @@
     "workspaces": {
       "label": "ワークスペース",
       "edit": "編集",
-      "color": "カラー"
+      "color": "カラー",
+      "animate": "アニメート"
     },
     "backToProjects": "プロジェクトに戻る",
     "backToProjectsAria": "プロジェクトに戻る",

@@ -39,7 +39,8 @@
     "workspaces": {
       "label": "Arbeitsbereiche",
       "edit": "Schnitt",
-      "color": "Farbe"
+      "color": "Farbe",
+      "animate": "Animation"
     },
     "backToProjects": "Zurück zu Projekten",
     "backToProjectsAria": "Zurück zu Projekten",

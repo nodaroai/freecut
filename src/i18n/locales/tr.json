@@ -39,7 +39,8 @@
     "workspaces": {
       "label": "Çalışma alanları",
       "edit": "Kurgu",
-      "color": "Renk"
+      "color": "Renk",
+      "animate": "Animasyon"
     },
     "backToProjects": "Projelere Dön",
     "backToProjectsAria": "Projelere dön",

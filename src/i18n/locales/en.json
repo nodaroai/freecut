@@ -39,7 +39,8 @@
     "workspaces": {
       "label": "Workspaces",
       "edit": "Edit",
-      "color": "Color"
+      "color": "Color",
+      "animate": "Animate"
     },
     "backToProjects": "Back to Projects",
     "backToProjectsAria": "Back to projects",

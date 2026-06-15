@@ -39,7 +39,8 @@
     "workspaces": {
       "label": "Espaces de travail",
       "edit": "Montage",
-      "color": "Étalonnage"
+      "color": "Étalonnage",
+      "animate": "Animation"
     },
     "backToProjects": "Retour aux projets",
     "backToProjectsAria": "Retour aux projets",
