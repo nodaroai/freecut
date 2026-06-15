@@ -18,3 +18,12 @@ export {
 export { DopesheetEditor } from '@/features/keyframes/components/dopesheet-editor'
 export { getAnimatablePropertiesForItem } from '@/features/keyframes/utils/animatable-properties'
 export { getEffectPropertyBaseValue } from '@/features/keyframes/utils/effect-animatable-properties'
+export {
+  captureAnimationFromItem,
+  getPresetCompatibility,
+} from '@/features/keyframes/utils/animation-preset-compat'
+export type {
+  CapturedAnimation,
+  PresetCompatibility,
+  PresetIncompatibilityReason,
+} from '@/features/keyframes/utils/animation-preset-compat'
