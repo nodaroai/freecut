@@ -168,11 +168,18 @@ describe('decoder prewarm', () => {
     const poolSize = createdWorkers.length
     expect(poolSize).toBeGreaterThan(0)
 
+    const inflightPromises: ReturnType<typeof backgroundPreseek>[] = []
     for (let index = 0; index < poolSize; index += 1) {
       const src = `blob:busy-${index}`
       registerObjectUrl(src, new Blob([`video-${index}`]))
-      void backgroundPreseek(src, index)
+      inflightPromises.push(backgroundPreseek(src, index))
     }
+
+    // A duplicate request for an already-inflight src/timestamp needs no extra
+    // worker capacity — even with the pool saturated it must reuse the pending
+    // promise rather than be dropped to null like genuinely new decode work.
+    const duplicateResult = backgroundPreseek('blob:busy-0', 0)
+    expect(duplicateResult).toBe(inflightPromises[0])
 
     registerObjectUrl('blob:overflow', new Blob(['overflow']))
     const overflowResult = await backgroundPreseek('blob:overflow', 999)

@@ -82,10 +82,6 @@ const VIEWPORT_PAD_TILES = 2
 const VIEWPORT_PAD_PX = 600
 
 function canUseItemSrcFallback(src: string): boolean {
-  if (!src.startsWith('blob:')) {
-    return true
-  }
-
   try {
     return new URL(src).origin === window.location.origin
   } catch {

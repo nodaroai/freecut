@@ -374,10 +374,10 @@ async function resolveBlobForUrl(src: string): Promise<Blob | null> {
 }
 
 export function backgroundPreseek(src: string, timestamp: number): Promise<ImageBitmap | null> {
-  const pw = acquireWorker()
-  if (!pw) return Promise.resolve(null)
   decoderPrewarmMetrics.requests += 1
 
+  // Cache and inflight-reuse hits need zero worker capacity — check them before
+  // the saturation guard so a saturated pool still serves already-decoded frames.
   const cachedBitmap = getCachedPredecodedBitmap(
     src,
     timestamp,
@@ -385,7 +385,6 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
   )
   if (cachedBitmap) {
     decoderPrewarmMetrics.cacheHits += 1
-    releaseWorker(pw)
     return Promise.resolve(cachedBitmap)
   }
 
@@ -396,9 +395,12 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
   )
   if (inflightMatch) {
     decoderPrewarmMetrics.inflightReuses += 1
-    releaseWorker(pw)
     return inflightMatch.promise
   }
+
+  // Genuinely new decode work — drop it if every worker is saturated.
+  const pw = acquireWorker()
+  if (!pw) return Promise.resolve(null)
 
   const id = `preseek-${++requestId}`
   const promise = new Promise<ImageBitmap | null>((resolve) => {
