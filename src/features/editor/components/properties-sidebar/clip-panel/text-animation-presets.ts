@@ -7,6 +7,7 @@ import {
   EASE_IN_SOFT as SOFT_EASE_IN,
   EASE_OUT_SOFT as SOFT_EASE_OUT,
   SPRING_SETTLE as TITLE_SPRING,
+  type MotionThumbnail,
 } from '@/features/editor/deps/keyframes'
 
 export type TextAnimationPresetId =
@@ -25,11 +26,14 @@ export type TextAnimationPhase = 'intro' | 'outro'
 interface TextAnimationPreset {
   id: TextAnimationPresetId
   labelKey: string
+  /** Animated glyph shown on the preset button (reuses the motion thumbnails). */
+  thumbnail: MotionThumbnail
 }
 
 export interface TextAnimationPresetOption {
   id: TextAnimationPresetOptionId
   labelKey: string
+  thumbnail?: MotionThumbnail
 }
 
 export interface TextAnimationKeyframePayload {
@@ -42,14 +46,14 @@ export interface TextAnimationKeyframePayload {
 }
 
 const TEXT_ANIMATION_EFFECT_PRESETS: TextAnimationPreset[] = [
-  { id: 'fade', labelKey: 'fade' },
-  { id: 'rise', labelKey: 'rise' },
-  { id: 'drop', labelKey: 'drop' },
-  { id: 'left', labelKey: 'left' },
-  { id: 'right', labelKey: 'right' },
-  { id: 'tilt', labelKey: 'tilt' },
-  { id: 'pop', labelKey: 'pop' },
-  { id: 'swing', labelKey: 'swing' },
+  { id: 'fade', labelKey: 'fade', thumbnail: { kind: 'fade' } },
+  { id: 'rise', labelKey: 'rise', thumbnail: { kind: 'slide', angle: 270 } },
+  { id: 'drop', labelKey: 'drop', thumbnail: { kind: 'slide', angle: 90 } },
+  { id: 'left', labelKey: 'left', thumbnail: { kind: 'slide', angle: 0 } },
+  { id: 'right', labelKey: 'right', thumbnail: { kind: 'slide', angle: 180 } },
+  { id: 'tilt', labelKey: 'tilt', thumbnail: { kind: 'wobble' } },
+  { id: 'pop', labelKey: 'pop', thumbnail: { kind: 'bounce' } },
+  { id: 'swing', labelKey: 'swing', thumbnail: { kind: 'wobble' } },
 ]
 
 export const TEXT_ANIMATION_PRESETS: TextAnimationPresetOption[] = [

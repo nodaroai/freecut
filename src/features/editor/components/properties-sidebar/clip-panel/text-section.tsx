@@ -28,6 +28,7 @@ import { useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { useGizmoStore, type ItemPropertiesPreview } from '@/features/editor/deps/preview'
 import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import { KeyframeToggle, resolveAnimatedTransform } from '@/features/editor/deps/keyframes'
+import { MotionPresetThumbnail } from '../../animate-workspace/motion-preset-thumbnail'
 import { PropertySection, PropertyRow, NumberInput, ColorPicker, SliderInput } from '../components'
 import { FontPicker } from './font-picker'
 import { FONT_CATALOG, FONT_WEIGHT_MAP } from '@/shared/typography/fonts'
@@ -1791,10 +1792,17 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
                   key={preset.id}
                   variant="outline"
                   size="sm"
-                  className="h-7 text-[11px]"
+                  className="group flex h-auto flex-col items-center gap-1 px-1 py-1.5 text-[10px]"
                   onClick={() => handleApplyTextAnimationPreset('intro', preset.id)}
                 >
-                  {t(`editor.textSection.animationPresets.${preset.labelKey}`)}
+                  {preset.thumbnail ? (
+                    <MotionPresetThumbnail thumbnail={preset.thumbnail} />
+                  ) : (
+                    <span className="mp-thumb text-[11px] text-muted-foreground/40">—</span>
+                  )}
+                  <span className="w-full truncate text-center leading-tight">
+                    {t(`editor.textSection.animationPresets.${preset.labelKey}`)}
+                  </span>
                 </Button>
               ))}
             </div>
@@ -1806,10 +1814,17 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
                   key={`outro-${preset.id}`}
                   variant="outline"
                   size="sm"
-                  className="h-7 text-[11px]"
+                  className="group flex h-auto flex-col items-center gap-1 px-1 py-1.5 text-[10px]"
                   onClick={() => handleApplyTextAnimationPreset('outro', preset.id)}
                 >
-                  {t(`editor.textSection.animationPresets.${preset.labelKey}`)}
+                  {preset.thumbnail ? (
+                    <MotionPresetThumbnail thumbnail={preset.thumbnail} />
+                  ) : (
+                    <span className="mp-thumb text-[11px] text-muted-foreground/40">—</span>
+                  )}
+                  <span className="w-full truncate text-center leading-tight">
+                    {t(`editor.textSection.animationPresets.${preset.labelKey}`)}
+                  </span>
                 </Button>
               ))}
             </div>
