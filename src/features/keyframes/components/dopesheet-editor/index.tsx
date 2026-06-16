@@ -61,6 +61,7 @@ import {
   PROPERTY_COLUMN_WIDTH,
   SPACIOUS_PROPERTY_COLUMN_WIDTH,
   ROW_HEIGHT,
+  RULER_HEIGHT,
   SNAP_THRESHOLD_PX,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
@@ -2690,13 +2691,29 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       onRulerPointerMove={handleRulerPointerMove}
       onRulerPointerUp={handleRulerPointerUp}
       rulerTickElements={rulerTickElements}
+      playheadFlag={
+        <DopesheetPlayheadLine
+          variant="flag"
+          relativeFrame={currentFrame}
+          itemFrom={itemFrom}
+          totalFrames={totalFrames}
+          frameToX={frameToX}
+          maxLeft={effectiveTimelineWidth - 1}
+          className="absolute top-0 bottom-0 pointer-events-none z-10"
+        />
+      }
     />
   )
+  // The timeline cells (ruler, rows, graph) all sit behind a 1px `border-l`, so
+  // their content origin is `columnWidth + 1`. The playhead overlay isn't inside
+  // those cells, so it must add that 1px to line up with ticks, keyframes and the
+  // ruler flag.
+  const timelineContentLeft = columnWidth + 1
   const playheadOverlayElement = (
     <div
       data-testid="dopesheet-playhead-clip"
       className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
-      style={{ left: columnWidth }}
+      style={{ left: timelineContentLeft }}
     >
       <DopesheetPlayheadLine
         relativeFrame={currentFrame}
@@ -2704,7 +2721,25 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         totalFrames={totalFrames}
         frameToX={frameToX}
         maxLeft={effectiveTimelineWidth - 1}
-        className="absolute top-0 bottom-0 w-px bg-primary/80"
+        className="absolute top-0 bottom-0"
+      />
+    </div>
+  )
+  // Split view: one shared playhead line spanning the sheet + graph panes (the
+  // graph's own line is hidden via `hidePlayhead`). A single element guarantees
+  // the two panes can't drift in position or appearance.
+  const splitPlayheadOverlayElement = (
+    <div
+      className="absolute right-0 bottom-0 overflow-hidden pointer-events-none z-30"
+      style={{ left: timelineContentLeft, top: RULER_HEIGHT }}
+    >
+      <DopesheetPlayheadLine
+        relativeFrame={currentFrame}
+        itemFrom={itemFrom}
+        totalFrames={totalFrames}
+        frameToX={frameToX}
+        maxLeft={effectiveTimelineWidth - 1}
+        className="absolute top-0 bottom-0"
       />
     </div>
   )
@@ -2766,6 +2801,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       graphRulerUnit={graphRulerUnit}
       autoZoomGraphHeight={autoZoomGraphHeight}
       graphVerticalZoomValue={graphVerticalZoomValue}
+      hidePlayhead={isSplitView}
     />
   )
 
@@ -2889,16 +2925,16 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         {isSplitView ? (
           <>
             {rulerHeaderElement}
-            {/* Sheet on top (shared ruler + its aligned playhead overlay),
-                curve/graph below. Both panes share the single `viewport` and
-                `currentFrame`, so the two playheads cannot desync. */}
+            {/* Sheet on top, curve/graph below, with ONE shared playhead line
+                ({splitPlayheadOverlayElement}) drawn over both panes so they
+                stay identical in position and appearance. */}
             <div className="relative min-h-0 flex-1 overflow-hidden" onWheel={handleWheel}>
-              {playheadOverlayElement}
               {sheetBodyElement}
             </div>
             <div className="min-h-0 flex-1 overflow-hidden border-t border-border/60">
               {graphPaneElement}
             </div>
+            {splitPlayheadOverlayElement}
           </>
         ) : (
           <>

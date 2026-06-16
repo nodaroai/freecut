@@ -23,6 +23,11 @@ interface DopesheetPlayheadLineProps {
   /** Upper clamp for `left` (keeps the line inside the viewport). */
   maxLeft: number
   className?: string
+  /**
+   * `line` (default) renders the full-height red playhead line through a body
+   * pane. `flag` renders just the flag handle, sat at the bottom of the ruler.
+   */
+  variant?: 'line' | 'flag'
 }
 
 export function DopesheetPlayheadLine({
@@ -32,6 +37,7 @@ export function DopesheetPlayheadLine({
   frameToX,
   maxLeft,
   className,
+  variant = 'line',
 }: DopesheetPlayheadLineProps) {
   const ref = useRef<HTMLDivElement>(null)
   const clampLeft = (frame: number): number => Math.max(0, Math.min(maxLeft, frameToX(frame)))
@@ -59,5 +65,19 @@ export function DopesheetPlayheadLine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemFrom, totalFrames, frameToX, maxLeft])
 
-  return <div ref={ref} data-testid="dopesheet-playhead-line" className={className} />
+  if (variant === 'flag') {
+    // Flag handle that sits in the ruler — matches the animate timeline strip.
+    return (
+      <div ref={ref} data-testid="dopesheet-playhead-flag" className={className}>
+        <span className="absolute bottom-0 left-0 h-3 w-2 -translate-x-1/2 rounded-b-[2px] border border-red-300/60 bg-red-500" />
+      </div>
+    )
+  }
+
+  return (
+    <div ref={ref} data-testid="dopesheet-playhead-line" className={className}>
+      {/* Red playhead line through the body — matches the animate timeline strip. */}
+      <span className="absolute bottom-0 top-0 w-px -translate-x-1/2 bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.65)]" />
+    </div>
+  )
 }

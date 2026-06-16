@@ -261,7 +261,6 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   // directly. On settled seek/zoom the editor re-renders and the layout effect
   // below repositions from the `frame` prop.
   const groupRef = useRef<SVGGElement>(null)
-  const labelRef = useRef<SVGTextElement>(null)
   const {
     startScrub: startPlayheadScrub,
     queueScrub: queuePlayheadScrub,
@@ -281,11 +280,6 @@ export const GraphPlayhead = memo(function GraphPlayhead({
       const frame = state.previewFrame ?? state.currentFrame
       const rel = Math.max(0, Math.min(lastFrame, frame - itemFrom))
       groupRef.current?.setAttribute('transform', `translate(${frameToGraphX(rel)}, 0)`)
-      if (labelRef.current) {
-        labelRef.current.textContent = totalFrames
-          ? `F${Math.round(rel)}/${totalFrames - 1}`
-          : `F${Math.round(rel)}`
-      }
     }
     return usePlaybackStore.subscribe(update)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -383,36 +377,21 @@ export const GraphPlayhead = memo(function GraphPlayhead({
       )}
       {visuals === 'visible' && (
         <>
+          {/* Red playhead line — matches the dopesheet body line; the flag
+              handle is rendered once in the shared ruler. */}
           <line
             x1={0}
             y1={graphTop}
             x2={0}
             y2={graphTop + graphHeight}
             stroke="#ef4444"
-            strokeWidth={2}
-            strokeOpacity={0.9}
+            strokeWidth={1}
             onPointerDown={isInteractive ? handlePointerDown : undefined}
-            style={{ cursor: isInteractive ? 'ew-resize' : 'default' }}
+            style={{
+              filter: 'drop-shadow(0 0 5px rgba(239, 68, 68, 0.65))',
+              cursor: isInteractive ? 'ew-resize' : 'default',
+            }}
           />
-          <path
-            d={`M -6 ${graphTop} L 6 ${graphTop} L 0 ${graphTop + 8} Z`}
-            fill="#ef4444"
-            onPointerDown={isInteractive ? handlePointerDown : undefined}
-            style={{ cursor: isInteractive ? 'ew-resize' : 'default' }}
-          />
-          <text
-            ref={labelRef}
-            x={0}
-            y={graphTop - 4}
-            textAnchor="middle"
-            fill="#ef4444"
-            fontSize={9}
-            fontFamily="monospace"
-            fontWeight="bold"
-            style={{ pointerEvents: 'none' }}
-          >
-            {totalFrames ? `F${Math.round(frame)}/${totalFrames - 1}` : `F${Math.round(frame)}`}
-          </text>
         </>
       )}
     </g>

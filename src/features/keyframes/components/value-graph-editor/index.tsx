@@ -121,6 +121,12 @@ interface ValueGraphEditorSharedProps {
   externalValueZoomLevel?: number
   /** Whether the editor is disabled */
   disabled?: boolean
+  /**
+   * Hide the graph's own playhead line/flag visuals (the scrub hit-area stays).
+   * Used when an outer editor (e.g. the dopesheet split view) draws a single
+   * shared playhead line spanning both panes instead.
+   */
+  hidePlayhead?: boolean
   /** Additional class name */
   className?: string
 }
@@ -180,6 +186,7 @@ const ValueGraphEditorBase = memo(function ValueGraphEditorBase({
   autoZoomGraphHeight = false,
   externalValueZoomLevel,
   disabled = false,
+  hidePlayhead = false,
   className,
   chrome,
 }: ValueGraphEditorBaseProps) {
@@ -1244,7 +1251,7 @@ const ValueGraphEditorBase = memo(function ValueGraphEditorBase({
             onScrubStart={handlePlayheadScrubStart}
             onScrubEnd={handlePlayheadScrubEnd}
             disabled={disabled}
-            visuals="visible"
+            visuals={hidePlayhead ? 'hidden' : 'visible'}
           />
 
           {/* Bezier handles (for selected keyframes with cubic-bezier easing) */}

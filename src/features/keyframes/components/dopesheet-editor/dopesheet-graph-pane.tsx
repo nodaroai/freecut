@@ -63,6 +63,8 @@ interface DopesheetGraphPaneProps {
   graphRulerUnit: 'frames' | 'seconds'
   autoZoomGraphHeight: boolean
   graphVerticalZoomValue: number
+  /** Hide the graph's own playhead line (the dopesheet draws a shared one). */
+  hidePlayhead?: boolean
 }
 
 const panelStyle: CSSProperties = { height: `calc(100% - ${RULER_HEIGHT}px)` }
@@ -111,6 +113,7 @@ export function DopesheetGraphPane({
   graphRulerUnit,
   autoZoomGraphHeight,
   graphVerticalZoomValue,
+  hidePlayhead,
 }: DopesheetGraphPaneProps) {
   if (!hasRows) {
     return (
@@ -168,6 +171,7 @@ export function DopesheetGraphPane({
             autoZoomGraphHeight={autoZoomGraphHeight}
             externalValueZoomLevel={graphVerticalZoomValue}
             disabled={disabled || graphDisplayPropertyLocked}
+            hidePlayhead={hidePlayhead}
           />
         ) : null}
       </div>

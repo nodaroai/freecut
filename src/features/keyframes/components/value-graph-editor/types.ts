@@ -104,9 +104,12 @@ export interface GraphPadding {
  */
 export const DEFAULT_GRAPH_PADDING: GraphPadding = {
   top: 20,
-  right: 10,
+  // Horizontal inset matches the dopesheet's KEYFRAME_EDGE_INSET (9) so the
+  // graph's frame axis lines up exactly with the dopesheet rows and the shared
+  // split-view playhead line.
+  right: 9,
   bottom: 40,
-  left: 10,
+  left: 9,
 }
 
 export { PROPERTY_VALUE_RANGES }
