@@ -157,9 +157,7 @@ class SourceController {
         if (this._pendingPrimary === element) {
           this._pendingPrimary = null
         }
-        element.pause()
-        element.src = ''
-        element.load()
+        this.disposeElement(element)
         // Allow retries by clearing the rejected promise
         this.loadPromise = null
         throw err
@@ -257,6 +255,7 @@ class SourceController {
    */
   release(clipId: string): void {
     this.assignments.delete(clipId)
+    this.pruneIdleOverflowElements()
   }
 
   /**
@@ -325,22 +324,16 @@ class SourceController {
 
     // Pause and clear all elements
     if (this.primary) {
-      this.primary.pause()
-      this.primary.src = ''
-      this.primary.load()
+      this.disposeElement(this.primary)
     }
 
     if (this._pendingPrimary) {
-      this._pendingPrimary.pause()
-      this._pendingPrimary.src = ''
-      this._pendingPrimary.load()
+      this.disposeElement(this._pendingPrimary)
       this._pendingPrimary = null
     }
 
     for (const element of this.overflow) {
-      element.pause()
-      element.src = ''
-      element.load()
+      this.disposeElement(element)
     }
 
     this.primary = null
@@ -350,6 +343,27 @@ class SourceController {
   }
 
   // --- Private methods ---
+
+  private disposeElement(element: HTMLVideoElement): void {
+    element.pause()
+    element.src = ''
+    element.load()
+  }
+
+  private pruneIdleOverflowElements(): void {
+    for (
+      let index = this.overflow.length - 1;
+      index >= SourceController.MAX_OVERFLOW_ELEMENTS;
+      index -= 1
+    ) {
+      const element = this.overflow[index]
+      if (!element || this.isElementInUse(element)) {
+        continue
+      }
+      this.disposeElement(element)
+      this.overflow.splice(index, 1)
+    }
+  }
 
   private isElementInUse(element: HTMLVideoElement): boolean {
     for (const assigned of this.assignments.values()) {

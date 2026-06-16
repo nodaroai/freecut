@@ -44,6 +44,12 @@ const supportsRVFC =
   typeof HTMLVideoElement !== 'undefined' &&
   'requestVideoFrameCallback' in HTMLVideoElement.prototype
 
+function isRecoverableVideoLoadError(message: string): boolean {
+  return /format error|unknown|empty src|not allowed to load local resource|ERR_UPLOAD_FILE_CHANGED|ERR_FILE_NOT_FOUND|PIPELINE_ERROR_DISCONNECTED|decode error|network/i.test(
+    message,
+  )
+}
+
 /**
  * Native HTML5 video component for preview mode using VideoSourcePool.
  * Uses pooled video elements instead of creating new ones per clip.
@@ -1011,8 +1017,7 @@ export const VideoContent: React.FC<{
     (error: Error) => {
       contentLog.warn(`Media error for item ${item.id}:`, error.message)
 
-      const looksLikeStaleBlob = /format error|unknown|empty src/i.test(error.message)
-      if (looksLikeStaleBlob && !retriedRef.current && item.mediaId) {
+      if (isRecoverableVideoLoadError(error.message) && !retriedRef.current && item.mediaId) {
         retriedRef.current = true
         contentLog.info(`Retrying item ${item.id} with fresh blob URL for media ${item.mediaId}`)
         blobUrlManager.invalidate(item.mediaId)
