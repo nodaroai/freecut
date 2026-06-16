@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
 import {
   createScrubThrottleState,
+  getDefaultActiveTrackId,
   shouldCommitScrubFrame,
 } from '@/features/editor/deps/timeline-utils'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -276,6 +277,29 @@ export const AnimateTimelineStrip = memo(function AnimateTimelineStrip() {
     },
     [pausePlayback, selectItems, setCurrentFrame, setPreviewFrame],
   )
+
+  // Auto-select a default clip when entering the Animate workspace (or after a
+  // refresh) with nothing selected, so the keyframe editor doesn't open on its
+  // empty "select an item to animate" state. Targets V1 (the default active
+  // track, i.e. the bottom-most video track) and selects its earliest clip. If
+  // V1 has no clips, falls back to the earliest clip anywhere so the editor still
+  // has a target. Runs once per mount: if the user later deselects on purpose, we
+  // leave the empty state alone.
+  const hasAutoSelectedRef = useRef(false)
+  useEffect(() => {
+    if (hasAutoSelectedRef.current) return
+    if (selectedItemIds.length > 0) {
+      hasAutoSelectedRef.current = true
+      return
+    }
+    if (clips.length === 0) return // items not loaded yet — retry when they arrive
+    // `clips` is sorted by `from`, so the first match on V1 is its earliest clip.
+    const v1TrackId = getDefaultActiveTrackId(tracks)
+    const target = clips.find((clip) => clip.trackId === v1TrackId) ?? clips[0]
+    if (!target) return
+    hasAutoSelectedRef.current = true
+    selectItems([target.id])
+  }, [clips, selectedItemIds, selectItems, tracks])
 
   const rowCount = Math.max(1, trackRows.length)
   const rowHeight = TRACK_AREA_HEIGHT / rowCount

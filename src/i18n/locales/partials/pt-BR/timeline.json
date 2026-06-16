@@ -208,6 +208,7 @@
       },
       "custom": "Personalizado",
       "dragHandlesHint": "Arraste as alças para moldar a curva.",
+      "easingControlsHint": "Selecione um quadro-chave para ajustar sua suavização.",
       "graph": "Grafico",
       "mixedCurves": "Curvas mistas",
       "mixedSpring": "Mola mista",

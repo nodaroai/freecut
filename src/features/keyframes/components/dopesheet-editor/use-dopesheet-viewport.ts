@@ -5,7 +5,6 @@ import type { Viewport } from './dopesheet-types'
 
 interface UseDopesheetViewportOptions {
   totalFrames: number
-  selectedProperty: string | null | undefined
   frameViewport: Viewport | undefined
   onFrameViewportChange: ((viewport: Viewport) => void) | undefined
 }
@@ -26,7 +25,6 @@ interface UseDopesheetViewportResult {
  */
 export function useDopesheetViewport({
   totalFrames,
-  selectedProperty,
   frameViewport,
   onFrameViewportChange,
 }: UseDopesheetViewportOptions): UseDopesheetViewportResult {
@@ -66,11 +64,13 @@ export function useDopesheetViewport({
     [normalizeViewport, onFrameViewportChange],
   )
 
-  // Reset viewport when the displayed property or content range changes —
-  // the previous viewport may no longer make sense for the new content.
+  // Reset viewport when the content range changes (e.g. a different item or clip
+  // duration) — the previous viewport may no longer fit the new content. Do NOT
+  // reset on property/keyframe selection: the frame (time) axis is the same for
+  // every property of a clip, so refitting there would discard the user's zoom.
   useEffect(() => {
     setViewport(frameViewport ? normalizeViewport(frameViewport) : buildDefaultViewport())
-  }, [buildDefaultViewport, frameViewport, normalizeViewport, selectedProperty])
+  }, [buildDefaultViewport, frameViewport, normalizeViewport])
 
   // Sync from external viewport when in split mode without overwriting if
   // the value hasn't actually changed (avoids feedback loops).

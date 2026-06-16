@@ -208,6 +208,7 @@
       },
       "custom": "Personalizado",
       "dragHandlesHint": "Arrastra los puntos para dar forma a la curva.",
+      "easingControlsHint": "Selecciona un fotograma clave para ajustar su suavizado.",
       "graph": "grafico",
       "mixedCurves": "mixto curvas",
       "mixedSpring": "mixto resorte",

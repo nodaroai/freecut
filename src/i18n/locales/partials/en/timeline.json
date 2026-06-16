@@ -212,6 +212,7 @@
       },
       "custom": "Custom",
       "dragHandlesHint": "Drag the handles to shape the curve.",
+      "easingControlsHint": "Select a keyframe to adjust its easing.",
       "mixedCurves": "Mixed Curves",
       "mixedSpring": "Mixed Spring",
       "movedKeyframes": "Moved Keyframes",

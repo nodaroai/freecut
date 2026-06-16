@@ -208,6 +208,7 @@
       },
       "custom": "自定义",
       "dragHandlesHint": "拖动控制点以调整曲线形状。",
+      "easingControlsHint": "选择一个关键帧以调整其缓动。",
       "mixedCurves": "混合曲线",
       "mixedSpring": "混合弹簧",
       "movedKeyframes": "已移动关键帧",

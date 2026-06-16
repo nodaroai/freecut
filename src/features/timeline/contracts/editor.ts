@@ -32,6 +32,7 @@ export {
 } from '../utils/generated-layer-items'
 export { findCompatibleTrackForItemType } from '../utils/track-item-compatibility'
 export { createClassicTrack, getTrackKind } from '../utils/classic-tracks'
+export { getDefaultActiveTrackId } from '../utils/default-active-track'
 export { resolveEffectiveTrackStates } from '../utils/group-utils'
 export { linkItems } from '../stores/actions/item-actions'
 export { applyAnimationPreset } from '../stores/actions/preset-actions'

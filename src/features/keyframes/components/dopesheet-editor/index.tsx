@@ -286,7 +286,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const { viewport, updateViewport, normalizeViewport, contentFrameMax, minViewportFrames } =
     useDopesheetViewport({
       totalFrames,
-      selectedProperty,
       frameViewport,
       onFrameViewportChange,
     })

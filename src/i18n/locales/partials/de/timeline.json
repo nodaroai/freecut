@@ -208,6 +208,7 @@
       },
       "custom": "Benutzerdefiniert",
       "dragHandlesHint": "Ziehe die Griffe, um die Kurve zu formen.",
+      "easingControlsHint": "Wähle einen Keyframe aus, um sein Easing anzupassen.",
       "graph": "Diagramm",
       "mixedCurves": "gemischt Kurven",
       "mixedSpring": "gemischt Feder",

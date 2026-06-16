@@ -27,6 +27,7 @@ export {
   executeTimelineCommand,
   findCompatibleTrackForItemType,
   findNearestAvailableSpace,
+  getDefaultActiveTrackId,
   getDefaultGeneratedLayerDurationInFrames,
   getMaxTransitionDurationForHandles,
   getTrackKind,

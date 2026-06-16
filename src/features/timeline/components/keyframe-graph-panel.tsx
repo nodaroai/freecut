@@ -88,6 +88,16 @@ const MAX_CONTENT_HEIGHT_FALLBACK = 500
 /** Maximum ratio the panel can occupy of its parent container */
 const MAX_PARENT_RATIO = 0.8
 
+/**
+ * Fixed height of the advanced-easing controls strip (single row of h-7
+ * controls + vertical padding + border). Reserved permanently while an item is
+ * loaded so the editor below it never resizes when a keyframe is selected — a
+ * measured/conditional strip caused a visible layout shift on selection.
+ */
+const ADVANCED_EASING_STRIP_HEIGHT = 42
+/** Strip height plus its `mb-2` gap above the editor. */
+const ADVANCED_EASING_STRIP_RESERVED = ADVANCED_EASING_STRIP_HEIGHT + 8
+
 interface KeyframeGraphPanelProps {
   /** Whether the panel is open */
   isOpen: boolean
@@ -372,7 +382,6 @@ function loadKeyframeEditorMode(): KeyframeEditorMode {
 }
 
 interface AdvancedEasingControlsProps {
-  containerRef: React.RefObject<HTMLDivElement | null>
   selectedBezierPoints: BezierControlPoints | null
   selectedBezierPreset: BezierPresetValue
   hasMixedBezierConfig: boolean
@@ -383,7 +392,6 @@ interface AdvancedEasingControlsProps {
 }
 
 function AdvancedEasingControls({
-  containerRef,
   selectedBezierPoints,
   selectedBezierPreset,
   hasMixedBezierConfig,
@@ -490,11 +498,16 @@ function AdvancedEasingControls({
 
   return (
     <div
-      ref={containerRef}
-      className="mb-2 rounded-md border border-border bg-secondary/20 px-2 py-1.5"
+      className="mb-2 flex items-center overflow-x-auto rounded-md border border-border bg-secondary/20 px-2"
+      style={{ height: ADVANCED_EASING_STRIP_HEIGHT }}
     >
+      {!selectedBezierPoints && !selectedSpringParameters && (
+        <span className="text-[11px] text-muted-foreground">
+          {t('timeline.keyframeEditor.easingControlsHint')}
+        </span>
+      )}
       {selectedBezierPoints && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex w-max items-center gap-2 text-xs">
           <span className="font-medium text-foreground">{t('timeline.keyframeEditor.bezier')}</span>
           <Select value={selectedBezierPreset} onValueChange={handleBezierPresetChange}>
             <SelectTrigger className="h-7 w-[130px] text-xs focus:ring-0 focus:ring-offset-0">
@@ -540,7 +553,7 @@ function AdvancedEasingControls({
         </div>
       )}
       {selectedSpringParameters && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex w-max items-center gap-2 text-xs">
           <span className="font-medium text-foreground">{t('timeline.keyframeEditor.spring')}</span>
           {SPRING_INPUT_KEYS.map((key) => (
             <label key={key} className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -780,8 +793,6 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   // Track selected property for graph editor
   const [selectedProperty, setSelectedProperty] = useState<AnimatableProperty | null>(null)
   const [editorMode, setEditorMode] = useState<KeyframeEditorMode>(() => loadKeyframeEditorMode())
-  const [advancedControlsHeight, setAdvancedControlsHeight] = useState(0)
-  const advancedControlsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     try {
@@ -967,24 +978,6 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
       selectedItemTransitions,
     )
   }, [selectedItemForEditor, selectedItemTransitions])
-
-  useEffect(() => {
-    const node = advancedControlsRef.current
-    if (!node) {
-      setAdvancedControlsHeight(0)
-      return
-    }
-
-    const updateHeight = () => {
-      setAdvancedControlsHeight(node.offsetHeight)
-    }
-
-    updateHeight()
-    const observer = new ResizeObserver(updateHeight)
-    observer.observe(node)
-
-    return () => observer.disconnect()
-  }, [selectedEditorEasing, selectedEditorKeyframes.length, containerWidth])
 
   // Handle drag start - capture snapshot for undo batching
   const handleDragStart = useCallback(() => {
@@ -1534,7 +1527,6 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   const editorWidth = Math.max(0, containerWidth - 16)
   const showBezierControls = selectedEditorEasing === 'cubic-bezier'
   const showSpringControls = selectedEditorEasing === 'spring'
-  const showAdvancedControls = showBezierControls || showSpringControls
   const advancedControlsKey = useMemo(
     () =>
       selectedEditorKeyframes
@@ -1550,10 +1542,10 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
         .join('|'),
     [selectedEditorKeyframes],
   )
-  const editorHeight = Math.max(
-    0,
-    resolvedContentHeight - 16 - advancedControlsHeight - (showAdvancedControls ? 8 : 0),
-  )
+  // The easing strip is reserved at a constant height (rendered whenever an item
+  // is selected), so the editor area stays the same size regardless of which
+  // keyframe is selected — no layout shift.
+  const editorHeight = Math.max(0, resolvedContentHeight - 16 - ADVANCED_EASING_STRIP_RESERVED)
   // Only render the docked editor when explicitly opened from the toolbar/hotkey.
   // Selecting a clip should not surface the docked panel by itself.
   if (!isOpen) {
@@ -1688,66 +1680,65 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
           className={cn('min-h-0 p-2', isSidePlacement && 'flex-1')}
           style={isSidePlacement ? undefined : { height: clampedContentHeight }}
         >
-          {showAdvancedControls && (
-            <AdvancedEasingControls
-              key={advancedControlsKey}
-              containerRef={advancedControlsRef}
-              selectedBezierPoints={showBezierControls ? selectedBezierPoints : null}
-              selectedBezierPreset={selectedBezierPreset}
-              hasMixedBezierConfig={hasMixedBezierConfig}
-              selectedSpringParameters={showSpringControls ? selectedSpringParameters : null}
-              hasMixedSpringConfig={hasMixedSpringConfig}
-              applyBezier={applyBezierToSelection}
-              applySpring={applySpringToSelection}
-            />
-          )}
           {selectedItemForEditor && containerWidth > 0 ? (
-            <ErrorBoundary level="component">
-              <DopesheetEditor
-                itemId={selectedItemForEditor.id}
-                keyframesByProperty={keyframesByProperty}
-                propertyValues={propertyValues}
-                selectedProperty={effectiveSelectedProperty}
-                selectedKeyframeIds={selectedKeyframeIds}
-                currentFrame={relativeFrame}
-                globalFrame={currentFrame}
-                itemFrom={selectedItemForEditor.from}
-                totalFrames={selectedItemForEditor.durationInFrames}
-                fps={canvas.fps}
-                width={editorWidth}
-                height={editorHeight}
-                onKeyframeMove={handleKeyframeMove}
-                onBezierHandleMove={handleBezierHandleMove}
-                onSelectionChange={handleSelectionChange}
-                onPropertyChange={handlePropertyChange}
-                onActivePropertyChange={setSelectedProperty}
-                onScrub={handleScrub}
-                onScrubStart={handleScrubStart}
-                onScrubEnd={handleScrubEnd}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onAddKeyframe={handleAddKeyframe}
-                onAddKeyframes={handleAddKeyframes}
-                onDuplicateKeyframes={handleDuplicateKeyframes}
-                onPropertyValueCommit={handlePropertyValueCommit}
-                onRemoveKeyframes={handleRemoveKeyframes}
-                onCopyKeyframes={handleCopyKeyframes}
-                onCutKeyframes={handleCutKeyframes}
-                onPasteKeyframes={handlePasteKeyframes}
-                hasKeyframeClipboard={Boolean(keyframeClipboard?.keyframes.length)}
-                isKeyframeClipboardCut={isKeyframeClipboardCut}
-                selectedInterpolation={selectedEditorEasing}
-                interpolationOptions={easingOptions}
-                onInterpolationChange={handleSelectedKeyframeEasingChange}
-                interpolationDisabled={selectedEditorKeyframes.length === 0}
-                onNavigateToKeyframe={handleNavigateToKeyframe}
-                transitionBlockedRanges={transitionBlockedRanges}
-                visualizationMode={
-                  splitView ? 'split' : editorMode === 'graph' ? 'graph' : 'dopesheet'
-                }
-                spacious={splitView}
+            <>
+              <AdvancedEasingControls
+                key={advancedControlsKey}
+                selectedBezierPoints={showBezierControls ? selectedBezierPoints : null}
+                selectedBezierPreset={selectedBezierPreset}
+                hasMixedBezierConfig={hasMixedBezierConfig}
+                selectedSpringParameters={showSpringControls ? selectedSpringParameters : null}
+                hasMixedSpringConfig={hasMixedSpringConfig}
+                applyBezier={applyBezierToSelection}
+                applySpring={applySpringToSelection}
               />
-            </ErrorBoundary>
+              <ErrorBoundary level="component">
+                <DopesheetEditor
+                  itemId={selectedItemForEditor.id}
+                  keyframesByProperty={keyframesByProperty}
+                  propertyValues={propertyValues}
+                  selectedProperty={effectiveSelectedProperty}
+                  selectedKeyframeIds={selectedKeyframeIds}
+                  currentFrame={relativeFrame}
+                  globalFrame={currentFrame}
+                  itemFrom={selectedItemForEditor.from}
+                  totalFrames={selectedItemForEditor.durationInFrames}
+                  fps={canvas.fps}
+                  width={editorWidth}
+                  height={editorHeight}
+                  onKeyframeMove={handleKeyframeMove}
+                  onBezierHandleMove={handleBezierHandleMove}
+                  onSelectionChange={handleSelectionChange}
+                  onPropertyChange={handlePropertyChange}
+                  onActivePropertyChange={setSelectedProperty}
+                  onScrub={handleScrub}
+                  onScrubStart={handleScrubStart}
+                  onScrubEnd={handleScrubEnd}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onAddKeyframe={handleAddKeyframe}
+                  onAddKeyframes={handleAddKeyframes}
+                  onDuplicateKeyframes={handleDuplicateKeyframes}
+                  onPropertyValueCommit={handlePropertyValueCommit}
+                  onRemoveKeyframes={handleRemoveKeyframes}
+                  onCopyKeyframes={handleCopyKeyframes}
+                  onCutKeyframes={handleCutKeyframes}
+                  onPasteKeyframes={handlePasteKeyframes}
+                  hasKeyframeClipboard={Boolean(keyframeClipboard?.keyframes.length)}
+                  isKeyframeClipboardCut={isKeyframeClipboardCut}
+                  selectedInterpolation={selectedEditorEasing}
+                  interpolationOptions={easingOptions}
+                  onInterpolationChange={handleSelectedKeyframeEasingChange}
+                  interpolationDisabled={selectedEditorKeyframes.length === 0}
+                  onNavigateToKeyframe={handleNavigateToKeyframe}
+                  transitionBlockedRanges={transitionBlockedRanges}
+                  visualizationMode={
+                    splitView ? 'split' : editorMode === 'graph' ? 'graph' : 'dopesheet'
+                  }
+                  spacious={splitView}
+                />
+              </ErrorBoundary>
+            </>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
               {selectedItemForEditor

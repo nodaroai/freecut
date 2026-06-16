@@ -12,6 +12,7 @@ export {
   createTextTemplateItem,
   findCompatibleTrackForItemType,
   findNearestAvailableSpace,
+  getDefaultActiveTrackId,
   getDefaultGeneratedLayerDurationInFrames,
   getTrackKind,
   resolveEffectiveTrackStates,
