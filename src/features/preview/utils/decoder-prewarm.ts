@@ -29,6 +29,7 @@ import {
 
 const log = createLogger('DecoderPrewarm')
 const MAX_CACHED_BITMAPS_PER_SOURCE = 6
+const MAX_INFLIGHT_PER_WORKER = 1
 const PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS = 1 / 240
 /** Min 3 (transition pair + spare), max 6 (memory cap ~12MB WASM) */
 const WORKER_POOL_SIZE = Math.max(
@@ -130,6 +131,8 @@ function handleWorkerMessage(event: MessageEvent): void {
     if (pending) {
       pendingRequests.delete(msg.id)
       pending.resolve(msg.bitmap ?? null)
+    } else {
+      closeUnclaimedBitmap(msg.bitmap)
     }
   } else if (msg.type === 'batch_preseek_done') {
     const pending = pendingBatchRequests.get(msg.id)
@@ -142,7 +145,23 @@ function handleWorkerMessage(event: MessageEvent): void {
         }
       }
       pending.resolve(results)
+    } else if (Array.isArray(msg.entries)) {
+      for (const entry of msg.entries) {
+        closeUnclaimedBitmap(entry?.bitmap)
+      }
     }
+  }
+}
+
+function closeUnclaimedBitmap(bitmap: unknown): void {
+  if (!bitmap || typeof (bitmap as ImageBitmap).close !== 'function') {
+    return
+  }
+
+  try {
+    ;(bitmap as ImageBitmap).close()
+  } catch {
+    // Ignore close errors.
   }
 }
 
@@ -204,6 +223,9 @@ function acquireWorker(): PoolWorker | null {
     if (pw.inflightCount < best.inflightCount) {
       best = pw
     }
+  }
+  if (best.inflightCount >= MAX_INFLIGHT_PER_WORKER) {
+    return null
   }
   best.inflightCount++
   return best
@@ -352,10 +374,10 @@ async function resolveBlobForUrl(src: string): Promise<Blob | null> {
 }
 
 export function backgroundPreseek(src: string, timestamp: number): Promise<ImageBitmap | null> {
-  const pw = acquireWorker()
-  if (!pw) return Promise.resolve(null)
   decoderPrewarmMetrics.requests += 1
 
+  // Cache and inflight-reuse hits need zero worker capacity — check them before
+  // the saturation guard so a saturated pool still serves already-decoded frames.
   const cachedBitmap = getCachedPredecodedBitmap(
     src,
     timestamp,
@@ -363,7 +385,6 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
   )
   if (cachedBitmap) {
     decoderPrewarmMetrics.cacheHits += 1
-    releaseWorker(pw)
     return Promise.resolve(cachedBitmap)
   }
 
@@ -374,9 +395,12 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
   )
   if (inflightMatch) {
     decoderPrewarmMetrics.inflightReuses += 1
-    releaseWorker(pw)
     return inflightMatch.promise
   }
+
+  // Genuinely new decode work — drop it if every worker is saturated.
+  const pw = acquireWorker()
+  if (!pw) return Promise.resolve(null)
 
   const id = `preseek-${++requestId}`
   const promise = new Promise<ImageBitmap | null>((resolve) => {

@@ -202,6 +202,10 @@ export class SharedVideoExtractorPool {
 
     this.itemSources.delete(itemId)
     this.itemWrappers.delete(itemId)
+
+    if (src) {
+      this.pruneIdleSource(src)
+    }
   }
 
   async drawItemFrame(
@@ -454,5 +458,29 @@ export class SharedVideoExtractorPool {
       const prev = state.laneAssignments[laneIndex] ?? 0
       state.laneAssignments[laneIndex] = Math.max(0, prev - 1)
     }
+  }
+
+  private pruneIdleSource(src: string): void {
+    const state = this.sourceStates.get(src)
+    if (!state) return
+    if (state.itemLaneById.size > 0) return
+    if (this.hasWrapperForSource(src)) return
+
+    for (const lane of state.lanes) {
+      lane.extractor.dispose()
+    }
+    state.lanes = []
+    state.laneAssignments = []
+    state.sourceInitPromise = null
+    state.sourceReady = false
+    state.sourceInitAttempted = false
+    this.sourceStates.delete(src)
+  }
+
+  private hasWrapperForSource(src: string): boolean {
+    for (const wrapperSrc of this.itemSources.values()) {
+      if (wrapperSrc === src) return true
+    }
+    return false
   }
 }

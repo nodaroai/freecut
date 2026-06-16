@@ -13,6 +13,7 @@ const TIMESTAMP_EPSILON = 1e-4
 const LOOKAHEAD_TOLERANCE_SECONDS = 0.05
 const STREAM_BACKTRACK_SECONDS = 1.0
 const FORWARD_JUMP_RESTART_SECONDS = 3.0
+const MAX_EXTRACTORS_PER_WORKER = 8
 
 /** Per-source keyframe index received from main thread */
 const keyframeIndexBySrc = new Map<string, number[]>()
@@ -85,7 +86,10 @@ async function getExtractor(
   options?: WorkerSourceOptions,
 ): Promise<ExtractorState | null> {
   const existing = extractors.get(src)
-  if (existing) return existing
+  if (existing) {
+    touchExtractor(src, existing)
+    return existing
+  }
 
   const inflight = initPromises.get(src)
   if (inflight) return inflight
@@ -167,6 +171,7 @@ async function getExtractor(
         drawLock: null,
       }
       extractors.set(src, state)
+      pruneOldExtractors(src)
       return state
     } catch (error) {
       input.dispose?.()
@@ -179,6 +184,40 @@ async function getExtractor(
     return await promise
   } finally {
     initPromises.delete(src)
+  }
+}
+
+function touchExtractor(src: string, state: ExtractorState): void {
+  extractors.delete(src)
+  extractors.set(src, state)
+}
+
+function disposeExtractorState(state: ExtractorState): void {
+  closeStreamState(state)
+  try {
+    state.input.dispose?.()
+  } catch {
+    // Ignore dispose errors.
+  }
+}
+
+function pruneOldExtractors(activeSrc: string): void {
+  while (extractors.size > MAX_EXTRACTORS_PER_WORKER) {
+    const oldestSrc = extractors.keys().next().value as string | undefined
+    if (!oldestSrc) return
+    if (oldestSrc === activeSrc) {
+      const activeState = extractors.get(oldestSrc)
+      if (!activeState) return
+      touchExtractor(oldestSrc, activeState)
+      continue
+    }
+
+    const oldest = extractors.get(oldestSrc)
+    extractors.delete(oldestSrc)
+    keyframeIndexBySrc.delete(oldestSrc)
+    if (oldest) {
+      disposeExtractorState(oldest)
+    }
   }
 }
 
@@ -450,21 +489,25 @@ async function batchPreseek(
       // state across the batch — each packet decoded at most once.
       const iterator = state.sink.samplesAtTimestamps(timestamps)
       let i = 0
-      for await (const sample of iterator) {
-        if (!sample || i >= timestamps.length) {
+      try {
+        for await (const sample of iterator) {
+          if (!sample || i >= timestamps.length) {
+            i++
+            continue
+          }
+
+          const ts = timestamps[i]!
           i++
-          continue
-        }
 
-        const ts = timestamps[i]!
-        i++
-
-        try {
-          const bitmap = renderSampleToBitmap(state, sample)
-          if (bitmap) results.set(ts, bitmap)
-        } finally {
-          sample.close?.()
+          try {
+            const bitmap = renderSampleToBitmap(state, sample)
+            if (bitmap) results.set(ts, bitmap)
+          } finally {
+            sample.close?.()
+          }
         }
+      } finally {
+        await iterator.return?.()
       }
     } catch {
       // Batch decode failed — return whatever we got

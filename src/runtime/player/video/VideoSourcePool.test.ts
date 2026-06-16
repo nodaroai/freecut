@@ -137,4 +137,29 @@ describe('VideoSourcePool', () => {
     pool.releaseClip('clip-1')
     expect(pool.getClipElement('clip-1')).toBeNull()
   })
+
+  it('disposes idle overflow elements created beyond the fixed lane pool', () => {
+    const pool = new VideoSourcePool()
+
+    const acquired = Array.from({ length: 5 }, (_, index) =>
+      pool.acquireForClip(`clip-${index}`, 'blob:test-video'),
+    )
+
+    expect(acquired.every(Boolean)).toBe(true)
+    expect(pool.getStats()).toEqual({
+      sourceCount: 1,
+      totalElements: 5,
+      activeClips: 5,
+    })
+
+    pool.releaseClip('clip-4')
+
+    expect(pool.getStats()).toEqual({
+      sourceCount: 1,
+      totalElements: 4,
+      activeClips: 4,
+    })
+    expect(videoMocks.createdVideos[4]!.pause).toHaveBeenCalledTimes(1)
+    expect(videoMocks.createdVideos[4]!.load).toHaveBeenCalledTimes(1)
+  })
 })

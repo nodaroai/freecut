@@ -81,6 +81,14 @@ const AnimatedTile = memo(function AnimatedTile({
 const VIEWPORT_PAD_TILES = 2
 const VIEWPORT_PAD_PX = 600
 
+function canUseItemSrcFallback(src: string): boolean {
+  try {
+    return new URL(src).origin === window.location.origin
+  } catch {
+    return false
+  }
+}
+
 /**
  * Image Filmstrip Component
  *
@@ -151,8 +159,9 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
   const tileWidth = Math.round(height * (16 / 9)) || 80
   const renderClipWidth = Math.max(clipWidth, renderWidth ?? clipWidth)
 
-  // Resolve the URL to use: prefer freshly resolved blobUrl, fall back to item.src
-  const resolvedSrc = blobUrl || src
+  // Resolve the URL to use: prefer freshly resolved blobUrl. Only use the
+  // saved item src if it is not a stale blob URL from another origin.
+  const resolvedSrc = blobUrl || (canUseItemSrcFallback(src) ? src : '')
 
   const effectiveStart = Math.max(0, sourceStart + trimStart)
 
