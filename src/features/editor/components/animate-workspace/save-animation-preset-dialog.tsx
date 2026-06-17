@@ -90,7 +90,9 @@ export function SaveAnimationPresetDialog({
             placeholder={t('editor.animatePresets.dialog.namePlaceholder')}
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              // Guard against committing mid-IME-composition (e.g. Japanese/Korean):
+              // the Enter that confirms a candidate must not trigger the save.
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                 event.preventDefault()
                 void handleSave()
               }

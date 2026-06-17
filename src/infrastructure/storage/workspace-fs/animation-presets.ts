@@ -139,7 +139,10 @@ export function sanitizeAnimationPresets(value: unknown): AnimationPreset[] {
           Number.isFinite(candidate.sourceDurationInFrames)
             ? candidate.sourceDurationInFrames
             : 0,
-        createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : 0,
+        createdAt:
+          typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt)
+            ? candidate.createdAt
+            : 0,
       },
     ]
   })

@@ -43,6 +43,10 @@ interface HexInputProps {
 function HexInput({ color, onLiveChange, onCommit, disabled, className }: HexInputProps) {
   const [draft, setDraft] = useState(() => normalizeHexDraft(color))
   const isFocusedRef = useRef(false)
+  // Set when Enter/Escape blurs the input itself, so the resulting onBlur skips
+  // its commit: Enter already committed (avoid a duplicate onChange) and Escape
+  // reset the draft (committing would persist the stale typed value).
+  const skipBlurCommitRef = useRef(false)
 
   // Sync the draft to external color changes only while the user isn't typing.
   useEffect(() => {
@@ -68,9 +72,11 @@ function HexInput({ color, onLiveChange, onCommit, disabled, className }: HexInp
       if (e.key === 'Enter') {
         e.preventDefault()
         commit()
+        skipBlurCommitRef.current = true
         e.currentTarget.blur()
       } else if (e.key === 'Escape') {
         setDraft(normalizeHexDraft(color))
+        skipBlurCommitRef.current = true
         e.currentTarget.blur()
       }
     },
@@ -87,6 +93,10 @@ function HexInput({ color, onLiveChange, onCommit, disabled, className }: HexInp
       }}
       onBlur={() => {
         isFocusedRef.current = false
+        if (skipBlurCommitRef.current) {
+          skipBlurCommitRef.current = false
+          return
+        }
         commit()
       }}
       onKeyDown={handleKeyDown}

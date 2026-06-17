@@ -370,6 +370,9 @@ export function drawCornerPinImage(
   }
 }
 
+/** Upper bound on a warp canvas edge — the widely-supported 2D canvas max. */
+const MAX_WARP_DIMENSION = 16384
+
 function createWarpCanvas(
   width: number,
   height: number,
@@ -500,6 +503,10 @@ export function computeProjectiveCornerPinWarp(
   const maxY = Math.ceil(Math.max(...corners.map(([, y]) => y))) + 1
   const outW = Math.max(1, maxX - minX)
   const outH = Math.max(1, maxY - minY)
+  // Pin offsets are user-controlled and can balloon the output far beyond any
+  // real canvas size; bail before allocating (createWarpCanvas would throw on an
+  // oversized OffscreenCanvas, and the per-pixel loop below would freeze).
+  if (outW > MAX_WARP_DIMENSION || outH > MAX_WARP_DIMENSION) return null
   const outputCanvas = createWarpCanvas(outW, outH)
   if (!outputCanvas) return null
 

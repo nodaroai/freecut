@@ -330,12 +330,15 @@ export const GraphPlayhead = memo(function GraphPlayhead({
       })
     }
 
+    // Also handles pointercancel — a system-interrupted gesture (capture lost,
+    // touch cancelled) must clean up exactly like a normal release.
     const handlePointerUp = (e: PointerEvent) => {
       e.preventDefault()
       e.stopPropagation()
       svg.releasePointerCapture(event.pointerId)
       svg.removeEventListener('pointermove', handlePointerMove)
       svg.removeEventListener('pointerup', handlePointerUp)
+      svg.removeEventListener('pointercancel', handlePointerUp)
       flushPendingPlayheadScrub(true)
 
       // Notify scrub end
@@ -344,6 +347,7 @@ export const GraphPlayhead = memo(function GraphPlayhead({
 
     svg.addEventListener('pointermove', handlePointerMove)
     svg.addEventListener('pointerup', handlePointerUp)
+    svg.addEventListener('pointercancel', handlePointerUp)
     startPlayheadScrub({
       frame,
       pointerX: x,

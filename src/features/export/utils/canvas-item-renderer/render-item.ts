@@ -334,9 +334,15 @@ async function renderItemWithCornerPin(
     // static text/pin/size, so cache & re-blit it across scrub frames.
     const warpCache = rctx.cornerPinWarpCache
     if (cornerPinRenderer === 'projective' && rctx.renderMode === 'preview' && warpCache) {
+      // Key must cover every input baked into the warped bitmap. Beyond the text
+      // raster + pin + source size, the pre-warp content also reflects the
+      // post-raster modifiers applied to the temp canvas (masks, corner-radius
+      // clip) — omitting them re-blits a stale warp when only those change.
       const key = `${getTextRasterCacheKey(item as TextItem, transform.width, transform.height)}|cp:${JSON.stringify(
         resolvedCornerPin,
-      )}|${pinSourceWidth}x${pinSourceHeight}`
+      )}|${pinSourceWidth}x${pinSourceHeight}|cr:${transform.cornerRadius}|m:${JSON.stringify(
+        preCornerPinMasks,
+      )}`
       let entry: CornerPinWarpCacheEntry | null | undefined = warpCache.get(key)
       if (entry) {
         warpCache.delete(key)

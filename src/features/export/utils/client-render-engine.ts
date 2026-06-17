@@ -1968,6 +1968,10 @@ export async function createCompositionRenderer(
       // === PERFORMANCE: Clean up optimization resources ===
       scrubbingCache?.dispose()
       reverseVideoFrameCache?.dispose()
+      // Preview-only cross-frame caches hold canvas backing stores (hundreds of
+      // MB for text rasters / corner-pin warps); drop them now instead of at GC.
+      itemRenderContext.textRasterCache?.clear()
+      itemRenderContext.cornerPinWarpCache?.clear()
 
       gpu.dispose()
       frameSceneCache.invalidate()
