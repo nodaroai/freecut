@@ -615,9 +615,13 @@ export function useTimelineDrag(
       const currentTracks = tracksRef.current
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
 
-      // If not in selection, select it (multi-select handled by TimelineItem's onClick)
+      // If not in selection, select it (multi-select handled by TimelineItem's onClick).
+      // Skip when a multi-select modifier is held: replacing the selection here
+      // would wipe the existing multi-selection, and the click handler's additive
+      // toggle would then read this clip as "already selected" and remove it again.
+      const isMultiSelectClick = e.ctrlKey || e.metaKey
       const linkedIds = linkedSelectionEnabled ? getLinkedItemIds(allItems, item.id) : [item.id]
-      if (!isInSelection) {
+      if (!isInSelection && !isMultiSelectClick) {
         selectItems(linkedIds)
       }
 

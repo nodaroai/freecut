@@ -137,7 +137,12 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
     timelineWidth: 0,
   })
   const [trackRowsViewportHeight, setTrackRowsViewportHeight] = useState(0)
-  const [sectionDividerPosition, setSectionDividerPosition] = useState<number | null>(null)
+  // A/V divider position is a viewport layout preference, persisted globally in
+  // localStorage (null = centered default). Seed the live value once from the
+  // saved preference; the drag handler commits the final value back on mouseup.
+  const [sectionDividerPosition, setSectionDividerPosition] = useState<number | null>(
+    () => useSettingsStore.getState().timelineSectionDividerPosition,
+  )
 
   const toggleKeyframeEditorOpen = useEditorStore((s) => s.toggleKeyframeEditorOpen)
   const setTimelineTracks = useTimelineStore((s) => s.setTracks)
@@ -334,19 +339,19 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
       document.body.style.userSelect = 'none'
       document.body.style.cursor = 'row-resize'
 
+      let latestPosition = clampedSectionDividerPosition
       const handleMouseMove = (moveEvent: MouseEvent) => {
         const dragState = sectionDividerDragRef.current
         if (!dragState) return
 
         const deltaY = moveEvent.clientY - dragState.startY
-        setSectionDividerPosition(
-          clampSectionDividerPosition({
-            viewportHeight: trackRowsViewportHeight,
-            tracks: visibleTracks,
-            requestedDividerPosition: dragState.startDividerPosition + deltaY,
-            trackTitleBarHeight: editorLayout.timelineClipLabelRowHeight,
-          }),
-        )
+        latestPosition = clampSectionDividerPosition({
+          viewportHeight: trackRowsViewportHeight,
+          tracks: visibleTracks,
+          requestedDividerPosition: dragState.startDividerPosition + deltaY,
+          trackTitleBarHeight: editorLayout.timelineClipLabelRowHeight,
+        })
+        setSectionDividerPosition(latestPosition)
       }
 
       const handleMouseUp = () => {
@@ -355,6 +360,9 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
         document.body.style.cursor = ''
         window.removeEventListener('mousemove', handleMouseMove)
         window.removeEventListener('mouseup', handleMouseUp)
+        // Persist to localStorage so the split survives a refresh (one write
+        // per gesture, on release — not on every mousemove frame).
+        useSettingsStore.getState().setSetting('timelineSectionDividerPosition', latestPosition)
       }
 
       window.addEventListener('mousemove', handleMouseMove)
