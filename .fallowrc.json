@@ -115,6 +115,12 @@
       "exports": ["*"]
     },
     {
+      // Consumed via a dynamic import('@/infrastructure/storage') in the render
+      // queue runner, which static reachability cannot follow.
+      "file": "src/infrastructure/storage/index.ts",
+      "exports": ["saveExportFile"]
+    },
+    {
       "file": "src/features/editor/deps/timeline-store.ts",
       "exports": ["*"]
     }

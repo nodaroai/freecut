@@ -27,12 +27,10 @@ export {
 } from '@/features/keyframes/utils/animation-easing'
 export {
   MOTION_PRESETS,
-  MOTION_PRESETS_BY_ID,
   MOTION_PRESET_CATEGORIES,
   getMotionPresetAnchorFrame,
   motionPresetScalesBox,
   type MotionPreset,
-  type MotionPresetId,
   type MotionPresetCategory,
   type MotionThumbnail,
 } from '@/features/keyframes/utils/motion-presets'

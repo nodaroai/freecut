@@ -3,11 +3,7 @@
  */
 
 export type {
-  ApplyAnimationPresetResult,
-  CapturedAnimation,
   FilmstripFrame,
-  PresetCompatibility,
-  PresetIncompatibilityReason,
   TimelineActions,
   TimelineState,
 } from '@/features/timeline/contracts/editor'
@@ -15,8 +11,6 @@ export {
   applyAnimationPreset,
   captureAnimationFromItem,
   getPresetCompatibility,
-  updateKeyframes,
-  useKeyframeSelectionStore,
   captureSnapshot,
   createClassicTrack,
   createDefaultAdjustmentItem,

@@ -22,7 +22,7 @@ export interface DopesheetPropertyGroupStructure<R extends GroupableRow = Dopesh
 }
 
 /** Playhead-derived group state — cheap to recompute as the current frame changes. */
-export interface GroupFrameState {
+interface GroupFrameState {
   currentKeyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>
   hasKeyframeAtCurrentFrame: boolean
   prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null
@@ -101,7 +101,7 @@ export function buildGroupedPropertyStructure<R extends GroupableRow>(
 }
 
 /** Derives the playhead-relative state for a group's frame groups. */
-export function computeGroupFrameState(
+function computeGroupFrameState(
   frameGroups: GroupFrameGroups,
   currentFrame: number,
 ): GroupFrameState {

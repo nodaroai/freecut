@@ -22,8 +22,4 @@ export {
   captureAnimationFromItem,
   getPresetCompatibility,
 } from '@/features/keyframes/utils/animation-preset-compat'
-export type {
-  CapturedAnimation,
-  PresetCompatibility,
-  PresetIncompatibilityReason,
-} from '@/features/keyframes/utils/animation-preset-compat'
+export type { PresetIncompatibilityReason } from '@/features/keyframes/utils/animation-preset-compat'

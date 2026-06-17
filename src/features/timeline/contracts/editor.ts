@@ -36,15 +36,7 @@ export { getDefaultActiveTrackId } from '../utils/default-active-track'
 export { resolveEffectiveTrackStates } from '../utils/group-utils'
 export { linkItems } from '../stores/actions/item-actions'
 export { applyAnimationPreset } from '../stores/actions/preset-actions'
-export type { ApplyAnimationPresetResult } from '../stores/actions/preset-actions'
-export { updateKeyframes } from '../stores/actions/keyframe-actions'
-export { useKeyframeSelectionStore } from '../stores/keyframe-selection-store'
 export { captureAnimationFromItem, getPresetCompatibility } from '../deps/keyframe-editors'
-export type {
-  CapturedAnimation,
-  PresetCompatibility,
-  PresetIncompatibilityReason,
-} from '../deps/keyframe-editors'
 export { rateStretchItemWithoutHistory } from '../stores/actions/item-edit-actions'
 export { timelineToSourceFrames, sourceToTimelineFrames } from '../utils/source-calculations'
 export { createScrubThrottleState, shouldCommitScrubFrame } from '../utils/scrub-throttle'

@@ -9,8 +9,4 @@ export {
   captureAnimationFromItem,
   getPresetCompatibility,
 } from './keyframes-contract'
-export type {
-  CapturedAnimation,
-  PresetCompatibility,
-  PresetIncompatibilityReason,
-} from './keyframes-contract'
+export type { PresetIncompatibilityReason } from './keyframes-contract'

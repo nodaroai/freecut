@@ -716,6 +716,7 @@ type ValidatedAnimationPresetsManifestEntry = z.infer<typeof animationPresetsMan
  * Validate the animation presets manifest entry (shape only — the sidecar
  * file's contents are validated separately and sanitized at restore time).
  */
+// fallow-ignore-next-line unused-export
 export function validateAnimationPresetsManifestEntry(data: unknown): {
   success: boolean
   data?: ValidatedAnimationPresetsManifestEntry
@@ -732,6 +733,7 @@ export function validateAnimationPresetsManifestEntry(data: unknown): {
  * Validate the animation presets sidecar file envelope. Restore additionally
  * runs the defensive runtime sanitizer; this is the structural gate.
  */
+// fallow-ignore-next-line unused-export
 export function validateAnimationPresetsFile(data: unknown): {
   success: boolean
   data?: ValidatedAnimationPresetsFile
