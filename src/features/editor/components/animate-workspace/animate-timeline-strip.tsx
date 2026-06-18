@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useTranslation } from 'react-i18next'
 import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { getDefaultActiveTrackId } from '@/features/editor/deps/timeline-utils'
+import { getLinkedAudioCompanion } from '@/shared/utils/linked-media'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
 import {
@@ -158,12 +159,34 @@ export const AnimateTimelineStrip = memo(function AnimateTimelineStrip() {
       })),
     [filmClips],
   )
+  // Linked-audio companions (the A1 half of a V1 clip) have no visual frame to
+  // animate. Map each companion to its visual partner so the audio lane stays
+  // visible for context but stops acting as a standalone animation target.
+  const { companionIds, companionToVisualId } = useMemo(() => {
+    const ids = new Set<string>()
+    const toVisual = new Map<string, string>()
+    for (const item of items) {
+      if (item.type !== 'video' && item.type !== 'composition') continue
+      const audio = getLinkedAudioCompanion(items, item)
+      if (!audio) continue
+      ids.add(audio.id)
+      toVisual.set(audio.id, item.id)
+    }
+    return { companionIds: ids, companionToVisualId: toVisual }
+  }, [items])
+  // The film-tile row only carries primary (animatable) clips — the audio
+  // companion would just render a labelled black box.
+  const tileClips = useMemo(
+    () => filmClips.filter((clip) => !companionIds.has(clip.id)),
+    [filmClips, companionIds],
+  )
+  const frameById = useMemo(() => new Map(items.map((item) => [item.id, item.from])), [items])
   const posterMediaIds = useMemo(
     () =>
       Array.from(
-        new Set(filmClips.map((clip) => clip.mediaId).filter((id): id is string => Boolean(id))),
+        new Set(tileClips.map((clip) => clip.mediaId).filter((id): id is string => Boolean(id))),
       ),
-    [filmClips],
+    [tileClips],
   )
   const posterUrls = useMediaPosterUrls(posterMediaIds)
   const timelineMaxFrame = resolveMiniTimelineMaxFrame({ items, markers, inPoint, outPoint })
@@ -180,12 +203,16 @@ export const AnimateTimelineStrip = memo(function AnimateTimelineStrip() {
 
   const selectClip = useCallback(
     (clip: { id: string; from: number }) => {
+      // A muted audio-companion bar forwards to its visual partner so the
+      // keyframe editor always opens on an animatable clip.
+      const targetId = companionToVisualId.get(clip.id) ?? clip.id
+      const targetFrom = frameById.get(targetId) ?? clip.from
       pausePlayback()
       setPreviewFrame(null)
-      setCurrentFrame(clip.from)
-      selectItems([clip.id])
+      setCurrentFrame(targetFrom)
+      selectItems([targetId])
     },
-    [pausePlayback, selectItems, setCurrentFrame, setPreviewFrame],
+    [companionToVisualId, frameById, pausePlayback, selectItems, setCurrentFrame, setPreviewFrame],
   )
 
   const seekToMarker = useCallback(
@@ -209,13 +236,13 @@ export const AnimateTimelineStrip = memo(function AnimateTimelineStrip() {
       hasAutoSelectedRef.current = true
       return
     }
-    if (filmClips.length === 0) return // items not loaded yet — retry when they arrive
+    if (tileClips.length === 0) return // items not loaded yet — retry when they arrive
     const v1TrackId = getDefaultActiveTrackId(tracks)
-    const target = filmClips.find((clip) => clip.trackId === v1TrackId) ?? filmClips[0]
+    const target = tileClips.find((clip) => clip.trackId === v1TrackId) ?? tileClips[0]
     if (!target) return
     hasAutoSelectedRef.current = true
     selectItems([target.id])
-  }, [filmClips, selectedItemIds, selectItems, tracks])
+  }, [tileClips, selectedItemIds, selectItems, tracks])
 
   return (
     <section
@@ -233,8 +260,8 @@ export const AnimateTimelineStrip = memo(function AnimateTimelineStrip() {
             paddingBottom: MINI_FILM_TILE_SCROLLBAR_GUTTER,
           }}
         >
-          {filmClips.length > 0 ? (
-            filmClips.map((clip, index) => (
+          {tileClips.length > 0 ? (
+            tileClips.map((clip, index) => (
               <AnimateFilmTile
                 key={`${clip.id}-film-tile`}
                 clip={clip}
@@ -292,6 +319,7 @@ export const AnimateTimelineStrip = memo(function AnimateTimelineStrip() {
               onSelectClip={selectClip}
               fallbackLabelPrefix="T"
               clipTestId="animate-timeline-clip"
+              mutedClipIds={companionIds}
             />
             <MiniTimelinePlayhead
               labelWidth={MINI_TIMELINE_LABEL_WIDTH}

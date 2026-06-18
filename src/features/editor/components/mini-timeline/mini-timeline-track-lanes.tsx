@@ -17,6 +17,7 @@ export const MiniTimelineTrackLanes = memo(function MiniTimelineTrackLanes({
   onSelectClip,
   fallbackLabelPrefix = 'V',
   clipTestId,
+  mutedClipIds,
 }: {
   tracks: readonly TimelineTrack[]
   clips: readonly MiniTimelineClip[]
@@ -27,6 +28,12 @@ export const MiniTimelineTrackLanes = memo(function MiniTimelineTrackLanes({
   onSelectClip: (clip: MiniTimelineClip) => void
   fallbackLabelPrefix?: string
   clipTestId?: string
+  /**
+   * Clips drawn as dimmed, secondary context rather than primary targets (e.g.
+   * a linked-audio companion in the Animate workspace). Still clickable —
+   * `onSelectClip` is expected to forward the press to the primary partner.
+   */
+  mutedClipIds?: ReadonlySet<string>
 }) {
   const laneIndexById = useMemo(
     () => new Map(tracks.map((track, index) => [track.id, index])),
@@ -65,21 +72,24 @@ export const MiniTimelineTrackLanes = memo(function MiniTimelineTrackLanes({
         ))}
         {clips.map((clip) => {
           const selected = selectedIds.has(clip.id)
+          const muted = mutedClipIds?.has(clip.id) ?? false
           const laneIndex = laneIndexById.get(clip.trackId) ?? 0
           const clipHeight =
             rowHeight >= 10 ? Math.max(8, Math.min(16, rowHeight - 4)) : Math.max(4, rowHeight - 2)
           const clipTop = laneIndex * rowHeight + Math.max(1, (rowHeight - clipHeight) / 2)
+          const clipTone = selected
+            ? 'border-orange-500 bg-orange-500/20 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
+            : muted
+              ? 'border-zinc-600/60 bg-zinc-500/20 opacity-70 hover:opacity-100'
+              : 'border-sky-500/70 bg-sky-500/45 hover:border-sky-300'
           return (
             <button
               key={`${clip.id}-mini`}
               type="button"
               data-testid={clipTestId}
               data-track-id={clip.trackId}
-              className={`absolute overflow-hidden rounded-[2px] border text-left transition-colors ${
-                selected
-                  ? 'border-orange-500 bg-orange-500/20 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
-                  : 'border-sky-500/70 bg-sky-500/45 hover:border-sky-300'
-              }`}
+              data-muted={muted ? '1' : undefined}
+              className={`absolute overflow-hidden rounded-[2px] border text-left transition-colors ${clipTone}`}
               style={{
                 left: `${(clip.from / maxFrame) * 100}%`,
                 width: `${Math.max(0.6, (clip.durationInFrames / maxFrame) * 100)}%`,

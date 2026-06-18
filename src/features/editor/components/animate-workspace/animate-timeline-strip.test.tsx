@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
-import type { TimelineTrack, VideoItem } from '@/types/timeline'
+import type { AudioItem, TimelineTrack, VideoItem } from '@/types/timeline'
 import { AnimateTimelineStrip } from './animate-timeline-strip'
 
 const VIDEO_TRACK: TimelineTrack = {
@@ -17,6 +17,14 @@ const VIDEO_TRACK: TimelineTrack = {
   solo: false,
   order: 1,
   items: [],
+}
+
+const AUDIO_TRACK: TimelineTrack = {
+  ...VIDEO_TRACK,
+  id: 'a1',
+  name: 'A1',
+  kind: 'audio',
+  order: 2,
 }
 
 const VIDEO_ITEM: VideoItem = {
@@ -79,6 +87,65 @@ describe('AnimateTimelineStrip', () => {
 
     // clip-1 (from 48) precedes clip-2 (from 200) on V1.
     expect(useSelectionStore.getState().selectedItemIds).toEqual(['clip-1'])
+  })
+
+  describe('linked audio companion (A1 paired with V1)', () => {
+    const LINKED_VIDEO: VideoItem = {
+      ...VIDEO_ITEM,
+      id: 'linked-video',
+      from: 48,
+      label: 'interview.mp4',
+      linkedGroupId: 'pair-1',
+    }
+    const LINKED_AUDIO: AudioItem = {
+      id: 'linked-audio',
+      type: 'audio',
+      trackId: 'a1',
+      from: 48,
+      durationInFrames: 120,
+      label: 'interview.mp4 audio',
+      src: 'blob:audio',
+      linkedGroupId: 'pair-1',
+    }
+
+    beforeEach(() => {
+      useItemsStore.getState().setTracks([VIDEO_TRACK, AUDIO_TRACK])
+      useItemsStore.getState().setItems([LINKED_VIDEO, LINKED_AUDIO])
+    })
+
+    it('omits the audio companion from the film-tile row', () => {
+      render(<AnimateTimelineStrip />)
+
+      const tiles = screen.getAllByTestId('animate-timeline-film-tile')
+      expect(tiles.map((tile) => tile.getAttribute('data-clip-id'))).toEqual(['linked-video'])
+    })
+
+    it('keeps the audio companion as a dimmed, non-target lane bar', () => {
+      render(<AnimateTimelineStrip />)
+
+      const clips = screen.getAllByTestId('animate-timeline-clip')
+      const audioBar = clips.find((bar) => bar.getAttribute('data-track-id') === 'a1')
+      expect(audioBar).toBeDefined()
+      expect(audioBar!.getAttribute('data-muted')).toBe('1')
+    })
+
+    it('forwards selection from the audio bar to its visual partner', () => {
+      render(<AnimateTimelineStrip />)
+
+      const audioBar = screen
+        .getAllByTestId('animate-timeline-clip')
+        .find((bar) => bar.getAttribute('data-track-id') === 'a1')
+      fireEvent.click(audioBar!)
+
+      expect(useSelectionStore.getState().selectedItemIds).toEqual(['linked-video'])
+      expect(usePlaybackStore.getState().currentFrame).toBe(48)
+    })
+
+    it('auto-selects the visual partner, never the audio companion', () => {
+      render(<AnimateTimelineStrip />)
+
+      expect(useSelectionStore.getState().selectedItemIds).toEqual(['linked-video'])
+    })
   })
 
   it('selects + seeks to a clip when its film tile is pressed', () => {
