@@ -194,9 +194,7 @@ describe('ColorTimelineNavigator', () => {
     render(<ColorTimelineNavigator />)
 
     expect(screen.getByTestId('color-timeline-io-strip')).toBeInTheDocument()
-    expect(screen.getByTestId('color-timeline-in-point')).toBeInTheDocument()
     expect(screen.getByTestId('color-timeline-in-handle')).toBeInTheDocument()
-    expect(screen.getByTestId('color-timeline-out-point')).toBeInTheDocument()
     expect(screen.getByTestId('color-timeline-out-handle')).toBeInTheDocument()
     expect(screen.getAllByTestId('color-timeline-marker')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Warm pass' })).toBeInTheDocument()

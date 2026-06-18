@@ -5,10 +5,10 @@ import type {
 } from '@/shared/timeline/timeline-annotations'
 
 /**
- * Track-spanning annotations for the mini timeline: the in/out guide lines
- * (flush with the IO bar's edges) and clickable marker flags. The IO range
- * strip + handles live in {@link MiniTimelineIoLane}; this layer only draws the
- * vertical lines and markers over the ruler + track rows.
+ * Track-spanning annotations for the mini timeline: clickable marker flags over
+ * the ruler + track rows. The IO range strip + handles live in
+ * {@link MiniTimelineIoLane}; the in/out guide lines are intentionally not drawn
+ * here so the rows stay uncluttered.
  */
 export const MiniTimelineAnnotations = memo(function MiniTimelineAnnotations({
   model,
@@ -23,37 +23,12 @@ export const MiniTimelineAnnotations = memo(function MiniTimelineAnnotations({
   labelWidth: number
   testIdPrefix: string
 }) {
-  const renderIoLine = (point: TimelineAnnotationModel['inPoint'], side: 'in' | 'out') => {
-    if (!point) return null
-    return (
-      <span
-        key={side}
-        className="pointer-events-none absolute bottom-0 top-0 z-[22] w-0"
-        data-testid={`${testIdPrefix}-${side}-point`}
-        style={{ left: `${point.positionRatio * 100}%` }}
-        title={side === 'in' ? 'In point' : 'Out point'}
-      >
-        <span
-          className="absolute bottom-0 top-0 w-px bg-cyan-200/55"
-          // Sit flush with the strip edge / handle: the `in` line hugs the left
-          // edge, the `out` line the right edge (no subpixel transform so it
-          // stays a crisp 1px instead of smearing across two pixels).
-          style={{ left: side === 'in' ? 0 : -1 }}
-          aria-hidden="true"
-        />
-      </span>
-    )
-  }
-
   return (
     <div
       className="pointer-events-none absolute bottom-0 right-0 top-0"
       data-testid={`${testIdPrefix}-annotations`}
       style={{ left: labelWidth }}
     >
-      {renderIoLine(model.inPoint, 'in')}
-      {renderIoLine(model.outPoint, 'out')}
-
       {model.markers.map((marker) => {
         const selected = selectedMarkerId === marker.id
         return (
