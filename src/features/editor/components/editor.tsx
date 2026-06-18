@@ -656,7 +656,7 @@ export const LoadedEditor = memo(function LoadedEditor({
             <ColorTimelineNavigator />
             <InteractionLockRegion
               locked={isMaskEditingActive}
-              className="h-[40%] min-h-[320px] max-h-[42vh] shrink-0"
+              className="h-[37%] min-h-[288px] max-h-[39vh] shrink-0"
             >
               <ErrorBoundary level="feature">
                 <ColorGradingDock />

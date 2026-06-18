@@ -54,14 +54,21 @@ interface TimelineClip {
   gradeThumbnail: ColorGradeThumbnailTreatment
 }
 
-const FILM_TILE_SCROLLBAR_GUTTER = 16
-const STRIP_HEIGHT = 164 + FILM_TILE_SCROLLBAR_GUTTER
+// Just enough to clear the 12px horizontal scrollbar (see index.css) without a
+// large black band under the tiles.
+const FILM_TILE_SCROLLBAR_GUTTER = 8
+const COLOR_IO_LANE_HEIGHT = 14
+const STRIP_HEIGHT = 212
 const FILM_TILE_WIDTH = 118
 const FILM_TILE_HEIGHT = 80
-const FILM_TILE_STRIP_HEIGHT = 88 + FILM_TILE_SCROLLBAR_GUTTER
-const MINI_TIMELINE_TRACK_AREA_HEIGHT = 52
+// Tiles (80) + top padding (4) + scrollbar gutter — trimmed so the IO lane sits
+// snug under the tiles and the reclaimed height goes to the track rows below.
+const FILM_TILE_STRIP_HEIGHT = FILM_TILE_HEIGHT + 4 + FILM_TILE_SCROLLBAR_GUTTER
+// Soaks up the navigator's growth: filmstrip (92) + IO lane (14) + ruler (20)
+// + track area = STRIP_HEIGHT, so every extra pixel goes to the track rows.
+const MINI_TIMELINE_TRACK_AREA_HEIGHT =
+  STRIP_HEIGHT - FILM_TILE_STRIP_HEIGHT - COLOR_IO_LANE_HEIGHT - 20
 const MINI_TIMELINE_LABEL_WIDTH = 32
-const COLOR_IO_LANE_HEIGHT = 14
 const COLOR_IO_HANDLE_WIDTH = 6
 const COLOR_IO_HANDLE_COLOR = 'var(--color-timeline-io-handle)'
 const MIN_TIMELINE_FRAMES = 300
@@ -120,9 +127,7 @@ function formatNavigatorTimecode(frame: number, fps: number): string {
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
-  return [hours, minutes, seconds, frames]
-    .map((part) => String(part).padStart(2, '0'))
-    .join(':')
+  return [hours, minutes, seconds, frames].map((part) => String(part).padStart(2, '0')).join(':')
 }
 
 function getDisplayFrame() {
@@ -144,18 +149,21 @@ const ColorTimelinePlayhead = memo(function ColorTimelinePlayhead({
   // (getBoundingClientRect forces layout on every playback store change).
   const containerWidthRef = useRef(0)
 
-  const updatePosition = useCallback((frame: number) => {
-    const playhead = playheadRef.current
-    if (!playhead) return
+  const updatePosition = useCallback(
+    (frame: number) => {
+      const playhead = playheadRef.current
+      if (!playhead) return
 
-    if (containerWidthRef.current <= 0) {
-      containerWidthRef.current = playhead.parentElement?.getBoundingClientRect().width ?? 0
-    }
-    const contentWidth = Math.max(0, containerWidthRef.current - timelineInsetPx)
-    const maxFrame = Math.max(MIN_TIMELINE_FRAMES, maxFrameRef.current, frame + 1)
-    const ratio = maxFrame > 0 ? Math.max(0, Math.min(1, frame / maxFrame)) : 0
-    playhead.style.transform = `translate3d(${Math.round(timelineInsetPx + contentWidth * ratio)}px, 0, 0)`
-  }, [timelineInsetPx])
+      if (containerWidthRef.current <= 0) {
+        containerWidthRef.current = playhead.parentElement?.getBoundingClientRect().width ?? 0
+      }
+      const contentWidth = Math.max(0, containerWidthRef.current - timelineInsetPx)
+      const maxFrame = Math.max(MIN_TIMELINE_FRAMES, maxFrameRef.current, frame + 1)
+      const ratio = maxFrame > 0 ? Math.max(0, Math.min(1, frame / maxFrame)) : 0
+      playhead.style.transform = `translate3d(${Math.round(timelineInsetPx + contentWidth * ratio)}px, 0, 0)`
+    },
+    [timelineInsetPx],
+  )
 
   useEffect(() => {
     updatePosition(getDisplayFrame())
@@ -196,6 +204,150 @@ const ColorTimelinePlayhead = memo(function ColorTimelinePlayhead({
   )
 })
 
+function ioRangeStyleFor(model: TimelineAnnotationModel) {
+  return model.ioRange
+    ? {
+        left: `${model.ioRange.startRatio * 100}%`,
+        width: `${Math.max(0.25, (model.ioRange.endRatio - model.ioRange.startRatio) * 100)}%`,
+      }
+    : null
+}
+
+/**
+ * The IO bar's own lane (DaVinci-style), sitting between the film tiles and the
+ * time ruler instead of overlapping the ruler. Renders the in/out range strip
+ * and its draggable handles (mirroring the Edit-workspace in/out markers); the
+ * guide lines that span the tracks below live in {@link ColorTimelineAnnotations}.
+ */
+const ColorTimelineIoLane = memo(function ColorTimelineIoLane({
+  model,
+  timelineMaxFrame,
+}: {
+  model: TimelineAnnotationModel
+  timelineMaxFrame: number
+}) {
+  const ioRangeStyle = ioRangeStyleFor(model)
+  const setInPoint = useTimelineStore((s) => s.setInPoint)
+  const setOutPoint = useTimelineStore((s) => s.setOutPoint)
+
+  const laneRef = useRef<HTMLDivElement>(null)
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+  const maxFrameRef = useRef(timelineMaxFrame)
+  maxFrameRef.current = timelineMaxFrame
+  const settersRef = useRef({ in: setInPoint, out: setOutPoint })
+  settersRef.current = { in: setInPoint, out: setOutPoint }
+
+  // Tear down any in-flight drag if the lane unmounts mid-gesture.
+  useEffect(() => () => dragCleanupRef.current?.(), [])
+
+  const startDrag = useCallback(
+    (side: 'in' | 'out') => (event: React.PointerEvent) => {
+      if (event.button !== 0) return
+      // Claim the gesture so the scrub surface underneath doesn't also seek.
+      event.preventDefault()
+      event.stopPropagation()
+      const lane = laneRef.current
+      if (!lane) return
+
+      const setFrame = settersRef.current[side]
+      const prevCursor = document.body.style.cursor
+      document.body.style.cursor = 'col-resize'
+
+      const onMove = (ev: PointerEvent) => {
+        const rect = lane.getBoundingClientRect()
+        if (rect.width <= 0) return
+        const ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width))
+        const frame = Math.round(ratio * maxFrameRef.current)
+        setFrame(frame)
+        // Skim the preview to the boundary; out is exclusive, so show out - 1.
+        const previewFrame = side === 'out' ? Math.max(0, frame - 1) : frame
+        usePlaybackStore.getState().setPreviewFrame(previewFrame)
+      }
+      const cleanup = () => {
+        document.removeEventListener('pointermove', onMove)
+        document.removeEventListener('pointerup', cleanup)
+        document.removeEventListener('pointercancel', cleanup)
+        document.body.style.cursor = prevCursor
+        usePlaybackStore.getState().setPreviewFrame(null)
+        dragCleanupRef.current = null
+      }
+      document.addEventListener('pointermove', onMove)
+      document.addEventListener('pointerup', cleanup)
+      document.addEventListener('pointercancel', cleanup)
+      dragCleanupRef.current = cleanup
+    },
+    [],
+  )
+
+  const renderHandle = (point: TimelineAnnotationModel['inPoint'], side: 'in' | 'out') => {
+    if (!point) return null
+    return (
+      <span
+        key={side}
+        className="absolute top-0 z-[2] w-0"
+        style={{ left: `${point.positionRatio * 100}%` }}
+        title={side === 'in' ? 'In point' : 'Out point'}
+      >
+        <span
+          className="absolute pointer-events-none"
+          data-testid={`color-timeline-${side}-handle`}
+          style={{
+            top: 0,
+            left: side === 'in' ? 0 : -COLOR_IO_HANDLE_WIDTH,
+            width: COLOR_IO_HANDLE_WIDTH,
+            height: COLOR_IO_LANE_HEIGHT,
+            borderRadius: side === 'in' ? '5px 1px 1px 5px' : '1px 5px 5px 1px',
+            background: `linear-gradient(to bottom, color-mix(in oklch, ${COLOR_IO_HANDLE_COLOR} 92%, white), color-mix(in oklch, ${COLOR_IO_HANDLE_COLOR} 78%, black))`,
+            boxShadow: `inset 0 1px 0 color-mix(in oklch, white 35%, transparent), 0 0 2px color-mix(in oklch, ${COLOR_IO_HANDLE_COLOR} 45%, transparent)`,
+          }}
+          aria-hidden="true"
+        />
+        {/* Wider invisible hit area for grabbing the handle. */}
+        <span
+          className="absolute pointer-events-auto"
+          style={{
+            top: 0,
+            left: side === 'in' ? -6 : -(COLOR_IO_HANDLE_WIDTH + 6),
+            width: COLOR_IO_HANDLE_WIDTH + 12,
+            height: COLOR_IO_LANE_HEIGHT + 6,
+            cursor: 'col-resize',
+          }}
+          onPointerDown={startDrag(side)}
+        />
+      </span>
+    )
+  }
+
+  return (
+    <div
+      ref={laneRef}
+      className="pointer-events-none absolute inset-y-0 right-0"
+      data-testid="color-timeline-io-lane"
+      style={{ left: MINI_TIMELINE_LABEL_WIDTH }}
+    >
+      {ioRangeStyle ? (
+        <span
+          className="absolute z-[1] rounded-[5px]"
+          data-testid="color-timeline-io-strip"
+          style={{
+            ...ioRangeStyle,
+            top: 0,
+            height: COLOR_IO_LANE_HEIGHT,
+            background:
+              'linear-gradient(to bottom, var(--color-timeline-io-range-fill), color-mix(in oklch, var(--color-timeline-io-range-fill) 82%, black))',
+            border: '1px solid var(--color-timeline-io-range-border)',
+            boxShadow:
+              'inset 0 1px 0 color-mix(in oklch, white 18%, transparent), 0 0 3px var(--color-timeline-io-range-glow)',
+          }}
+        />
+      ) : null}
+
+      {renderHandle(model.inPoint, 'in')}
+      {renderHandle(model.outPoint, 'out')}
+    </div>
+  )
+})
+
 const ColorTimelineAnnotations = memo(function ColorTimelineAnnotations({
   model,
   selectedMarkerId,
@@ -205,14 +357,7 @@ const ColorTimelineAnnotations = memo(function ColorTimelineAnnotations({
   selectedMarkerId: string | null
   onMarkerPress: (marker: TimelineAnnotationMarker) => void
 }) {
-  const ioRangeStyle = model.ioRange
-    ? {
-        left: `${model.ioRange.startRatio * 100}%`,
-        width: `${Math.max(0.25, (model.ioRange.endRatio - model.ioRange.startRatio) * 100)}%`,
-      }
-    : null
-
-  const renderIoPost = (point: TimelineAnnotationModel['inPoint'], side: 'in' | 'out') => {
+  const renderIoLine = (point: TimelineAnnotationModel['inPoint'], side: 'in' | 'out') => {
     if (!point) return null
     return (
       <span
@@ -227,20 +372,6 @@ const ColorTimelineAnnotations = memo(function ColorTimelineAnnotations({
           style={{ transform: 'translateX(-0.5px)' }}
           aria-hidden="true"
         />
-        <span
-          className="absolute pointer-events-none"
-          data-testid={`color-timeline-${side}-handle`}
-          style={{
-            top: 0,
-            left: side === 'in' ? 0 : -COLOR_IO_HANDLE_WIDTH,
-            width: COLOR_IO_HANDLE_WIDTH,
-            height: COLOR_IO_LANE_HEIGHT,
-            borderRadius: '2px',
-            background: `linear-gradient(to bottom, ${COLOR_IO_HANDLE_COLOR}, color-mix(in oklch, ${COLOR_IO_HANDLE_COLOR} 75%, black))`,
-            boxShadow: `0 0 6px color-mix(in oklch, ${COLOR_IO_HANDLE_COLOR} 55%, transparent)`,
-          }}
-          aria-hidden="true"
-        />
       </span>
     )
   }
@@ -251,39 +382,8 @@ const ColorTimelineAnnotations = memo(function ColorTimelineAnnotations({
       data-testid="color-timeline-annotations"
       style={{ left: MINI_TIMELINE_LABEL_WIDTH }}
     >
-      {ioRangeStyle ? (
-        <>
-          <span
-            className="absolute bottom-0 top-0 z-[9]"
-            data-testid="color-timeline-io-range"
-            style={{
-              ...ioRangeStyle,
-              backgroundColor: 'oklch(0.50 0.10 220 / 0.16)',
-              borderLeft:
-                '1px solid color-mix(in oklch, var(--color-timeline-io-range-border) 45%, transparent)',
-              borderRight:
-                '1px solid color-mix(in oklch, var(--color-timeline-io-range-border) 45%, transparent)',
-            }}
-          />
-          <span
-            className="absolute z-[11] rounded-[2px]"
-            data-testid="color-timeline-io-strip"
-            style={{
-              ...ioRangeStyle,
-              top: 0,
-              height: COLOR_IO_LANE_HEIGHT,
-              background:
-                'linear-gradient(to bottom, var(--color-timeline-io-range-fill), color-mix(in oklch, var(--color-timeline-io-range-fill) 82%, black))',
-              border: '1px solid var(--color-timeline-io-range-border)',
-              boxShadow:
-                'inset 0 1px 0 color-mix(in oklch, white 22%, transparent), 0 0 8px var(--color-timeline-io-range-glow)',
-            }}
-          />
-        </>
-      ) : null}
-
-      {renderIoPost(model.inPoint, 'in')}
-      {renderIoPost(model.outPoint, 'out')}
+      {renderIoLine(model.inPoint, 'in')}
+      {renderIoLine(model.outPoint, 'out')}
 
       {model.markers.map((marker) => {
         const selected = selectedMarkerId === marker.id
@@ -812,13 +912,10 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
     [clientXToFrame, pausePlayback, runScrubLoop, setPreviewFrame],
   )
 
-  const handleScrubMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!isScrubbingRef.current) return
-      pendingClientXRef.current = event.clientX
-    },
-    [],
-  )
+  const handleScrubMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isScrubbingRef.current) return
+    pendingClientXRef.current = event.clientX
+  }, [])
 
   const finishScrub = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -940,79 +1037,87 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
         </div>
 
         <div
-          className="relative min-h-0 flex-1 cursor-ew-resize bg-[#1d1e23]"
+          className="relative flex min-h-0 flex-1 cursor-ew-resize flex-col bg-[#1d1e23]"
           data-testid="color-timeline-scrub-surface"
           onPointerDown={handleScrubStart}
           onPointerMove={handleScrubMove}
           onPointerUp={finishScrub}
           onPointerCancel={cancelScrub}
         >
-          <ColorTimelineAnnotations
-            model={annotationModel}
-            selectedMarkerId={selectedMarkerId}
-            onMarkerPress={seekToMarker}
-          />
-          <div className="relative h-5 border-b border-black/40">
-            <div
-              className="absolute inset-y-0 right-0"
-              style={{ left: MINI_TIMELINE_LABEL_WIDTH }}
-            >
-              {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
-                <div
-                  key={ratio}
-                  className="absolute top-0 h-full border-l border-zinc-500/45 pl-1 pt-0.5 text-[10px] text-zinc-500"
-                  style={{ left: `${ratio * 100}%` }}
-                >
-                  {formatNavigatorTime(Math.round(ratio * timelineMaxFrame), fps)}
-                </div>
-              ))}
-            </div>
+          <div
+            className="relative shrink-0 border-b border-black/40 bg-[#202127]"
+            style={{ height: COLOR_IO_LANE_HEIGHT }}
+          >
+            <ColorTimelineIoLane model={annotationModel} timelineMaxFrame={timelineMaxFrame} />
           </div>
-          <div className="relative" style={{ height: MINI_TIMELINE_TRACK_AREA_HEIGHT }}>
-            <div
-              className="absolute left-0 top-0 h-full border-r border-black/35 text-[9px] font-semibold text-zinc-400"
-              style={{ width: MINI_TIMELINE_LABEL_WIDTH }}
-            >
-              {videoTrackRows.length > 0 ? (
-                videoTrackRows.map((track, index) => {
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <ColorTimelineAnnotations
+              model={annotationModel}
+              selectedMarkerId={selectedMarkerId}
+              onMarkerPress={seekToMarker}
+            />
+            <div className="relative h-5 border-b border-black/40">
+              <div
+                className="absolute inset-y-0 right-0"
+                style={{ left: MINI_TIMELINE_LABEL_WIDTH }}
+              >
+                {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+                  <div
+                    key={ratio}
+                    className="absolute top-0 h-full border-l border-zinc-500/45 pl-1 pt-0.5 text-[10px] text-zinc-500"
+                    style={{ left: `${ratio * 100}%` }}
+                  >
+                    {formatNavigatorTime(Math.round(ratio * timelineMaxFrame), fps)}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="relative" style={{ height: MINI_TIMELINE_TRACK_AREA_HEIGHT }}>
+              <div
+                className="absolute left-0 top-0 h-full border-r border-black/35 text-[9px] font-semibold text-zinc-400"
+                style={{ width: MINI_TIMELINE_LABEL_WIDTH }}
+              >
+                {videoTrackRows.length > 0 ? (
+                  videoTrackRows.map((track, index) => {
+                    const rowCount = Math.max(1, videoTrackRows.length)
+                    const rowHeight = MINI_TIMELINE_TRACK_AREA_HEIGHT / rowCount
+                    return (
+                      <span
+                        key={track.id}
+                        className="absolute left-0 flex w-full items-center justify-center overflow-hidden leading-none"
+                        style={{ top: index * rowHeight, height: rowHeight }}
+                      >
+                        {track.name || `V${index + 1}`}
+                      </span>
+                    )
+                  })
+                ) : (
+                  <span className="flex h-full items-center justify-center">V1</span>
+                )}
+              </div>
+              <div
+                className="absolute inset-y-0 right-0"
+                style={{ left: MINI_TIMELINE_LABEL_WIDTH }}
+              >
+                {videoTrackRows.map((track, index) => {
                   const rowCount = Math.max(1, videoTrackRows.length)
                   const rowHeight = MINI_TIMELINE_TRACK_AREA_HEIGHT / rowCount
                   return (
-                    <span
+                    <div
                       key={track.id}
-                      className="absolute left-0 flex w-full items-center justify-center overflow-hidden leading-none"
-                      style={{ top: index * rowHeight, height: rowHeight }}
-                    >
-                      {track.name || `V${index + 1}`}
-                    </span>
+                      className="absolute left-0 right-0 border-t border-zinc-700/70"
+                      style={{ top: index * rowHeight }}
+                    />
                   )
-                })
-              ) : (
-                <span className="flex h-full items-center justify-center">V1</span>
-              )}
+                })}
+                {visualClips.map(renderTimelineClip)}
+              </div>
             </div>
-            <div
-              className="absolute inset-y-0 right-0"
-              style={{ left: MINI_TIMELINE_LABEL_WIDTH }}
-            >
-              {videoTrackRows.map((track, index) => {
-                const rowCount = Math.max(1, videoTrackRows.length)
-                const rowHeight = MINI_TIMELINE_TRACK_AREA_HEIGHT / rowCount
-                return (
-                  <div
-                    key={track.id}
-                    className="absolute left-0 right-0 border-t border-zinc-700/70"
-                    style={{ top: index * rowHeight }}
-                  />
-                )
-              })}
-              {visualClips.map(renderTimelineClip)}
-            </div>
+            <ColorTimelinePlayhead
+              timelineInsetPx={MINI_TIMELINE_LABEL_WIDTH}
+              timelineMaxFrame={timelineMaxFrame}
+            />
           </div>
-          <ColorTimelinePlayhead
-            timelineInsetPx={MINI_TIMELINE_LABEL_WIDTH}
-            timelineMaxFrame={timelineMaxFrame}
-          />
         </div>
       </div>
     </section>
