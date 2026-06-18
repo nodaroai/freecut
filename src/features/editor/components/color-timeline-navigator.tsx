@@ -7,7 +7,12 @@ import {
   useMediaLibraryStore,
 } from '@/features/editor/deps/media-library'
 import { useFilmstrip, type FilmstripFrame } from '@/features/editor/deps/timeline-hooks'
-import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  setInOutPointsWithoutHistory,
+  useItemsStore,
+  useTimelineSettingsStore,
+  useTimelineStore,
+} from '@/features/editor/deps/timeline-store'
 import type { GpuEffectInstance } from '@/infrastructure/gpu-effects'
 import type { GpuEffect, ItemEffect } from '@/types/effects'
 import { renderGradedTileFrame } from '@/features/editor/utils/color-grade-tile-renderer'
@@ -138,9 +143,13 @@ function getDisplayFrame() {
 const ColorTimelinePlayhead = memo(function ColorTimelinePlayhead({
   timelineInsetPx,
   timelineMaxFrame,
+  suppressPreviewRef,
 }: {
   timelineInsetPx: number
   timelineMaxFrame: number
+  // While an IO drag is active, the playhead ignores the preview frame so it
+  // doesn't visually chase the markers — the preview canvas still updates.
+  suppressPreviewRef: { current: boolean }
 }) {
   const playheadRef = useRef<HTMLDivElement>(null)
   const maxFrameRef = useRef(timelineMaxFrame)
@@ -169,7 +178,10 @@ const ColorTimelinePlayhead = memo(function ColorTimelinePlayhead({
     updatePosition(getDisplayFrame())
 
     const unsubscribe = usePlaybackStore.subscribe((state) => {
-      updatePosition(state.previewFrame ?? state.currentFrame)
+      const frame = suppressPreviewRef.current
+        ? state.currentFrame
+        : (state.previewFrame ?? state.currentFrame)
+      updatePosition(frame)
     })
 
     const container = playheadRef.current?.parentElement
@@ -186,7 +198,7 @@ const ColorTimelinePlayhead = memo(function ColorTimelinePlayhead({
       resizeObserver.disconnect()
       unsubscribe()
     }
-  }, [updatePosition])
+  }, [updatePosition, suppressPreviewRef])
 
   useLayoutEffect(() => {
     updatePosition(getDisplayFrame())
@@ -222,13 +234,17 @@ function ioRangeStyleFor(model: TimelineAnnotationModel) {
 const ColorTimelineIoLane = memo(function ColorTimelineIoLane({
   model,
   timelineMaxFrame,
+  suppressPlayheadPreviewRef,
 }: {
   model: TimelineAnnotationModel
   timelineMaxFrame: number
+  suppressPlayheadPreviewRef: { current: boolean }
 }) {
   const ioRangeStyle = ioRangeStyleFor(model)
   const setInPoint = useTimelineStore((s) => s.setInPoint)
   const setOutPoint = useTimelineStore((s) => s.setOutPoint)
+  const inPoint = useTimelineStore((s) => s.inPoint)
+  const outPoint = useTimelineStore((s) => s.outPoint)
 
   const laneRef = useRef<HTMLDivElement>(null)
   const dragCleanupRef = useRef<(() => void) | null>(null)
@@ -236,9 +252,64 @@ const ColorTimelineIoLane = memo(function ColorTimelineIoLane({
   maxFrameRef.current = timelineMaxFrame
   const settersRef = useRef({ in: setInPoint, out: setOutPoint })
   settersRef.current = { in: setInPoint, out: setOutPoint }
+  const inOutRef = useRef({ in: inPoint, out: outPoint })
+  inOutRef.current = { in: inPoint, out: outPoint }
 
   // Tear down any in-flight drag if the lane unmounts mid-gesture.
   useEffect(() => () => dragCleanupRef.current?.(), [])
+
+  // Drag the whole strip to slide the in/out range together, preserving its
+  // length (mirrors the Edit-workspace ruler range drag: no history per move,
+  // mark dirty on release).
+  const startRangeDrag = useCallback(
+    (event: React.PointerEvent) => {
+      if (event.button !== 0) return
+      const { in: startIn, out: startOut } = inOutRef.current
+      if (startIn === null || startOut === null) return
+      event.preventDefault()
+      event.stopPropagation()
+      const lane = laneRef.current
+      if (!lane) return
+
+      const startClientX = event.clientX
+      const span = Math.max(1, startOut - startIn)
+      const prevCursor = document.body.style.cursor
+      document.body.style.cursor = 'grabbing'
+      // Keep the preview live but pin the navigator playhead while dragging.
+      suppressPlayheadPreviewRef.current = true
+      let lastIn = startIn
+
+      const onMove = (ev: PointerEvent) => {
+        const rect = lane.getBoundingClientRect()
+        if (rect.width <= 0) return
+        const frameDelta = Math.round(
+          ((ev.clientX - startClientX) / rect.width) * maxFrameRef.current,
+        )
+        const maxIn = Math.max(0, maxFrameRef.current - span)
+        const nextIn = Math.max(0, Math.min(startIn + frameDelta, maxIn))
+        if (nextIn === lastIn) return
+        lastIn = nextIn
+        setInOutPointsWithoutHistory(nextIn, nextIn + span)
+        // Preview follows the leading edge; the playhead stays put (suppressed).
+        usePlaybackStore.getState().setPreviewFrame(nextIn)
+      }
+      const cleanup = () => {
+        document.removeEventListener('pointermove', onMove)
+        document.removeEventListener('pointerup', cleanup)
+        document.removeEventListener('pointercancel', cleanup)
+        document.body.style.cursor = prevCursor
+        usePlaybackStore.getState().setPreviewFrame(null)
+        suppressPlayheadPreviewRef.current = false
+        useTimelineSettingsStore.getState().markDirty()
+        dragCleanupRef.current = null
+      }
+      document.addEventListener('pointermove', onMove)
+      document.addEventListener('pointerup', cleanup)
+      document.addEventListener('pointercancel', cleanup)
+      dragCleanupRef.current = cleanup
+    },
+    [suppressPlayheadPreviewRef],
+  )
 
   const startDrag = useCallback(
     (side: 'in' | 'out') => (event: React.PointerEvent) => {
@@ -252,6 +323,8 @@ const ColorTimelineIoLane = memo(function ColorTimelineIoLane({
       const setFrame = settersRef.current[side]
       const prevCursor = document.body.style.cursor
       document.body.style.cursor = 'col-resize'
+      // Keep the preview live but pin the navigator playhead while dragging.
+      suppressPlayheadPreviewRef.current = true
 
       const onMove = (ev: PointerEvent) => {
         const rect = lane.getBoundingClientRect()
@@ -269,6 +342,7 @@ const ColorTimelineIoLane = memo(function ColorTimelineIoLane({
         document.removeEventListener('pointercancel', cleanup)
         document.body.style.cursor = prevCursor
         usePlaybackStore.getState().setPreviewFrame(null)
+        suppressPlayheadPreviewRef.current = false
         dragCleanupRef.current = null
       }
       document.addEventListener('pointermove', onMove)
@@ -276,7 +350,7 @@ const ColorTimelineIoLane = memo(function ColorTimelineIoLane({
       document.addEventListener('pointercancel', cleanup)
       dragCleanupRef.current = cleanup
     },
-    [],
+    [suppressPlayheadPreviewRef],
   )
 
   const renderHandle = (point: TimelineAnnotationModel['inPoint'], side: 'in' | 'out') => {
@@ -327,17 +401,15 @@ const ColorTimelineIoLane = memo(function ColorTimelineIoLane({
     >
       {ioRangeStyle ? (
         <span
-          className="absolute z-[1] rounded-[5px]"
+          className="pointer-events-auto absolute z-[1] cursor-grab rounded-[5px] active:cursor-grabbing"
           data-testid="color-timeline-io-strip"
+          onPointerDown={startRangeDrag}
           style={{
             ...ioRangeStyle,
             top: 0,
             height: COLOR_IO_LANE_HEIGHT,
-            background:
-              'linear-gradient(to bottom, var(--color-timeline-io-range-fill), color-mix(in oklch, var(--color-timeline-io-range-fill) 82%, black))',
-            border: '1px solid var(--color-timeline-io-range-border)',
-            boxShadow:
-              'inset 0 1px 0 color-mix(in oklch, white 18%, transparent), 0 0 3px var(--color-timeline-io-range-glow)',
+            background: 'color-mix(in oklch, var(--muted-foreground) 82%, black)',
+            border: '1px solid color-mix(in oklch, var(--muted-foreground) 70%, transparent)',
           }}
         />
       ) : null}
@@ -369,7 +441,10 @@ const ColorTimelineAnnotations = memo(function ColorTimelineAnnotations({
       >
         <span
           className="absolute bottom-0 top-0 w-px bg-cyan-200/55"
-          style={{ transform: 'translateX(-0.5px)' }}
+          // Sit flush with the strip edge / handle: the `in` line hugs the left
+          // edge, the `out` line the right edge (no subpixel transform so it
+          // stays a crisp 1px instead of smearing across two pixels).
+          style={{ left: side === 'in' ? 0 : -1 }}
           aria-hidden="true"
         />
       </span>
@@ -774,6 +849,9 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
   const selectItems = useSelectionStore((s) => s.selectItems)
   const selectMarker = useSelectionStore((s) => s.selectMarker)
   const livePreviewEdits = useGizmoStore((s) => s.preview)
+  // Set while an IO handle/body drag is active so the navigator playhead stops
+  // chasing the preview frame (the preview canvas itself keeps updating).
+  const suppressPlayheadPreviewRef = useRef(false)
   const isScrubbingRef = useRef(false)
   // Scrub gesture state: rect is captured once on pointer down (no layout reads
   // per move), commits are rAF-batched and gated by the same adaptive throttle
@@ -1048,7 +1126,11 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
             className="relative shrink-0 border-b border-black/40 bg-[#202127]"
             style={{ height: COLOR_IO_LANE_HEIGHT }}
           >
-            <ColorTimelineIoLane model={annotationModel} timelineMaxFrame={timelineMaxFrame} />
+            <ColorTimelineIoLane
+              model={annotationModel}
+              timelineMaxFrame={timelineMaxFrame}
+              suppressPlayheadPreviewRef={suppressPlayheadPreviewRef}
+            />
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col">
             <ColorTimelineAnnotations
@@ -1116,6 +1198,7 @@ export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
             <ColorTimelinePlayhead
               timelineInsetPx={MINI_TIMELINE_LABEL_WIDTH}
               timelineMaxFrame={timelineMaxFrame}
+              suppressPreviewRef={suppressPlayheadPreviewRef}
             />
           </div>
         </div>
