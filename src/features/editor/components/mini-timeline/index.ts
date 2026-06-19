@@ -8,13 +8,8 @@
  */
 export * from './constants'
 export * from './types'
-export {
-  resolveMiniTimelineMaxFrame,
-  formatMiniTimelineClock,
-  formatMiniTimelineTimecode,
-  getMiniTimelineDisplayFrame,
-} from './utils'
-export { useMiniTimelineScrub, type MiniTimelineScrubHandlers } from './use-mini-timeline-scrub'
+export { resolveMiniTimelineMaxFrame, formatMiniTimelineTimecode } from './utils'
+export { useMiniTimelineScrub } from './use-mini-timeline-scrub'
 export { MiniTimelinePlayhead } from './mini-timeline-playhead'
 export { MiniTimelineRuler } from './mini-timeline-ruler'
 export { MiniTimelineTrackLanes } from './mini-timeline-track-lanes'
