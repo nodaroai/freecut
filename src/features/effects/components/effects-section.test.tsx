@@ -44,7 +44,6 @@ vi.mock('../hooks/use-keyframes-by-item-id', () => ({
 vi.mock('../hooks/use-gpu-effect-preview-data', () => ({
   useGpuEffectPreviewData: () => ({
     gpuCategories: [],
-    effectPreviews: new Map(),
     triggerPreviews: vi.fn(),
   }),
 }))

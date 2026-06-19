@@ -26,7 +26,6 @@ import {
   Hexagon,
   Heart,
   Pentagon,
-  Sparkles,
   Blend,
   Pen,
   WandSparkles,
@@ -59,7 +58,7 @@ import { useMaskEditorStore } from '@/features/editor/deps/preview'
 import type { VisualEffect, GpuEffect } from '@/types/effects'
 import { EFFECT_PRESETS } from '@/types/effects'
 import { getGpuEffectDefaultParams } from '@/infrastructure/gpu-effects'
-import { useGpuEffectPreviewData } from '@/features/editor/deps/effects-contract'
+import { EffectThumbnail, useGpuEffectPreviewData } from '@/features/editor/deps/effects-contract'
 import { createLogger } from '@/shared/logging/logger'
 import { useSettingsStore } from '@/features/editor/deps/settings'
 const LazyAiPanel = lazy(() => import('./ai-panel').then((m) => ({ default: m.AiPanel })))
@@ -521,7 +520,9 @@ export const MediaSidebar = memo(function MediaSidebar() {
     [handleAddAdjustmentLayer],
   )
 
-  const { gpuCategories, effectPreviews, triggerPreviews } = useGpuEffectPreviewData()
+  const { gpuCategories, triggerPreviews } = useGpuEffectPreviewData()
+  // Which effect/preset tile is hovered — drives its live sweep animation.
+  const [hoveredEffectKey, setHoveredEffectKey] = useState<string | null>(null)
   const textTemplatesByLayout = useMemo(() => {
     const grouped = {
       single: [] as TextStylePreset[],
@@ -1050,24 +1051,21 @@ export const MediaSidebar = memo(function MediaSidebar() {
                               effects: preset.effects,
                             })}
                             onDragEnd={handleTemplateDragEnd}
+                            onMouseEnter={() => setHoveredEffectKey(`preset:${preset.id}`)}
+                            onMouseLeave={() =>
+                              setHoveredEffectKey((k) => (k === `preset:${preset.id}` ? null : k))
+                            }
                             onClick={() => {
                               if (shouldSuppressGeneratedItemClick()) return
                               handleAddPreset(preset.id)
                             }}
                             className="flex flex-col items-center gap-1 p-1.5 rounded-md border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                           >
-                            {effectPreviews.has(`preset:${preset.id}`) ? (
-                              <img
-                                src={effectPreviews.get(`preset:${preset.id}`)}
-                                alt=""
-                                draggable={false}
-                                className="w-full aspect-video rounded-sm object-cover"
-                              />
-                            ) : (
-                              <div className="w-full aspect-video rounded-sm bg-muted flex items-center justify-center">
-                                <Sparkles className="w-3 h-3 text-muted-foreground/50" />
-                              </div>
-                            )}
+                            <EffectThumbnail
+                              effects={preset.effects}
+                              active={hoveredEffectKey === `preset:${preset.id}`}
+                              className="w-full aspect-video rounded-sm"
+                            />
                             <span className="text-[9px] text-muted-foreground group-hover:text-foreground text-center leading-tight">
                               {preset.name}
                             </span>
@@ -1099,22 +1097,21 @@ export const MediaSidebar = memo(function MediaSidebar() {
                                 ],
                               })}
                               onDragEnd={handleTemplateDragEnd}
+                              onMouseEnter={() => setHoveredEffectKey(def.id)}
+                              onMouseLeave={() =>
+                                setHoveredEffectKey((k) => (k === def.id ? null : k))
+                              }
                               onClick={() => {
                                 if (shouldSuppressGeneratedItemClick()) return
                                 handleAddGpuEffect(def.id)
                               }}
                               className="flex flex-col items-center gap-1 p-1.5 rounded-md border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                             >
-                              {effectPreviews.has(def.id) ? (
-                                <img
-                                  src={effectPreviews.get(def.id)}
-                                  alt=""
-                                  draggable={false}
-                                  className="w-full aspect-video rounded-sm object-cover"
-                                />
-                              ) : (
-                                <div className="w-full aspect-video rounded-sm bg-muted" />
-                              )}
+                              <EffectThumbnail
+                                effectId={def.id}
+                                active={hoveredEffectKey === def.id}
+                                className="w-full aspect-video rounded-sm"
+                              />
                               <span className="text-[9px] text-muted-foreground group-hover:text-foreground text-center leading-tight truncate w-full">
                                 {def.name}
                               </span>

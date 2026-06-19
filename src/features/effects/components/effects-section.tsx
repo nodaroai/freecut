@@ -19,6 +19,7 @@ import {
 } from './panels'
 import { getGpuEffect, getGpuEffectDefaultParams } from '@/infrastructure/gpu-effects'
 import { useGpuEffectPreviewData } from '../hooks/use-gpu-effect-preview-data'
+import { EffectThumbnail } from './effect-thumbnail'
 import { getMappedSelectionEffectEntry } from '../utils/effect-selection'
 import { useUserPresetsStore } from '../stores/user-presets-store'
 import { getAutoKeyframeOperation } from '@/features/effects/deps/keyframes-contract'
@@ -152,7 +153,9 @@ export const EffectsSection = memo(function EffectsSection({
     [itemIds, addEffect],
   )
 
-  const { gpuCategories, effectPreviews, triggerPreviews } = useGpuEffectPreviewData()
+  const { gpuCategories, triggerPreviews } = useGpuEffectPreviewData()
+  // Which picker row is hovered — drives that thumbnail's live sweep animation.
+  const [hoveredPickerKey, setHoveredPickerKey] = useState<string | null>(null)
 
   // Update GPU effect parameter(s)
   const handleGpuParamChange = useCallback(
@@ -657,20 +660,18 @@ export const EffectsSection = memo(function EffectsSection({
                       key={def.id}
                       type="button"
                       className="relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+                      onMouseEnter={() => setHoveredPickerKey(def.id)}
+                      onMouseLeave={() => setHoveredPickerKey((k) => (k === def.id ? null : k))}
                       onClick={() => {
                         handleAddGpuEffect(def.id)
                         closePicker()
                       }}
                     >
-                      {effectPreviews.has(def.id) ? (
-                        <img
-                          src={effectPreviews.get(def.id)}
-                          alt=""
-                          className="w-8 h-[18px] rounded-sm object-cover flex-shrink-0"
-                        />
-                      ) : (
-                        <span className="w-8 h-[18px] rounded-sm bg-muted flex-shrink-0" />
-                      )}
+                      <EffectThumbnail
+                        effectId={def.id}
+                        active={hoveredPickerKey === def.id}
+                        className="w-8 h-[18px] rounded-sm flex-shrink-0"
+                      />
                       {getEffectDefinitionName(def)}
                     </button>
                   ))}
@@ -688,20 +689,20 @@ export const EffectsSection = memo(function EffectsSection({
                       key={preset.id}
                       type="button"
                       className="relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+                      onMouseEnter={() => setHoveredPickerKey(`preset:${preset.id}`)}
+                      onMouseLeave={() =>
+                        setHoveredPickerKey((k) => (k === `preset:${preset.id}` ? null : k))
+                      }
                       onClick={() => {
                         handleApplyPreset(preset.id)
                         closePicker()
                       }}
                     >
-                      {effectPreviews.has(`preset:${preset.id}`) ? (
-                        <img
-                          src={effectPreviews.get(`preset:${preset.id}`)}
-                          alt=""
-                          className="w-8 h-[18px] rounded-sm object-cover flex-shrink-0"
-                        />
-                      ) : (
-                        <span className="w-8 h-[18px] rounded-sm bg-muted flex-shrink-0" />
-                      )}
+                      <EffectThumbnail
+                        effects={preset.effects}
+                        active={hoveredPickerKey === `preset:${preset.id}`}
+                        className="w-8 h-[18px] rounded-sm flex-shrink-0"
+                      />
                       {preset.name}
                     </button>
                   ))}
