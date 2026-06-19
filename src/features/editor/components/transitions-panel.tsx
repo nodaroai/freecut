@@ -124,7 +124,7 @@ const CategorySection = memo(function CategorySection({
       <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
         {title}
       </div>
-      <div className="grid grid-cols-4 gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5">
         {configs.map((config, index) => (
           <TransitionCard
             key={`${config.id}-${config.direction || index}`}
