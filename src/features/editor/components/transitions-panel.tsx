@@ -44,8 +44,9 @@ const TransitionCard = memo(function TransitionCard({
   onDragEnd,
 }: TransitionCardProps) {
   const Icon = TRANSITION_ICON_MAP[config.icon] ?? Blend
-  // Animated A/B preview when the renderer exposes a Canvas 2D path; static icon otherwise.
-  const showPreview = !!transitionRegistry.getRenderer(config.id)?.renderCanvas
+  // Animated A/B preview when the renderer has a GPU shader or Canvas 2D path; static icon otherwise.
+  const renderer = transitionRegistry.getRenderer(config.id)
+  const showPreview = !!(renderer?.gpuTransitionId || renderer?.renderCanvas)
   const previewDirection = config.direction ?? config.defaultDirection
   const [hovered, setHovered] = useState(false)
 
