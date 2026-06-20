@@ -654,10 +654,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
       // Close the dialog and transcribe in the background — exactly like the transcript
       // panel, which just calls transcribeMedia and tracks status. Keeping the modal open
       // during the job (animated spinner + backdrop forcing continuous compositing) while
-      // the WebGPU encoder runs in the media-library view deadlocked the renderer. We also
-      // intentionally do NOT mirror per-event onProgress into the global store here: the
-      // media card shows an indeterminate "transcribing" state from transcriptStatus alone,
-      // avoiding a re-render storm across every media card.
+      // the WebGPU encoder runs in the media-library view deadlocked the renderer.
       setTranscribeDialogOpen(false)
 
       void (async () => {
@@ -678,6 +675,13 @@ const MediaCardInternal = memo(function MediaCardInternal({
                     target.id,
                     state === 'queued' ? 'queued' : 'transcribing',
                   )
+                },
+                // Mirror progress into the store so the aggregate "Generating Transcripts" bar
+                // fills as the job runs. Both the decode and transcribe stages emit at most
+                // whole-percent steps, and the store merge is monotonic, so this is a bounded
+                // ~100 updates over the whole job — not the per-packet storm we throttled away.
+                onProgress: (progress) => {
+                  store.setTranscriptProgress(target.id, progress)
                 },
               })
               store.setTranscriptStatus(target.id, 'ready')

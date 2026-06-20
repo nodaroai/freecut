@@ -284,7 +284,22 @@ async function transcribeChunk(chunk: PCMChunk): Promise<void> {
     return
   }
 
-  postMain({ type: 'progress', event: { stage: 'transcribing', progress: 0 } })
+  // Report absolute progress — chunk start / total duration — so a multi-chunk job advances
+  // monotonically between chunks instead of resetting to 0% each chunk. transformers.js runs
+  // the whole chunk in one opaque, batched call, so there is no inner loop to report finer
+  // granularity; the loading and decoding stages cover the early movement before this stage.
+  const chunkSeconds = chunk.samples.length / 16_000
+  const totalSeconds =
+    chunk.totalDuration && chunk.totalDuration > 0
+      ? chunk.totalDuration
+      : chunk.timestamp + chunkSeconds
+  const transcribeProgressAt = (offsetSeconds: number): number =>
+    Math.min(Math.max((chunk.timestamp + offsetSeconds) / totalSeconds, 0), 1)
+
+  postMain({
+    type: 'progress',
+    event: { stage: 'transcribing', progress: transcribeProgressAt(0) },
+  })
 
   const result = await asrPipeline(chunk.samples, {
     sampling_rate: 16_000,
@@ -352,7 +367,10 @@ async function transcribeChunk(chunk: PCMChunk): Promise<void> {
     })
   }
 
-  postMain({ type: 'progress', event: { stage: 'transcribing', progress: 1 } })
+  postMain({
+    type: 'progress',
+    event: { stage: 'transcribing', progress: transcribeProgressAt(chunkSeconds) },
+  })
 
   if (chunk.final) {
     postMain({ type: 'done' })
