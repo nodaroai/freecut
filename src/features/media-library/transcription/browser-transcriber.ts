@@ -142,25 +142,33 @@ export class TranscribeStream implements AsyncIterable<TranscriptSegment> {
       }
       this.idleResumeTimer = setTimeout(() => {
         this.idleResumeTimer = null
-        const playback = usePlaybackStore.getState()
-        if (playback.isPlaying || playback.previewFrame !== null) return
+        // Only stay paused while actually playing; otherwise always resume. Re-check on the
+        // next tick instead of giving up, so the worker can never get stuck paused.
+        if (usePlaybackStore.getState().isPlaying) {
+          scheduleResume()
+          return
+        }
         this.workerPaused = false
         this.bridge?.setPaused(false)
       }, IDLE_RESUME_MS)
     }
 
+    // Pause transcription only during genuinely active playback or scrubbing (the playhead
+    // actually moving). A *parked* preview frame is not a reason to pause — treating it as
+    // one (and never rescheduling a resume) would suspend the worker forever, which is why
+    // captions generated from the UI hung while a static frame was previewed.
     const initial = usePlaybackStore.getState()
-    if (initial.isPlaying || initial.previewFrame !== null) {
+    if (initial.isPlaying) {
       pauseWorker()
+      scheduleResume()
     }
 
     this.unsubscribePlayback = usePlaybackStore.subscribe((state, prev) => {
-      const isActive = state.isPlaying || state.previewFrame !== null
       const frameMoved = state.currentFrameEpoch !== prev.currentFrameEpoch
 
-      if (isActive || frameMoved) {
+      if (state.isPlaying || frameMoved) {
         pauseWorker()
-        if (!state.isPlaying) scheduleResume()
+        scheduleResume()
         return
       }
 
