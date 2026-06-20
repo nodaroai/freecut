@@ -41,6 +41,7 @@ export {
   resolveTransitionTargetFromSelection,
   sourceToTimelineFrames,
   Timeline,
+  TranscriptEditorPanel,
   timelineToSourceFrames,
   useBentoLayoutDialogStore,
   useCompositionsStore,

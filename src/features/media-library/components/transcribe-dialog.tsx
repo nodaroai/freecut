@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select'
 import { useSettingsStore } from '@/features/media-library/deps/settings-contract'
 import { getMediaTranscriptionModelOptions } from '../transcription/registry'
+import { isParakeetModel } from '../transcription/transcription-engine'
 import {
   getWhisperLanguageSelectValue,
   getWhisperLanguageSettingValue,
@@ -167,25 +168,27 @@ export function TranscribeDialog({
             </Select>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-sm">{t('media.transcribe.quantization')}</Label>
-            <Select
-              value={quantization}
-              onValueChange={(value) => setQuantization(value as MediaTranscriptQuantization)}
-              disabled={isRunning}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WHISPER_QUANTIZATION_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {!isParakeetModel(model) && (
+            <div className="space-y-1.5">
+              <Label className="text-sm">{t('media.transcribe.quantization')}</Label>
+              <Select
+                value={quantization}
+                onValueChange={(value) => setQuantization(value as MediaTranscriptQuantization)}
+                disabled={isRunning}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WHISPER_QUANTIZATION_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label className="text-sm">{t('media.transcribe.language')}</Label>

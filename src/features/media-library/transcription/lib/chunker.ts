@@ -1,8 +1,13 @@
 import type { PCMChunk } from '../types'
 
 const SAMPLE_RATE = 16_000
-const CHUNK_SECONDS = 30
-const OVERLAP_SECONDS = 5
+// Feed Whisper large, near-contiguous spans rather than 30 s windows. transformers.js
+// windows each span into 30 s segments internally and batches them on WebGPU, so
+// app-level 30 s chunking just forced one un-batched inference call per window and
+// re-decoded the 5 s overlaps. A 120 s span lets ~4 windows batch in a single call.
+// A tiny 2 s overlap only guards words straddling a span boundary (deduped downstream).
+const CHUNK_SECONDS = 120
+const OVERLAP_SECONDS = 2
 const SAMPLES_PER_CHUNK = SAMPLE_RATE * CHUNK_SECONDS
 const OVERLAP_SAMPLES = SAMPLE_RATE * OVERLAP_SECONDS
 const ADVANCE_SAMPLES = SAMPLES_PER_CHUNK - OVERLAP_SAMPLES

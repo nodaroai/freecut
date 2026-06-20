@@ -3,6 +3,10 @@ import type { MediaTranscriptModel, MediaTranscriptQuantization } from '@/types/
 export type WhisperModel = MediaTranscriptModel
 export type QuantizationType = MediaTranscriptQuantization
 
+// Which on-device ASR backend handles a job. Resolved per-job from the selected model +
+// language + WebGPU availability (see `transcription-engine.ts`).
+export type TranscriptionEngine = 'whisper' | 'parakeet'
+
 export interface TranscriptSegment {
   text: string
   start: number
@@ -62,6 +66,9 @@ export type WhisperWorkerMessage =
   | { type: 'resume' }
 
 export const MODEL_IDS: Record<WhisperModel, string> = {
+  // Parakeet resolves its own ONNX assets inside the worker; this entry is the source repo
+  // for reference and to satisfy the exhaustive model map.
+  'parakeet-tdt-v3': 'Olicorne/parakeet-tdt-0.6b-v3-smoothquant-onnx',
   'whisper-tiny': 'onnx-community/whisper-tiny_timestamped',
   'whisper-base': 'onnx-community/whisper-base_timestamped',
   'whisper-small': 'onnx-community/whisper-small_timestamped',

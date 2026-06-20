@@ -5,7 +5,11 @@
  */
 
 export type { RemoveSilenceResult } from './edit/range-removal-actions'
-export { removeSilenceFromItems, removeFillerWordsFromItems } from './edit/range-removal-actions'
+export {
+  removeSilenceFromItems,
+  removeFillerWordsFromItems,
+  removeTranscriptRangesFromItems,
+} from './edit/range-removal-actions'
 export {
   trimItemStart,
   trimItemEnd,

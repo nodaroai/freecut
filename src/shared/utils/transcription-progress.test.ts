@@ -8,9 +8,9 @@ import {
 describe('transcription-progress', () => {
   it('maps stages into a stable overall percentage range', () => {
     expect(getTranscriptionOverallPercent({ stage: 'queued', progress: 1 })).toBe(0)
-    expect(getTranscriptionOverallPercent({ stage: 'loading', progress: 1 })).toBe(35)
-    expect(getTranscriptionOverallPercent({ stage: 'decoding', progress: 0.5 })).toBeCloseTo(52.5)
-    expect(getTranscriptionOverallPercent({ stage: 'transcribing', progress: 0.5 })).toBe(85)
+    expect(getTranscriptionOverallPercent({ stage: 'loading', progress: 1 })).toBeCloseTo(8)
+    expect(getTranscriptionOverallPercent({ stage: 'decoding', progress: 0.5 })).toBeCloseTo(11)
+    expect(getTranscriptionOverallPercent({ stage: 'transcribing', progress: 0.5 })).toBeCloseTo(57)
   })
 
   it('keeps progress monotonic when earlier stages report after later stages', () => {
@@ -28,7 +28,7 @@ describe('transcription-progress', () => {
   })
 
   it('clamps progress values to the supported range', () => {
-    expect(getTranscriptionOverallPercent({ stage: 'loading', progress: 5 })).toBe(35)
+    expect(getTranscriptionOverallPercent({ stage: 'loading', progress: 5 })).toBeCloseTo(8)
     expect(
       mergeTranscriptionProgress(undefined, {
         stage: 'transcribing',

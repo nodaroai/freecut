@@ -15,8 +15,11 @@ const logger = createLogger('TranscriptionWorker')
 
 const TRANSFORMERS_CDN_URL = 'https://esm.sh/@huggingface/transformers@3.8.1?bundle'
 const WASM_CDN_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/'
-const WHISPER_CHUNK_SECONDS = 29
+const WHISPER_CHUNK_SECONDS = 30
 const WHISPER_STRIDE_SECONDS = 5
+// Batch the internal 30 s windows of each span on WebGPU (measured ~1.5x faster on a
+// 120 s span). WASM gains nothing from batching and pays the memory, so keep it serial.
+const WHISPER_WEBGPU_BATCH_SIZE = 8
 const WHISPER_TASK = 'transcribe'
 const RECENT_WORD_RETENTION_SECONDS = 8
 const DUPLICATE_WORD_START_TOLERANCE_SECONDS = 0.5
@@ -56,6 +59,7 @@ interface TransformersModule {
 
 let asrPipeline: ASRPipeline | null = null
 let currentModelId: string | null = null
+let activeDevice: 'webgpu' | 'wasm' = 'wasm'
 let port: MessagePort | null = null
 let language: string | undefined
 let pipelineReady = false
@@ -182,6 +186,7 @@ async function initPipeline(modelId: string, quantization: QuantizationType): Pr
 
       try {
         asrPipeline = await loadPipeline('webgpu')
+        activeDevice = 'webgpu'
         postMain({ type: 'runtime', info: { backend: 'webgpu' } })
       } catch (error) {
         logger.warn(
@@ -190,6 +195,7 @@ async function initPipeline(modelId: string, quantization: QuantizationType): Pr
           }. Falling back to WASM.`,
         )
         asrPipeline = await loadPipeline('wasm')
+        activeDevice = 'wasm'
         postMain({ type: 'runtime', info: { backend: 'wasm' } })
       }
 
@@ -276,6 +282,7 @@ async function transcribeChunk(chunk: PCMChunk): Promise<void> {
     return_timestamps: 'word',
     chunk_length_s: WHISPER_CHUNK_SECONDS,
     stride_length_s: WHISPER_STRIDE_SECONDS,
+    batch_size: activeDevice === 'webgpu' ? WHISPER_WEBGPU_BATCH_SIZE : 1,
     force_full_sequences: false,
     top_k: 0,
     do_sample: false,

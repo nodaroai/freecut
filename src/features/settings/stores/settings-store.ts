@@ -289,15 +289,22 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'freecut-settings',
-      version: 1,
+      version: 2,
       // v1: auto-save now defaults on. Enable it for anyone persisted under the old
       // default (0 = disabled) so a crashed or closed tab can't lose a long edit.
       // After this one-time bump the user's choice is sticky again (toggle in
       // Settings → General).
+      // v2: Parakeet TDT is the new default ASR engine (~10x faster than Whisper base
+      // with native punctuation). Upgrade anyone still on the previous default
+      // ('whisper-base') so the speed win applies without manual opt-in; deliberate
+      // tiny/small/large choices are preserved.
       migrate: (persistedState, version) => {
-        const state = (persistedState as Partial<AppSettings> | undefined) ?? {}
+        let state = (persistedState as Partial<AppSettings> | undefined) ?? {}
         if (version < 1 && (state.autoSaveInterval == null || state.autoSaveInterval <= 0)) {
-          return { ...state, autoSaveInterval: 5 }
+          state = { ...state, autoSaveInterval: 5 }
+        }
+        if (version < 2 && state.defaultWhisperModel === 'whisper-base') {
+          state = { ...state, defaultWhisperModel: 'parakeet-tdt-v3' }
         }
         return state
       },

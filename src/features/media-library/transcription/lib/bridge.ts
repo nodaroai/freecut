@@ -5,6 +5,7 @@ import type {
   TranscriptSegment,
   TranscribeProgress,
   TranscribeRuntimeInfo,
+  TranscriptionEngine,
   WhisperModel,
 } from '../types'
 import { MODEL_IDS } from '../types'
@@ -12,6 +13,11 @@ import { createManagedWorkerSession } from '@/shared/utils/managed-worker-sessio
 import { Chunker } from './chunker'
 import { downmixToMono, resampleTo16kHz } from './resampler'
 import { DEFAULT_WHISPER_MODEL } from '@/shared/utils/whisper-settings'
+import {
+  acquireParakeetWorker,
+  releaseParakeetWorker,
+  disposeParakeetWorker,
+} from './parakeet-worker-host'
 
 export interface BridgeCallbacks {
   onSegment: (segment: TranscriptSegment) => void
@@ -48,7 +54,7 @@ export class Bridge {
         new Worker(new URL('../workers/whisper.worker.ts', import.meta.url), { type: 'module' }),
       setupWorker: (worker) => {
         worker.onmessage = (event: MessageEvent<MainThreadMessage>) => {
-          this.handleWhisperMessage(event.data)
+          this.handleTranscriptionMessage(event.data)
         }
 
         worker.onerror = (event) => {
@@ -64,6 +70,14 @@ export class Bridge {
     },
   })
 
+  // Which transcription worker is driving the active job (whisper.worker / parakeet.worker).
+  private activeWorker: 'whisper' | 'parakeet' = 'whisper'
+  // The Parakeet worker is shared/persistent (its 1.24 GB encoder is expensive to compile),
+  // so it lives outside the per-job managed session — see parakeet-worker-host.
+  private parakeetWorker: Worker | null = null
+  private detachParakeet: (() => void) | null = null
+  private torndown = false
+
   constructor(callbacks: BridgeCallbacks) {
     this.callbacks = callbacks
   }
@@ -73,11 +87,17 @@ export class Bridge {
     model: WhisperModel = DEFAULT_WHISPER_MODEL,
     language?: string,
     quantization?: QuantizationType,
+    engine: TranscriptionEngine = 'whisper',
   ): Promise<void> {
     const { port1, port2 } = new MessageChannel()
     const modelId = MODEL_IDS[model]
     const hasWebCodecs = typeof window !== 'undefined' && 'AudioDecoder' in window
-    const whisperWorker = this.session.getWorker('whisper')
+    this.activeWorker = engine === 'parakeet' ? 'parakeet' : 'whisper'
+
+    const transcriptionWorker =
+      this.activeWorker === 'parakeet'
+        ? this.attachParakeetWorker()
+        : this.session.getWorker('whisper')
 
     if (hasWebCodecs) {
       this.session.getWorker('decoder').postMessage({ type: 'port', port: port1 }, [port1])
@@ -90,8 +110,8 @@ export class Bridge {
       port2.close()
     })
 
-    whisperWorker.postMessage({ type: 'port', port: port2 }, [port2])
-    whisperWorker.postMessage({ type: 'init', modelId, language, quantization })
+    transcriptionWorker.postMessage({ type: 'port', port: port2 }, [port2])
+    transcriptionWorker.postMessage({ type: 'init', modelId, language, quantization })
 
     if (hasWebCodecs) {
       this.session.getWorker('decoder').postMessage({ type: 'init', file })
@@ -101,21 +121,64 @@ export class Bridge {
     void this.decodeWithAudioContext(file, port1)
   }
 
-  terminate(): void {
-    if (this.session.isTerminated()) {
+  // Attach this job's message handlers to the shared, persistent Parakeet worker without
+  // taking ownership of its lifecycle (it survives across jobs to avoid recompiling).
+  private attachParakeetWorker(): Worker {
+    const worker = acquireParakeetWorker()
+    this.parakeetWorker = worker
+    const onMessage = (event: MessageEvent<MainThreadMessage>) => {
+      this.handleTranscriptionMessage(event.data)
+    }
+    const onError = (event: ErrorEvent) => {
+      this.callbacks.onError(`Parakeet worker: ${event.message ?? 'unknown error'}`)
+      this.teardown(true)
+    }
+    worker.addEventListener('message', onMessage)
+    worker.addEventListener('error', onError)
+    this.detachParakeet = () => {
+      worker.removeEventListener('message', onMessage)
+      worker.removeEventListener('error', onError)
+    }
+    return worker
+  }
+
+  // Tear down the job. `disposeShared` controls whether the persistent Parakeet worker is
+  // also destroyed (true on error/cancel) or kept warm for the next job (false on clean done).
+  private teardown(disposeShared: boolean): void {
+    if (this.torndown) {
       return
     }
+    this.torndown = true
 
-    this.session.terminate()
+    this.detachParakeet?.()
+    this.detachParakeet = null
+    if (this.parakeetWorker) {
+      this.parakeetWorker = null
+      if (disposeShared) {
+        disposeParakeetWorker()
+      } else {
+        releaseParakeetWorker()
+      }
+    }
+
+    if (!this.session.isTerminated()) {
+      this.session.terminate()
+    }
+  }
+
+  terminate(): void {
+    this.teardown(true)
   }
 
   setPaused(paused: boolean): void {
-    if (this.session.isTerminated()) {
+    if (this.torndown || this.session.isTerminated()) {
       return
     }
 
     const message = { type: paused ? 'pause' : 'resume' } as const
-    this.session.getWorker('whisper').postMessage(message)
+    const transcriptionWorker =
+      this.activeWorker === 'parakeet' ? this.parakeetWorker : this.session.getWorker('whisper')
+    transcriptionWorker?.postMessage(message)
     const hasWebCodecs = typeof window !== 'undefined' && 'AudioDecoder' in window
     if (hasWebCodecs) {
       this.session.getWorker('decoder').postMessage(message)
@@ -198,8 +261,8 @@ export class Bridge {
     }
   }
 
-  private handleWhisperMessage(message: MainThreadMessage): void {
-    if (this.session.isTerminated()) {
+  private handleTranscriptionMessage(message: MainThreadMessage): void {
+    if (this.torndown) {
       return
     }
 
@@ -215,11 +278,13 @@ export class Bridge {
         break
       case 'done':
         this.callbacks.onDone()
-        this.terminate()
+        // Keep the shared Parakeet worker warm for the next job; whisper's per-job worker
+        // is torn down with the managed session.
+        this.teardown(false)
         break
       case 'error':
         this.callbacks.onError(message.message)
-        this.terminate()
+        this.teardown(true)
         break
       default:
         break

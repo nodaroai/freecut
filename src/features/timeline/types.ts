@@ -91,6 +91,10 @@ export interface TimelineActions {
     itemIds: string[],
     fillerRangesByMediaId: Record<string, Array<{ start: number; end: number }>>,
   ) => { analyzedItemCount: number; removedItemCount: number; splitCount: number }
+  removeTranscriptRangesFromItems: (
+    itemIds: string[],
+    rangesByMediaId: Record<string, Array<{ start: number; end: number }>>,
+  ) => { analyzedItemCount: number; removedItemCount: number; splitCount: number }
   joinItems: (itemIds: string[]) => void
   rateStretchItem: (id: string, newFrom: number, newDuration: number, newSpeed: number) => void
   resetSpeedWithRipple: (itemIds: string[]) => void

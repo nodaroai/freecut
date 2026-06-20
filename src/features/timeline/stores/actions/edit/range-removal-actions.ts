@@ -188,8 +188,21 @@ export function removeFillerWordsFromItems(
   return removeTimelineRangesFromItems('REMOVE_FILLER_WORDS', itemIds, fillerRangesByMediaId)
 }
 
+/**
+ * Remove the source-time ranges a user selected in the transcript editor.
+ * Ranges are in source-native seconds, keyed by mediaId — the same shape the
+ * silence/filler removers use — so this reuses the split-then-ripple machinery
+ * and lands as a single "remove transcript selection" undo step.
+ */
+export function removeTranscriptRangesFromItems(
+  itemIds: string[],
+  rangesByMediaId: Record<string, RemoveSilenceRange[]>,
+): RemoveSilenceResult {
+  return removeTimelineRangesFromItems('REMOVE_TRANSCRIPT_SELECTION', itemIds, rangesByMediaId)
+}
+
 function removeTimelineRangesFromItems(
-  commandType: 'REMOVE_SILENCE' | 'REMOVE_FILLER_WORDS',
+  commandType: 'REMOVE_SILENCE' | 'REMOVE_FILLER_WORDS' | 'REMOVE_TRANSCRIPT_SELECTION',
   itemIds: string[],
   rangesByMediaId: Record<string, RemoveSilenceRange[]>,
 ): RemoveSilenceResult {

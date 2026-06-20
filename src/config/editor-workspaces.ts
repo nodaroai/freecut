@@ -9,7 +9,14 @@
  */
 export type EditorWorkspaceId = 'edit' | 'color' | 'animate'
 
-export type EditorSidebarTab = 'media' | 'text' | 'shapes' | 'effects' | 'transitions' | 'ai'
+export type EditorSidebarTab =
+  | 'media'
+  | 'text'
+  | 'shapes'
+  | 'effects'
+  | 'transitions'
+  | 'transcript'
+  | 'ai'
 export type EditorClipInspectorTab = 'video' | 'audio' | 'effects'
 
 /** The slice of editor UI state that a workspace controls. */
@@ -74,6 +81,7 @@ const SIDEBAR_TABS: readonly EditorSidebarTab[] = [
   'shapes',
   'effects',
   'transitions',
+  'transcript',
   'ai',
 ]
 const CLIP_INSPECTOR_TABS: readonly EditorClipInspectorTab[] = ['video', 'audio', 'effects']

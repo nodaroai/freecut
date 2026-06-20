@@ -9,7 +9,16 @@ import type {
 import type { MediaTranscriptQuantization } from '@/types/storage'
 import { localInferenceRuntimeRegistry } from '@/shared/state/local-inference'
 import { LOCAL_INFERENCE_UNLOADED_MESSAGE } from '@/shared/state/local-inference'
-import { formatWhisperRuntimeModelLabel, estimateWhisperRuntimeBytes } from './runtime-estimates'
+import {
+  formatWhisperRuntimeModelLabel,
+  estimateWhisperRuntimeBytes,
+  formatParakeetRuntimeModelLabel,
+  estimateParakeetRuntimeBytes,
+} from './runtime-estimates'
+import {
+  resolveTranscriptionEngine,
+  type ResolvedTranscriptionEngine,
+} from './transcription-engine'
 import { DEFAULT_WHISPER_MODEL } from '@/shared/utils/whisper-settings'
 import { usePlaybackStore } from '@/shared/state/playback'
 
@@ -31,7 +40,8 @@ export class BrowserTranscriber {
 export class TranscribeStream implements AsyncIterable<TranscriptSegment> {
   private readonly file: File
   private readonly options: TranscribeOptions
-  private readonly runtimeId = `whisper-${crypto.randomUUID()}`
+  private readonly resolved: ResolvedTranscriptionEngine
+  private readonly runtimeId: string
   private readonly queue: TranscriptSegment[] = []
   private doneFlag = false
   private error: Error | undefined
@@ -46,6 +56,9 @@ export class TranscribeStream implements AsyncIterable<TranscriptSegment> {
   constructor(file: File, options: TranscribeOptions = {}) {
     this.file = file
     this.options = options
+    const requestedModel = (options.model as WhisperModel | undefined) ?? DEFAULT_WHISPER_MODEL
+    this.resolved = resolveTranscriptionEngine(requestedModel, options.language)
+    this.runtimeId = `${this.resolved.engine}-${crypto.randomUUID()}`
   }
 
   async *[Symbol.asyncIterator](): AsyncGenerator<TranscriptSegment> {
@@ -184,9 +197,10 @@ export class TranscribeStream implements AsyncIterable<TranscriptSegment> {
     try {
       await this.bridge.start(
         this.file,
-        (this.options.model as WhisperModel | undefined) ?? DEFAULT_WHISPER_MODEL,
+        this.resolved.model,
         this.options.language,
         this.options.quantization,
+        this.resolved.engine,
       )
       this.startPlaybackWatcher()
     } catch (error) {
@@ -203,21 +217,25 @@ export class TranscribeStream implements AsyncIterable<TranscriptSegment> {
     }
 
     this.runtimeRegistered = true
-    const model = (this.options.model as WhisperModel | undefined) ?? DEFAULT_WHISPER_MODEL
+    const now = Date.now()
+    const isParakeet = this.resolved.engine === 'parakeet'
     const quantization =
       (this.options.quantization as MediaTranscriptQuantization | undefined) ?? 'hybrid'
-    const now = Date.now()
 
     localInferenceRuntimeRegistry.registerRuntime(
       {
         id: this.runtimeId,
-        feature: 'whisper',
-        featureLabel: 'Whisper',
-        modelKey: model,
-        modelLabel: formatWhisperRuntimeModelLabel(model, quantization),
+        feature: isParakeet ? 'parakeet' : 'whisper',
+        featureLabel: isParakeet ? 'Parakeet' : 'Whisper',
+        modelKey: this.resolved.model,
+        modelLabel: isParakeet
+          ? formatParakeetRuntimeModelLabel('webgpu')
+          : formatWhisperRuntimeModelLabel(this.resolved.model, quantization),
         backend: 'unknown',
         state: 'loading',
-        estimatedBytes: estimateWhisperRuntimeBytes(model, quantization),
+        estimatedBytes: isParakeet
+          ? estimateParakeetRuntimeBytes('webgpu')
+          : estimateWhisperRuntimeBytes(this.resolved.model, quantization),
         activeJobs: 1,
         loadedAt: now,
         lastUsedAt: now,
