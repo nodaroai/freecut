@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   CircleDashed,
+  Info,
   Loader2,
   Play,
   Send,
@@ -12,6 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/shared/ui/cn'
 import { useAgentStore, type PlanStepState } from '../agent'
 
@@ -165,14 +167,6 @@ export const AgentChatPanel = memo(function AgentChatPanel() {
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {messages.length === 0 && phase === 'idle' && (
           <div className="space-y-3">
-            <div className="rounded-lg border border-border bg-secondary/20 p-3">
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {t('agent.empty.intro', {
-                  defaultValue:
-                    'Ask me to edit your timeline in plain language. I run fully on-device — nothing leaves your computer. I propose a plan first; you confirm before anything changes.',
-                })}
-              </p>
-            </div>
             <div className="flex flex-wrap gap-1.5">
               {SUGGESTIONS.map((suggestion) => (
                 <button
@@ -238,6 +232,26 @@ export const AgentChatPanel = memo(function AgentChatPanel() {
           </div>
         )}
         <div className="flex items-end gap-1.5">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-9 w-9 shrink-0 text-muted-foreground"
+                aria-label={t('agent.empty.infoLabel', { defaultValue: 'About this assistant' })}
+              >
+                <Info className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" side="top" className="w-64 p-3">
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {t('agent.empty.intro', {
+                  defaultValue:
+                    'Ask me to edit your timeline in plain language. I run fully on-device — nothing leaves your computer. I propose a plan first; you confirm before anything changes.',
+                })}
+              </p>
+            </PopoverContent>
+          </Popover>
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
