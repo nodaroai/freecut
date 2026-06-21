@@ -1,5 +1,6 @@
 import {
   Fragment,
+  memo,
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
@@ -146,6 +147,99 @@ function buildSegments(
   return segments
 }
 
+interface TranscriptSegmentRowProps {
+  segment: TranscriptSegment
+  tokens: readonly TranscriptToken[]
+  /** Global index of the active word, or -1 when it falls outside this segment. */
+  activeIndex: number
+  selectedKeys: ReadonlySet<string>
+  matchKeys: ReadonlySet<string>
+  ignoredKeys: ReadonlySet<string>
+  matchesApproximate: boolean
+  onSeek: (frame: number) => void
+  onPointerDown: (index: number, event: ReactPointerEvent) => void
+}
+
+/**
+ * One timestamped paragraph. Memoized so the per-frame playhead highlight only
+ * re-renders the segment that gains/loses the active word — the parent passes
+ * activeIndex={-1} to every other segment, so React.memo bails on them and the
+ * full transcript no longer reconciles each frame during playback/skim.
+ */
+const TranscriptSegmentRow = memo(function TranscriptSegmentRow({
+  segment,
+  tokens,
+  activeIndex,
+  selectedKeys,
+  matchKeys,
+  ignoredKeys,
+  matchesApproximate,
+  onSeek,
+  onPointerDown,
+}: TranscriptSegmentRowProps) {
+  const { t } = useTranslation()
+  return (
+    <Fragment>
+      {segment.isClipStart && (
+        <div className="flex items-center gap-2 pt-4 pb-1 first:pt-0" aria-hidden>
+          <span className="h-px flex-1 bg-border" />
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {t('transcript.boundaryClip', { defaultValue: 'New clip' })}
+          </span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      )}
+      <div className="group grid grid-cols-[3rem_1fr] gap-x-3 py-1.5">
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => onSeek(segment.startFrame)}
+          aria-label={t('transcript.jumpTo', {
+            defaultValue: 'Jump to {{time}}',
+            time: formatTimecode(segment.startSeconds),
+          })}
+          className="mt-px h-fit select-none rounded text-right font-mono text-[11px] tabular-nums leading-7 text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+        >
+          {formatTimecode(segment.startSeconds)}
+        </button>
+        <p className="text-[13px] leading-7">
+          {segment.indices.map((index) => {
+            const token = tokens[index]
+            if (!token) return null
+            const isActive = index === activeIndex
+            const isSelected = selectedKeys.has(token.key)
+            const isMatch = matchKeys.has(token.key)
+            const isIgnored = ignoredKeys.has(token.key)
+            return (
+              <span
+                key={token.key}
+                data-token-key={token.key}
+                data-token-index={index}
+                onPointerDown={(event) => onPointerDown(index, event)}
+                className={cn(
+                  'cursor-text rounded px-0.5',
+                  isSelected
+                    ? 'bg-primary text-primary-foreground'
+                    : isActive
+                      ? 'bg-yellow-300 text-neutral-900 shadow-sm'
+                      : isMatch
+                        ? matchesApproximate
+                          ? 'text-foreground ring-1 ring-inset ring-amber-500/40'
+                          : 'text-foreground ring-1 ring-inset ring-amber-500/70'
+                        : 'text-foreground/85 hover:bg-secondary/60 hover:text-foreground',
+                  isIgnored && 'line-through decoration-from-font opacity-45',
+                )}
+              >
+                {token.text}{' '}
+              </span>
+            )
+          })}
+        </p>
+      </div>
+    </Fragment>
+  )
+})
+
 export interface TranscriptEditorPanelProps {
   /** Only fetch/transcribe while the tab is actually visible. */
   active: boolean
@@ -157,7 +251,12 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
   const itemById = useItemsStore((s) => s.itemById)
   const allItems = useItemsStore((s) => s.items)
   const timelineFps = useTimelineSettingsStore((s) => s.fps)
-  const currentFrame = usePlaybackStore((s) => s.currentFrame)
+  // Only track the playhead while the tab is visible. The panel is always mounted
+  // (media-sidebar toggles a CSS `hidden` class, never unmounts), so subscribing to
+  // currentFrame unconditionally would re-render + reconcile the whole token list on
+  // every playback/skim frame even when hidden. When inactive the selector returns a
+  // constant, so zustand skips the re-render entirely.
+  const currentFrame = usePlaybackStore((s) => (active ? s.currentFrame : 0))
   const isPlaying = usePlaybackStore((s) => s.isPlaying)
   const ignoreRanges = useTranscriptIgnoreStore((s) => s.ranges)
   const setTranscriptShortcutScope = useEditorStore((s) => s.setTranscriptEditorShortcutScopeActive)
@@ -183,6 +282,11 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
   // depending on `mediaState` (which would re-run it and cancel its own fetch).
   const requestedRef = useRef<Set<string>>(new Set())
   const mountedRef = useRef(true)
+  // Mirror anchorIndex so handlePointerDown can read it without listing it as a
+  // dependency — otherwise every selection click swaps the callback reference and
+  // re-renders all TranscriptSegmentRows, defeating their React.memo.
+  const anchorIndexRef = useRef(anchorIndex)
+  anchorIndexRef.current = anchorIndex
 
   // Own Delete/Backspace whenever the pointer or focus is inside the panel, so
   // the timeline's clip-delete shortcut yields to us (see use-editing-shortcuts).
@@ -335,16 +439,17 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
     )
   }, [active, uniqueMediaIds, refreshNonce])
 
-  // Keep the active word in view during playback.
+  // Keep the active word in view during playback. Skip entirely when hidden — a
+  // querySelector + scrollIntoView every frame on an off-screen panel is pure waste.
   useEffect(() => {
-    if (!isPlaying || activeIndex < 0) return
+    if (!active || !isPlaying || activeIndex < 0) return
     const key = tokens[activeIndex]?.key
     if (!key) return
     const el = scrollRef.current?.querySelector<HTMLElement>(
       `[data-token-key="${CSS.escape(key)}"]`,
     )
     el?.scrollIntoView({ block: 'nearest' })
-  }, [isPlaying, activeIndex, tokens])
+  }, [active, isPlaying, activeIndex, tokens])
 
   useEffect(() => {
     const stop = () => {
@@ -362,7 +467,7 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
     (index: number, event: ReactPointerEvent) => {
       const token = tokens[index]
       if (!token) return
-      if (event.shiftKey && anchorIndex >= 0) {
+      if (event.shiftKey && anchorIndexRef.current >= 0) {
         setFocusIndex(index)
       } else {
         isSelectingRef.current = true
@@ -378,7 +483,7 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
       scrollRef.current?.setPointerCapture(event.pointerId)
       seekToToken(token.startFrame)
     },
-    [tokens, anchorIndex, seekToToken],
+    [tokens, seekToToken],
   )
 
   // Drag-extend by hit-testing the word under the cursor on every move. This is
@@ -741,68 +846,24 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
           </div>
         ) : (
           <div className="mx-auto max-w-[62ch] select-none">
-            {segments.map((segment) => {
-              return (
-                <Fragment key={segment.key}>
-                  {segment.isClipStart && (
-                    <div className="flex items-center gap-2 pt-4 pb-1 first:pt-0" aria-hidden>
-                      <span className="h-px flex-1 bg-border" />
-                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                        {t('transcript.boundaryClip', { defaultValue: 'New clip' })}
-                      </span>
-                      <span className="h-px flex-1 bg-border" />
-                    </div>
-                  )}
-                  <div className="group grid grid-cols-[3rem_1fr] gap-x-3 py-1.5">
-                    <button
-                      type="button"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={() => seekToToken(segment.startFrame)}
-                      aria-label={t('transcript.jumpTo', {
-                        defaultValue: 'Jump to {{time}}',
-                        time: formatTimecode(segment.startSeconds),
-                      })}
-                      className="mt-px h-fit select-none rounded text-right font-mono text-[11px] tabular-nums leading-7 text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                    >
-                      {formatTimecode(segment.startSeconds)}
-                    </button>
-                    <p className="text-[13px] leading-7">
-                      {segment.indices.map((index) => {
-                        const token = tokens[index]
-                        if (!token) return null
-                        const isActive = index === activeIndex
-                        const isSelected = selectedKeys.has(token.key)
-                        const isMatch = matchKeys.has(token.key)
-                        const isIgnored = ignoredKeys.has(token.key)
-                        return (
-                          <span
-                            key={token.key}
-                            data-token-key={token.key}
-                            data-token-index={index}
-                            onPointerDown={(event) => handlePointerDown(index, event)}
-                            className={cn(
-                              'cursor-text rounded px-0.5',
-                              isSelected
-                                ? 'bg-primary text-primary-foreground'
-                                : isActive
-                                  ? 'bg-yellow-300 text-neutral-900 shadow-sm'
-                                  : isMatch
-                                    ? matchesApproximate
-                                      ? 'text-foreground ring-1 ring-inset ring-amber-500/40'
-                                      : 'text-foreground ring-1 ring-inset ring-amber-500/70'
-                                    : 'text-foreground/85 hover:bg-secondary/60 hover:text-foreground',
-                              isIgnored && 'line-through decoration-from-font opacity-45',
-                            )}
-                          >
-                            {token.text}{' '}
-                          </span>
-                        )
-                      })}
-                    </p>
-                  </div>
-                </Fragment>
-              )
-            })}
+            {segments.map((segment) => (
+              <TranscriptSegmentRow
+                key={segment.key}
+                segment={segment}
+                tokens={tokens}
+                activeIndex={
+                  activeIndex >= segment.firstIndex && activeIndex <= segment.lastIndex
+                    ? activeIndex
+                    : -1
+                }
+                selectedKeys={selectedKeys}
+                matchKeys={matchKeys}
+                ignoredKeys={ignoredKeys}
+                matchesApproximate={matchesApproximate}
+                onSeek={seekToToken}
+                onPointerDown={handlePointerDown}
+              />
+            ))}
           </div>
         )}
       </div>
