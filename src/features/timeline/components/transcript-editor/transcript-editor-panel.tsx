@@ -167,7 +167,8 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
   const [anchorIndex, setAnchorIndex] = useState(-1)
   const [focusIndex, setFocusIndex] = useState(-1)
   const [query, setQuery] = useState('')
-  const [matchCursor, setMatchCursor] = useState(0)
+  // -1 means "no match shown yet", so the first Next/Enter lands on match 0.
+  const [matchCursor, setMatchCursor] = useState(-1)
   // Bumped when a stored transcript changes externally (e.g. deleted from the media
   // library) to force the load effect to re-fetch instead of serving the stale cache.
   const [refreshNonce, setRefreshNonce] = useState(0)
@@ -511,23 +512,29 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
     useTranscriptIgnoreStore.getState().clear()
   }, [])
 
-  const handleSearchSubmit = useCallback(() => {
-    if (matchSpans.length === 0) return
-    const cursor = matchCursor % matchSpans.length
-    const span = matchSpans[cursor]
-    if (!span) return
-    const token = tokens[span.start]
-    if (!token) return
-    // Select the whole matched run so a phrase jump highlights the phrase.
-    setAnchorIndex(span.start)
-    setFocusIndex(span.end)
-    seekToToken(token.startFrame)
-    const el = scrollRef.current?.querySelector<HTMLElement>(
-      `[data-token-key="${CSS.escape(token.key)}"]`,
-    )
-    el?.scrollIntoView({ block: 'center' })
-    setMatchCursor((prev) => prev + 1)
-  }, [matchSpans, matchCursor, tokens, seekToToken])
+  // Jump to a specific match. Callers own the cursor math (next/prev/Enter) and
+  // pass the target index; this normalizes, selects, and records the cursor in a
+  // single update so navigation never double-increments.
+  const goToMatch = useCallback(
+    (target: number) => {
+      if (matchSpans.length === 0) return
+      const cursor = ((target % matchSpans.length) + matchSpans.length) % matchSpans.length
+      const span = matchSpans[cursor]
+      if (!span) return
+      const token = tokens[span.start]
+      if (!token) return
+      // Select the whole matched run so a phrase jump highlights the phrase.
+      setAnchorIndex(span.start)
+      setFocusIndex(span.end)
+      seekToToken(token.startFrame)
+      const el = scrollRef.current?.querySelector<HTMLElement>(
+        `[data-token-key="${CSS.escape(token.key)}"]`,
+      )
+      el?.scrollIntoView({ block: 'center' })
+      setMatchCursor(cursor)
+    },
+    [matchSpans, tokens, seekToToken],
+  )
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -582,6 +589,7 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
       targets.map(async (mediaId) => {
         try {
           const result = await runMediaTranscriptionJob(mediaId)
+          if (!mountedRef.current) return
           if (result.status === 'cancelled') {
             setMediaState((prev) => ({ ...prev, [mediaId]: { status: 'needs' } }))
             return
@@ -595,7 +603,9 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
           }))
         } catch (error) {
           logger.warn('Transcription failed', { mediaId, error })
-          setMediaState((prev) => ({ ...prev, [mediaId]: { status: 'error' } }))
+          if (mountedRef.current) {
+            setMediaState((prev) => ({ ...prev, [mediaId]: { status: 'error' } }))
+          }
           toast.error(t('transcript.toastTranscribeFailed'))
         }
       }),
@@ -634,12 +644,12 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
             value={query}
             onChange={(event) => {
               setQuery(event.target.value)
-              setMatchCursor(0)
+              setMatchCursor(-1)
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault()
-                handleSearchSubmit()
+                goToMatch(matchCursor + 1)
               }
             }}
             placeholder={t('transcript.searchPlaceholder')}
@@ -650,7 +660,7 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
               type="button"
               onClick={() => {
                 setQuery('')
-                setMatchCursor(0)
+                setMatchCursor(-1)
               }}
               aria-label={t('transcript.clearSearch', { defaultValue: 'Clear search' })}
               className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -678,10 +688,7 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
               size="icon"
               className="h-7 w-7"
               disabled={matchSpans.length === 0}
-              onClick={() => {
-                setMatchCursor((prev) => prev + 1)
-                handleSearchSubmit()
-              }}
+              onClick={() => goToMatch(matchCursor + 1)}
               aria-label={t('transcript.nextMatch')}
             >
               <ChevronDown className="h-3.5 w-3.5" />
@@ -692,10 +699,7 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
               size="icon"
               className="h-7 w-7"
               disabled={matchSpans.length === 0}
-              onClick={() => {
-                setMatchCursor((prev) => (prev + matchSpans.length - 1) % matchSpans.length)
-                handleSearchSubmit()
-              }}
+              onClick={() => goToMatch(matchCursor - 1)}
               aria-label={t('transcript.previousMatch')}
             >
               <ChevronUp className="h-3.5 w-3.5" />
