@@ -65,44 +65,84 @@ export function fuzzyThreshold(length: number): number {
 /** Shortest query eligible for fuzzy fallback (avoids noisy 1–2 char hits). */
 const MIN_FUZZY_QUERY = 3
 
+/** An inclusive run of token indices that satisfied the query. */
+export interface TranscriptMatchSpan {
+  start: number
+  end: number
+}
+
 export interface TranscriptMatchResult {
-  /** Token indices that matched, in order. */
-  indices: number[]
+  /** Matched spans, in document order. Single-word matches span one token. */
+  spans: TranscriptMatchSpan[]
   /** True when results came from the edit-distance fallback, not exact search. */
   approximate: boolean
 }
 
 /**
+ * Exact phrase match across consecutive tokens: every query word but the last
+ * must equal a token (punctuation-insensitive); the last may be a prefix so a
+ * phrase still matches while it's being typed.
+ */
+function matchPhrase(words: readonly string[], queryWords: string[]): TranscriptMatchSpan[] {
+  const keys = queryWords.map(wordKey).filter((word) => word.length > 0)
+  const span = keys.length
+  if (span === 0 || span > words.length) return []
+
+  const spans: TranscriptMatchSpan[] = []
+  for (let i = 0; i + span <= words.length; i++) {
+    let matched = true
+    for (let k = 0; k < span; k++) {
+      const token = wordKey(words[i + k] ?? '')
+      const needle = keys[k] ?? ''
+      const ok = k < span - 1 ? token === needle : token.startsWith(needle)
+      if (!ok) {
+        matched = false
+        break
+      }
+    }
+    if (matched) {
+      spans.push({ start: i, end: i + span - 1 })
+      i += span - 1 // skip past the run to avoid overlapping matches
+    }
+  }
+  return spans
+}
+
+/**
  * Match `query` against per-token `words` (each entry is one token's text).
- * Exact substring first; if that finds nothing and the query is a single word
- * of usable length, fall back to typo-tolerant matching.
+ *
+ * - Multi-word query → exact phrase match across consecutive tokens.
+ * - Single word → exact substring first; if that finds nothing (and the query
+ *   is long enough), fall back to typo-tolerant edit-distance matching.
  */
 export function findTranscriptWordMatches(
   words: readonly string[],
   query: string,
 ): TranscriptMatchResult {
   const trimmed = query.trim()
-  if (!trimmed) return { indices: [], approximate: false }
+  if (!trimmed) return { spans: [], approximate: false }
+
+  const queryWords = trimmed.split(/\s+/)
+  if (queryWords.length > 1) {
+    return { spans: matchPhrase(words, queryWords), approximate: false }
+  }
 
   const needle = normalizeForSearch(trimmed)
-  const exact: number[] = []
+  const exact: TranscriptMatchSpan[] = []
   for (let i = 0; i < words.length; i++) {
-    if (normalizeForSearch(words[i] ?? '').includes(needle)) exact.push(i)
+    if (normalizeForSearch(words[i] ?? '').includes(needle)) exact.push({ start: i, end: i })
   }
-
-  // Exact hits, or a multi-word phrase (cross-word fuzzing is out of scope):
-  // return precise results untouched.
-  if (exact.length > 0 || /\s/.test(trimmed)) {
-    return { indices: exact, approximate: false }
-  }
+  if (exact.length > 0) return { spans: exact, approximate: false }
 
   const key = wordKey(trimmed)
-  if (key.length < MIN_FUZZY_QUERY) return { indices: exact, approximate: false }
+  if (key.length < MIN_FUZZY_QUERY) return { spans: [], approximate: false }
 
   const max = fuzzyThreshold(key.length)
-  const fuzzy: number[] = []
+  const fuzzy: TranscriptMatchSpan[] = []
   for (let i = 0; i < words.length; i++) {
-    if (boundedLevenshtein(key, wordKey(words[i] ?? ''), max) <= max) fuzzy.push(i)
+    if (boundedLevenshtein(key, wordKey(words[i] ?? ''), max) <= max) {
+      fuzzy.push({ start: i, end: i })
+    }
   }
-  return { indices: fuzzy, approximate: fuzzy.length > 0 }
+  return { spans: fuzzy, approximate: fuzzy.length > 0 }
 }

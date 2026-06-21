@@ -47,40 +47,67 @@ describe('findTranscriptWordMatches', () => {
   const words = ['How', 'to', 'trim', 'silences', 'in', 'Ved', 'editor']
 
   it('returns empty for a blank query', () => {
-    expect(findTranscriptWordMatches(words, '   ')).toEqual({ indices: [], approximate: false })
+    expect(findTranscriptWordMatches(words, '   ')).toEqual({ spans: [], approximate: false })
   })
 
   it('matches exact substrings without approximation', () => {
     const result = findTranscriptWordMatches(words, 'sil')
-    expect(result).toEqual({ indices: [3], approximate: false })
+    expect(result).toEqual({ spans: [{ start: 3, end: 3 }], approximate: false })
   })
 
   it('is case- and punctuation-insensitive on exact matches', () => {
     const result = findTranscriptWordMatches(['Trim,', 'TRIMMED'], 'trim')
     expect(result.approximate).toBe(false)
-    expect(result.indices).toEqual([0, 1])
+    expect(result.spans).toEqual([
+      { start: 0, end: 0 },
+      { start: 1, end: 1 },
+    ])
   })
 
   it('falls back to fuzzy only when exact finds nothing', () => {
     // "Vid" is not a substring of any token, but is one edit from "Ved".
     const result = findTranscriptWordMatches(words, 'Vid')
     expect(result.approximate).toBe(true)
-    expect(result.indices).toEqual([5])
+    expect(result.spans).toEqual([{ start: 5, end: 5 }])
   })
 
   it('does not fuzz when an exact match exists', () => {
-    // "trim" matches exactly, so "trip" is irrelevant — but "trim" itself stays exact.
     const result = findTranscriptWordMatches(words, 'trim')
-    expect(result).toEqual({ indices: [2], approximate: false })
+    expect(result).toEqual({ spans: [{ start: 2, end: 2 }], approximate: false })
   })
 
   it('skips fuzzy for very short queries', () => {
     const result = findTranscriptWordMatches(['ax', 'by'], 'az')
-    expect(result).toEqual({ indices: [], approximate: false })
+    expect(result).toEqual({ spans: [], approximate: false })
+  })
+})
+
+describe('findTranscriptWordMatches — phrases', () => {
+  const words = ['So', 'I', 'gonna', 'remove', 'silences', 'in', 'this', 'video']
+
+  it('matches a phrase across consecutive tokens', () => {
+    const result = findTranscriptWordMatches(words, 'remove silences')
+    expect(result).toEqual({ spans: [{ start: 3, end: 4 }], approximate: false })
   })
 
-  it('treats multi-word queries as exact-only', () => {
-    const result = findTranscriptWordMatches(['remove', 'silences'], 'remove silences')
-    expect(result).toEqual({ indices: [], approximate: false })
+  it('allows the trailing word to be a prefix while typing', () => {
+    const result = findTranscriptWordMatches(words, 'remove sil')
+    expect(result.spans).toEqual([{ start: 3, end: 4 }])
+  })
+
+  it('requires whole words for all but the last token', () => {
+    // "sil" as a non-final word must not match "silences".
+    expect(findTranscriptWordMatches(words, 'sil in').spans).toEqual([])
+  })
+
+  it('does not match a phrase that is not contiguous', () => {
+    expect(findTranscriptWordMatches(words, 'remove video').spans).toEqual([])
+  })
+
+  it('is punctuation-insensitive across the phrase', () => {
+    const punctuated = ['remove', 'silences,', 'in']
+    expect(findTranscriptWordMatches(punctuated, 'silences in').spans).toEqual([
+      { start: 1, end: 2 },
+    ])
   })
 })

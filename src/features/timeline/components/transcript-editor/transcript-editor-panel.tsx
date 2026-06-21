@@ -237,13 +237,21 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
       ),
     [tokens, query],
   )
-  const matchIndices = searchResult.indices
+  const matchSpans = searchResult.spans
   const matchesApproximate = searchResult.approximate
 
-  const matchKeys = useMemo(
-    () => new Set(matchIndices.map((index) => tokens[index]?.key)),
-    [matchIndices, tokens],
-  )
+  // One phrase = one navigable result (count + next/prev use matchSpans); every
+  // token inside a span is highlighted.
+  const matchKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const span of matchSpans) {
+      for (let index = span.start; index <= span.end; index++) {
+        const key = tokens[index]?.key
+        if (key) keys.add(key)
+      }
+    }
+    return keys
+  }, [matchSpans, tokens])
 
   // Reset transient UI when the document changes (clips or scope).
   useEffect(() => {
@@ -486,21 +494,22 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
   }, [])
 
   const handleSearchSubmit = useCallback(() => {
-    if (matchIndices.length === 0) return
-    const cursor = matchCursor % matchIndices.length
-    const tokenIndex = matchIndices[cursor]
-    if (tokenIndex === undefined) return
-    const token = tokens[tokenIndex]
+    if (matchSpans.length === 0) return
+    const cursor = matchCursor % matchSpans.length
+    const span = matchSpans[cursor]
+    if (!span) return
+    const token = tokens[span.start]
     if (!token) return
-    setAnchorIndex(tokenIndex)
-    setFocusIndex(tokenIndex)
+    // Select the whole matched run so a phrase jump highlights the phrase.
+    setAnchorIndex(span.start)
+    setFocusIndex(span.end)
     seekToToken(token.startFrame)
     const el = scrollRef.current?.querySelector<HTMLElement>(
       `[data-token-key="${CSS.escape(token.key)}"]`,
     )
     el?.scrollIntoView({ block: 'center' })
     setMatchCursor((prev) => prev + 1)
-  }, [matchIndices, matchCursor, tokens, seekToToken])
+  }, [matchSpans, matchCursor, tokens, seekToToken])
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -611,15 +620,15 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
                   : undefined
               }
             >
-              {matchesApproximate && matchIndices.length > 0 ? '~' : ''}
-              {matchIndices.length}
+              {matchesApproximate && matchSpans.length > 0 ? '~' : ''}
+              {matchSpans.length}
             </span>
             <Button
               type="button"
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              disabled={matchIndices.length === 0}
+              disabled={matchSpans.length === 0}
               onClick={() => {
                 setMatchCursor((prev) => prev + 1)
                 handleSearchSubmit()
@@ -633,9 +642,9 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              disabled={matchIndices.length === 0}
+              disabled={matchSpans.length === 0}
               onClick={() => {
-                setMatchCursor((prev) => (prev + matchIndices.length - 1) % matchIndices.length)
+                setMatchCursor((prev) => (prev + matchSpans.length - 1) % matchSpans.length)
                 handleSearchSubmit()
               }}
               aria-label={t('transcript.previousMatch')}
