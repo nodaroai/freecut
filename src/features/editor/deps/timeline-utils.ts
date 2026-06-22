@@ -4,8 +4,23 @@
  */
 
 export {
+  createClassicTrack,
+  createDefaultAdjustmentItem,
+  createScrubThrottleState,
+  shouldCommitScrubFrame,
+  createDefaultShapeItem,
+  createTextTemplateItem,
+  findCompatibleTrackForItemType,
   findNearestAvailableSpace,
-  areFramesAligned,
+  getDefaultActiveTrackId,
+  getDefaultGeneratedLayerDurationInFrames,
+  getTrackKind,
+  resolveEffectiveTrackStates,
+  getMaxTransitionDurationForHandles,
+  resolveTransitionTargetFromSelection,
+  searchTimelineTranscript,
   timelineToSourceFrames,
   sourceToTimelineFrames,
-} from './timeline-contract';
+  linkItems,
+} from './timeline-contract'
+export type { TranscriptSearchMatch } from './timeline-contract'

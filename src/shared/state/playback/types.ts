@@ -1,68 +1,93 @@
+import type { AudioEqSettings } from '@/types/audio'
+
 export interface CaptureOptions {
-  width?: number;
-  height?: number;
-  quality?: number;
-  format?: 'image/jpeg' | 'image/png' | 'image/webp';
+  width?: number
+  height?: number
+  quality?: number
+  format?: 'image/jpeg' | 'image/png' | 'image/webp'
   /** If true, capture at container size without scaling */
-  fullResolution?: boolean;
+  fullResolution?: boolean
+  /**
+   * If true, do not join an existing in-flight capture. Used by live scopes so
+   * playback sampling waits for the previous read and then captures the newest
+   * frame instead of reusing stale pixels.
+   */
+  fresh?: boolean
+  /**
+   * If true, prefer the rendered preview overlay frame when one is visible.
+   * Color scopes use this so GPU-effect samples match the color workspace
+   * preview instead of an adjacent live player frame.
+   */
+  preferRenderedFrame?: boolean
 }
 
-export type PreviewQuality = 1 | 0.5 | 0.33 | 0.25;
+export type PreviewQuality = 1 | 0.5 | 0.33 | 0.25
 
 export interface PlaybackState {
-  currentFrame: number;
+  currentFrame: number
   /** Internal epoch for last currentFrame mutation (monotonic per store session) */
-  currentFrameEpoch: number;
-  /** Frame currently presented to the user in preview output (null when Player path is active) */
-  displayedFrame: number | null;
-  isPlaying: boolean;
-  playbackRate: number;
-  loop: boolean;
-  volume: number;
-  muted: boolean;
-  zoom: number;
+  currentFrameEpoch: number
+  isPlaying: boolean
+  playbackRate: number
+  loop: boolean
+  /**
+   * Per-device monitor gain (linear, 1 = unity). Persisted to localStorage,
+   * affects only the preview player — not exports. Separate from the
+   * project-scoped master bus gain below.
+   */
+  volume: number
+  muted: boolean
+  /**
+   * Project-scoped master bus gain in dB, applied to the final mix in both
+   * preview and export. Loaded from / saved to the active project's timeline.
+   * Defaults to 0 (unity) for new/loaded projects.
+   */
+  masterBusDb: number
+  busAudioEq?: AudioEqSettings
+  zoom: number
   /** Frame to preview on hover (null when not hovering) */
-  previewFrame: number | null;
+  previewFrame: number | null
   /** Internal epoch for last previewFrame mutation (monotonic per store session) */
-  previewFrameEpoch: number;
+  previewFrameEpoch: number
   /** Internal shared mutation counter used to order frame updates */
-  frameUpdateEpoch: number;
+  frameUpdateEpoch: number
   /** Item ID under the cursor when previewing (null when not over an item) */
-  previewItemId: string | null;
-  /** Function to capture the current Player frame as a data URL (set by VideoPreview) */
-  captureFrame: ((options?: CaptureOptions) => Promise<string | null>) | null;
-  /** Optional raw capture path that returns ImageData directly (avoids encode/decode overhead) */
-  captureFrameImageData?: ((options?: CaptureOptions) => Promise<ImageData | null>) | null;
-  /** Returns the rendered OffscreenCanvas directly for GPU-accelerated scope analysis (near-zero-copy) */
-  captureCanvasSource?: (() => Promise<OffscreenCanvas | HTMLCanvasElement | null>) | null;
+  previewItemId: string | null
   /** Whether to use proxy videos for preview playback (true = use 720p proxies when available) */
-  useProxy: boolean;
+  useProxy: boolean
   /** Fast-scrub render resolution multiplier (1 = full, 0.5 = half, 0.33 = third, 0.25 = quarter) */
-  previewQuality: PreviewQuality;
+  previewQuality: PreviewQuality
+  /**
+   * True while the GPU fast-scrub overlay owns the preview during playback.
+   * When set, the (occluded) DOM composition tree freezes its per-item visual
+   * recomputation (transforms, masks, text layout) at the frame it held when
+   * playback began — the overlay composites the actual frames, so re-deriving
+   * those styles every frame is wasted work behind the overlay. Mount/visibility
+   * and video element sync stay live so the overlay always has correct sources.
+   * Transient runtime flag — never persisted.
+   */
+  compositionVisualFrozen: boolean
 }
 
 export interface PlaybackActions {
-  setCurrentFrame: (frame: number) => void;
+  setCurrentFrame: (frame: number) => void
   /** Update the authoritative playhead and transient scrub preview atomically. */
-  setScrubFrame: (frame: number, itemId?: string | null) => void;
-  play: () => void;
-  pause: () => void;
-  togglePlayPause: () => void;
-  setPlaybackRate: (rate: number) => void;
-  toggleLoop: () => void;
-  setVolume: (volume: number) => void;
-  toggleMute: () => void;
-  setZoom: (zoom: number) => void;
-  setPreviewFrame: (frame: number | null, itemId?: string | null) => void;
-  setDisplayedFrame: (frame: number | null) => void;
-  /** Register a frame capture function (called by VideoPreview on mount) */
-  setCaptureFrame: (fn: ((options?: CaptureOptions) => Promise<string | null>) | null) => void;
-  /** Register raw frame capture function for scopes (optional) */
-  setCaptureFrameImageData?: (fn: ((options?: CaptureOptions) => Promise<ImageData | null>) | null) => void;
-  /** Register canvas source capture for GPU scopes (optional) */
-  setCaptureCanvasSource?: (fn: (() => Promise<OffscreenCanvas | HTMLCanvasElement | null>) | null) => void;
+  setScrubFrame: (frame: number, itemId?: string | null) => void
+  play: () => void
+  pause: () => void
+  togglePlayPause: () => void
+  setPlaybackRate: (rate: number) => void
+  toggleLoop: () => void
+  setVolume: (volume: number) => void
+  toggleMute: () => void
+  setMasterBusDb: (db: number) => void
+  setBusAudioEq: (eq: AudioEqSettings | undefined) => void
+  setZoom: (zoom: number) => void
+  setPreviewFrame: (frame: number | null, itemId?: string | null) => void
   /** Toggle proxy playback mode */
-  toggleUseProxy: () => void;
+  toggleUseProxy: () => void
   /** Set fast-scrub render quality */
-  setPreviewQuality: (quality: PreviewQuality) => void;
+  setPreviewQuality: (quality: PreviewQuality) => void
+  /** Toggle the composition-tree visual freeze used during overlay playback. */
+  setCompositionVisualFrozen: (frozen: boolean) => void
 }

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Keyframe toggle button component.
  * Diamond-shaped button that appears next to animatable properties.
  * - Hollow diamond: No keyframe at current frame (click to add)
@@ -6,33 +6,33 @@
  * - Disabled with strikethrough: Frame is in transition region (keyframes not allowed)
  */
 
-import { useCallback, useMemo } from 'react';
-import { Diamond } from 'lucide-react';
-import { cn } from '@/shared/ui/cn';
-import { useTimelineStore } from '@/features/keyframes/deps/timeline';
-import { useThrottledFrame } from '@/features/keyframes/deps/preview-contract';
-import type { AnimatableProperty } from '@/types/keyframe';
+import { useCallback, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Diamond } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import { cn } from '@/shared/ui/cn'
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import {
-  isFrameInTransitionRegion,
-  getTransitionBlockedMessage,
-} from '../utils/transition-region';
+  useItemsStore,
+  useKeyframesStore,
+  useTimelineStore,
+  useTransitionsStore,
+} from '@/features/keyframes/deps/timeline'
+import { useThrottledFrame } from '@/features/keyframes/deps/preview-contract'
+import type { AnimatableProperty } from '@/types/keyframe'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { isFrameInTransitionRegion, getTransitionBlockedMessage } from '../utils/transition-region'
 
 interface KeyframeToggleProps {
   /** The item ID(s) to toggle keyframes for */
-  itemIds: string[];
+  itemIds: string[]
   /** The property to animate */
-  property: AnimatableProperty;
+  property: AnimatableProperty
   /** Current value of the property (used when adding keyframe) */
-  currentValue: number;
+  currentValue: number
   /** Optional class name for the button */
-  className?: string;
+  className?: string
   /** Disabled state */
-  disabled?: boolean;
+  disabled?: boolean
 }
 
 /**
@@ -46,74 +46,82 @@ export function KeyframeToggle({
   className,
   disabled = false,
 }: KeyframeToggleProps) {
+  const { t } = useTranslation()
   // Get current frame (throttled to reduce re-renders during playback)
-  const currentFrame = useThrottledFrame();
+  const currentFrame = useThrottledFrame()
 
   // Get keyframes for the first item (for multi-select, we show state of first item)
-  const firstItemId = itemIds[0];
-  const itemKeyframes = useTimelineStore(
-    useCallback(
-      (s) => (firstItemId ? s.keyframes.find((k) => k.itemId === firstItemId) : undefined),
-      [firstItemId]
-    )
-  );
+  const firstItemId = itemIds[0]
+  const itemKeyframes = useKeyframesStore(
+    useCallback((s) => (firstItemId ? s.keyframesByItemId[firstItemId] : undefined), [firstItemId]),
+  )
 
   // Get store actions
-  const addKeyframe = useTimelineStore((s) => s.addKeyframe);
-  const removeKeyframe = useTimelineStore((s) => s.removeKeyframe);
+  const addKeyframe = useTimelineStore((s) => s.addKeyframe)
+  const removeKeyframe = useTimelineStore((s) => s.removeKeyframe)
 
   // Get the first item to calculate relative frame
-  const firstItem = useTimelineStore(
-    useCallback(
-      (s) => (firstItemId ? s.items.find((i) => i.id === firstItemId) : undefined),
-      [firstItemId]
-    )
-  );
+  const firstItem = useItemsStore(
+    useCallback((s) => (firstItemId ? s.itemById[firstItemId] : undefined), [firstItemId]),
+  )
 
   // Get transitions to check for blocked regions
-  const transitions = useTimelineStore((s) => s.transitions);
+  const transitions = useTransitionsStore(
+    useShallow(
+      useCallback(
+        (s) =>
+          firstItemId
+            ? s.transitions.filter(
+                (transition) =>
+                  transition.leftClipId === firstItemId || transition.rightClipId === firstItemId,
+              )
+            : [],
+        [firstItemId],
+      ),
+    ),
+  )
 
   // Calculate frame relative to item start
   const relativeFrame = useMemo(() => {
-    if (!firstItem) return 0;
-    return currentFrame - firstItem.from;
-  }, [currentFrame, firstItem]);
+    if (!firstItem) return 0
+    return currentFrame - firstItem.from
+  }, [currentFrame, firstItem])
 
   // Check if frame is in a transition region (blocked for keyframes)
   const transitionBlockedRange = useMemo(() => {
-    if (!firstItem || !firstItemId) return undefined;
-    return isFrameInTransitionRegion(relativeFrame, firstItemId, firstItem, transitions);
-  }, [relativeFrame, firstItemId, firstItem, transitions]);
+    if (!firstItem || !firstItemId) return undefined
+    return isFrameInTransitionRegion(relativeFrame, firstItemId, firstItem, transitions)
+  }, [relativeFrame, firstItemId, firstItem, transitions])
 
-  const isInTransition = transitionBlockedRange !== undefined;
+  const isInTransition = transitionBlockedRange !== undefined
 
   // Check if keyframe exists at current frame
   const keyframeAtFrame = useMemo(() => {
-    if (!itemKeyframes) return undefined;
-    const propKeyframes = itemKeyframes.properties.find((p) => p.property === property);
-    if (!propKeyframes) return undefined;
-    return propKeyframes.keyframes.find((k) => k.frame === relativeFrame);
-  }, [itemKeyframes, property, relativeFrame]);
+    if (!itemKeyframes) return undefined
+    const propKeyframes = itemKeyframes.properties.find((p) => p.property === property)
+    if (!propKeyframes) return undefined
+    return propKeyframes.keyframes.find((k) => k.frame === relativeFrame)
+  }, [itemKeyframes, property, relativeFrame])
 
-  const hasKeyframe = keyframeAtFrame !== undefined;
+  const hasKeyframe = keyframeAtFrame !== undefined
 
   // Check if property has any keyframes at all
   const hasAnyKeyframes = useMemo(() => {
-    if (!itemKeyframes) return false;
-    const propKeyframes = itemKeyframes.properties.find((p) => p.property === property);
-    return propKeyframes ? propKeyframes.keyframes.length > 0 : false;
-  }, [itemKeyframes, property]);
+    if (!itemKeyframes) return false
+    const propKeyframes = itemKeyframes.properties.find((p) => p.property === property)
+    return propKeyframes ? propKeyframes.keyframes.length > 0 : false
+  }, [itemKeyframes, property])
 
   // Handle toggle click
   const handleToggle = useCallback(() => {
-    if (disabled || isInTransition || !firstItemId || relativeFrame < 0) return;
+    if (disabled || isInTransition || !firstItemId || relativeFrame < 0) return
 
     if (hasKeyframe && keyframeAtFrame) {
       // Remove keyframe
-      removeKeyframe(firstItemId, property, keyframeAtFrame.id);
+      removeKeyframe(firstItemId, property, keyframeAtFrame.id)
     } else {
       // Add keyframe at current frame with current value
-      addKeyframe(firstItemId, property, relativeFrame, currentValue);
+      addKeyframe(firstItemId, property, relativeFrame, currentValue)
     }
   }, [
     disabled,
@@ -126,16 +134,14 @@ export function KeyframeToggle({
     addKeyframe,
     property,
     currentValue,
-  ]);
+  ])
 
-  // Don't render if outside item bounds
-  // Valid frame range is [0, durationInFrames - 1] since durationInFrames is a count
-  if (!firstItem || relativeFrame < 0 || relativeFrame >= firstItem.durationInFrames) {
-    return null;
-  }
+  // Disable when playhead is outside item bounds
+  const isOutsideBounds =
+    !firstItem || relativeFrame < 0 || relativeFrame >= firstItem.durationInFrames
 
   // Compute effective disabled state
-  const effectiveDisabled = disabled || isInTransition;
+  const effectiveDisabled = disabled || isInTransition || isOutsideBounds
 
   return (
     <Tooltip>
@@ -153,20 +159,30 @@ export function KeyframeToggle({
             !hasKeyframe && hasAnyKeyframes && !isInTransition && 'text-amber-500/50',
             !hasKeyframe && !hasAnyKeyframes && !isInTransition && 'text-muted-foreground',
             isInTransition && 'text-muted-foreground/50',
-            className
+            className,
           )}
           aria-label={
             isInTransition
-              ? 'Keyframes blocked (transition region)'
-              : hasKeyframe
-                ? 'Remove keyframe'
-                : 'Add keyframe'
+              ? t('timeline.keyframeEditor.keyframesBlockedTransition', {
+                  defaultValue: 'Keyframes blocked (transition region)',
+                })
+              : isOutsideBounds
+                ? t('timeline.keyframeEditor.playheadOutsideClipBounds', {
+                    defaultValue: 'Playhead outside clip bounds',
+                  })
+                : hasKeyframe
+                  ? t('timeline.keyframeEditor.removeKeyframe', {
+                      defaultValue: 'Remove keyframe',
+                    })
+                  : t('timeline.keyframeEditor.addKeyframe', {
+                      defaultValue: 'Add keyframe',
+                    })
           }
         >
           <Diamond
             className={cn(
               'w-3 h-3 rotate-0 transition-transform',
-              hasKeyframe && !isInTransition && 'fill-current'
+              hasKeyframe && !isInTransition && 'fill-current',
             )}
           />
         </button>
@@ -174,13 +190,28 @@ export function KeyframeToggle({
       <TooltipContent side="top" className="text-xs max-w-[200px]">
         {isInTransition && transitionBlockedRange ? (
           <>{getTransitionBlockedMessage(transitionBlockedRange)}</>
+        ) : isOutsideBounds ? (
+          <>
+            {t('timeline.keyframeEditor.playheadIsOutsideClipBounds', {
+              defaultValue: 'Playhead is outside clip bounds',
+            })}
+          </>
         ) : hasKeyframe ? (
-          <>Remove keyframe at frame {relativeFrame}</>
+          <>
+            {t('timeline.keyframeEditor.removeKeyframeAtFrame', {
+              frame: relativeFrame,
+              defaultValue: 'Remove keyframe at frame {{frame}}',
+            })}
+          </>
         ) : (
-          <>Add keyframe at frame {relativeFrame}</>
+          <>
+            {t('timeline.keyframeEditor.addKeyframeAtFrame', {
+              frame: relativeFrame,
+              defaultValue: 'Add keyframe at frame {{frame}}',
+            })}
+          </>
         )}
       </TooltipContent>
     </Tooltip>
-  );
+  )
 }
-

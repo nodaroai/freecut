@@ -1,14 +1,24 @@
-import { useState } from 'react';
-import { Link } from '@tanstack/react-router';
-import { toast } from 'sonner';
-import { MoreVertical, PlayCircle, Edit2, Copy, Trash2, AlertTriangle, HardDrive } from 'lucide-react';
+import { useState, type KeyboardEvent } from 'react'
+import { Trans, useTranslation } from 'react-i18next'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { toast } from 'sonner'
+import {
+  MoreVertical,
+  PlayCircle,
+  Edit2,
+  Copy,
+  Trash2,
+  AlertTriangle,
+  HardDrive,
+  Check,
+} from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@/components/ui/dropdown-menu'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,76 +28,151 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
-import type { Project } from '@/types/project';
-import { formatRelativeTime } from '../utils/project-helpers';
-import { useDeleteProject, useDuplicateProject } from '../hooks/use-project-actions';
-import { useProjectThumbnail } from '../hooks/use-project-thumbnail';
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import type { Project } from '@/types/project'
+import { formatRelativeTime } from '../utils/project-helpers'
+import {
+  useDeleteProject,
+  useDuplicateProject,
+  useRestoreProject,
+} from '../hooks/use-project-actions'
+import { useProjectThumbnail } from '../hooks/use-project-thumbnail'
+import {
+  DEFAULT_PROJECT_FPS,
+  DEFAULT_PROJECT_HEIGHT,
+  DEFAULT_PROJECT_WIDTH,
+} from '@/shared/projects/defaults'
 
 interface ProjectCardProps {
-  project: Project;
-  onEdit?: (project: Project) => void;
+  project: Project
+  onEdit?: (project: Project) => void
+  isSelected?: boolean
+  onCardMouseDown?: (e: React.MouseEvent, project: Project) => void
+  onCardClick?: (e: React.MouseEvent, project: Project) => void
 }
 
-export function ProjectCard({ project, onEdit }: ProjectCardProps) {
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isDuplicating, setIsDuplicating] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [clearLocalFiles, setClearLocalFiles] = useState(false);
-  const deleteProject = useDeleteProject();
-  const duplicateProject = useDuplicateProject();
-  const thumbnailUrl = useProjectThumbnail(project);
+export function ProjectCard({
+  project,
+  onEdit,
+  isSelected = false,
+  onCardMouseDown,
+  onCardClick,
+}: ProjectCardProps) {
+  const navigate = useNavigate()
+  const { t } = useTranslation()
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isDuplicating, setIsDuplicating] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [clearLocalFiles, setClearLocalFiles] = useState(false)
+  const deleteProject = useDeleteProject()
+  const restoreProject = useRestoreProject()
+  const duplicateProject = useDuplicateProject()
+  const thumbnailUrl = useProjectThumbnail(project)
 
   const handleDeleteClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setShowDeleteDialog(true);
-  };
+    e.preventDefault()
+    e.stopPropagation()
+    setShowDeleteDialog(true)
+  }
 
   const handleConfirmDelete = async () => {
-    setIsDeleting(true);
-    setShowDeleteDialog(false);
-    const wantedLocalDelete = clearLocalFiles;
-    const result = await deleteProject(project.id, clearLocalFiles);
-    setIsDeleting(false);
-    setClearLocalFiles(false);
+    setIsDeleting(true)
+    setShowDeleteDialog(false)
+    const wantedLocalDelete = clearLocalFiles
+    const projectId = project.id
+    const result = await deleteProject(projectId, clearLocalFiles)
+    setIsDeleting(false)
+    setClearLocalFiles(false)
 
     if (!result.success) {
-      toast.error('Failed to delete project', { description: result.error });
-    } else if (wantedLocalDelete && !result.localFilesDeleted) {
-      toast.warning('Project deleted but local files were not removed', {
-        description: 'Filesystem cleanup failed — you may need to delete the folder manually.',
-      });
+      toast.error(t('projects.toasts.deleteFailed'), { description: result.error })
+      return
     }
-  };
+
+    if (wantedLocalDelete && !result.localFilesDeleted) {
+      toast.warning(t('projects.toasts.movedToTrash', { name: result.originalName }), {
+        description: t('projects.toasts.localFilesNotRemoved'),
+      })
+      return
+    }
+
+    toast.success(t('projects.toasts.movedToTrash', { name: result.originalName }), {
+      description: wantedLocalDelete
+        ? t('projects.toasts.localFilesDeleted')
+        : t('projects.toasts.canUndo'),
+      duration: 8000,
+      action: {
+        label: t('projects.undo'),
+        onClick: async () => {
+          const undo = await restoreProject(projectId)
+          if (undo.success) {
+            toast.success(t('projects.toasts.restored', { name: result.originalName }))
+          } else {
+            toast.error(t('projects.toasts.restoreFailed'), { description: undo.error })
+          }
+        },
+      },
+    })
+  }
 
   const handleDuplicate = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault()
+    e.stopPropagation()
 
-    setIsDuplicating(true);
-    const result = await duplicateProject(project.id);
-    setIsDuplicating(false);
+    setIsDuplicating(true)
+    const result = await duplicateProject(project.id)
+    setIsDuplicating(false)
 
     if (!result.success) {
-      toast.error('Failed to duplicate project', { description: result.error });
+      toast.error(t('projects.toasts.duplicateFailed'), { description: result.error })
     }
-  };
+  }
 
   const handleEdit = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onEdit?.(project);
-  };
+    e.preventDefault()
+    e.stopPropagation()
+    onEdit?.(project)
+  }
+
+  const handleClick = (e: React.MouseEvent) => {
+    onCardClick?.(e, project)
+  }
+
+  const openProject = () => {
+    navigate({ to: '/editor/$projectId', params: { projectId: project.id } })
+  }
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openProject()
+  }
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    e.stopPropagation()
+    openProject()
+  }
+
+  const handleOpenClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openProject()
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    onCardMouseDown?.(e, project)
+  }
 
   // Safe metadata access with defaults
-  const width = project?.metadata?.width || 1920;
-  const height = project?.metadata?.height || 1080;
-  const fps = project?.metadata?.fps || 30;
+  const width = project?.metadata?.width || DEFAULT_PROJECT_WIDTH
+  const height = project?.metadata?.height || DEFAULT_PROJECT_HEIGHT
+  const fps = project?.metadata?.fps || DEFAULT_PROJECT_FPS
 
-  const resolution = `${width}×${height}`;
-  const aspectRatio = width / height;
+  const resolution = `${width}×${height}`
+  const aspectRatio = width / height
   const aspectRatioLabel =
     Math.abs(aspectRatio - 16 / 9) < 0.01
       ? '16:9'
@@ -97,22 +182,41 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
           ? '1:1'
           : Math.abs(aspectRatio - 21 / 9) < 0.01
             ? '21:9'
-            : `${width}:${height}`;
+            : `${width}:${height}`
 
   return (
-    <div className="group relative panel-bg border border-border rounded-lg overflow-hidden transition-all hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5">
+    <div
+      data-project-card
+      data-project-id={project.id}
+      onMouseDown={handleMouseDown}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
+      aria-label={t('projects.card.openProject')}
+      className={`group relative panel-bg border rounded-lg overflow-hidden transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+        isSelected
+          ? 'border-primary ring-2 ring-primary/40 shadow-lg shadow-primary/10'
+          : 'border-border hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5'
+      }`}
+    >
+      {/* Selection check badge */}
+      {isSelected && (
+        <div className="absolute top-2 left-2 z-10 w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md pointer-events-none">
+          <Check className="w-4 h-4" strokeWidth={3} />
+        </div>
+      )}
+
       {/* Thumbnail */}
-      <Link
-        to="/editor/$projectId"
-        params={{ projectId: project.id }}
-        className="block relative aspect-video bg-secondary/30 overflow-hidden"
-      >
+      <div className="block relative aspect-video bg-secondary/30 overflow-hidden">
         {thumbnailUrl ? (
           <img
-            key={project.updatedAt} // Force re-render when project is updated
+            key={project.updatedAt}
             src={thumbnailUrl}
             alt={project.name}
-            className="w-full h-full object-contain bg-black/40"
+            draggable={false}
+            className="w-full h-full object-contain bg-black/40 pointer-events-none"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-secondary/40 to-secondary/20">
@@ -121,18 +225,18 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
         )}
 
         {/* Hover overlay */}
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <div className="flex items-center gap-2 text-white">
-            <PlayCircle className="w-6 h-6" />
-            <span className="font-medium">Open in Editor</span>
-          </div>
+        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center justify-center">
+          <Button size="sm" className="gap-2" onClick={handleOpenClick}>
+            <PlayCircle className="w-4 h-4" />
+            {t('projects.card.openProject')}
+          </Button>
         </div>
 
         {/* Resolution badge */}
-        <div className="absolute top-2 right-2 px-2 py-1 bg-black/80 backdrop-blur-sm rounded text-xs font-mono text-white">
+        <div className="absolute top-2 right-2 px-2 py-1 bg-black/80 backdrop-blur-sm rounded text-xs font-mono text-white pointer-events-none">
           {resolution}
         </div>
-      </Link>
+      </div>
 
       {/* Content */}
       <div className="p-4">
@@ -155,7 +259,12 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
               >
                 <MoreVertical className="w-4 h-4" />
               </Button>
@@ -168,12 +277,12 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
                   className="flex items-center gap-2 cursor-pointer"
                 >
                   <PlayCircle className="w-4 h-4" />
-                  Open in Editor
+                  {t('projects.card.openInEditor')}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleEdit} className="flex items-center gap-2">
                 <Edit2 className="w-4 h-4" />
-                Edit Settings
+                {t('projects.card.editSettings')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={handleDuplicate}
@@ -181,7 +290,7 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
                 className="flex items-center gap-2"
               >
                 <Copy className="w-4 h-4" />
-                {isDuplicating ? 'Duplicating...' : 'Duplicate'}
+                {isDuplicating ? t('projects.card.duplicating') : t('projects.card.duplicate')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -190,26 +299,32 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
                 className="flex items-center gap-2 text-destructive focus:text-destructive"
               >
                 <Trash2 className="w-4 h-4" />
-                {isDeleting ? 'Deleting...' : 'Delete'}
+                {isDeleting ? t('common.deleting') : t('common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
         {/* Delete Confirmation Dialog */}
-        <AlertDialog open={showDeleteDialog} onOpenChange={(open) => {
-          setShowDeleteDialog(open);
-          if (!open) setClearLocalFiles(false);
-        }}>
-          <AlertDialogContent>
+        <AlertDialog
+          open={showDeleteDialog}
+          onOpenChange={(open) => {
+            setShowDeleteDialog(open)
+            if (!open) setClearLocalFiles(false)
+          }}
+        >
+          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
             <AlertDialogHeader>
               <AlertDialogTitle className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-destructive" />
-                Delete Project
+                {t('projects.card.deleteProjectTitle')}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Are you sure you want to delete <strong>{project.name}</strong>? This action cannot be
-                undone and will permanently remove the project and all its contents.
+                <Trans
+                  i18nKey="projects.card.deleteProjectDescription"
+                  values={{ name: project.name }}
+                  components={{ strong: <strong /> }}
+                />
               </AlertDialogDescription>
             </AlertDialogHeader>
             {project.rootFolderHandle && (
@@ -223,21 +338,25 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                     <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
-                    Also delete local files on disk
+                    {t('projects.card.alsoDeleteLocalFiles')}
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Remove files from the linked folder{project.rootFolderName ? ` "${project.rootFolderName}"` : ''}. This cannot be undone.
+                    {project.rootFolderName
+                      ? t('projects.card.removeFilesFromNamedFolder', {
+                          folder: project.rootFolderName,
+                        })
+                      : t('projects.card.removeFilesFromFolder')}
                   </p>
                 </div>
               </label>
             )}
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleConfirmDelete}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
-                Delete Project
+                {t('projects.card.deleteProjectTitle')}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -259,5 +378,5 @@ export function ProjectCard({ project, onEdit }: ProjectCardProps) {
         </div>
       </div>
     </div>
-  );
+  )
 }

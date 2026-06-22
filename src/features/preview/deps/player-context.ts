@@ -1,8 +1,10 @@
 export {
   PlayerEmitterProvider,
   ClockBridgeProvider,
-  useBridgedTimelineContext,
+  useClock,
+  useClockIsPlaying,
+  useClockPlaybackRate,
   VideoConfigProvider,
   useVideoConfig,
   usePlayer,
-} from './player-contract';
+} from './player-contract'

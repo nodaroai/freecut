@@ -1,14 +1,15 @@
-﻿import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState, useRef } from 'react';
-import { toast } from 'sonner';
-import { createLogger } from '@/shared/logging/logger';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { useEffect, useState, useRef } from 'react'
+import { Trans, useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { createLogger } from '@/shared/logging/logger'
 
-const logger = createLogger('ProjectsIndex');
-import { Button } from '@/components/ui/button';
-import { Plus, Upload, FolderOpen, File, Github } from 'lucide-react';
-import { FreeCutLogo } from '@/components/brand/freecut-logo';
-import { ProjectList } from '@/features/projects/components/project-list';
-import { ProjectForm } from '@/features/projects/components/project-form';
+const logger = createLogger('ProjectsIndex')
+import { Button } from '@/components/ui/button'
+import { Plus, Upload, FolderOpen, File, Github, BookOpen } from 'lucide-react'
+import { FreeCutLogo } from '@/components/brand/freecut-logo'
+import { ProjectList } from '@/features/projects/components/project-list'
+import { EditProjectForm } from '@/features/projects/components/project-form'
 import {
   Dialog,
   DialogContent,
@@ -16,104 +17,119 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from '@/components/ui/dialog';
-import { Progress } from '@/components/ui/progress';
-import { useProjectStore } from '@/features/projects/stores/project-store';
-import { useProjectActions } from '@/features/projects/hooks/use-project-actions';
-import { useProjectsLoading, useProjectsError } from '@/features/projects/hooks/use-project-selectors';
-import { cleanupBlobUrls } from '@/features/media-library/utils/media-resolver';
-import type { Project } from '@/types/project';
-import type { ProjectFormData } from '@/features/projects/utils/validation';
-import type { ImportProgress } from '@/features/project-bundle/types/bundle';
-import { BUNDLE_EXTENSION } from '@/features/project-bundle/types/bundle';
+} from '@/components/ui/dialog'
+import { Progress } from '@/components/ui/progress'
+import { useProjectStore } from '@/features/projects/stores/project-store'
+import { useProjectActions } from '@/features/projects/hooks/use-project-actions'
+import {
+  useProjects,
+  useProjectsLoading,
+  useProjectsError,
+} from '@/features/projects/hooks/use-project-selectors'
+import { cleanupBlobUrls } from '@/features/media-library/utils/media-resolver'
+import type { Project } from '@/types/project'
+import type { ProjectFormData } from '@/features/projects/utils/validation'
+import type { ImportProgress } from '@/features/project-bundle/types/bundle'
+import { BUNDLE_EXTENSION } from '@/features/project-bundle/types/bundle'
+import { LegacyMigrationBanner } from '@/features/projects/components/legacy-migration-banner'
+import { LegacyMigrationErrors } from '@/features/projects/components/legacy-migration-errors'
+import { TrashSection } from '@/features/projects/components/trash-section'
+import { WorkspaceIndicator } from '@/features/workspace-gate'
+import { LanguageSwitcher } from '@/shared/ui/language-switcher'
 
 export const Route = createFileRoute('/projects/')({
   component: ProjectsIndex,
   // Clean up any media blob URLs when returning to projects page
   beforeLoad: async () => {
-    cleanupBlobUrls();
-    // Always reload projects from IndexedDB to get fresh data (thumbnails may have changed)
-    const { loadProjects } = useProjectStore.getState();
-    await loadProjects();
+    cleanupBlobUrls()
+    // Always reload projects from storage to get fresh data (thumbnails may have changed)
+    const { loadProjects } = useProjectStore.getState()
+    await loadProjects()
   },
-});
+})
 
 function ProjectsIndex() {
-  const navigate = useNavigate();
-  const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const navigate = useNavigate()
+  const { t } = useTranslation()
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Import state - two-step flow
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
-  const [projectNameFromFile, setProjectNameFromFile] = useState<string | null>(null);
-  const [destinationDir, setDestinationDir] = useState<FileSystemDirectoryHandle | null>(null);
-  const [destinationName, setDestinationName] = useState<string | null>(null);
-  const [useProjectsFolder, setUseProjectsFolder] = useState(true); // Create FreeCutProjects subfolder
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
+  const [projectNameFromFile, setProjectNameFromFile] = useState<string | null>(null)
+  const [destinationDir, setDestinationDir] = useState<FileSystemDirectoryHandle | null>(null)
+  const [destinationName, setDestinationName] = useState<string | null>(null)
+  const [useProjectsFolder, setUseProjectsFolder] = useState(true) // Create FreeCutProjects subfolder
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [isImporting, setIsImporting] = useState(false)
 
-  const PROJECTS_FOLDER_NAME = 'FreeCutProjects';
+  const PROJECTS_FOLDER_NAME = 'FreeCutProjects'
 
   // Extract project name from bundle filename
   // Handles both "myproject.freecut.zip" and browser-renamed "myproject.freecut (1).zip"
   const extractProjectName = (fileName: string): string => {
     // Remove .zip extension first
-    let name = fileName.replace(/\.zip$/i, '');
+    let name = fileName.replace(/\.zip$/i, '')
     // Remove browser duplicate suffix like " (1)", " (2)", etc.
-    name = name.replace(/\s*\(\d+\)$/, '');
+    name = name.replace(/\s*\(\d+\)$/, '')
     // Remove .freecut suffix
-    name = name.replace(/\.freecut$/i, '');
-    return name;
-  };
+    name = name.replace(/\.freecut$/i, '')
+    return name
+  }
 
   // Check if file is a valid bundle (handles browser-renamed files like "project.freecut (1).zip")
   const isValidBundleFile = (fileName: string): boolean => {
     // Match: anything.freecut.zip or anything.freecut (N).zip
-    return /\.freecut(\s*\(\d+\))?\.zip$/i.test(fileName);
-  };
+    return /\.freecut(\s*\(\d+\))?\.zip$/i.test(fileName)
+  }
 
-  const isLoading = useProjectsLoading();
-  const error = useProjectsError();
-  const { loadProjects, updateProject } = useProjectActions();
+  const isLoading = useProjectsLoading()
+  const projects = useProjects()
+  const error = useProjectsError()
+  const { loadProjects, updateProject } = useProjectActions()
+
+  // Only show the full-page spinner for the genuine initial load — mutations
+  // (delete/duplicate/update) should never blank the populated list.
+  const showInitialLoadingSpinner = isLoading && projects.length === 0
 
   // Load projects on mount
   useEffect(() => {
-    loadProjects();
-  }, [loadProjects]);
+    loadProjects()
+  }, [loadProjects])
 
   // Handle import file selection
   const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
+    fileInputRef.current?.click()
+  }
 
   // Step 1: File selected - show destination selection dialog
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const file = event.target.files?.[0]
+    if (!file) return
 
     // Reset file input for next selection
-    event.target.value = '';
+    event.target.value = ''
 
     // Validate file extension (handles browser-renamed files like "project.freecut (1).zip")
     if (!isValidBundleFile(file.name)) {
-      setImportError(`Please select a valid ${BUNDLE_EXTENSION} file`);
-      setImportDialogOpen(true);
-      return;
+      setImportError(t('projects.import.invalidFile', { extension: BUNDLE_EXTENSION }))
+      setImportDialogOpen(true)
+      return
     }
 
     // Store file and extract project name, then show destination selection dialog
-    setPendingImportFile(file);
-    setProjectNameFromFile(extractProjectName(file.name));
-    setDestinationDir(null);
-    setDestinationName(null);
-    setImportError(null);
-    setImportProgress(null);
-    setIsImporting(false);
-    setImportDialogOpen(true);
-  };
+    setPendingImportFile(file)
+    setProjectNameFromFile(extractProjectName(file.name))
+    setDestinationDir(null)
+    setDestinationName(null)
+    setImportError(null)
+    setImportProgress(null)
+    setIsImporting(false)
+    setImportDialogOpen(true)
+  }
 
   // Step 2: User clicks to select destination folder (fresh user gesture!)
   const handleSelectDestination = async () => {
@@ -122,142 +138,151 @@ function ProjectsIndex() {
         id: 'freecut-import',
         mode: 'readwrite',
         startIn: 'documents',
-      });
-      setDestinationDir(dirHandle);
-      setDestinationName(dirHandle.name);
-      setImportError(null);
+      })
+      setDestinationDir(dirHandle)
+      setDestinationName(dirHandle.name)
+      setImportError(null)
     } catch (err) {
       // User cancelled - ignore
       if (err instanceof DOMException && err.name === 'AbortError') {
-        return;
+        return
       }
       // Handle "contains system files" or permission errors
-      if (err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
-        setImportError(
-          'Cannot select system folders directly. Use "New Folder" in the picker to create a folder first, then select it.'
-        );
-        return;
+      if (
+        err instanceof DOMException &&
+        (err.name === 'NotAllowedError' || err.name === 'SecurityError')
+      ) {
+        setImportError(t('projects.import.cannotSelectSystemFolders'))
+        return
       }
-      logger.error('Failed to select directory:', err);
-      setImportError('Failed to select destination folder. Please try a different location.');
+      logger.error('Failed to select directory:', err)
+      setImportError(t('projects.import.selectDestinationFailed'))
     }
-  };
+  }
 
   // Step 3: User clicks "Start Import" - begin actual import
   const handleStartImport = async () => {
-    if (!pendingImportFile || !destinationDir) return;
+    if (!pendingImportFile || !destinationDir) return
 
-    setIsImporting(true);
-    setImportProgress({ percent: 0, stage: 'validating' });
+    setIsImporting(true)
+    setImportProgress({ percent: 0, stage: 'validating' })
 
     try {
       // If useProjectsFolder is enabled, create/get the FreeCutProjects subfolder first
-      let finalDestination = destinationDir;
+      let finalDestination = destinationDir
       if (useProjectsFolder) {
         try {
-          finalDestination = await destinationDir.getDirectoryHandle(PROJECTS_FOLDER_NAME, { create: true });
+          finalDestination = await destinationDir.getDirectoryHandle(PROJECTS_FOLDER_NAME, {
+            create: true,
+          })
         } catch (err) {
-          logger.error('Failed to create FreeCutProjects folder:', err);
-          throw new Error(`Failed to create ${PROJECTS_FOLDER_NAME} folder. Try selecting a different location.`);
+          logger.error('Failed to create FreeCutProjects folder:', err)
+          throw new Error(t('projects.import.createFolderFailed', { folder: PROJECTS_FOLDER_NAME }))
         }
       }
 
-      const { importProjectBundle } = await import(
-        '@/features/project-bundle/services/bundle-import-service'
-      );
+      const { importProjectBundle } =
+        await import('@/features/project-bundle/services/bundle-import-service')
 
       const result = await importProjectBundle(
         pendingImportFile,
         finalDestination,
         {},
         (progress) => {
-          setImportProgress(progress);
-        }
-      );
+          setImportProgress(progress)
+        },
+      )
 
       // Reload projects list
-      await loadProjects();
+      await loadProjects()
 
       // Close dialog and navigate to the imported project
-      handleCloseImportDialog();
-      navigate({ to: '/editor/$projectId', params: { projectId: result.project.id } });
+      handleCloseImportDialog()
+      navigate({ to: '/editor/$projectId', params: { projectId: result.project.id } })
     } catch (err) {
-      logger.error('Import failed:', err);
-      setImportError(err instanceof Error ? err.message : 'Import failed');
-      setImportProgress(null);
-      setIsImporting(false);
+      logger.error('Import failed:', err)
+      setImportError(err instanceof Error ? err.message : t('projects.import.importFailed'))
+      setImportProgress(null)
+      setIsImporting(false)
     }
-  };
+  }
 
   // Reset import dialog state
   const handleCloseImportDialog = () => {
-    if (isImporting) return; // Don't close while importing
-    setImportDialogOpen(false);
-    setPendingImportFile(null);
-    setProjectNameFromFile(null);
-    setDestinationDir(null);
-    setDestinationName(null);
-    setImportError(null);
-    setImportProgress(null);
-    setIsImporting(false);
-  };
+    if (isImporting) return // Don't close while importing
+    setImportDialogOpen(false)
+    setPendingImportFile(null)
+    setProjectNameFromFile(null)
+    setDestinationDir(null)
+    setDestinationName(null)
+    setImportError(null)
+    setImportProgress(null)
+    setIsImporting(false)
+  }
 
   // Compute full destination path for display
   const getFullDestinationPath = (): string => {
-    if (!destinationName) return '';
-    const parts = [destinationName];
-    if (useProjectsFolder) parts.push(PROJECTS_FOLDER_NAME);
-    if (projectNameFromFile) parts.push(projectNameFromFile);
-    return parts.join('/');
-  };
+    if (!destinationName) return ''
+    const parts = [destinationName]
+    if (useProjectsFolder) parts.push(PROJECTS_FOLDER_NAME)
+    if (projectNameFromFile) parts.push(projectNameFromFile)
+    return parts.join('/')
+  }
 
   // Format file size for display
   const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
 
   const handleEditProject = (project: Project) => {
-    setEditingProject(project);
-  };
+    setEditingProject(project)
+  }
 
   const handleEditSubmit = async (data: ProjectFormData) => {
-    if (!editingProject) return;
+    if (!editingProject) return
 
-    setIsSubmitting(true);
+    setIsSubmitting(true)
     try {
-      await updateProject(editingProject.id, data);
-      setEditingProject(null);
+      await updateProject(editingProject.id, data)
+      setEditingProject(null)
     } catch (error) {
-      logger.error('Failed to update project:', error);
-      toast.error('Failed to update project', { description: 'Please try again' });
+      logger.error('Failed to update project:', error)
+      toast.error(t('projects.toasts.updateFailed'), { description: t('projects.tryAgain') })
     } finally {
-      setIsSubmitting(false);
+      setIsSubmitting(false)
     }
-  };
+  }
 
   return (
     <>
       <div className="min-h-screen bg-background">
         {/* Header */}
-        <div className="panel-header border-b border-border">
+        <div className="panel-header border-b border-border" data-no-marquee>
           <div className="max-w-[1920px] mx-auto px-6 py-5 flex items-center justify-between">
             <Link to="/">
-              <FreeCutLogo variant="full" size="md" className="hover:opacity-80 transition-opacity" />
+              <FreeCutLogo
+                variant="full"
+                size="md"
+                className="hover:opacity-80 transition-opacity"
+              />
             </Link>
             <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-10 w-10"
-                asChild
-              >
+              <WorkspaceIndicator />
+              <LanguageSwitcher size="md" align="end" side="bottom" />
+              <Button variant="outline" size="lg" className="gap-2" asChild>
+                <Link to="/docs">
+                  <BookOpen className="w-4 h-4" />
+                  Docs
+                </Link>
+              </Button>
+              <Button variant="outline" size="icon" className="h-10 w-10" asChild>
                 <a
                   href="https://github.com/walterlow/freecut"
                   target="_blank"
                   rel="noopener noreferrer"
-                  data-tooltip="View on GitHub"
+                  data-tooltip={t('projects.viewOnGitHub')}
                   data-tooltip-side="left"
                 >
                   <Github className="w-5 h-5" />
@@ -265,12 +290,12 @@ function ProjectsIndex() {
               </Button>
               <Button variant="outline" size="lg" className="gap-2" onClick={handleImportClick}>
                 <Upload className="w-4 h-4" />
-                Import Project
+                {t('projects.importProject')}
               </Button>
               <Link to="/projects/new">
                 <Button size="lg" className="gap-2">
                   <Plus className="w-4 h-4" />
-                  New Project
+                  {t('projects.newProject')}
                 </Button>
               </Link>
             </div>
@@ -290,36 +315,45 @@ function ProjectsIndex() {
         {error && (
           <div className="max-w-[1920px] mx-auto px-6 py-4">
             <div className="panel-bg border border-destructive/50 rounded-lg p-4 text-destructive">
-              <p className="font-medium">Error loading projects</p>
+              <p className="font-medium">{t('projects.errorLoading')}</p>
               <p className="text-sm mt-1">{error}</p>
             </div>
           </div>
         )}
 
+        {/* Legacy IDB migration banner — appears only when old data is present and unmigrated */}
+        <div className="max-w-[1920px] mx-auto px-6 pt-6 space-y-3">
+          <LegacyMigrationBanner onMigrated={loadProjects} />
+          {/* Retry banner — appears only when a previous migration left failed items behind */}
+          <LegacyMigrationErrors onRetried={loadProjects} />
+        </div>
+
         {/* Loading state */}
-        {isLoading ? (
+        {showInitialLoadingSpinner ? (
           <div className="max-w-[1920px] mx-auto px-6 py-16 flex items-center justify-center">
             <div className="text-center">
               <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-muted-foreground">Loading projects...</p>
+              <p className="text-muted-foreground">{t('projects.loadingProjects')}</p>
             </div>
           </div>
         ) : (
           /* Projects List */
           <div className="max-w-[1920px] mx-auto px-6 py-8">
-            <ProjectList onEditProject={handleEditProject} />
+            <ProjectList onEditProject={handleEditProject} onImportProject={handleImportClick} />
+            <TrashSection />
           </div>
         )}
       </div>
 
       {/* Edit Project Dialog */}
       <Dialog open={!!editingProject} onOpenChange={(open) => !open && setEditingProject(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[1200px] w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Project Settings</DialogTitle>
+            <DialogTitle className="text-2xl">{t('projects.form.editTitle')}</DialogTitle>
+            <DialogDescription>{t('projects.form.editSubtitle')}</DialogDescription>
           </DialogHeader>
           {editingProject && (
-            <ProjectForm
+            <EditProjectForm
               onSubmit={handleEditSubmit}
               onCancel={() => setEditingProject(null)}
               defaultValues={{
@@ -329,7 +363,6 @@ function ProjectsIndex() {
                 height: editingProject.metadata.height,
                 fps: editingProject.metadata.fps,
               }}
-              isEditing={true}
               isSubmitting={isSubmitting}
             />
           )}
@@ -337,26 +370,39 @@ function ProjectsIndex() {
       </Dialog>
 
       {/* Import Project Dialog - Two Step Flow */}
-      <Dialog open={importDialogOpen} onOpenChange={(open) => {
-        if (!open) handleCloseImportDialog();
-      }}>
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) handleCloseImportDialog()
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {importError ? 'Import Failed' : isImporting ? 'Importing Project' : 'Import Project'}
+              {importError
+                ? t('projects.import.importFailedTitle')
+                : isImporting
+                  ? t('projects.import.importingTitle')
+                  : t('projects.import.importTitle')}
             </DialogTitle>
             {!importError && !isImporting && pendingImportFile && (
-              <DialogDescription>
-                Select where to extract media files
-              </DialogDescription>
+              <DialogDescription>{t('projects.import.selectWhereToExtract')}</DialogDescription>
             )}
             {!importError && isImporting && importProgress && (
               <DialogDescription>
-                {importProgress.stage === 'validating' && 'Validating bundle...'}
-                {importProgress.stage === 'extracting' && `Extracting${importProgress.currentFile ? `: ${importProgress.currentFile}` : '...'}`}
-                {importProgress.stage === 'importing_media' && `Importing${importProgress.currentFile ? `: ${importProgress.currentFile}` : '...'}`}
-                {importProgress.stage === 'linking' && 'Creating project...'}
-                {importProgress.stage === 'complete' && 'Import complete!'}
+                {importProgress.stage === 'validating' && t('projects.import.stageValidating')}
+                {importProgress.stage === 'extracting' &&
+                  (importProgress.currentFile
+                    ? t('projects.import.stageExtractingFile', {
+                        file: importProgress.currentFile,
+                      })
+                    : t('projects.import.stageExtracting'))}
+                {importProgress.stage === 'importing_media' &&
+                  (importProgress.currentFile
+                    ? t('projects.import.stageImportingFile', { file: importProgress.currentFile })
+                    : t('projects.import.stageImporting'))}
+                {importProgress.stage === 'linking' && t('projects.import.stageLinking')}
+                {importProgress.stage === 'complete' && t('projects.import.stageComplete')}
               </DialogDescription>
             )}
           </DialogHeader>
@@ -365,12 +411,8 @@ function ProjectsIndex() {
             /* Fatal error state - no file */
             <div className="space-y-4">
               <p className="text-sm text-destructive">{importError}</p>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleCloseImportDialog}
-              >
-                Close
+              <Button variant="outline" className="w-full" onClick={handleCloseImportDialog}>
+                {t('common.close')}
               </Button>
             </div>
           ) : isImporting && importProgress ? (
@@ -389,16 +431,20 @@ function ProjectsIndex() {
                 <File className="w-8 h-8 text-muted-foreground flex-shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-sm truncate">{pendingImportFile.name}</p>
-                  <p className="text-xs text-muted-foreground">{formatFileSize(pendingImportFile.size)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatFileSize(pendingImportFile.size)}
+                  </p>
                 </div>
               </div>
 
               {/* Destination selection */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">Destination Folder</p>
+                  <p className="text-sm font-medium">{t('projects.import.destinationFolder')}</p>
                   {!destinationDir && (
-                    <p className="text-xs text-muted-foreground">Use "New Folder" in picker if needed</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t('projects.import.useNewFolderIfNeeded')}
+                    </p>
                   )}
                 </div>
                 <Button
@@ -410,7 +456,9 @@ function ProjectsIndex() {
                   {destinationName ? (
                     <span className="truncate">{destinationName}</span>
                   ) : (
-                    <span className="text-muted-foreground">Select or create folder...</span>
+                    <span className="text-muted-foreground">
+                      {t('projects.import.selectOrCreateFolder')}
+                    </span>
                   )}
                 </Button>
 
@@ -423,16 +471,22 @@ function ProjectsIndex() {
                     className="w-4 h-4 rounded border-border accent-primary"
                   />
                   <span className="text-sm">
-                    Create in <code className="text-xs bg-muted px-1 py-0.5 rounded">{PROJECTS_FOLDER_NAME}</code> subfolder
+                    <Trans
+                      i18nKey="projects.import.createInSubfolder"
+                      values={{ folder: PROJECTS_FOLDER_NAME }}
+                      components={{
+                        code: <code className="text-xs bg-muted px-1 py-0.5 rounded" />,
+                      }}
+                    />
                   </span>
                 </label>
 
-                {importError && (
-                  <p className="text-xs text-destructive">{importError}</p>
-                )}
+                {importError && <p className="text-xs text-destructive">{importError}</p>}
                 {destinationDir && !importError && (
                   <div className="p-3 bg-muted/50 rounded-lg border border-border">
-                    <p className="text-xs text-muted-foreground mb-1">Media will be saved to:</p>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {t('projects.import.mediaWillBeSavedTo')}
+                    </p>
                     <p className="text-sm font-semibold text-foreground break-all">
                       {getFullDestinationPath()}
                     </p>
@@ -442,13 +496,10 @@ function ProjectsIndex() {
 
               <DialogFooter className="gap-2 sm:gap-0">
                 <Button variant="outline" onClick={handleCloseImportDialog}>
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
-                <Button
-                  onClick={handleStartImport}
-                  disabled={!destinationDir}
-                >
-                  Start Import
+                <Button onClick={handleStartImport} disabled={!destinationDir}>
+                  {t('projects.import.startImport')}
                 </Button>
               </DialogFooter>
             </div>
@@ -456,6 +507,5 @@ function ProjectsIndex() {
         </DialogContent>
       </Dialog>
     </>
-  );
+  )
 }
-

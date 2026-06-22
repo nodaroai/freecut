@@ -1,7 +1,22 @@
-import type { TimelineItem } from '@/types/timeline';
-import type { OrphanedClipInfo } from '@/features/timeline/deps/media-library-resolver';
-import type { MediaMetadata } from '@/types/storage';
-import { mediaLibraryService } from '@/features/timeline/deps/media-library-service';
+import type { TimelineItem } from '@/types/timeline'
+import type { OrphanedClipInfo } from '@/features/timeline/deps/media-library-resolver'
+import type { MediaMetadata } from '@/types/storage'
+import { importMediaLibraryService } from '@/features/timeline/deps/media-library-service'
+import { getSynchronizedLinkedItems } from './linked-items'
+
+function isOrphanableMediaItem(item: TimelineItem): item is TimelineItem & { mediaId: string } {
+  return !!item.mediaId && (item.type === 'video' || item.type === 'audio' || item.type === 'image')
+}
+
+function getOrphanGroupRepresentative(
+  items: Array<TimelineItem & { mediaId: string }>,
+): TimelineItem & { mediaId: string } {
+  return (
+    items.find((item) => item.type === 'video') ??
+    items.find((item) => item.type === 'image') ??
+    items[0]!
+  )
+}
 
 /**
  * Validates that all timeline items have valid media references.
@@ -10,41 +25,71 @@ import { mediaLibraryService } from '@/features/timeline/deps/media-library-serv
  * This detects clips that reference mediaIds which no longer exist in IndexedDB,
  * typically from loading old project snapshots saved before media was deleted.
  */
-export async function validateMediaReferences(
+async function validateMediaReferences(
   items: TimelineItem[],
-  projectId: string
+  projectId: string,
 ): Promise<OrphanedClipInfo[]> {
-  const orphans: OrphanedClipInfo[] = [];
+  const orphans: OrphanedClipInfo[] = []
 
   // Get all unique mediaIds from timeline items that have media references
-  const mediaItems = items.filter(
-    (item): item is TimelineItem & { mediaId: string } =>
-      !!item.mediaId &&
-      (item.type === 'video' || item.type === 'audio' || item.type === 'image')
-  );
+  const mediaItems = items.filter(isOrphanableMediaItem)
 
   if (mediaItems.length === 0) {
-    return orphans;
+    return orphans
   }
 
   // Get all media for this project
-  const mediaLibrary = await mediaLibraryService.getMediaForProject(projectId);
-  const validMediaIds = new Set(mediaLibrary.map((m) => m.id));
+  const { mediaLibraryService } = await importMediaLibraryService()
+  const mediaLibrary = await mediaLibraryService.getMediaForProject(projectId)
+  const validMediaIds = new Set(mediaLibrary.map((m) => m.id))
 
-  // Find items with missing media
+  const visitedItemIds = new Set<string>()
+
+  // Find items with missing media, collapsing synchronized linked A/V pairs
   for (const item of mediaItems) {
+    if (visitedItemIds.has(item.id) || validMediaIds.has(item.mediaId)) {
+      continue
+    }
+
+    const groupedItems = getSynchronizedLinkedItems(mediaItems, item.id).filter(
+      (candidate): candidate is TimelineItem & { mediaId: string } =>
+        isOrphanableMediaItem(candidate) && candidate.mediaId === item.mediaId,
+    )
+    const orphanGroup = groupedItems.length > 0 ? groupedItems : [item]
+    orphanGroup.forEach((groupedItem) => visitedItemIds.add(groupedItem.id))
+
+    const representative = getOrphanGroupRepresentative(orphanGroup)
     if (!validMediaIds.has(item.mediaId)) {
       orphans.push({
-        itemId: item.id,
-        mediaId: item.mediaId,
-        itemType: item.type as 'video' | 'audio' | 'image',
-        fileName: item.label || 'Unknown',
-        trackId: item.trackId,
-      });
+        itemId: representative.id,
+        mediaId: representative.mediaId,
+        itemType: representative.type as 'video' | 'audio' | 'image',
+        fileName: representative.label || 'Unknown',
+        trackId: representative.trackId,
+      })
     }
   }
 
-  return orphans;
+  return orphans
+}
+
+export async function validateProjectMediaReferences(params: {
+  rootItems: TimelineItem[]
+  compositions: Array<{ items: TimelineItem[] }>
+  projectId: string
+}): Promise<OrphanedClipInfo[]> {
+  const allItems = [
+    ...params.rootItems,
+    ...params.compositions.flatMap((composition) => composition.items),
+  ]
+
+  if (allItems.length === 0) {
+    return []
+  }
+
+  const dedupedItems = Array.from(new Map(allItems.map((item) => [item.id, item])).values())
+
+  return validateMediaReferences(dedupedItems, params.projectId)
 }
 
 /**
@@ -53,26 +98,24 @@ export async function validateMediaReferences(
  */
 function findMatchingMediaByFilename(
   orphan: OrphanedClipInfo,
-  mediaItems: MediaMetadata[]
+  mediaItems: MediaMetadata[],
 ): MediaMetadata | null {
-  const orphanFileName = orphan.fileName.toLowerCase();
+  const orphanFileName = orphan.fileName.toLowerCase()
 
   // Try exact filename match first
-  const exactMatch = mediaItems.find(
-    (m) => m.fileName.toLowerCase() === orphanFileName
-  );
+  const exactMatch = mediaItems.find((m) => m.fileName.toLowerCase() === orphanFileName)
   if (exactMatch) {
-    return exactMatch;
+    return exactMatch
   }
 
   // Try matching without extension
-  const orphanBaseName = orphanFileName.replace(/\.[^.]+$/, '');
+  const orphanBaseName = orphanFileName.replace(/\.[^.]+$/, '')
   const baseNameMatch = mediaItems.find((m) => {
-    const mediaBaseName = m.fileName.toLowerCase().replace(/\.[^.]+$/, '');
-    return mediaBaseName === orphanBaseName;
-  });
+    const mediaBaseName = m.fileName.toLowerCase().replace(/\.[^.]+$/, '')
+    return mediaBaseName === orphanBaseName
+  })
 
-  return baseNameMatch || null;
+  return baseNameMatch || null
 }
 
 /**
@@ -81,10 +124,10 @@ function findMatchingMediaByFilename(
  */
 function filterMediaByType(
   mediaItems: MediaMetadata[],
-  itemType: 'video' | 'audio' | 'image'
+  itemType: 'video' | 'audio' | 'image',
 ): MediaMetadata[] {
-  const mimePrefix = `${itemType}/`;
-  return mediaItems.filter((m) => m.mimeType.startsWith(mimePrefix));
+  const mimePrefix = `${itemType}/`
+  return mediaItems.filter((m) => m.mimeType.startsWith(mimePrefix))
 }
 
 /**
@@ -93,19 +136,19 @@ function filterMediaByType(
  */
 export function autoMatchOrphanedClips(
   orphans: OrphanedClipInfo[],
-  mediaItems: MediaMetadata[]
+  mediaItems: MediaMetadata[],
 ): Map<string, string> {
-  const matches = new Map<string, string>();
+  const matches = new Map<string, string>()
 
   for (const orphan of orphans) {
     // Filter to same type first
-    const compatibleMedia = filterMediaByType(mediaItems, orphan.itemType);
-    const match = findMatchingMediaByFilename(orphan, compatibleMedia);
+    const compatibleMedia = filterMediaByType(mediaItems, orphan.itemType)
+    const match = findMatchingMediaByFilename(orphan, compatibleMedia)
 
     if (match) {
-      matches.set(orphan.itemId, match.id);
+      matches.set(orphan.itemId, match.id)
     }
   }
 
-  return matches;
+  return matches
 }

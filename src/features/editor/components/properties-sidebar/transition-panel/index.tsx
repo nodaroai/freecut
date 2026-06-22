@@ -1,17 +1,15 @@
-﻿import { useMemo, useCallback, memo } from 'react';
-import { Button } from '@/components/ui/button';
-import {
-  Blend,
-  Trash2,
-  Zap,
-  Copy,
-  RotateCcw,
-} from 'lucide-react';
-import { useTimelineStore } from '@/features/editor/deps/timeline-store';
-import { useSelectionStore } from '@/shared/state/selection';
-import { PropertySection, PropertyRow, SliderInput } from '../components';
-import type { TimelineState, TimelineActions } from '@/features/editor/deps/timeline-store';
-import type { SelectionState, SelectionActions } from '@/shared/state/selection';
+import { useMemo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useTranslation } from 'react-i18next'
+import { createPortal } from 'react-dom'
+import { i18n } from '@/i18n'
+import { Button } from '@/components/ui/button'
+import { Trash2, Zap, RotateCcw, ChevronDown } from 'lucide-react'
+import { HexColorPicker } from 'react-colorful'
+import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useSelectionStore } from '@/shared/state/selection'
+import { PropertySection, PropertyRow, SliderInput } from '../components'
+import type { TimelineState, TimelineActions } from '@/features/editor/deps/timeline-store'
+import type { SelectionState, SelectionActions } from '@/shared/state/selection'
 import {
   TRANSITION_CONFIGS,
   type Transition,
@@ -21,289 +19,663 @@ import {
   type SlideDirection,
   type FlipDirection,
   type PresentationConfig,
-} from '@/types/transition';
-import { cn } from '@/shared/ui/cn';
+  type TransitionDefinition,
+  type TransitionParameterDefinition,
+} from '@/types/transition'
+import { cn } from '@/shared/ui/cn'
+import { transitionRegistry } from '@/shared/timeline/transitions'
 import {
-  TRANSITION_ICON_MAP,
   TRANSITION_CATEGORY_INFO,
-  TRANSITION_CATEGORY_ORDER,
-  TRANSITION_CONFIGS_BY_CATEGORY,
-} from '@/features/editor/utils/transition-ui-config';
+  getTransitionConfigsByCategory,
+} from '@/features/editor/utils/transition-ui-config'
+import { getMaxTransitionDurationForHandles } from '@/features/editor/deps/timeline-utils'
 
-/**
- * Single presentation option button
- */
-const PresentationButton = memo(function PresentationButton({
-  config,
-  isSelected,
-  onClick,
+function rgbArrayToHex(value: unknown): string {
+  if (!Array.isArray(value)) return '#000000'
+  const [r = 0, g = 0, b = 0] = value
+  const toHex = (channel: unknown) => {
+    const numeric = typeof channel === 'number' && Number.isFinite(channel) ? channel : 0
+    return Math.round(Math.max(0, Math.min(1, numeric)) * 255)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`
+}
+
+function hexToRgbArray(hex: string): [number, number, number] {
+  const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.slice(1) : '000000'
+  return [
+    parseInt(normalized.slice(0, 2), 16) / 255,
+    parseInt(normalized.slice(2, 4), 16) / 255,
+    parseInt(normalized.slice(4, 6), 16) / 255,
+  ]
+}
+
+function TransitionColorPicker({
+  label,
+  initialColor,
+  onColorChange,
 }: {
-  config: PresentationConfig;
-  isSelected: boolean;
-  onClick: () => void;
+  label: string
+  initialColor: string
+  onColorChange: (color: string) => void
 }) {
-  const Icon = TRANSITION_ICON_MAP[config.icon] || Blend;
+  const { t } = useTranslation()
+  const [color, setColor] = useState(initialColor)
+  const [isOpen, setIsOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex flex-col items-center justify-center gap-1 p-2 rounded-md border transition-all',
-        'hover:bg-secondary/50 hover:border-primary/50',
-        isSelected
-          ? 'bg-primary/10 border-primary text-primary'
-          : 'bg-secondary/30 border-border text-muted-foreground'
-      )}
-      title={config.description}
-    >
-      <Icon className="w-4 h-4" />
-      <span className="text-[10px] font-medium truncate max-w-full">
-        {config.label}
-      </span>
-    </button>
-  );
-});
+  useEffect(() => {
+    setColor(initialColor)
+  }, [initialColor])
 
-/**
- * Grid of presentation options grouped by category
- */
-const PresentationPicker = memo(function PresentationPicker({
-  currentPresentation,
-  currentDirection,
-  onSelect,
-}: {
-  currentPresentation: TransitionPresentation;
-  currentDirection?: WipeDirection | SlideDirection | FlipDirection;
-  onSelect: (
-    presentation: TransitionPresentation,
-    direction?: WipeDirection | SlideDirection | FlipDirection
-  ) => void;
-}) {
-  // Check if a config matches current selection
-  const isSelected = useCallback(
-    (config: PresentationConfig) => {
-      if (config.id !== currentPresentation) return false;
-      // For directional transitions, also check direction
-      if (config.direction) {
-        return config.direction === currentDirection;
-      }
-      return true;
+  const handleColorChange = useCallback(
+    (newColor: string) => {
+      setColor(newColor)
+      onColorChange(newColor)
     },
-    [currentPresentation, currentDirection]
-  );
+    [onColorChange],
+  )
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isOpen])
 
   return (
-    <div className="space-y-3">
-      {TRANSITION_CATEGORY_ORDER.map((category) => {
-        const configs = TRANSITION_CONFIGS_BY_CATEGORY[category];
-        if (!configs || configs.length === 0) return null;
-        return (
-          <div key={category}>
-            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-              {TRANSITION_CATEGORY_INFO[category]?.title ?? category}
-            </span>
-            <div className="grid grid-cols-4 gap-1 mt-1">
-              {configs.map((config, idx) => (
-                <PresentationButton
-                  key={`${config.id}-${config.direction || idx}`}
-                  config={config}
-                  isSelected={isSelected(config)}
-                  onClick={() => onSelect(config.id, config.direction)}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+    <div ref={containerRef} className="relative flex-1">
+      <button
+        type="button"
+        aria-label={t('editor.transitionPanel.paramColorAria', { label })}
+        onClick={() => setIsOpen((open) => !open)}
+        className="flex w-full items-center gap-2"
+      >
+        <div
+          className="h-6 w-6 flex-shrink-0 rounded border border-border"
+          style={{ backgroundColor: color }}
+        />
+        <span className="text-xs font-mono uppercase text-muted-foreground">{color}</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 top-8 z-50 rounded-lg border border-border bg-popover p-2 shadow-lg">
+          <HexColorPicker color={color} onChange={handleColorChange} />
+        </div>
+      )}
     </div>
-  );
-});
+  )
+}
+
+function getDefaultTransitionProperties(
+  definition: TransitionDefinition | undefined,
+): Record<string, unknown> | undefined {
+  if (!definition?.parameters?.length) return undefined
+  return Object.fromEntries(
+    definition.parameters.map((parameter) => [parameter.key, parameter.defaultValue]),
+  )
+}
+
+function getNumberParameterValue(
+  properties: Record<string, unknown> | undefined,
+  parameter: TransitionParameterDefinition,
+): number {
+  const value = properties?.[parameter.key]
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : Number(parameter.defaultValue)
+}
+
+function getColorParameterValue(
+  properties: Record<string, unknown> | undefined,
+  parameter: TransitionParameterDefinition,
+): string {
+  return rgbArrayToHex(properties?.[parameter.key] ?? parameter.defaultValue)
+}
+
+function getParameterDefaultValue(parameter: TransitionParameterDefinition): unknown {
+  return Array.isArray(parameter.defaultValue)
+    ? [...parameter.defaultValue]
+    : parameter.defaultValue
+}
+
+function isParameterAtDefault(
+  properties: Record<string, unknown> | undefined,
+  parameter: TransitionParameterDefinition,
+): boolean {
+  if (parameter.type === 'number') {
+    return getNumberParameterValue(properties, parameter) === Number(parameter.defaultValue)
+  }
+
+  return getColorParameterValue(properties, parameter) === rgbArrayToHex(parameter.defaultValue)
+}
+
+function formatParameterValue(parameter: TransitionParameterDefinition, value: number): string {
+  const step = parameter.step ?? 1
+  const [, decimalPart = ''] = step.toString().split('.')
+  const decimals = decimalPart.length
+  const fixed = value.toFixed(Math.min(3, decimals))
+  return parameter.unit ? `${fixed}${parameter.unit}` : fixed
+}
+
+function getPresentationOptionValue(config: Pick<PresentationConfig, 'id' | 'direction'>): string {
+  return config.direction ? `${config.id}:${config.direction}` : config.id
+}
+
+function getPresentationOptionLabel(
+  config: Pick<PresentationConfig, 'label' | 'description' | 'direction'>,
+): string {
+  return config.direction ? config.description : config.label
+}
+
+const DIRECTION_OPTIONS = [
+  { value: 'from-left', labelKey: 'editor.transitionPanel.directionLeft' },
+  { value: 'from-right', labelKey: 'editor.transitionPanel.directionRight' },
+  { value: 'from-top', labelKey: 'editor.transitionPanel.directionTop' },
+  { value: 'from-bottom', labelKey: 'editor.transitionPanel.directionBottom' },
+] as const satisfies ReadonlyArray<{
+  value: WipeDirection | SlideDirection | FlipDirection
+  labelKey: string
+}>
+
+const EASE_OPTIONS = [
+  { value: 'linear', labelKey: 'editor.transitionPanel.easeLinear' },
+  { value: 'ease-in', labelKey: 'editor.transitionPanel.easeIn' },
+  { value: 'ease-out', labelKey: 'editor.transitionPanel.easeOut' },
+  { value: 'ease-in-out', labelKey: 'editor.transitionPanel.easeInOut' },
+] as const satisfies ReadonlyArray<{ value: TransitionTiming; labelKey: string }>
+
+const PLACEMENT_OPTIONS = [
+  {
+    value: 1,
+    labelKey: 'editor.transitionPanel.placementLeft',
+    titleKey: 'editor.transitionPanel.placementLeftTooltip',
+  },
+  {
+    value: 0.5,
+    labelKey: 'editor.transitionPanel.placementCenter',
+    titleKey: 'editor.transitionPanel.placementCenterTooltip',
+  },
+  {
+    value: 0,
+    labelKey: 'editor.transitionPanel.placementRight',
+    titleKey: 'editor.transitionPanel.placementRightTooltip',
+  },
+] as const
+
+function getSupportedEaseOptions(
+  supportedTimings: readonly TransitionTiming[],
+): ReadonlyArray<(typeof EASE_OPTIONS)[number]> {
+  return EASE_OPTIONS.filter((option) => supportedTimings.includes(option.value))
+}
 
 /**
  * Transition properties panel - shown when a transition is selected.
  * Allows editing presentation style, duration, timing, and direction.
  */
 export function TransitionPanel() {
+  const { t } = useTranslation()
   // Granular selectors (Zustand v5 best practice)
-  const selectedTransitionId = useSelectionStore(
-    (s: SelectionState) => s.selectedTransitionId
-  );
-  const clearSelection = useSelectionStore(
-    (s: SelectionActions) => s.clearSelection
-  );
-  const transitions = useTimelineStore((s: TimelineState) => s.transitions);
-  const updateTransition = useTimelineStore(
-    (s: TimelineActions) => s.updateTransition
-  );
-  const updateTransitions = useTimelineStore(
-    (s: TimelineActions) => s.updateTransitions
-  );
-  const removeTransition = useTimelineStore(
-    (s: TimelineActions) => s.removeTransition
-  );
-  const fps = useTimelineStore((s: TimelineState) => s.fps);
+  const selectedTransitionId = useSelectionStore((s: SelectionState) => s.selectedTransitionId)
+  const clearSelection = useSelectionStore((s: SelectionActions) => s.clearSelection)
+  const transitions = useTimelineStore((s: TimelineState) => s.transitions)
+  const updateTransition = useTimelineStore((s: TimelineActions) => s.updateTransition)
+  const removeTransition = useTimelineStore((s: TimelineActions) => s.removeTransition)
+  const fps = useTimelineStore((s: TimelineState) => s.fps)
+  const items = useTimelineStore((s: TimelineState) => s.items)
 
   // Derive selected transition
   const selectedTransition = useMemo<Transition | undefined>(
     () => transitions.find((t: Transition) => t.id === selectedTransitionId),
-    [transitions, selectedTransitionId]
-  );
+    [transitions, selectedTransitionId],
+  )
 
   // Get config for current transition type
   const transitionConfig =
     selectedTransition && selectedTransition.type in TRANSITION_CONFIGS
       ? TRANSITION_CONFIGS[selectedTransition.type]
-      : null;
+      : null
+  const leftClip = useMemo(
+    () =>
+      selectedTransition ? items.find((item) => item.id === selectedTransition.leftClipId) : null,
+    [items, selectedTransition],
+  )
+  const rightClip = useMemo(
+    () =>
+      selectedTransition ? items.find((item) => item.id === selectedTransition.rightClipId) : null,
+    [items, selectedTransition],
+  )
+  const presentationConfigGroups = useMemo(
+    () =>
+      Object.entries(getTransitionConfigsByCategory()).filter(([, configs]) => configs.length > 0),
+    [],
+  )
+  const presentationConfigs = useMemo(
+    () => presentationConfigGroups.flatMap(([, configs]) => configs),
+    [presentationConfigGroups],
+  )
+  const currentPresentationConfig = useMemo(
+    () => presentationConfigs.find((config) => config.id === selectedTransition?.presentation),
+    [presentationConfigs, selectedTransition?.presentation],
+  )
+  const currentPresentationLabel = currentPresentationConfig
+    ? getPresentationOptionLabel(currentPresentationConfig)
+    : t('editor.transitionPanel.selectPreset')
+  const transitionDefinition = useMemo(
+    () =>
+      selectedTransition
+        ? transitionRegistry.getDefinition(selectedTransition.presentation)
+        : undefined,
+    [selectedTransition],
+  )
+  const easeOptions = useMemo(
+    () => getSupportedEaseOptions(transitionDefinition?.supportedTimings ?? []),
+    [transitionDefinition],
+  )
 
-  // Presentations that support spring timing (transforms that can overshoot)
-  const supportsSpringTiming = useCallback(
-    (presentation: TransitionPresentation) => {
-      return presentation === 'slide' || presentation === 'flip';
-    },
-    []
-  );
+  const definitionMinDuration = transitionDefinition?.minDuration ?? 1
+  const definitionMaxDuration = transitionDefinition?.maxDuration ?? Number.POSITIVE_INFINITY
+  const definitionDefaultDuration = transitionDefinition?.defaultDuration ?? fps
 
-  const minDuration = fps;
-  const maxDuration = fps * 3;
+  const minDuration = Math.max(1, definitionMinDuration)
+  const maxDuration = useMemo(() => {
+    if (!transitionConfig || !selectedTransition || !leftClip || !rightClip) {
+      const fallback =
+        selectedTransition?.durationInFrames ?? transitionConfig?.defaultDuration ?? fps
+      return Math.max(minDuration, Math.min(fallback, definitionMaxDuration))
+    }
+
+    const leftEnd = leftClip.from + leftClip.durationInFrames
+    const isAdjacent = Math.abs(leftEnd - rightClip.from) <= 1
+    const handleLimit = isAdjacent
+      ? getMaxTransitionDurationForHandles(leftClip, rightClip, selectedTransition.alignment)
+      : Math.floor(Math.min(leftClip.durationInFrames, rightClip.durationInFrames) - 1)
+    const combinedLimit = Math.min(handleLimit, definitionMaxDuration)
+    return Math.max(minDuration, Math.max(selectedTransition.durationInFrames, combinedLimit))
+  }, [
+    transitionConfig,
+    selectedTransition,
+    leftClip,
+    rightClip,
+    fps,
+    minDuration,
+    definitionMaxDuration,
+  ])
 
   // Handle presentation change
   const handlePresentationChange = useCallback(
     (
       presentation: TransitionPresentation,
-      direction?: WipeDirection | SlideDirection | FlipDirection
+      direction?: WipeDirection | SlideDirection | FlipDirection,
     ) => {
       if (selectedTransitionId) {
-        // Reset timing to linear if switching to a presentation that doesn't support spring
-        const updates: Partial<Transition> = { presentation, direction };
-        if (!supportsSpringTiming(presentation) && selectedTransition?.timing === 'spring') {
-          updates.timing = 'linear';
+        const nextDefinition = transitionRegistry.getDefinition(presentation)
+        const currentDirection = selectedTransition?.direction
+        const nextDirections = nextDefinition?.directions ?? []
+        const nextDirection =
+          direction ??
+          (currentDirection && nextDirections.includes(currentDirection)
+            ? currentDirection
+            : undefined) ??
+          nextDirections[0]
+        const updates: Partial<Transition> = {
+          presentation,
+          direction: nextDefinition?.hasDirection ? nextDirection : undefined,
         }
-        updateTransition(selectedTransitionId, updates);
+        if (selectedTransition?.presentation !== presentation) {
+          updates.properties = getDefaultTransitionProperties(nextDefinition)
+        }
+        const nextEaseOptions = getSupportedEaseOptions(nextDefinition?.supportedTimings ?? [])
+        const fallbackEase = nextEaseOptions[0]
+        const currentTiming = selectedTransition?.timing
+        if (
+          fallbackEase &&
+          nextDefinition &&
+          currentTiming &&
+          !nextDefinition.supportedTimings.includes(currentTiming)
+        ) {
+          updates.timing = fallbackEase.value
+        }
+        updateTransition(selectedTransitionId, updates)
       }
     },
-    [selectedTransitionId, updateTransition, supportsSpringTiming, selectedTransition?.timing]
-  );
+    [
+      selectedTransitionId,
+      selectedTransition?.direction,
+      selectedTransition?.presentation,
+      selectedTransition?.timing,
+      updateTransition,
+    ],
+  )
+
+  const handlePresentationPresetChange = useCallback(
+    (value: string) => {
+      const config = presentationConfigs.find(
+        (entry) => getPresentationOptionValue(entry) === value,
+      )
+      if (!config) return
+      handlePresentationChange(config.id, config.direction)
+    },
+    [handlePresentationChange, presentationConfigs],
+  )
+
+  const [presetPickerOpen, setPresetPickerOpen] = useState(false)
+  const [presetSearchQuery, setPresetSearchQuery] = useState('')
+  const presetTriggerRef = useRef<HTMLButtonElement>(null)
+  const presetPanelRef = useRef<HTMLDivElement>(null)
+  const [presetPanelStyle, setPresetPanelStyle] = useState<CSSProperties>({})
+  const filteredPresentationConfigGroups = useMemo(() => {
+    const query = presetSearchQuery.trim().toLowerCase()
+    if (!query) return presentationConfigGroups
+
+    return presentationConfigGroups
+      .map(([category, configs]) => {
+        const categoryTitle = TRANSITION_CATEGORY_INFO[category]
+          ? i18n.t(TRANSITION_CATEGORY_INFO[category].titleKey)
+          : category
+        const filtered = configs.filter((config) =>
+          [config.id, config.label, config.description, config.direction, category, categoryTitle]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(query)),
+        )
+        return [category, filtered] as const
+      })
+      .filter(([, configs]) => configs.length > 0)
+  }, [presentationConfigGroups, presetSearchQuery])
+
+  const openPresetPicker = useCallback(() => {
+    if (presetTriggerRef.current) {
+      const rect = presetTriggerRef.current.getBoundingClientRect()
+      setPresetPanelStyle({
+        position: 'fixed',
+        top: `${rect.bottom + 4}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+      })
+    }
+    setPresetPickerOpen(true)
+  }, [])
+
+  const closePresetPicker = useCallback(() => {
+    setPresetPickerOpen(false)
+    setPresetSearchQuery('')
+    presetTriggerRef.current?.blur()
+  }, [])
+
+  const selectPresentationPreset = useCallback(
+    (value: string) => {
+      handlePresentationPresetChange(value)
+      closePresetPicker()
+    },
+    [closePresetPicker, handlePresentationPresetChange],
+  )
+
+  useEffect(() => {
+    if (!presetPickerOpen) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        presetPanelRef.current?.contains(event.target as Node) ||
+        presetTriggerRef.current?.contains(event.target as Node)
+      ) {
+        return
+      }
+      closePresetPicker()
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closePresetPicker()
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [closePresetPicker, presetPickerOpen])
 
   // Handle duration change (in frames)
   const handleDurationChange = useCallback(
     (durationInFrames: number) => {
       if (selectedTransitionId && transitionConfig) {
-        const clamped = Math.max(
-          minDuration,
-          Math.min(maxDuration, Math.round(durationInFrames))
-        );
-        updateTransition(selectedTransitionId, { durationInFrames: clamped });
+        const clamped = Math.max(minDuration, Math.min(maxDuration, Math.round(durationInFrames)))
+        updateTransition(selectedTransitionId, { durationInFrames: clamped })
       }
     },
-    [selectedTransitionId, transitionConfig, updateTransition, minDuration, maxDuration]
-  );
+    [selectedTransitionId, transitionConfig, updateTransition, minDuration, maxDuration],
+  )
 
-  // Default duration is 1 second (fps frames)
-  const defaultDuration = fps;
+  // Prefer the registry-declared default; clamp into the allowable range.
+  const defaultDuration = Math.max(minDuration, Math.min(maxDuration, definitionDefaultDuration))
 
   // Handle reset duration to default (1 second)
   const handleResetDuration = useCallback(() => {
     if (selectedTransitionId && transitionConfig) {
-      const clamped = Math.max(
-        minDuration,
-        Math.min(maxDuration, defaultDuration)
-      );
-      updateTransition(selectedTransitionId, { durationInFrames: clamped });
+      const clamped = Math.max(minDuration, Math.min(maxDuration, defaultDuration))
+      updateTransition(selectedTransitionId, { durationInFrames: clamped })
     }
-  }, [selectedTransitionId, transitionConfig, updateTransition, defaultDuration, minDuration, maxDuration]);
+  }, [
+    selectedTransitionId,
+    transitionConfig,
+    updateTransition,
+    defaultDuration,
+    minDuration,
+    maxDuration,
+  ])
+
+  const selectedAlignment = selectedTransition?.alignment ?? 0.5
+  const handlePlacementChange = useCallback(
+    (alignment: number) => {
+      if (!selectedTransitionId || !selectedTransition || !leftClip || !rightClip) return
+
+      const maxForPlacement = getMaxTransitionDurationForHandles(leftClip, rightClip, alignment)
+      if (maxForPlacement < selectedTransition.durationInFrames) return
+
+      updateTransition(selectedTransitionId, { alignment })
+    },
+    [leftClip, rightClip, selectedTransition, selectedTransitionId, updateTransition],
+  )
 
   // Handle timing change
   const handleTimingChange = useCallback(
     (timing: TransitionTiming) => {
       if (selectedTransitionId) {
-        updateTransition(selectedTransitionId, { timing });
+        updateTransition(selectedTransitionId, { timing })
       }
     },
-    [selectedTransitionId, updateTransition]
-  );
+    [selectedTransitionId, updateTransition],
+  )
+
+  const directionOptions = useMemo(() => {
+    const directions = transitionDefinition?.directions ?? []
+    return DIRECTION_OPTIONS.filter((option) => directions.includes(option.value))
+  }, [transitionDefinition])
+
+  const selectedDirection = selectedTransition?.direction ?? transitionDefinition?.directions?.[0]
+
+  const handleDirectionChange = useCallback(
+    (direction: WipeDirection | SlideDirection | FlipDirection) => {
+      if (selectedTransitionId) {
+        updateTransition(selectedTransitionId, { direction })
+      }
+    },
+    [selectedTransitionId, updateTransition],
+  )
+
+  const handleParameterChange = useCallback(
+    (parameter: TransitionParameterDefinition, value: unknown) => {
+      if (!selectedTransitionId || !selectedTransition) return
+      updateTransition(selectedTransitionId, {
+        properties: {
+          ...(selectedTransition.properties ?? {}),
+          [parameter.key]:
+            parameter.type === 'color' && parameter.valueFormat === 'rgb-array'
+              ? hexToRgbArray(String(value))
+              : value,
+        },
+      })
+    },
+    [selectedTransition, selectedTransitionId, updateTransition],
+  )
+
+  const handleParameterReset = useCallback(
+    (parameter: TransitionParameterDefinition) => {
+      if (!selectedTransitionId || !selectedTransition) return
+      updateTransition(selectedTransitionId, {
+        properties: {
+          ...(selectedTransition.properties ?? {}),
+          [parameter.key]: getParameterDefaultValue(parameter),
+        },
+      })
+    },
+    [selectedTransition, selectedTransitionId, updateTransition],
+  )
 
   // Handle delete
   const handleDelete = useCallback(() => {
     if (selectedTransitionId) {
-      removeTransition(selectedTransitionId);
-      clearSelection();
+      removeTransition(selectedTransitionId)
+      clearSelection()
     }
-  }, [selectedTransitionId, removeTransition, clearSelection]);
-
-  // Handle apply duration to all other transitions (single undo)
-  const handleApplyDurationToAll = useCallback(() => {
-    if (!selectedTransition) return;
-
-    const otherTransitions = transitions.filter(
-      (t: Transition) => t.id !== selectedTransition.id
-    );
-
-    if (otherTransitions.length === 0) return;
-
-    // Batch update for single undo
-    updateTransitions(
-      otherTransitions.map((t) => ({
-        id: t.id,
-        updates: { durationInFrames: selectedTransition.durationInFrames },
-      }))
-    );
-  }, [selectedTransition, transitions, updateTransitions]);
-
-  // Count other transitions for button label
-  const otherTransitionsCount = useMemo(() => {
-    if (!selectedTransition) return 0;
-    return transitions.filter(
-      (t: Transition) => t.id !== selectedTransition.id
-    ).length;
-  }, [selectedTransition, transitions]);
+  }, [selectedTransitionId, removeTransition, clearSelection])
 
   // Format duration for display
   const formatDuration = useCallback(
     (frames: number): string => {
-      const seconds = frames / fps;
-      return `${seconds.toFixed(2)}s`;
+      const seconds = frames / fps
+      return `${seconds.toFixed(2)}s`
     },
-    [fps]
-  );
+    [fps],
+  )
 
   const formatDurationInput = useCallback(
     (frames: number): string => (frames / fps).toFixed(2),
-    [fps]
-  );
+    [fps],
+  )
 
   const parseDurationInput = useCallback(
     (rawValue: string): number => {
-      const normalized = rawValue.trim().replace(/s$/i, '');
-      const seconds = parseFloat(normalized);
-      return Number.isFinite(seconds) ? seconds * fps : Number.NaN;
+      const normalized = rawValue.trim().replace(/s$/i, '')
+      const seconds = parseFloat(normalized)
+      return Number.isFinite(seconds) ? seconds * fps : Number.NaN
     },
-    [fps]
-  );
+    [fps],
+  )
 
   if (!selectedTransition || !transitionConfig) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <Zap className="w-8 h-8 text-muted-foreground/50 mb-2" />
-        <p className="text-xs text-muted-foreground">Transition not found</p>
+        <p className="text-xs text-muted-foreground">{t('editor.transitionPanel.notFound')}</p>
       </div>
-    );
+    )
   }
 
   return (
     <div className="space-y-4">
-      <PropertySection title="Transition" icon={Zap} defaultOpen={true}>
-        {/* Presentation picker */}
-        <div className="py-2">
-          <PresentationPicker
-            currentPresentation={selectedTransition.presentation}
-            currentDirection={selectedTransition.direction}
-            onSelect={handlePresentationChange}
-          />
-        </div>
+      <PropertySection
+        title={t('editor.transitionPanel.sectionTitle')}
+        icon={Zap}
+        defaultOpen={true}
+      >
+        <PropertyRow
+          label={t('editor.transitionPanel.preset')}
+          tooltip={t('editor.transitionPanel.presetTooltip')}
+        >
+          <div className="w-full">
+            <Button
+              ref={presetTriggerRef}
+              variant="outline"
+              size="sm"
+              role="combobox"
+              aria-expanded={presetPickerOpen}
+              className="h-7 w-full justify-between px-2 text-xs font-normal"
+              onClick={() => (presetPickerOpen ? closePresetPicker() : openPresetPicker())}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  openPresetPicker()
+                }
+              }}
+            >
+              <span className="truncate">{currentPresentationLabel}</span>
+              <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+            </Button>
+            {presetPickerOpen &&
+              createPortal(
+                <div
+                  ref={presetPanelRef}
+                  style={presetPanelStyle}
+                  className="z-50 rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 slide-in-from-top-2"
+                >
+                  <div className="border-b border-border p-1.5">
+                    <input
+                      type="search"
+                      aria-label={t('editor.transitionPanel.searchTransitions')}
+                      value={presetSearchQuery}
+                      onChange={(event) => setPresetSearchQuery(event.currentTarget.value)}
+                      placeholder={t('editor.transitionPanel.searchTransitions')}
+                      className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-[460px] overflow-y-auto overflow-x-hidden p-1">
+                    {filteredPresentationConfigGroups.map(([category, configs], index) => (
+                      <div key={category}>
+                        {index > 0 && <div className="-mx-1 my-1 h-px bg-muted" />}
+                        <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                          {TRANSITION_CATEGORY_INFO[category]
+                            ? t(TRANSITION_CATEGORY_INFO[category].titleKey)
+                            : category}
+                        </div>
+                        {configs.map((config) => {
+                          const value = getPresentationOptionValue(config)
+                          const selected =
+                            currentPresentationConfig &&
+                            getPresentationOptionValue(currentPresentationConfig) === value
+
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-selected={selected}
+                              className={cn(
+                                'relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground',
+                                selected && 'bg-accent text-accent-foreground',
+                              )}
+                              onClick={() => selectPresentationPreset(value)}
+                            >
+                              <span className="truncate">{getPresentationOptionLabel(config)}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ))}
+                    {filteredPresentationConfigGroups.length === 0 && (
+                      <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+                        {t('editor.transitionPanel.noTransitionsFound')}
+                      </div>
+                    )}
+                  </div>
+                </div>,
+                document.body,
+              )}
+          </div>
+        </PropertyRow>
 
         {/* Duration slider */}
-        <PropertyRow label="Duration" tooltip="Transition duration">
+        <PropertyRow
+          label={t('editor.transitionPanel.duration')}
+          tooltip={t('editor.transitionPanel.durationTooltip')}
+        >
           <div className="flex items-center gap-1 w-full">
             <SliderInput
               value={selectedTransition.durationInFrames}
@@ -321,61 +693,143 @@ export function TransitionPanel() {
               size="icon"
               className="h-7 w-7 flex-shrink-0"
               onClick={handleResetDuration}
-              title="Reset to 1s"
+              title={t('editor.transitionPanel.resetToDefault')}
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </Button>
           </div>
         </PropertyRow>
 
-        {/* Timing toggle - only show for slide/flip presentations that support spring */}
-        {supportsSpringTiming(selectedTransition.presentation) && (
-          <PropertyRow label="Timing" tooltip="Easing function for the transition">
+        <PropertyRow
+          label={t('editor.transitionPanel.placement')}
+          tooltip={t('editor.transitionPanel.placementTooltip')}
+        >
+          <div className="flex items-center gap-0.5 p-0.5 bg-secondary rounded-md">
+            {PLACEMENT_OPTIONS.map(({ value, labelKey, titleKey }) => {
+              const maxForPlacement =
+                leftClip && rightClip
+                  ? getMaxTransitionDurationForHandles(leftClip, rightClip, value)
+                  : 0
+              const disabled = maxForPlacement < selectedTransition.durationInFrames
+              const selected = selectedAlignment === value
+              const label = t(labelKey)
+              const title = t(titleKey)
+
+              return (
+                <button
+                  key={labelKey}
+                  type="button"
+                  aria-label={t('editor.transitionPanel.placementAria', { label })}
+                  title={
+                    disabled ? t('editor.transitionPanel.placementDisabled', { title }) : title
+                  }
+                  disabled={disabled}
+                  onClick={() => handlePlacementChange(value)}
+                  className={cn(
+                    'inline-flex h-7 min-w-[3.75rem] flex-1 items-center justify-center rounded px-2 text-xs transition-colors',
+                    selected
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                    disabled && 'cursor-not-allowed opacity-40 hover:text-muted-foreground',
+                  )}
+                >
+                  <span>{label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </PropertyRow>
+
+        {easeOptions.length > 0 && (
+          <PropertyRow
+            label={t('editor.transitionPanel.ease')}
+            tooltip={t('editor.transitionPanel.easeTooltip')}
+          >
             <div className="flex items-center gap-0.5 p-0.5 bg-secondary rounded-md">
-              <button
-                type="button"
-                onClick={() => handleTimingChange('linear')}
-                className={cn(
-                  'px-3 py-1 text-xs rounded transition-colors',
-                  selectedTransition.timing === 'linear'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Linear
-              </button>
-              <button
-                type="button"
-                onClick={() => handleTimingChange('spring')}
-                className={cn(
-                  'px-3 py-1 text-xs rounded transition-colors',
-                  selectedTransition.timing === 'spring'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Spring
-              </button>
+              {easeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleTimingChange(option.value)}
+                  className={cn(
+                    'px-3 py-1 text-xs rounded transition-colors',
+                    selectedTransition.timing === option.value
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {t(option.labelKey)}
+                </button>
+              ))}
             </div>
           </PropertyRow>
         )}
 
-        {/* Action buttons */}
-        <div className="pt-2 space-y-2">
-          {/* Apply duration to all - only show if there are other transitions */}
-          {otherTransitionsCount > 0 && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="w-full h-7 text-xs"
-              onClick={handleApplyDurationToAll}
-              title={`Apply ${formatDuration(selectedTransition.durationInFrames)} duration to ${otherTransitionsCount} other transition${otherTransitionsCount > 1 ? 's' : ''}`}
-            >
-              <Copy className="w-3 h-3 mr-1.5" />
-              Apply duration to all ({otherTransitionsCount})
-            </Button>
-          )}
+        {transitionDefinition?.hasDirection && directionOptions.length > 0 && (
+          <PropertyRow
+            label={t('editor.transitionPanel.direction')}
+            tooltip={t('editor.transitionPanel.directionTooltip')}
+          >
+            <div className="flex items-center gap-0.5 p-0.5 bg-secondary rounded-md">
+              {directionOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-label={t(option.labelKey)}
+                  onClick={() => handleDirectionChange(option.value)}
+                  className={cn(
+                    'px-3 py-1 text-xs rounded transition-colors',
+                    selectedDirection === option.value
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {t(option.labelKey)}
+                </button>
+              ))}
+            </div>
+          </PropertyRow>
+        )}
 
+        {transitionDefinition?.parameters?.map((parameter) => (
+          <PropertyRow key={parameter.key} label={parameter.label} tooltip={parameter.description}>
+            <div className="flex items-center gap-1 w-full">
+              {parameter.type === 'number' ? (
+                <SliderInput
+                  value={getNumberParameterValue(selectedTransition.properties, parameter)}
+                  onChange={(value) => handleParameterChange(parameter, value)}
+                  onLiveChange={(value) => handleParameterChange(parameter, value)}
+                  min={parameter.min ?? 0}
+                  max={parameter.max ?? 1}
+                  step={parameter.step ?? 1}
+                  unit={parameter.unit}
+                  formatValue={(value) => formatParameterValue(parameter, value)}
+                  className="flex-1 min-w-0"
+                />
+              ) : (
+                <TransitionColorPicker
+                  label={parameter.label}
+                  initialColor={getColorParameterValue(selectedTransition.properties, parameter)}
+                  onColorChange={(color) => handleParameterChange(parameter, color)}
+                />
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 flex-shrink-0"
+                onClick={() => handleParameterReset(parameter)}
+                disabled={isParameterAtDefault(selectedTransition.properties, parameter)}
+                title={t('editor.transitionPanel.resetParam', { label: parameter.label })}
+                aria-label={t('editor.transitionPanel.resetParam', { label: parameter.label })}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </PropertyRow>
+        ))}
+
+        {/* Action buttons */}
+        <div className="pt-2">
           {/* Delete button */}
           <Button
             variant="destructive"
@@ -384,10 +838,10 @@ export function TransitionPanel() {
             onClick={handleDelete}
           >
             <Trash2 className="w-3 h-3 mr-1.5" />
-            Delete
+            {t('common.delete')}
           </Button>
         </div>
       </PropertySection>
     </div>
-  );
+  )
 }

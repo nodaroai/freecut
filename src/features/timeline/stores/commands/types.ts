@@ -1,7 +1,9 @@
-import type { TimelineItem, TimelineTrack, ProjectMarker } from '@/types/timeline';
-import type { Transition } from '@/types/transition';
-import type { ItemKeyframes } from '@/types/keyframe';
-import type { SubComposition } from '../compositions-store';
+import type { TimelineItem, TimelineTrack, ProjectMarker } from '@/types/timeline'
+import type { AudioEqSettings } from '@/types/audio'
+import type { Transition } from '@/types/transition'
+import type { ItemKeyframes } from '@/types/keyframe'
+import type { SubComposition } from '../compositions-store'
+import type { ProjectResolution } from '@/types/project'
 
 /**
  * Snapshot of all timeline state for undo/redo.
@@ -9,18 +11,23 @@ import type { SubComposition } from '../compositions-store';
  * Excludes ephemeral state (for example isDirty) that shouldn't be in history.
  */
 export interface TimelineSnapshot {
-  items: TimelineItem[];
-  tracks: TimelineTrack[];
-  transitions: Transition[];
-  keyframes: ItemKeyframes[];
-  markers: ProjectMarker[];
-  compositions: SubComposition[];
-  inPoint: number | null;
-  outPoint: number | null;
-  fps: number;
-  scrollPosition: number;
-  snapEnabled: boolean;
-  currentFrame: number;
+  items: TimelineItem[]
+  tracks: TimelineTrack[]
+  transitions: Transition[]
+  keyframes: ItemKeyframes[]
+  markers: ProjectMarker[]
+  compositions: SubComposition[]
+  inPoint: number | null
+  outPoint: number | null
+  fps: number
+  scrollPosition: number
+  snapEnabled: boolean
+  currentFrame: number
+  busAudioEq?: AudioEqSettings
+  /** Project-scoped master bus gain in dB (0 = unity). */
+  masterBusDb: number
+  projectId: string | null
+  projectMetadata: ProjectResolution | null
 }
 
 /**
@@ -29,8 +36,8 @@ export interface TimelineSnapshot {
  * The actual undo/redo uses snapshots, not command-specific logic.
  */
 export interface TimelineCommand {
-  type: string;
-  payload?: Record<string, unknown>;
+  type: string
+  payload?: Record<string, unknown>
 }
 
 /**
@@ -38,7 +45,7 @@ export interface TimelineCommand {
  * Stores the command metadata and the state snapshot from before the command was executed.
  */
 export interface CommandEntry {
-  command: TimelineCommand;
-  beforeSnapshot: TimelineSnapshot;
-  timestamp: number;
+  command: TimelineCommand
+  beforeSnapshot: TimelineSnapshot
+  timestamp: number
 }

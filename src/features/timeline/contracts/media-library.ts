@@ -2,21 +2,13 @@
  * Timeline contract consumed by media-library feature adapters.
  */
 
-export { useTimelineSettingsStore } from '../stores/timeline-settings-store';
-export { useTimelineStore } from '../stores/timeline-store';
-export { useCompositionNavigationStore } from '../stores/composition-navigation-store';
-export { DEFAULT_TRACK_HEIGHT } from '../constants';
-export { timelineToSourceFrames, sourceToTimelineFrames } from '../utils/source-calculations';
+export { useCompositionsStore, type SubComposition } from '../stores/compositions-store'
+export { autoMatchOrphanedClips } from '../utils/media-validation'
+export { resolveMediaUrl, resolveMediaUrls } from '../deps/media-library-resolver'
+export { importCanvasRenderOrchestrator } from '../deps/export-contract'
 export {
-  useCompositionsStore,
-  type SubComposition,
-} from '../stores/compositions-store';
-export { useItemsStore } from '../stores/items-store';
-
-export { removeItems, updateItem } from '../stores/timeline-actions';
-export {
-  removeItems as removeItemsFromItemsActions,
-} from '../stores/actions/item-actions';
-
-export { autoMatchOrphanedClips } from '../utils/media-validation';
-export { gifFrameCache } from '../services/gif-frame-cache';
+  buildSubCompositionInput,
+  buildSubCompositionPreviewSignature,
+  collectSubCompositionMediaIds,
+  getSubCompositionThumbnailFrame,
+} from '../utils/sub-composition-preview'

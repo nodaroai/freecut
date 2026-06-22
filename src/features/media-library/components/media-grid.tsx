@@ -1,14 +1,18 @@
-﻿import { useState, useMemo, useEffect, useRef, memo } from 'react';
-import { Loader2, Upload, AlertTriangle } from 'lucide-react';
-import { createLogger } from '@/shared/logging/logger';
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Loader2, Upload, AlertTriangle } from 'lucide-react'
+import { createLogger } from '@/shared/logging/logger'
 
-const logger = createLogger('MediaGrid');
-import { MediaCard } from './media-card';
-import { useMediaLibraryStore, useFilteredMediaItems } from '../stores/media-library-store';
-import { useTimelineStore } from '@/features/media-library/deps/timeline-stores';
-import { useEditorStore } from '@/shared/state/editor';
-import { useMarqueeSelection, type MarqueeItem } from '@/hooks/use-marquee-selection';
-import { MarqueeOverlay } from '@/components/marquee-overlay';
+const logger = createLogger('MediaGrid')
+import { GridMediaCard, ListMediaCard } from './media-card'
+import { useMediaLibraryStore, useFilteredMediaItems } from '../stores/media-library-store'
+import type { MediaMetadata } from '@/types/storage'
+import {
+  getMediaDeletionImpact,
+  removeProjectItems,
+  useTimelineStore,
+} from '@/features/media-library/deps/timeline-stores'
+import { useEditorStore } from '@/shared/state/editor'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,223 +22,209 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+} from '@/components/ui/alert-dialog'
+
+import { GRID_MIN_SIZE_PX, GRID_GAP_BY_SIZE } from './media-grid-constants'
+import {
+  showMediaFilePicker,
+  getSupportedMediaFormatLabels,
+} from '@/features/media-library/utils/media-file-picker'
 
 interface MediaGridProps {
-  onMediaSelect?: (mediaId: string) => void;
-  viewMode?: 'grid' | 'list';
+  onMediaSelect?: (mediaId: string) => void
+  /** Grid item size (1 = largest, 5 = smallest) */
+  itemSize?: number
+  /** When provided, renders these items instead of pulling from the store */
+  items?: MediaMetadata[]
 }
 
-export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'grid' }: MediaGridProps) {
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [mediaIdToDelete, setMediaIdToDelete] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const wasMarqueeDraggingRef = useRef(false);
-  const hasAnimatedRef = useRef(false);
-  const lastSelectedIdRef = useRef<string | null>(null);
+interface MediaGridBaseProps extends MediaGridProps {
+  layout: 'grid' | 'list'
+}
 
-  const filteredItems = useFilteredMediaItems();
-  const isLoading = useMediaLibraryStore((s) => s.isLoading);
-  const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds);
-  const brokenMediaIds = useMediaLibraryStore((s) => s.brokenMediaIds);
-  const toggleMediaSelection = useMediaLibraryStore((s) => s.toggleMediaSelection);
-  const selectMedia = useMediaLibraryStore((s) => s.selectMedia);
-  const deleteMedia = useMediaLibraryStore((s) => s.deleteMedia);
-  const relinkMedia = useMediaLibraryStore((s) => s.relinkMedia);
-  const importMedia = useMediaLibraryStore((s) => s.importMedia);
-  const setSourcePreviewMediaId = useEditorStore((s) => s.setSourcePreviewMediaId);
+export const GridMediaGrid = memo(function GridMediaGrid(props: MediaGridProps) {
+  return <MediaGridBase {...props} layout="grid" />
+})
 
-  // Timeline store for checking references - don't subscribe to items to avoid re-renders
-  const removeTimelineItems = useTimelineStore((s) => s.removeItems);
+export const ListMediaGrid = memo(function ListMediaGrid(props: MediaGridProps) {
+  return <MediaGridBase {...props} layout="list" />
+})
 
-  // Find timeline items that reference the media being deleted
-  // Read from store directly to avoid subscribing to items array
-  const affectedTimelineItems = useMemo(() => {
-    if (!mediaIdToDelete) return [];
-    const timelineItems = useTimelineStore.getState().items;
-    return timelineItems.filter((item) => item.mediaId === mediaIdToDelete);
-  }, [mediaIdToDelete]);
+const MediaGridBase = memo(function MediaGridBase({
+  onMediaSelect,
+  layout,
+  itemSize = 3,
+  items,
+}: MediaGridBaseProps) {
+  const { t } = useTranslation()
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [mediaIdsToDelete, setMediaIdsToDelete] = useState<string[]>([])
+  const lastSelectedIdRef = useRef<string | null>(null)
 
-  // Create marquee items from filtered media
-  const marqueeItems: MarqueeItem[] = useMemo(
+  const allFilteredItems = useFilteredMediaItems()
+  const filteredItems = items ?? allFilteredItems
+  const filteredItemsRef = useRef(filteredItems)
+  const isLoading = useMediaLibraryStore((s) => s.isLoading)
+  const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds)
+  const brokenMediaIds = useMediaLibraryStore((s) => s.brokenMediaIds)
+  const deleteMedia = useMediaLibraryStore((s) => s.deleteMedia)
+  const deleteMediaBatch = useMediaLibraryStore((s) => s.deleteMediaBatch)
+  const relinkMedia = useMediaLibraryStore((s) => s.relinkMedia)
+  const importMedia = useMediaLibraryStore((s) => s.importMedia)
+  const setSourcePreviewMediaId = useEditorStore((s) => s.setSourcePreviewMediaId)
+  const selectedMediaIdSet = useMemo(() => new Set(selectedMediaIds), [selectedMediaIds])
+  const brokenMediaIdSet = useMemo(() => new Set(brokenMediaIds), [brokenMediaIds])
+
+  useEffect(() => {
+    filteredItemsRef.current = filteredItems
+  }, [filteredItems])
+
+  const affectedMediaImpact = useMemo(
     () =>
-      filteredItems.map((media) => ({
-        id: media.id,
-        getBoundingRect: () => {
-          const element = document.querySelector(`[data-media-id="${media.id}"]`);
-          if (!element) {
-            return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+      mediaIdsToDelete.length > 0
+        ? getMediaDeletionImpact(mediaIdsToDelete)
+        : { itemIds: [], rootReferenceCount: 0, nestedReferenceCount: 0, totalReferenceCount: 0 },
+    [mediaIdsToDelete],
+  )
+
+  const handleCardSelect = useCallback(
+    (mediaId: string, event?: React.MouseEvent) => {
+      const currentFilteredItems = filteredItemsRef.current
+      const mediaStore = useMediaLibraryStore.getState()
+
+      // Shift click: select range from last selected item to this item
+      if (event?.shiftKey && lastSelectedIdRef.current) {
+        const lastIndex = currentFilteredItems.findIndex(
+          (item) => item.id === lastSelectedIdRef.current,
+        )
+        const currentIndex = currentFilteredItems.findIndex((item) => item.id === mediaId)
+
+        if (lastIndex !== -1 && currentIndex !== -1) {
+          const startIndex = Math.min(lastIndex, currentIndex)
+          const endIndex = Math.max(lastIndex, currentIndex)
+          const rangeIds = currentFilteredItems
+            .slice(startIndex, endIndex + 1)
+            .map((item) => item.id)
+
+          // If Ctrl/Cmd is also held, add range to existing selection
+          if (event.ctrlKey || event.metaKey) {
+            const newSelection = [...new Set([...mediaStore.selectedMediaIds, ...rangeIds])]
+            mediaStore.setSelection({
+              mediaIds: newSelection,
+              compositionIds: mediaStore.selectedCompositionIds,
+            })
+          } else {
+            // Replace selection with range
+            mediaStore.setSelection({ mediaIds: rangeIds, compositionIds: [] })
           }
-          const rect = element.getBoundingClientRect();
-          return {
-            left: rect.left,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-            width: rect.width,
-            height: rect.height,
-          };
-        },
-      })),
-    [filteredItems]
-  );
-
-  // Marquee selection
-  const { marqueeState } = useMarqueeSelection({
-    containerRef: containerRef as React.RefObject<HTMLElement>,
-    items: marqueeItems,
-    onSelectionChange: (ids) => {
-      selectMedia(ids);
-    },
-    enabled: filteredItems.length > 0,
-  });
-
-  // Track when marquee was active to prevent click from clearing selection
-  useEffect(() => {
-    if (marqueeState.active) {
-      wasMarqueeDraggingRef.current = true;
-    }
-  }, [marqueeState.active]);
-
-  // Mark as animated after first render to prevent re-animation on tab switches
-  useEffect(() => {
-    if (filteredItems.length > 0) {
-      hasAnimatedRef.current = true;
-    }
-  }, [filteredItems.length]);
-
-  const handleCardSelect = (mediaId: string, event?: React.MouseEvent) => {
-    // Shift click: select range from last selected item to this item
-    if (event?.shiftKey && lastSelectedIdRef.current) {
-      const lastIndex = filteredItems.findIndex((item) => item.id === lastSelectedIdRef.current);
-      const currentIndex = filteredItems.findIndex((item) => item.id === mediaId);
-
-      if (lastIndex !== -1 && currentIndex !== -1) {
-        const startIndex = Math.min(lastIndex, currentIndex);
-        const endIndex = Math.max(lastIndex, currentIndex);
-        const rangeIds = filteredItems.slice(startIndex, endIndex + 1).map((item) => item.id);
-
-        // If Ctrl/Cmd is also held, add range to existing selection
-        if (event.ctrlKey || event.metaKey) {
-          const newSelection = [...new Set([...selectedMediaIds, ...rangeIds])];
-          selectMedia(newSelection);
-        } else {
-          // Replace selection with range
-          selectMedia(rangeIds);
         }
+      } else if (event?.ctrlKey || event?.metaKey) {
+        // Ctrl/Cmd click: toggle selection (add/remove from current selection)
+        mediaStore.toggleMediaSelection(mediaId)
+        lastSelectedIdRef.current = mediaId
+      } else {
+        // Normal click: select only this item (clear others)
+        mediaStore.setSelection({ mediaIds: [mediaId], compositionIds: [] })
+        lastSelectedIdRef.current = mediaId
       }
-    } else if (event?.ctrlKey || event?.metaKey) {
-      // Ctrl/Cmd click: toggle selection (add/remove from current selection)
-      toggleMediaSelection(mediaId);
-      lastSelectedIdRef.current = mediaId;
-    } else {
-      // Normal click: select only this item (clear others)
-      selectMedia([mediaId]);
-      lastSelectedIdRef.current = mediaId;
-    }
-    onMediaSelect?.(mediaId);
-  };
+      onMediaSelect?.(mediaId)
+    },
+    [onMediaSelect],
+  )
 
   // Show delete confirmation dialog (called from MediaCard)
-  const handleCardDelete = (mediaId: string) => {
-    setMediaIdToDelete(mediaId);
-    setShowDeleteDialog(true);
-  };
+  const handleCardDelete = useCallback((mediaIds: string[]) => {
+    if (mediaIds.length === 0) return
+    setMediaIdsToDelete(mediaIds)
+    setShowDeleteDialog(true)
+  }, [])
 
   // Actually delete after confirmation
   const handleConfirmDelete = async () => {
-    if (!mediaIdToDelete) return;
+    if (mediaIdsToDelete.length === 0) return
 
-    setShowDeleteDialog(false);
+    setShowDeleteDialog(false)
     try {
       // First remove timeline items that reference this media
-      if (affectedTimelineItems.length > 0) {
-        const timelineItemIds = affectedTimelineItems.map((item) => item.id);
-        removeTimelineItems(timelineItemIds);
+      if (affectedMediaImpact.itemIds.length > 0) {
+        const removedTimelineReferences = removeProjectItems(affectedMediaImpact.itemIds)
+        const currentProjectId = useMediaLibraryStore.getState().currentProjectId
+        if (removedTimelineReferences && currentProjectId) {
+          await useTimelineStore.getState().saveTimeline(currentProjectId)
+        }
       }
 
       // Then delete the media from the library
-      await deleteMedia(mediaIdToDelete);
+      if (mediaIdsToDelete.length === 1) {
+        await deleteMedia(mediaIdsToDelete[0]!)
+      } else {
+        await deleteMediaBatch(mediaIdsToDelete)
+      }
     } catch (error) {
-      logger.error('Failed to delete media:', error);
+      logger.error('Failed to delete media:', error)
       // Error is already set in store
     } finally {
-      setMediaIdToDelete(null);
+      setMediaIdsToDelete([])
     }
-  };
+  }
 
-  const handleCancelDelete = () => {
-    setShowDeleteDialog(false);
-    setMediaIdToDelete(null);
-  };
+  const handleCancelDelete = useCallback(() => {
+    setShowDeleteDialog(false)
+    setMediaIdsToDelete([])
+  }, [])
 
   // Handle relinking a broken media file
-  const handleRelink = async (mediaId: string) => {
-    try {
-      // Open file picker for a single file
-      const handles = await window.showOpenFilePicker({
-        multiple: false,
-        types: [
-          {
-            description: 'Media files',
-            accept: {
-              'video/*': ['.mp4', '.webm', '.mov', '.avi', '.mkv'],
-              'audio/*': ['.mp3', '.wav', '.ogg', '.m4a', '.aac'],
-              'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'],
-            },
-          },
-        ],
-      });
+  const handleRelink = useCallback(
+    async (mediaId: string) => {
+      try {
+        const handles = await showMediaFilePicker({ multiple: false })
 
-      const handle = handles[0];
-      if (!handle) return;
+        const handle = handles[0]
+        if (!handle) return
 
-      await relinkMedia(mediaId, handle);
-    } catch (error) {
-      // User cancelled - ignore AbortError
-      if (error instanceof Error && error.name !== 'AbortError') {
-        logger.error('Failed to relink media:', error);
+        await relinkMedia(mediaId, handle)
+      } catch (error) {
+        // User cancelled - ignore AbortError
+        if (error instanceof Error && error.name !== 'AbortError') {
+          logger.error('Failed to relink media:', error)
+        }
       }
-    }
-  };
-
-  const handleContainerClick = (e: React.MouseEvent) => {
-    // Don't clear selection if we just finished a marquee drag
-    if (wasMarqueeDraggingRef.current) {
-      wasMarqueeDraggingRef.current = false;
-      return;
-    }
-
-    // Check if click was on a media card by looking for the data attribute
-    const clickedOnCard = (e.target as HTMLElement).closest('[data-media-id]');
-
-    if (!clickedOnCard) {
-      // Clear selection when clicking empty area (not on a card)
-      selectMedia([]);
-    }
-  };
+    },
+    [relinkMedia],
+  )
 
   // Handle click on empty state to open file picker
-  const handleEmptyStateClick = async () => {
+  const handleEmptyStateClick = useCallback(async () => {
     try {
-      await importMedia();
+      await importMedia()
     } catch (error) {
-      logger.error('Import failed:', error);
+      logger.error('Import failed:', error)
     }
-  };
+  }, [importMedia])
+
+  const cardHandlersById = useMemo(
+    () =>
+      new Map(
+        filteredItems.map((media) => [
+          media.id,
+          {
+            onSelect: (event: React.MouseEvent) => handleCardSelect(media.id, event),
+            onDoubleClick: () => setSourcePreviewMediaId(media.id),
+            onDelete: (mediaIds: string[]) => handleCardDelete(mediaIds),
+            onRelink: () => {
+              void handleRelink(media.id)
+            },
+          },
+        ]),
+      ),
+    [filteredItems, handleCardDelete, handleCardSelect, handleRelink, setSourcePreviewMediaId],
+  )
 
   // Main container with dropzone functionality
   return (
-    <div
-      ref={containerRef}
-      className="relative"
-      onClick={handleContainerClick}
-    >
-      {/* Marquee selection overlay */}
-      <MarqueeOverlay marqueeState={marqueeState} />
-
+    <div>
       {/* Content */}
-      {isLoading ? (
+      {!items && isLoading ? (
         <div className="flex items-center justify-center py-24">
           <div className="flex flex-col items-center gap-4">
             <div className="relative">
@@ -242,56 +232,79 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
               <div className="absolute inset-0 w-12 h-12 rounded-full border-2 border-primary/20 animate-pulse" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-mono text-foreground tracking-wider mb-1">LOADING MEDIA LIBRARY</p>
-              <p className="text-xs text-muted-foreground font-mono">Initializing storage...</p>
+              <p className="text-sm font-mono text-foreground tracking-wider mb-1">
+                {t('media.grid.loadingTitle')}
+              </p>
+              <p className="text-xs text-muted-foreground font-mono">
+                {t('media.grid.loadingSubtitle')}
+              </p>
             </div>
           </div>
         </div>
-      ) : filteredItems.length === 0 ? (
+      ) : !items && filteredItems.length === 0 ? (
         <div className="flex items-center justify-center py-24">
-          <div className="text-center max-w-md">
-            <div
-              className="w-20 h-20 mx-auto mb-6 rounded-full border-2 border-dashed border-border flex items-center justify-center bg-secondary hover:border-primary/50 hover:bg-secondary/80 cursor-pointer transition-colors"
-              onClick={handleEmptyStateClick}
-            >
+          <button
+            type="button"
+            className="text-center max-w-md rounded-xl border border-dashed border-border/80 p-6 transition-colors hover:border-primary/60 hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={handleEmptyStateClick}
+          >
+            <div className="w-20 h-20 mx-auto mb-6 rounded-full border-2 border-dashed border-border flex items-center justify-center bg-secondary transition-colors">
               <Upload className="w-10 h-10 text-muted-foreground" />
             </div>
-            <p className="text-base font-bold text-foreground mb-2 tracking-wide">NO MEDIA FILES</p>
-            <p className="text-sm text-muted-foreground font-light mb-3">
-              Drag and drop files or click to browse
+            <p className="text-base font-bold text-foreground mb-2 tracking-wide">
+              {t('media.grid.emptyTitle')}
             </p>
+            <p className="text-sm text-muted-foreground font-light mb-4">
+              {t('media.grid.emptyHint')}
+            </p>
+            <span className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground mb-4">
+              {t('media.grid.importButton')}
+            </span>
             <div className="flex flex-wrap justify-center gap-2">
-              <span className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground">MP4</span>
-              <span className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground">WebM</span>
-              <span className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground">MOV</span>
-              <span className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground">MP3</span>
-              <span className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground">WAV</span>
-              <span className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground">JPG</span>
-              <span className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground">PNG</span>
+              {getSupportedMediaFormatLabels().map((label) => (
+                <span
+                  key={label}
+                  className="px-2 py-0.5 bg-secondary border border-border rounded text-xs font-mono text-muted-foreground"
+                >
+                  {label}
+                </span>
+              ))}
             </div>
-          </div>
+          </button>
         </div>
       ) : (
-        <div className={viewMode === 'grid' ? 'grid grid-cols-2 md:grid-cols-3 gap-4 max-w-5xl' : 'space-y-2'}>
-          {filteredItems.map((media, index) => (
-            <div
-              key={media.id}
-              data-media-id={media.id}
-              className={hasAnimatedRef.current ? '' : 'animate-in fade-in slide-in-from-bottom-4 duration-300'}
-              style={hasAnimatedRef.current ? {} : { animationDelay: `${index * 30}ms` }}
-            >
-              <MediaCard
-                media={media}
-                selected={selectedMediaIds.includes(media.id)}
-                isBroken={brokenMediaIds.includes(media.id)}
-                onSelect={(event) => handleCardSelect(media.id, event)}
-                onDoubleClick={() => setSourcePreviewMediaId(media.id)}
-                onDelete={() => handleCardDelete(media.id)}
-                onRelink={() => handleRelink(media.id)}
-                viewMode={viewMode}
-              />
-            </div>
-          ))}
+        <div
+          className={
+            layout === 'grid'
+              ? `grid ${GRID_GAP_BY_SIZE[itemSize] ?? GRID_GAP_BY_SIZE[3]}`
+              : 'space-y-1'
+          }
+          style={
+            layout === 'grid'
+              ? {
+                  gridTemplateColumns: `repeat(auto-fill, minmax(min(${GRID_MIN_SIZE_PX[itemSize] ?? GRID_MIN_SIZE_PX[3]}px, 100%), 1fr))`,
+                }
+              : undefined
+          }
+        >
+          {filteredItems.map((media) => {
+            const handlers = cardHandlersById.get(media.id)
+            const Card = layout === 'grid' ? GridMediaCard : ListMediaCard
+
+            return (
+              <div key={media.id} data-media-id={media.id}>
+                <Card
+                  media={media}
+                  selected={selectedMediaIdSet.has(media.id)}
+                  isBroken={brokenMediaIdSet.has(media.id)}
+                  onSelect={handlers?.onSelect}
+                  onDoubleClick={handlers?.onDoubleClick}
+                  onDelete={handlers?.onDelete}
+                  onRelink={handlers?.onRelink}
+                />
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -299,20 +312,30 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
       <AlertDialog open={showDeleteDialog} onOpenChange={(open) => !open && handleCancelDelete()}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete media file?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {mediaIdsToDelete.length > 1
+                ? t('media.deleteDialog.titleMultiple', { count: mediaIdsToDelete.length })
+                : t('media.deleteDialog.titleSingle')}
+            </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 <p>
-                  Are you sure you want to delete "{filteredItems.find(m => m.id === mediaIdToDelete)?.fileName}"?
-                  This action cannot be undone.
+                  {mediaIdsToDelete.length > 1
+                    ? t('media.deleteDialog.bodyMultiple', { count: mediaIdsToDelete.length })
+                    : t('media.deleteDialog.bodySingle', {
+                        name:
+                          filteredItems.find((m) => m.id === mediaIdsToDelete[0])?.fileName ?? '',
+                      })}
                 </p>
-                {affectedTimelineItems.length > 0 && (
+                {affectedMediaImpact.totalReferenceCount > 0 && (
                   <div className="flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-md">
                     <AlertTriangle className="w-4 h-4 text-yellow-500 flex-shrink-0 mt-0.5" />
                     <div className="text-sm text-yellow-600 dark:text-yellow-400">
-                      <p className="font-medium">Timeline clips will be removed</p>
+                      <p className="font-medium">{t('media.deleteDialog.timelineClipsRemoved')}</p>
                       <p className="text-xs mt-1 text-yellow-600/80 dark:text-yellow-400/80">
-                        {affectedTimelineItems.length} clip{affectedTimelineItems.length > 1 ? 's' : ''} in the timeline use{affectedTimelineItems.length === 1 ? 's' : ''} this media and will also be deleted.
+                        {t('media.deleteDialog.timelineClipsDetail', {
+                          count: affectedMediaImpact.totalReferenceCount,
+                        })}
                       </p>
                     </div>
                   </div>
@@ -321,14 +344,20 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancelDelete}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Delete{affectedTimelineItems.length > 0 ? ` & ${affectedTimelineItems.length} clip${affectedTimelineItems.length > 1 ? 's' : ''}` : ''}
+            <AlertDialogCancel onClick={handleCancelDelete}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {affectedMediaImpact.totalReferenceCount > 0
+                ? t('media.deleteDialog.confirmWithClips', {
+                    count: affectedMediaImpact.totalReferenceCount,
+                  })
+                : t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-});
-
+  )
+})

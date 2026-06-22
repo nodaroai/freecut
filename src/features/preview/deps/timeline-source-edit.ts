@@ -4,6 +4,8 @@
  */
 
 export {
+  getTrackKind,
   performInsertEdit,
   performOverwriteEdit,
-} from './timeline-contract';
+  resolveSourceEditTrackTargets,
+} from './timeline-contract'

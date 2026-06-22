@@ -1,191 +1,210 @@
-﻿/**
+/**
  * Dopesheet Editor - timeline-style keyframe editor.
  * Shows keyframes across properties as draggable diamonds on a frame grid.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useHotkeys } from 'react-hotkeys-hook';
-import { ChevronLeft, ChevronRight, Maximize2, Timer, Trash2, ZoomIn, ZoomOut, Magnet } from 'lucide-react';
-import { cn } from '@/shared/ui/cn';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { useTranslation } from 'react-i18next'
+import { useHotkeys } from 'react-hotkeys-hook'
+import { ChevronDown, ChevronLeft, ChevronRight, LineChart, Lock, Timer, X } from 'lucide-react'
+import { cn } from '@/shared/ui/cn'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import type {
+  AnimatableProperty,
+  BezierControlPoints,
+  EasingType,
+  Keyframe,
+  KeyframeRef,
+} from '@/types/keyframe'
+import type { BlockedFrameRange } from '../../utils/transition-region'
+import { HOTKEY_OPTIONS } from '@/config/hotkeys'
+import { getFrameAxisX, getFrameFromAxisX, getVisibleKeyframeX } from './layout'
+import { CompactNavigator } from './compact-navigator'
+import { DopesheetClipboardActions } from './dopesheet-clipboard-actions'
+import { DopesheetEditActions } from './dopesheet-edit-actions'
+import { DopesheetGraphPane } from './dopesheet-graph-pane'
+import { useGraphViewState } from './use-graph-view-state'
+import { useGroupExpansion } from './use-group-expansion'
+import { useHeaderFrameInputs } from './use-header-frame-inputs'
+import { usePropertyFilters } from './use-property-filters'
+import { useDopesheetMarquee } from './use-dopesheet-marquee'
+import { useTimingStripDrag } from './use-timing-strip-drag'
+import { useDopesheetViewport } from './use-dopesheet-viewport'
+import { useElementSize } from './use-element-size'
+import { addWindowPointerListeners } from './dopesheet-pointer-listeners'
+import { DopesheetHeaderFrameInputs } from './dopesheet-header-frame-inputs'
+import { DopesheetRulerHeader } from './dopesheet-ruler-header'
+import { DopesheetSheetBody } from './dopesheet-sheet-body'
+import { DopesheetInterpolationButtons } from './dopesheet-interpolation-buttons'
+import { DopesheetParameterMenu } from './dopesheet-parameter-menu'
+import { DopesheetLegendPopover } from './dopesheet-legend-popover'
+import { DopesheetViewOptionsMenu } from './dopesheet-view-options-menu'
+import { KeyframeTimingStrip } from './keyframe-timing-strip'
+import { setPointerCaptureSafely } from './dopesheet-utils'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  arePreviewFramesEqual,
+  buildGroupedPropertyRows,
+  buildGroupedPropertyStructure,
+  getNiceTickStep,
+} from './dopesheet-helpers'
+import type { DopesheetPropertyGroupStructure } from './dopesheet-helpers'
+import { GroupTimelineCell, PropertyTimelineCell } from './dopesheet-timeline-cells'
+import { DopesheetPlayheadLine } from './dopesheet-playhead-line'
 import {
-  KEYFRAME_MARQUEE_THRESHOLD,
-  KeyframeMarqueeOverlay,
-  type KeyframeMarqueeRect,
-} from '../keyframe-marquee';
-import type { AnimatableProperty, Keyframe, KeyframeRef } from '@/types/keyframe';
-import { PROPERTY_LABELS } from '@/types/keyframe';
-import type { BlockedFrameRange } from '../../utils/transition-region';
-import { HOTKEY_OPTIONS } from '@/config/hotkeys';
-import { getFrameAxisX, getFrameFromAxisX, getVisibleKeyframeX } from './layout';
-import { getDopesheetRowControlState } from './row-controls';
-import { PROPERTY_VALUE_RANGES } from '@/features/keyframes/property-value-ranges';
-import { useAutoKeyframeStore } from '../../stores/auto-keyframe-store';
+  DRAG_THRESHOLD,
+  EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
+  GROUP_HEADER_HEIGHT,
+  MINI_ICON_BUTTON_CLASS,
+  MINI_ICON_CLASS,
+  PROPERTY_COLUMN_WIDTH,
+  SPACIOUS_PROPERTY_COLUMN_WIDTH,
+  ROW_HEIGHT,
+  RULER_HEIGHT,
+  SNAP_THRESHOLD_PX,
+  ZOOM_IN_FACTOR,
+  ZOOM_OUT_FACTOR,
+} from './dopesheet-constants'
+import type {
+  DopesheetPropertyGroup,
+  DopesheetPropertyRow,
+  DragState,
+  KeyframeMeta,
+  RenderedSheetEntry,
+  Viewport,
+} from './dopesheet-types'
+import { getDopesheetRowControlState } from './row-controls'
+import { getPropertyAccordionGroups } from './property-groups'
+import { getCombinedGraphValueRange } from '../value-graph-editor/value-range-utils'
+import { PROPERTY_VALUE_RANGES } from '@/features/keyframes/property-value-ranges'
+import { constrainSelectedKeyframeDelta } from '@/features/keyframes/utils/frame-move-constraints'
+import { useAutoKeyframeStore } from '../../stores/auto-keyframe-store'
+import { clampFrame } from './frame-utils'
+import {
+  buildSelectionFramePreview as buildSelectionFramePreviewState,
+  commitSelectionFramePreview as commitSelectionFramePreviewState,
+  duplicateSelectionFramePreview as duplicateSelectionFramePreviewState,
+} from './selection-frame-actions'
+import {
+  buildGroupAddEntries,
+  buildPropertyKeyframeRefs,
+  buildRowKeyframeRefs,
+  getRemovableGroupCurrentKeyframes,
+  removeSelectionIds,
+} from './row-action-helpers'
+import {
+  getKeyframeGroupLabel,
+  getKeyframePropertyLabel,
+} from '@/features/keyframes/utils/property-i18n'
+import { useCoalescedScrub } from '../use-coalesced-scrub'
 
 interface DopesheetEditorProps {
   /** Shared time viewport when split mode needs synchronized frame zoom/pan */
-  frameViewport?: Viewport;
+  frameViewport?: Viewport
   /** Callback when the shared time viewport changes */
-  onFrameViewportChange?: (viewport: Viewport) => void;
+  onFrameViewportChange?: (viewport: Viewport) => void
   /** Item ID to show keyframes for */
-  itemId: string;
+  itemId: string
   /** Keyframes organized by property */
-  keyframesByProperty: Partial<Record<AnimatableProperty, Keyframe[]>>;
+  keyframesByProperty: Partial<Record<AnimatableProperty, Keyframe[]>>
   /** Currently selected property (or null to show all) */
-  selectedProperty?: AnimatableProperty | null;
+  selectedProperty?: AnimatableProperty | null
   /** Selected keyframe IDs */
-  selectedKeyframeIds?: Set<string>;
+  selectedKeyframeIds?: Set<string>
   /** Current playhead frame */
-  currentFrame?: number;
+  currentFrame?: number
   /** Global timeline frame for the same playhead position */
-  globalFrame?: number | null;
+  globalFrame?: number | null
+  /** Absolute timeline frame where the edited item starts (for live playhead) */
+  itemFrom?: number
   /** Total duration in frames */
-  totalFrames?: number;
+  totalFrames?: number
+  /** Timeline FPS used for ruler display */
+  fps?: number
   /** Width of the editor */
-  width?: number;
+  width?: number
   /** Height of the editor */
-  height?: number;
+  height?: number
   /** Callback when keyframe is moved */
-  onKeyframeMove?: (ref: KeyframeRef, newFrame: number, newValue: number) => void;
+  onKeyframeMove?: (ref: KeyframeRef, newFrame: number, newValue: number) => void
+  /** Callback when bezier handles are moved in graph view */
+  onBezierHandleMove?: (ref: KeyframeRef, bezier: BezierControlPoints) => void
   /** Callback when selection changes */
-  onSelectionChange?: (keyframeIds: Set<string>) => void;
+  onSelectionChange?: (keyframeIds: Set<string>) => void
   /** Callback when property selection changes */
-  onPropertyChange?: (property: AnimatableProperty | null) => void;
+  onPropertyChange?: (property: AnimatableProperty | null) => void
   /** Callback when a property row becomes the active interaction target */
-  onActivePropertyChange?: (property: AnimatableProperty) => void;
+  onActivePropertyChange?: (property: AnimatableProperty) => void
   /** Callback when playhead is scrubbed (frame is clip-relative) */
-  onScrub?: (frame: number) => void;
+  onScrub?: (frame: number) => void
+  /** Callback when scrubbing starts */
+  onScrubStart?: () => void
   /** Callback when scrubbing ends */
-  onScrubEnd?: () => void;
+  onScrubEnd?: () => void
   /** Callback when drag starts (for undo batching) */
-  onDragStart?: () => void;
+  onDragStart?: () => void
   /** Callback when drag ends (for undo batching) */
-  onDragEnd?: () => void;
+  onDragEnd?: () => void
   /** Callback to add a keyframe at the current frame */
-  onAddKeyframe?: (property: AnimatableProperty, frame: number) => void;
+  onAddKeyframe?: (property: AnimatableProperty, frame: number) => void
+  /** Callback to add multiple keyframes in a single batch */
+  onAddKeyframes?: (entries: Array<{ property: AnimatableProperty; frame: number }>) => void
+  /** Callback to duplicate keyframes to explicit target frames */
+  onDuplicateKeyframes?: (
+    entries: Array<{ ref: KeyframeRef; frame: number; value: number }>,
+  ) => void
   /** Current property values at the playhead */
-  propertyValues?: Partial<Record<AnimatableProperty, number>>;
+  propertyValues?: Partial<Record<AnimatableProperty, number>>
   /** Callback to commit a property value at the playhead */
   onPropertyValueCommit?: (
     property: AnimatableProperty,
     value: number,
-    options?: { allowCreate?: boolean }
-  ) => void;
+    options?: { allowCreate?: boolean },
+  ) => void
   /** Callback to remove selected keyframes */
-  onRemoveKeyframes?: (refs: KeyframeRef[]) => void;
+  onRemoveKeyframes?: (refs: KeyframeRef[]) => void
+  /** Copy selected keyframes */
+  onCopyKeyframes?: () => void
+  /** Cut selected keyframes */
+  onCutKeyframes?: () => void
+  /** Paste keyframes from clipboard */
+  onPasteKeyframes?: () => void
+  /** Whether clipboard currently contains keyframes */
+  hasKeyframeClipboard?: boolean
+  /** Whether clipboard represents a cut operation */
+  isKeyframeClipboardCut?: boolean
+  /** Selected interpolation/easing for the current editor selection */
+  selectedInterpolation?: EasingType
+  /** Available interpolation options */
+  interpolationOptions?: ReadonlyArray<{ value: EasingType; label: string }>
+  /** Callback when the selection interpolation changes */
+  onInterpolationChange?: (easing: EasingType) => void
+  /** Disable interpolation control */
+  interpolationDisabled?: boolean
   /** Callback to navigate to a keyframe */
-  onNavigateToKeyframe?: (frame: number) => void;
+  onNavigateToKeyframe?: (frame: number) => void
   /** Transition-blocked frame ranges (keyframes cannot be placed here) */
-  transitionBlockedRanges?: BlockedFrameRange[];
+  transitionBlockedRanges?: BlockedFrameRange[]
   /** Whether the editor is disabled */
-  disabled?: boolean;
+  disabled?: boolean
+  /** Which visualization to render on the right side. `split` shows both the
+   *  sheet body and the curve/graph pane at once (Animate workspace placement),
+   *  sharing a single frame viewport and playhead so they cannot desync. */
+  visualizationMode?: 'dopesheet' | 'graph' | 'split'
+  /** Use the wider property column + value inputs (Animate workspace, where
+   *  there is room). Defaults to the compact sidebar sizing. */
+  spacious?: boolean
   /** Additional class name */
-  className?: string;
+  className?: string
 }
 
-interface Viewport {
-  startFrame: number;
-  endFrame: number;
-}
+type StructureRow = { property: AnimatableProperty; keyframes: Keyframe[] }
 
-interface KeyframeMeta {
-  property: AnimatableProperty;
-  keyframe: Keyframe;
-}
-
-interface DragState {
-  anchorKeyframeId: string;
-  selectedKeyframeIds: string[];
-  initialFrames: Map<string, number>;
-  startClientX: number;
-  pointerId: number;
-  started: boolean;
-}
-
-type MarqueeMode = 'replace' | 'add' | 'toggle';
-
-interface MarqueeState {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  currentX: number;
-  currentY: number;
-  mode: MarqueeMode;
-  baseSelection: Set<string>;
-  started: boolean;
-}
-
-const PROPERTY_COLUMN_WIDTH = 290;
-const MIN_VISIBLE_FRAMES = 20;
-const DEFAULT_VISIBLE_FRAMES = 120;
-const SNAP_THRESHOLD_PX = 8;
-const ROW_HEIGHT = 36;
-const RULER_HEIGHT = 26;
-const ZOOM_IN_FACTOR = 0.8;
-const ZOOM_OUT_FACTOR = 1.25;
-const DRAG_THRESHOLD = 2;
-const MARQUEE_SCROLL_EDGE_PX = 24;
-const MARQUEE_SCROLL_MAX_SPEED = 16;
-const EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY: Partial<Record<AnimatableProperty, boolean>> = {};
-
-function clampFrame(frame: number, totalFrames: number): number {
-  if (totalFrames <= 0) return 0;
-  return Math.max(0, Math.min(totalFrames - 1, frame));
-}
-
-function getNiceTickStep(frameRange: number): number {
-  const rough = Math.max(1, frameRange / 10);
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
-  const normalized = rough / magnitude;
-  if (normalized <= 1) return magnitude;
-  if (normalized <= 2) return 2 * magnitude;
-  if (normalized <= 5) return 5 * magnitude;
-  return 10 * magnitude;
-}
-
-function clampToAvoidBlockedRanges(
-  frame: number,
-  initialFrame: number,
-  blockedRanges: BlockedFrameRange[]
-): number {
-  if (blockedRanges.length === 0) return frame;
-  for (const range of blockedRanges) {
-    if (frame >= range.start && frame < range.end) {
-      if (initialFrame < range.start) return range.start - 1;
-      if (initialFrame >= range.end) return range.end;
-      const distToStart = frame - range.start;
-      const distToEnd = range.end - frame;
-      return distToStart < distToEnd ? range.start - 1 : range.end;
-    }
-  }
-  return frame;
-}
-
-function arePreviewFramesEqual(
-  a: Record<string, number> | null,
-  b: Record<string, number> | null
-): boolean {
-  if (a === b) return true;
-  if (!a || !b) return a === b;
-
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-
-  for (const key of aKeys) {
-    if (a[key] !== b[key]) return false;
-  }
-
-  return true;
-}
+// Stable empty fallbacks so memoized timeline cells don't see fresh `[]` refs.
+const EMPTY_KEYFRAMES: Keyframe[] = []
+const EMPTY_STRUCTURE_ROWS: StructureRow[] = []
+const EMPTY_FRAME_GROUPS: DopesheetPropertyGroupStructure<StructureRow>['frameGroups'] = []
 
 export const DopesheetEditor = memo(function DopesheetEditor({
   frameViewport,
@@ -196,193 +215,286 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   selectedKeyframeIds = new Set(),
   currentFrame = 0,
   globalFrame = null,
+  itemFrom = 0,
   totalFrames = 300,
+  fps = 30,
   width = 600,
   height = 260,
   onKeyframeMove,
+  onBezierHandleMove,
   onSelectionChange,
   onPropertyChange,
   onActivePropertyChange,
   onScrub,
+  onScrubStart,
   onScrubEnd,
   onDragStart,
   onDragEnd,
   onAddKeyframe,
+  onAddKeyframes,
+  onDuplicateKeyframes,
   propertyValues = {},
   onPropertyValueCommit,
   onRemoveKeyframes,
+  onCopyKeyframes,
+  onCutKeyframes,
+  onPasteKeyframes,
+  hasKeyframeClipboard = false,
+  isKeyframeClipboardCut = false,
+  selectedInterpolation,
+  interpolationOptions = [],
+  onInterpolationChange,
+  interpolationDisabled = false,
   onNavigateToKeyframe,
   transitionBlockedRanges = [],
   disabled = false,
+  visualizationMode = 'dopesheet',
+  spacious = false,
   className,
 }: DopesheetEditorProps) {
-  const timelineRef = useRef<HTMLDivElement>(null);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const bodyTimelineRef = useRef<HTMLDivElement>(null);
-  const keyframeButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const [timelineWidth, setTimelineWidth] = useState(0);
-  const [bodyTimelineWidth, setBodyTimelineWidth] = useState(0);
-  const [snapEnabled, setSnapEnabled] = useState(true);
-  const [marqueeRect, setMarqueeRect] = useState<KeyframeMarqueeRect | null>(null);
-  const [valueDrafts, setValueDrafts] = useState<Partial<Record<AnimatableProperty, string>>>({});
-  const [editingValueProperty, setEditingValueProperty] = useState<AnimatableProperty | null>(null);
+  const { t } = useTranslation()
+  // `split` shows both panes at once. Derive per-pane visibility so the many
+  // mode branches below read intent ("is the graph showing?") rather than an
+  // exact mode, and the exclusive `dopesheet`/`graph` modes stay unchanged.
+  const showSheetPane = visualizationMode !== 'graph'
+  const showGraphPane = visualizationMode !== 'dopesheet'
+  const isSplitView = visualizationMode === 'split'
+  // Wider property column + value inputs when there is room (Animate workspace).
+  const columnWidth = spacious ? SPACIOUS_PROPERTY_COLUMN_WIDTH : PROPERTY_COLUMN_WIDTH
+  const timelineRef = useRef<HTMLDivElement>(null)
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const graphPaneRef = useRef<HTMLDivElement>(null)
+  const keyframeButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const snapEnabled = true
+  const [valueDrafts, setValueDrafts] = useState<Partial<Record<AnimatableProperty, string>>>({})
+  const [editingValueProperty, setEditingValueProperty] = useState<AnimatableProperty | null>(null)
   const autoKeyEnabledByProperty = useAutoKeyframeStore(
     useCallback(
       (state) => state.enabledByItem[itemId] ?? EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
-      [itemId]
-    )
-  );
-  const toggleAutoKeyframeEnabled = useAutoKeyframeStore((state) => state.toggleAutoKeyframeEnabled);
-  const [localFrameInputValue, setLocalFrameInputValue] = useState('');
-  const [globalFrameInputValue, setGlobalFrameInputValue] = useState('');
-  const skipNextBlurCommitPropertyRef = useRef<AnimatableProperty | null>(null);
-  const skipNextHeaderFrameBlurRef = useRef<'local' | 'global' | null>(null);
-  const appliedDragPreviewFramesRef = useRef<Record<string, number> | null>(null);
+      [itemId],
+    ),
+  )
+  const setAutoKeyframeEnabled = useAutoKeyframeStore((state) => state.setAutoKeyframeEnabled)
+  const toggleAutoKeyframeEnabled = useAutoKeyframeStore((state) => state.toggleAutoKeyframeEnabled)
+  const skipNextBlurCommitPropertyRef = useRef<AnimatableProperty | null>(null)
+  const appliedDragPreviewFramesRef = useRef<Record<string, number> | null>(null)
+  const [sheetPreviewFrames, setSheetPreviewFrames] = useState<Record<string, number> | null>(null)
+  const [sheetPreviewDuplicateKeyframeIds, setSheetPreviewDuplicateKeyframeIds] = useState<
+    string[] | null
+  >(null)
 
-  const buildDefaultViewport = useCallback((): Viewport => {
-    return {
-      startFrame: 0,
-      endFrame: Math.max(totalFrames, DEFAULT_VISIBLE_FRAMES),
-    };
-  }, [totalFrames]);
+  const { viewport, updateViewport, normalizeViewport, contentFrameMax, minViewportFrames } =
+    useDopesheetViewport({
+      totalFrames,
+      frameViewport,
+      onFrameViewportChange,
+    })
 
-  const [viewport, setViewport] = useState<Viewport>(() => frameViewport ?? buildDefaultViewport());
-  const updateViewport = useCallback(
-    (next: Viewport | ((prev: Viewport) => Viewport)) => {
-      setViewport((prev) => {
-        const resolved = typeof next === 'function' ? next(prev) : next;
-        if (resolved.startFrame !== prev.startFrame || resolved.endFrame !== prev.endFrame) {
-          onFrameViewportChange?.(resolved);
-        }
-        return resolved;
-      });
-    },
-    [onFrameViewportChange]
-  );
-
-  useEffect(() => {
-    setViewport(frameViewport ?? buildDefaultViewport());
-  }, [buildDefaultViewport, frameViewport, selectedProperty]);
-
-  useEffect(() => {
-    if (!frameViewport) return;
-    setViewport((prev) => {
-      if (
-        prev.startFrame === frameViewport.startFrame &&
-        prev.endFrame === frameViewport.endFrame
-      ) {
-        return prev;
-      }
-      return frameViewport;
-    });
-  }, [frameViewport]);
-
-  useEffect(() => {
-    const node = timelineRef.current;
-    if (!node) return;
-
-    const updateWidth = () => {
-      setTimelineWidth(node.clientWidth);
-    };
-
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
+  const { width: timelineWidth } = useElementSize(timelineRef, { deps: [visualizationMode] })
 
   const availableProperties = useMemo(
     () => Object.keys(keyframesByProperty) as AnimatableProperty[],
-    [keyframesByProperty]
-  );
-  const activeSelectedProperty = selectedProperty && availableProperties.includes(selectedProperty)
-    ? selectedProperty
-    : null;
-
-  const visibleProperties = useMemo(() => {
-    if (activeSelectedProperty) {
-      return availableProperties.filter((p) => p === activeSelectedProperty);
+    [keyframesByProperty],
+  )
+  const allPropertyGroups = useMemo(
+    () => getPropertyAccordionGroups(availableProperties),
+    [availableProperties],
+  )
+  const propertyGroupIdByProperty = useMemo(() => {
+    const map = new Map<AnimatableProperty, string>()
+    for (const group of allPropertyGroups) {
+      for (const property of group.properties) {
+        map.set(property, group.id)
+      }
     }
-    return availableProperties;
-  }, [availableProperties, activeSelectedProperty]);
+    return map
+  }, [allPropertyGroups])
+  const keyframedPropertyIds = useMemo(
+    () =>
+      new Set(
+        availableProperties.filter((property) => (keyframesByProperty[property] ?? []).length > 0),
+      ),
+    [availableProperties, keyframesByProperty],
+  )
+  const {
+    graphVisibleProperties,
+    graphRulerUnit,
+    setGraphRulerUnit,
+    showAllGraphHandles,
+    setShowAllGraphHandles,
+    autoZoomGraphHeight,
+    setAutoZoomGraphHeight,
+    graphVerticalZoomValue,
+    setGraphVerticalZoomValue,
+    togglePropertyCurve,
+    toggleGroupCurves,
+  } = useGraphViewState({
+    itemId,
+    availableProperties,
+    selectedProperty,
+    onPropertyChange,
+    onActivePropertyChange,
+  })
 
-  const rows = useMemo(
+  const {
+    visibleGroups,
+    setVisibleGroups,
+    showKeyframedOnly,
+    setShowKeyframedOnly,
+    toggleVisibleGroup,
+    isPropertyLocked,
+    toggleLockedProperty,
+    setGroupLocked,
+  } = usePropertyFilters({ allPropertyGroups, availableProperties })
+
+  const filteredProperties = useMemo(
+    () =>
+      availableProperties.filter((property) => {
+        const groupId = propertyGroupIdByProperty.get(property)
+        const groupVisible = groupId ? (visibleGroups[groupId] ?? true) : true
+        if (!groupVisible) return false
+        if (showKeyframedOnly && !keyframedPropertyIds.has(property)) return false
+        return true
+      }),
+    [
+      availableProperties,
+      keyframedPropertyIds,
+      propertyGroupIdByProperty,
+      showKeyframedOnly,
+      visibleGroups,
+    ],
+  )
+  const activeSelectedProperty =
+    selectedProperty && filteredProperties.includes(selectedProperty) ? selectedProperty : null
+  const visibleProperties = filteredProperties
+  const propertyColumnProperties = filteredProperties
+  const hasPropertyFilters =
+    showKeyframedOnly || allPropertyGroups.some((group) => visibleGroups[group.id] === false)
+
+  // Frame-independent keyframe data. These references only change when the
+  // properties or keyframes change — NOT when the playhead moves — so the
+  // memoized timeline grid cells can skip re-rendering during scrubs.
+  const sheetKeyframesByProperty = useMemo(() => {
+    const map = new Map<AnimatableProperty, Keyframe[]>()
+    for (const property of visibleProperties) {
+      map.set(
+        property,
+        (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
+      )
+    }
+    return map
+  }, [visibleProperties, keyframesByProperty])
+
+  const sheetRowsStructure = useMemo(
     () =>
       visibleProperties.map((property) => ({
         property,
-        keyframes: (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
-        controls: getDopesheetRowControlState(
-          (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
-          currentFrame
-        ),
+        keyframes: sheetKeyframesByProperty.get(property) ?? [],
       })),
-    [visibleProperties, keyframesByProperty, currentFrame]
-  );
+    [visibleProperties, sheetKeyframesByProperty],
+  )
 
-  useEffect(() => {
-    const node = bodyTimelineRef.current;
-    if (!node) return;
+  // Stable, frame-independent group structure keyed by group id — used to feed
+  // the memoized group timeline cells.
+  const groupTimelineById = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof buildGroupedPropertyStructure>[number]>()
+    for (const group of buildGroupedPropertyStructure(sheetRowsStructure)) {
+      map.set(group.id, group)
+    }
+    return map
+  }, [sheetRowsStructure])
 
-    const updateWidth = () => {
-      setBodyTimelineWidth(node.clientWidth);
-    };
+  // Playhead-dependent rows (carry the per-frame `controls`). `propertyColumnProperties`
+  // is the same list as `visibleProperties`, so the column/sheet rows are identical.
+  const sheetRows = useMemo<DopesheetPropertyRow[]>(
+    () =>
+      sheetRowsStructure.map((row) => ({
+        ...row,
+        controls: getDopesheetRowControlState(row.keyframes, currentFrame),
+      })),
+    [sheetRowsStructure, currentFrame],
+  )
 
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [rows.length]);
+  const propertyRows = sheetRows
+  const groupedSheetRows = useMemo(
+    () => buildGroupedPropertyRows(sheetRows, currentFrame),
+    [currentFrame, sheetRows],
+  )
+  const groupedPropertyRows = groupedSheetRows
+  const propertyRowByProperty = useMemo(
+    () => new Map(propertyRows.map((row) => [row.property, row])),
+    [propertyRows],
+  )
+  const { expandedGroups, toggleGroup, setAllGroupsExpanded } = useGroupExpansion({
+    allPropertyGroups,
+    groupedSheetRows,
+    groupedPropertyRows,
+    activeSelectedProperty,
+  })
 
-  const formatPropertyValue = useCallback((property: AnimatableProperty, value: number | undefined) => {
-    if (value === undefined || Number.isNaN(value)) return '';
-    const decimals = PROPERTY_VALUE_RANGES[property].decimals;
-    return decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
-  }, []);
+  const resetParameterView = useCallback(() => {
+    setShowKeyframedOnly(false)
+    setVisibleGroups(
+      Object.fromEntries(allPropertyGroups.map((group) => [group.id, true])) as Record<
+        string,
+        boolean
+      >,
+    )
+    setAllGroupsExpanded(true)
+  }, [allPropertyGroups, setAllGroupsExpanded, setShowKeyframedOnly, setVisibleGroups])
+
+  const graphPaneSize = useElementSize(graphPaneRef, {
+    enabled: showGraphPane,
+    deps: [visualizationMode, propertyRows.length],
+  })
+
+  const formatPropertyValue = useCallback(
+    (property: AnimatableProperty, value: number | undefined) => {
+      if (value === undefined || Number.isNaN(value)) return ''
+      const decimals = PROPERTY_VALUE_RANGES[property]?.decimals ?? 2
+      return decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals)
+    },
+    [],
+  )
 
   useEffect(() => {
     setValueDrafts((prev) => {
-      let changed = false;
-      const nextDrafts = { ...prev };
+      let changed = false
+      const nextDrafts = { ...prev }
 
-      for (const property of visibleProperties) {
-        if (editingValueProperty === property) continue;
-        const nextValue = formatPropertyValue(property, propertyValues[property]);
+      for (const property of propertyColumnProperties) {
+        if (editingValueProperty === property) continue
+        const nextValue = formatPropertyValue(property, propertyValues[property])
         if (nextDrafts[property] !== nextValue) {
-          nextDrafts[property] = nextValue;
-          changed = true;
+          nextDrafts[property] = nextValue
+          changed = true
         }
       }
 
-      return changed ? nextDrafts : prev;
-    });
-  }, [visibleProperties, propertyValues, editingValueProperty, formatPropertyValue]);
-  const rowKeyframesByProperty = useMemo(() => {
-    const map = new Map<AnimatableProperty, Keyframe[]>();
-    for (const row of rows) {
-      map.set(row.property, row.keyframes);
-    }
-    return map;
-  }, [rows]);
+      return changed ? nextDrafts : prev
+    })
+  }, [propertyColumnProperties, propertyValues, editingValueProperty, formatPropertyValue])
+  const rowKeyframesByProperty = sheetKeyframesByProperty
 
   const keyframeMetaById = useMemo(() => {
-    const map = new Map<string, KeyframeMeta>();
-    for (const row of rows) {
+    const map = new Map<string, KeyframeMeta>()
+    for (const row of sheetRowsStructure) {
       for (const keyframe of row.keyframes) {
-        map.set(keyframe.id, { property: row.property, keyframe });
+        map.set(keyframe.id, { property: row.property, keyframe })
       }
     }
-    return map;
-  }, [rows]);
+    return map
+  }, [sheetRowsStructure])
 
-  const keyframeMetaByIdRef = useRef(keyframeMetaById);
-  keyframeMetaByIdRef.current = keyframeMetaById;
+  const keyframeMetaByIdRef = useRef(keyframeMetaById)
+  keyframeMetaByIdRef.current = keyframeMetaById
 
   const selectedFrameSummary = useMemo(() => {
-    const selectedFrames: number[] = [];
+    const selectedFrames: number[] = []
     for (const keyframeId of selectedKeyframeIds) {
-      const meta = keyframeMetaById.get(keyframeId);
+      const meta = keyframeMetaById.get(keyframeId)
       if (meta) {
-        selectedFrames.push(meta.keyframe.frame);
+        selectedFrames.push(meta.keyframe.frame)
       }
     }
 
@@ -392,12 +504,12 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         hasMixedFrames: false,
         localFrame: null as number | null,
         globalFrame: null as number | null,
-      };
+      }
     }
 
-    const firstFrame = selectedFrames[0] ?? null;
-    const hasMixedFrames = selectedFrames.some((frame) => frame !== firstFrame);
-    const frameOffset = globalFrame === null ? null : globalFrame - currentFrame;
+    const firstFrame = selectedFrames[0] ?? null
+    const hasMixedFrames = selectedFrames.some((frame) => frame !== firstFrame)
+    const frameOffset = globalFrame === null ? null : globalFrame - currentFrame
 
     return {
       hasSelection: true,
@@ -407,666 +519,917 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         hasMixedFrames || firstFrame === null || frameOffset === null
           ? null
           : firstFrame + frameOffset,
-    };
-  }, [currentFrame, globalFrame, keyframeMetaById, selectedKeyframeIds]);
+    }
+  }, [currentFrame, globalFrame, keyframeMetaById, selectedKeyframeIds])
+  const selectedCurveProperty = useMemo(() => {
+    let property: AnimatableProperty | null = null
+
+    for (const keyframeId of selectedKeyframeIds) {
+      const meta = keyframeMetaById.get(keyframeId)
+      if (!meta) {
+        continue
+      }
+
+      if (property === null) {
+        property = meta.property
+        continue
+      }
+
+      if (property !== meta.property) {
+        return null
+      }
+    }
+
+    return property
+  }, [keyframeMetaById, selectedKeyframeIds])
 
   useEffect(() => {
-    setLocalFrameInputValue(
-      selectedFrameSummary.localFrame === null ? '' : String(selectedFrameSummary.localFrame)
-    );
-    setGlobalFrameInputValue(
-      selectedFrameSummary.globalFrame === null ? '' : String(selectedFrameSummary.globalFrame)
-    );
-  }, [selectedFrameSummary.globalFrame, selectedFrameSummary.localFrame]);
+    if (!showGraphPane || !selectedCurveProperty) {
+      return
+    }
+
+    if (selectedProperty !== selectedCurveProperty) {
+      onPropertyChange?.(selectedCurveProperty)
+    }
+    onActivePropertyChange?.(selectedCurveProperty)
+  }, [
+    onActivePropertyChange,
+    onPropertyChange,
+    selectedCurveProperty,
+    selectedProperty,
+    showGraphPane,
+  ])
 
   const visibleKeyframes = useMemo(
     () =>
-      rows.flatMap((row) =>
+      sheetRows.flatMap((row) =>
         row.keyframes.map((keyframe) => ({
           property: row.property,
           keyframe,
-        }))
+        })),
       ),
-    [rows]
-  );
+    [sheetRows],
+  )
 
-  const frameRange = Math.max(1, viewport.endFrame - viewport.startFrame);
-  const timelineFrameMax = Math.max(totalFrames, DEFAULT_VISIBLE_FRAMES) * 4;
-  const fallbackTimelineWidth = Math.max(width - PROPERTY_COLUMN_WIDTH, 1);
-  const effectiveTimelineWidth = Math.max(
-    bodyTimelineWidth || timelineWidth || fallbackTimelineWidth,
-    1
-  );
+  const frameRange = Math.max(1, viewport.endFrame - viewport.startFrame)
+  const horizontalZoomRatioBase = useMemo(
+    () => Math.max(1, contentFrameMax / Math.max(1, minViewportFrames)),
+    [contentFrameMax, minViewportFrames],
+  )
+  const horizontalZoomValue = useMemo(() => {
+    if (horizontalZoomRatioBase <= 1) {
+      return 0
+    }
+
+    const normalized =
+      Math.log(contentFrameMax / Math.max(1, frameRange)) / Math.log(horizontalZoomRatioBase)
+    return Math.max(0, Math.min(100, normalized * 100))
+  }, [contentFrameMax, frameRange, horizontalZoomRatioBase])
+  const visibleGraphProperties = useMemo(
+    () => [...graphVisibleProperties],
+    [graphVisibleProperties],
+  )
+  const graphBaseValueRange = useMemo(
+    () =>
+      getCombinedGraphValueRange(
+        visibleGraphProperties.map((property) => PROPERTY_VALUE_RANGES[property] ?? null),
+        visibleGraphProperties.map((property) => keyframesByProperty[property] ?? []),
+        autoZoomGraphHeight,
+      ),
+    [autoZoomGraphHeight, keyframesByProperty, visibleGraphProperties],
+  )
+  const graphBaseValueSpan = useMemo(
+    () => Math.max(0.0001, graphBaseValueRange.max - graphBaseValueRange.min),
+    [graphBaseValueRange],
+  )
+  const graphMinZoomValueSpan = useMemo(
+    () => Math.max(graphBaseValueSpan * 0.02, 0.0001),
+    [graphBaseValueSpan],
+  )
+  const verticalZoomRatioBase = useMemo(
+    () => Math.max(1, graphBaseValueSpan / graphMinZoomValueSpan),
+    [graphBaseValueSpan, graphMinZoomValueSpan],
+  )
+  const fallbackTimelineWidth = Math.max(width - columnWidth, 1)
+  const effectiveTimelineWidth = Math.max(timelineWidth || fallbackTimelineWidth, 1)
+  const timelinePixelsPerSecond = useMemo(
+    () => (effectiveTimelineWidth / frameRange) * fps,
+    [effectiveTimelineWidth, frameRange, fps],
+  )
 
   const frameToX = useCallback(
     (frame: number) => getFrameAxisX(frame, viewport, effectiveTimelineWidth),
-    [viewport, effectiveTimelineWidth]
-  );
+    [viewport, effectiveTimelineWidth],
+  )
   const getRenderedKeyframeX = useCallback(
     (frame: number) => getVisibleKeyframeX(frame, viewport, effectiveTimelineWidth),
-    [viewport, effectiveTimelineWidth]
-  );
+    [viewport, effectiveTimelineWidth],
+  )
   const setKeyframeButtonRef = useCallback((keyframeId: string, node: HTMLButtonElement | null) => {
     if (node) {
-      keyframeButtonRefs.current.set(keyframeId, node);
+      keyframeButtonRefs.current.set(keyframeId, node)
     } else {
-      keyframeButtonRefs.current.delete(keyframeId);
+      keyframeButtonRefs.current.delete(keyframeId)
     }
-  }, []);
+  }, [])
   const applyDragPreviewFrames = useCallback(
     (nextPreviewFrames: Record<string, number> | null) => {
-      const previousPreviewFrames = appliedDragPreviewFramesRef.current;
+      const previousPreviewFrames = appliedDragPreviewFramesRef.current
       if (arePreviewFramesEqual(previousPreviewFrames, nextPreviewFrames)) {
-        return;
+        return
       }
+
+      const duplicatePreviewIds =
+        dragStateRef.current?.duplicateOnCommit && nextPreviewFrames
+          ? dragStateRef.current.selectedKeyframeIds
+          : null
+
+      flushSync(() => {
+        setSheetPreviewFrames(nextPreviewFrames)
+        setSheetPreviewDuplicateKeyframeIds(duplicatePreviewIds)
+      })
 
       const keyframeIds = new Set([
         ...Object.keys(previousPreviewFrames ?? {}),
         ...Object.keys(nextPreviewFrames ?? {}),
-      ]);
+      ])
 
-      for (const keyframeId of keyframeIds) {
-        const button = keyframeButtonRefs.current.get(keyframeId);
-        if (!button) continue;
-
-        const previewFrame = nextPreviewFrames?.[keyframeId];
-        const frame =
-          previewFrame ?? keyframeMetaByIdRef.current.get(keyframeId)?.keyframe.frame;
-        if (frame === undefined) continue;
-
-        const renderedX = getRenderedKeyframeX(frame);
-        if (renderedX === null) {
-          button.style.visibility = 'hidden';
-          continue;
-        }
-
-        button.style.left = `${renderedX}px`;
-        button.style.visibility = 'visible';
+      if (duplicatePreviewIds) {
+        appliedDragPreviewFramesRef.current = nextPreviewFrames
+        return
       }
 
-      appliedDragPreviewFramesRef.current = nextPreviewFrames;
+      for (const keyframeId of keyframeIds) {
+        const button = keyframeButtonRefs.current.get(keyframeId)
+        if (!button) continue
+
+        const previewFrame = nextPreviewFrames?.[keyframeId]
+        const frame = previewFrame ?? keyframeMetaByIdRef.current.get(keyframeId)?.keyframe.frame
+        if (frame === undefined) continue
+
+        const renderedX = getRenderedKeyframeX(frame)
+        if (renderedX === null) {
+          button.style.visibility = 'hidden'
+          continue
+        }
+
+        button.style.left = `${renderedX}px`
+        button.style.visibility = 'visible'
+      }
+
+      appliedDragPreviewFramesRef.current = nextPreviewFrames
     },
-    [getRenderedKeyframeX]
-  );
+    [getRenderedKeyframeX],
+  )
   const scheduleDragPreviewFrames = useCallback(
     (nextPreviewFrames: Record<string, number> | null) => {
-      applyDragPreviewFrames(nextPreviewFrames);
+      applyDragPreviewFrames(nextPreviewFrames)
     },
-    [applyDragPreviewFrames]
-  );
+    [applyDragPreviewFrames],
+  )
   const renderedKeyframeXById = useMemo(() => {
-    const positions = new Map<string, number>();
-    for (const row of rows) {
+    const positions = new Map<string, number>()
+    for (const row of sheetRowsStructure) {
       for (const keyframe of row.keyframes) {
-        const x = getRenderedKeyframeX(keyframe.frame);
+        const x = getRenderedKeyframeX(keyframe.frame)
         if (x !== null) {
-          positions.set(keyframe.id, x);
+          positions.set(keyframe.id, x)
         }
       }
     }
-    return positions;
-  }, [rows, getRenderedKeyframeX]);
+    return positions
+  }, [sheetRowsStructure, getRenderedKeyframeX])
+  const renderedSheetEntries = useMemo(() => {
+    const entries: RenderedSheetEntry[] = []
+    let top = 0
+
+    for (const group of groupedSheetRows) {
+      entries.push({ type: 'group', group, top })
+      top += GROUP_HEADER_HEIGHT
+
+      if (!(expandedGroups[group.id] ?? true)) {
+        continue
+      }
+
+      for (const row of group.rows) {
+        entries.push({ type: 'row', row, top })
+        top += ROW_HEIGHT
+      }
+    }
+
+    return {
+      entries,
+      contentHeight: top,
+    }
+  }, [expandedGroups, groupedSheetRows])
   const keyframePoints = useMemo(
     () =>
-      rows.flatMap((row, rowIndex) =>
-        row.keyframes.flatMap((keyframe) => {
-          const x = renderedKeyframeXById.get(keyframe.id);
-          if (x === undefined) return [];
-          return [{
-            keyframeId: keyframe.id,
-            x,
-            y: rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2,
-          }];
+      renderedSheetEntries.entries.flatMap((entry) => {
+        if (entry.type === 'group') {
+          return entry.group.frameGroups.flatMap((frameGroup) => {
+            const x = getRenderedKeyframeX(frameGroup.frame)
+            if (x === null) return []
+
+            return frameGroup.keyframes
+              .filter(({ property }) => !isPropertyLocked(property))
+              .map(({ keyframe }) => ({
+                keyframeId: keyframe.id,
+                x,
+                y: entry.top + GROUP_HEADER_HEIGHT / 2,
+              }))
+          })
+        }
+
+        if (isPropertyLocked(entry.row.property)) {
+          return []
+        }
+
+        return entry.row.keyframes.flatMap((keyframe) => {
+          const x = renderedKeyframeXById.get(keyframe.id)
+          if (x === undefined) return []
+          return [
+            {
+              keyframeId: keyframe.id,
+              x,
+              y: entry.top + ROW_HEIGHT / 2,
+            },
+          ]
         })
-      ),
-    [rows, renderedKeyframeXById]
-  );
-  const keyframePointsRef = useRef(keyframePoints);
-  keyframePointsRef.current = keyframePoints;
+      }),
+    [getRenderedKeyframeX, isPropertyLocked, renderedKeyframeXById, renderedSheetEntries.entries],
+  )
+  const keyframePointsRef = useRef(keyframePoints)
+  keyframePointsRef.current = keyframePoints
 
   const xToFrame = useCallback(
     (x: number) => getFrameFromAxisX(x, viewport, effectiveTimelineWidth),
-    [viewport, effectiveTimelineWidth]
-  );
+    [viewport, effectiveTimelineWidth],
+  )
 
   const getFrameFromClientX = useCallback(
     (clientX: number) => {
-      const node = timelineRef.current;
-      if (!node) return currentFrame;
-      const rect = node.getBoundingClientRect();
-      return clampFrame(xToFrame(clientX - rect.left), totalFrames);
+      const node = timelineRef.current
+      if (!node) return currentFrame
+      const rect = node.getBoundingClientRect()
+      return clampFrame(xToFrame(clientX - rect.left), totalFrames)
     },
-    [xToFrame, totalFrames, currentFrame]
-  );
+    [xToFrame, totalFrames, currentFrame],
+  )
 
   const getTimelineXFromClientX = useCallback(
     (clientX: number) => {
-      const node = timelineRef.current;
-      if (!node) return 0;
-      const rect = node.getBoundingClientRect();
-      return Math.max(0, Math.min(effectiveTimelineWidth, clientX - rect.left));
+      const node = timelineRef.current
+      if (!node) return 0
+      const rect = node.getBoundingClientRect()
+      return Math.max(0, Math.min(effectiveTimelineWidth, clientX - rect.left))
     },
-    [effectiveTimelineWidth]
-  );
+    [effectiveTimelineWidth],
+  )
 
   const getContentYFromClientY = useCallback(
     (clientY: number) => {
-      const node = scrollAreaRef.current;
-      if (!node) return 0;
-      const rect = node.getBoundingClientRect();
-      const y = clientY - rect.top + node.scrollTop;
-      const maxY = Math.max(0, rows.length * ROW_HEIGHT);
-      return Math.max(0, Math.min(maxY, y));
+      const node = scrollAreaRef.current
+      if (!node) return 0
+      const rect = node.getBoundingClientRect()
+      const y = clientY - rect.top + node.scrollTop
+      const maxY = Math.max(0, renderedSheetEntries.contentHeight)
+      return Math.max(0, Math.min(maxY, y))
     },
-    [rows.length]
-  );
+    [renderedSheetEntries.contentHeight],
+  )
 
   const ticks = useMemo(() => {
-    const step = getNiceTickStep(frameRange);
-    const first = Math.floor(viewport.startFrame / step) * step;
-    const result: number[] = [];
+    const step = getNiceTickStep(frameRange)
+    const first = Math.floor(viewport.startFrame / step) * step
+    const result: number[] = []
     for (let frame = first; frame <= viewport.endFrame; frame += step) {
       if (frame >= viewport.startFrame) {
-        result.push(frame);
+        result.push(frame)
       }
     }
-    return result;
-  }, [viewport.startFrame, viewport.endFrame, frameRange]);
+    return result
+  }, [viewport.startFrame, viewport.endFrame, frameRange])
 
   const propertyGridStyle = useMemo(() => {
-    return { gridTemplateColumns: `${PROPERTY_COLUMN_WIDTH}px 1fr` };
-  }, []);
+    return { gridTemplateColumns: `${columnWidth}px 1fr` }
+  }, [columnWidth])
 
   const selectedRefs = useMemo(() => {
-    const refs: KeyframeRef[] = [];
+    const refs: KeyframeRef[] = []
     for (const keyframeId of selectedKeyframeIds) {
-      const meta = keyframeMetaById.get(keyframeId);
-      if (!meta) continue;
+      const meta = keyframeMetaById.get(keyframeId)
+      if (!meta) continue
+      if (isPropertyLocked(meta.property)) continue
       refs.push({
         itemId,
         property: meta.property,
         keyframeId,
-      });
+      })
     }
-    return refs;
-  }, [selectedKeyframeIds, keyframeMetaById, itemId]);
+    return refs
+  }, [selectedKeyframeIds, keyframeMetaById, isPropertyLocked, itemId])
+  const selectedRefIds = useMemo(() => selectedRefs.map((ref) => ref.keyframeId), [selectedRefs])
 
   const isCurrentFrameBlocked = useMemo(
-    () => transitionBlockedRanges.some((range) => currentFrame >= range.start && currentFrame < range.end),
-    [transitionBlockedRanges, currentFrame]
-  );
+    () =>
+      transitionBlockedRanges.some(
+        (range) => currentFrame >= range.start && currentFrame < range.end,
+      ),
+    [transitionBlockedRanges, currentFrame],
+  )
 
   const snapFrameTargets = useMemo(() => {
-    const targets: number[] = [0, currentFrame];
+    const targets: number[] = [0, currentFrame]
     for (const { keyframe } of visibleKeyframes) {
       if (!selectedKeyframeIds.has(keyframe.id)) {
-        targets.push(keyframe.frame);
+        targets.push(keyframe.frame)
       }
     }
-    return [...new Set(targets)];
-  }, [visibleKeyframes, selectedKeyframeIds, currentFrame]);
+    return [...new Set(targets)]
+  }, [visibleKeyframes, selectedKeyframeIds, currentFrame])
 
   const snapThresholdFrames = useMemo(
     () => (SNAP_THRESHOLD_PX / effectiveTimelineWidth) * frameRange,
-    [effectiveTimelineWidth, frameRange]
-  );
+    [effectiveTimelineWidth, frameRange],
+  )
 
   const snapFrame = useCallback(
     (frame: number) => {
-      let closest = frame;
-      let minDistance = Infinity;
+      let closest = frame
+      let minDistance = Infinity
       for (const target of snapFrameTargets) {
-        const distance = Math.abs(frame - target);
+        const distance = Math.abs(frame - target)
         if (distance <= snapThresholdFrames && distance < minDistance) {
-          minDistance = distance;
-          closest = target;
+          minDistance = distance
+          closest = target
         }
       }
-      return closest;
+      return closest
     },
-    [snapFrameTargets, snapThresholdFrames]
-  );
+    [snapFrameTargets, snapThresholdFrames],
+  )
 
   const zoomAroundFrame = useCallback(
     (centerFrame: number, factor: number) => {
       updateViewport((prev) => {
-        const prevRange = Math.max(1, prev.endFrame - prev.startFrame);
-        const nextRange = Math.max(MIN_VISIBLE_FRAMES, Math.round(prevRange * factor));
-        const ratio = (centerFrame - prev.startFrame) / prevRange;
-        let nextStart = Math.round(centerFrame - ratio * nextRange);
-        let nextEnd = nextStart + nextRange;
+        const prevRange = Math.max(1, prev.endFrame - prev.startFrame)
+        const nextRange = Math.max(
+          minViewportFrames,
+          Math.min(contentFrameMax, Math.round(prevRange * factor)),
+        )
+        const ratio = (centerFrame - prev.startFrame) / prevRange
+        let nextStart = Math.round(centerFrame - ratio * nextRange)
+        let nextEnd = nextStart + nextRange
 
         if (nextStart < 0) {
-          nextEnd -= nextStart;
-          nextStart = 0;
+          nextEnd -= nextStart
+          nextStart = 0
         }
-        if (nextEnd > timelineFrameMax) {
-          const overflow = nextEnd - timelineFrameMax;
-          nextStart = Math.max(0, nextStart - overflow);
-          nextEnd = timelineFrameMax;
+        if (nextEnd > contentFrameMax) {
+          const overflow = nextEnd - contentFrameMax
+          nextStart = Math.max(0, nextStart - overflow)
+          nextEnd = contentFrameMax
         }
-        return { startFrame: nextStart, endFrame: nextEnd };
-      });
+        return normalizeViewport({ startFrame: nextStart, endFrame: nextEnd })
+      })
     },
-    [timelineFrameMax, updateViewport]
-  );
+    [contentFrameMax, minViewportFrames, normalizeViewport, updateViewport],
+  )
+  const setHorizontalZoomValue = useCallback(
+    (nextValue: number) => {
+      if (horizontalZoomRatioBase <= 1) {
+        return
+      }
+
+      const normalized = Math.max(0, Math.min(1, nextValue / 100))
+      const nextRange = Math.max(
+        minViewportFrames,
+        Math.min(
+          contentFrameMax,
+          Math.round(contentFrameMax / Math.pow(horizontalZoomRatioBase, normalized)),
+        ),
+      )
+
+      updateViewport((prev) => {
+        const centerFrame = (prev.startFrame + prev.endFrame) / 2
+        let nextStart = Math.round(centerFrame - nextRange / 2)
+        let nextEnd = nextStart + nextRange
+
+        if (nextStart < 0) {
+          nextEnd -= nextStart
+          nextStart = 0
+        }
+        if (nextEnd > contentFrameMax) {
+          const overflow = nextEnd - contentFrameMax
+          nextStart = Math.max(0, nextStart - overflow)
+          nextEnd = contentFrameMax
+        }
+
+        return normalizeViewport({ startFrame: nextStart, endFrame: nextEnd })
+      })
+    },
+    [
+      contentFrameMax,
+      horizontalZoomRatioBase,
+      minViewportFrames,
+      normalizeViewport,
+      updateViewport,
+    ],
+  )
 
   const panFrames = useCallback(
     (deltaFrames: number) => {
-      if (deltaFrames === 0) return;
+      if (deltaFrames === 0) return
       updateViewport((prev) => {
-        const range = Math.max(1, prev.endFrame - prev.startFrame);
-        const maxStart = Math.max(0, timelineFrameMax - range);
-        const nextStart = Math.max(0, Math.min(maxStart, prev.startFrame + deltaFrames));
-        return {
+        const range = Math.max(1, prev.endFrame - prev.startFrame)
+        const maxStart = Math.max(0, contentFrameMax - range)
+        const nextStart = Math.max(0, Math.min(maxStart, prev.startFrame + deltaFrames))
+        return normalizeViewport({
           startFrame: nextStart,
           endFrame: nextStart + range,
-        };
-      });
+        })
+      })
     },
-    [timelineFrameMax, updateViewport]
-  );
+    [contentFrameMax, normalizeViewport, updateViewport],
+  )
 
   const resetViewport = useCallback(() => {
-    updateViewport(buildDefaultViewport());
-  }, [buildDefaultViewport, updateViewport]);
-
-  const handlePropertySelect = useCallback(
-    (value: string) => {
-      const next = value === 'all' ? null : (value as AnimatableProperty);
-      onPropertyChange?.(next);
-      if (next) {
-        onActivePropertyChange?.(next);
-      }
-    },
-    [onActivePropertyChange, onPropertyChange]
-  );
+    updateViewport({ startFrame: 0, endFrame: contentFrameMax })
+  }, [contentFrameMax, updateViewport])
 
   const handleRemoveKeyframes = useCallback(() => {
-    if (!onRemoveKeyframes || selectedRefs.length === 0) return;
-    onRemoveKeyframes(selectedRefs);
-  }, [onRemoveKeyframes, selectedRefs]);
+    if (!onRemoveKeyframes || selectedRefs.length === 0) return
+    onRemoveKeyframes(selectedRefs)
+  }, [onRemoveKeyframes, selectedRefs])
 
-  const resetHeaderFrameInputs = useCallback(() => {
-    setLocalFrameInputValue(
-      selectedFrameSummary.localFrame === null ? '' : String(selectedFrameSummary.localFrame)
-    );
-    setGlobalFrameInputValue(
-      selectedFrameSummary.globalFrame === null ? '' : String(selectedFrameSummary.globalFrame)
-    );
-  }, [selectedFrameSummary.globalFrame, selectedFrameSummary.localFrame]);
+  const buildSelectionFramePreview = useCallback(
+    (selectionIds: Iterable<string>, requestedDeltaFrames: number) => {
+      return buildSelectionFramePreviewState({
+        selectionIds,
+        requestedDeltaFrames,
+        keyframeMetaById: keyframeMetaByIdRef.current,
+        isPropertyLocked,
+        keyframesByProperty,
+        totalFrames,
+        transitionBlockedRanges,
+      })
+    },
+    [isPropertyLocked, keyframesByProperty, totalFrames, transitionBlockedRanges],
+  )
+
+  const commitSelectionFramePreview = useCallback(
+    (selectionIds: Iterable<string>, previewFrames: Record<string, number> | null) => {
+      return commitSelectionFramePreviewState({
+        selectionIds,
+        previewFrames,
+        keyframeMetaById: keyframeMetaByIdRef.current,
+        isPropertyLocked,
+        itemId,
+        onKeyframeMove,
+      })
+    },
+    [isPropertyLocked, itemId, onKeyframeMove],
+  )
+  const duplicateSelectionFramePreview = useCallback(
+    (selectionIds: Iterable<string>, previewFrames: Record<string, number> | null) => {
+      return duplicateSelectionFramePreviewState({
+        selectionIds,
+        previewFrames,
+        keyframeMetaById: keyframeMetaByIdRef.current,
+        isPropertyLocked,
+        itemId,
+        onDuplicateKeyframes,
+      })
+    },
+    [isPropertyLocked, itemId, onDuplicateKeyframes],
+  )
+
+  const canAddKeyframeForRow = useCallback(
+    (row: DopesheetPropertyRow) => {
+      if (disabled || !onAddKeyframe) return false
+      if (isPropertyLocked(row.property)) return false
+      if (row.controls.hasKeyframeAtCurrentFrame) return false
+      if (isCurrentFrameBlocked) return false
+      return true
+    },
+    [disabled, isCurrentFrameBlocked, isPropertyLocked, onAddKeyframe],
+  )
+
+  const canClearRow = useCallback(
+    (row: DopesheetPropertyRow) => {
+      if (disabled || !onRemoveKeyframes) return false
+      if (isPropertyLocked(row.property)) return false
+      return row.keyframes.length > 0
+    },
+    [disabled, isPropertyLocked, onRemoveKeyframes],
+  )
 
   const moveSelectedKeyframesByDelta = useCallback(
     (deltaFrames: number) => {
-      if (disabled || !onKeyframeMove || selectedKeyframeIds.size === 0 || deltaFrames === 0) {
-        return false;
+      if (disabled || !onKeyframeMove || selectedRefIds.length === 0 || deltaFrames === 0) {
+        return { didMove: false, appliedDeltaFrames: 0 }
       }
 
-      let hasChanges = false;
-      onDragStart?.();
-      for (const keyframeId of selectedKeyframeIds) {
-        const meta = keyframeMetaByIdRef.current.get(keyframeId);
-        if (!meta) continue;
-        const initialFrame = meta.keyframe.frame;
-        let nextFrame = clampFrame(initialFrame + deltaFrames, totalFrames);
-        nextFrame = clampToAvoidBlockedRanges(nextFrame, initialFrame, transitionBlockedRanges);
-        nextFrame = clampFrame(nextFrame, totalFrames);
-        if (nextFrame === meta.keyframe.frame) continue;
-        onKeyframeMove(
-          { itemId, property: meta.property, keyframeId },
-          nextFrame,
-          meta.keyframe.value
-        );
-        hasChanges = true;
+      const preview = buildSelectionFramePreview(selectedRefIds, deltaFrames)
+      if (!preview.previewFrames) {
+        return { didMove: false, appliedDeltaFrames: 0 }
       }
-      if (hasChanges) {
-        onDragEnd?.();
+
+      onDragStart?.()
+      const didMove = commitSelectionFramePreview(
+        preview.movableSelectionIds,
+        preview.previewFrames,
+      )
+      onDragEnd?.()
+
+      return {
+        didMove,
+        appliedDeltaFrames: preview.appliedDeltaFrames,
       }
-      return hasChanges;
     },
     [
+      buildSelectionFramePreview,
+      commitSelectionFramePreview,
       disabled,
-      itemId,
       onDragEnd,
       onDragStart,
       onKeyframeMove,
-      selectedKeyframeIds,
-      totalFrames,
-      transitionBlockedRanges,
-    ]
-  );
+      selectedRefIds,
+    ],
+  )
 
-  const commitLocalFrameInput = useCallback(() => {
-    if (
-      selectedFrameSummary.localFrame === null ||
-      selectedFrameSummary.hasMixedFrames ||
-      !onKeyframeMove
-    ) {
-      resetHeaderFrameInputs();
-      return;
-    }
-
-    const parsed = Math.round(Number(localFrameInputValue));
-    if (!Number.isFinite(parsed)) {
-      resetHeaderFrameInputs();
-      return;
-    }
-
-    let targetFrame = clampFrame(parsed, totalFrames);
-    targetFrame = clampToAvoidBlockedRanges(
-      targetFrame,
-      selectedFrameSummary.localFrame,
-      transitionBlockedRanges
-    );
-    targetFrame = clampFrame(targetFrame, totalFrames);
-    const deltaFrames = targetFrame - selectedFrameSummary.localFrame;
-
-    setLocalFrameInputValue(String(targetFrame));
-    if (selectedFrameSummary.globalFrame !== null) {
-      const frameOffset = selectedFrameSummary.globalFrame - selectedFrameSummary.localFrame;
-      setGlobalFrameInputValue(String(targetFrame + frameOffset));
-    }
-
-    if (!moveSelectedKeyframesByDelta(deltaFrames)) {
-      return;
-    }
-
-    onNavigateToKeyframe?.(targetFrame);
-  }, [
+  const {
     localFrameInputValue,
-    moveSelectedKeyframesByDelta,
-    onKeyframeMove,
-    onNavigateToKeyframe,
-    resetHeaderFrameInputs,
-    selectedFrameSummary.globalFrame,
-    selectedFrameSummary.hasMixedFrames,
-    selectedFrameSummary.localFrame,
-    totalFrames,
-    transitionBlockedRanges,
-  ]);
-
-  const commitGlobalFrameInput = useCallback(() => {
-    if (
-      globalFrame === null ||
-      selectedFrameSummary.localFrame === null ||
-      selectedFrameSummary.hasMixedFrames ||
-      !onKeyframeMove
-    ) {
-      resetHeaderFrameInputs();
-      return;
-    }
-
-    const parsed = Math.round(Number(globalFrameInputValue));
-    if (!Number.isFinite(parsed)) {
-      resetHeaderFrameInputs();
-      return;
-    }
-
-    const frameOffset = globalFrame - currentFrame;
-    let nextLocalFrame = clampFrame(parsed - frameOffset, totalFrames);
-    nextLocalFrame = clampToAvoidBlockedRanges(
-      nextLocalFrame,
-      selectedFrameSummary.localFrame,
-      transitionBlockedRanges
-    );
-    nextLocalFrame = clampFrame(nextLocalFrame, totalFrames);
-    const normalizedGlobalFrame = nextLocalFrame + frameOffset;
-    const deltaFrames = nextLocalFrame - selectedFrameSummary.localFrame;
-
-    setLocalFrameInputValue(String(nextLocalFrame));
-    setGlobalFrameInputValue(String(normalizedGlobalFrame));
-
-    if (!moveSelectedKeyframesByDelta(deltaFrames)) {
-      return;
-    }
-
-    onNavigateToKeyframe?.(nextLocalFrame);
-  }, [
+    globalFrameInputValue,
+    setLocalFrameInputValue,
+    setGlobalFrameInputValue,
+    skipNextHeaderFrameBlurRef,
+    commitLocalFrameInput,
+    commitGlobalFrameInput,
+    handleHeaderFrameInputKeyDown,
+  } = useHeaderFrameInputs({
+    selectedFrameSummary,
     currentFrame,
     globalFrame,
-    globalFrameInputValue,
-    moveSelectedKeyframesByDelta,
-    onKeyframeMove,
-    onNavigateToKeyframe,
-    resetHeaderFrameInputs,
-    selectedFrameSummary.hasMixedFrames,
-    selectedFrameSummary.localFrame,
     totalFrames,
     transitionBlockedRanges,
-  ]);
+    onKeyframeMove,
+    onNavigateToKeyframe,
+    moveSelectedKeyframesByDelta,
+  })
 
-  const handleHeaderFrameInputKeyDown = useCallback(
-    (
-      event: React.KeyboardEvent<HTMLInputElement>,
-      input: 'local' | 'global',
-      commit: () => void
-    ) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        skipNextHeaderFrameBlurRef.current = input;
-        event.currentTarget.blur();
-        commit();
-        return;
+  const activateProperty = useCallback(
+    (property: AnimatableProperty) => {
+      if (showGraphPane) {
+        onPropertyChange?.(property)
       }
+      onActivePropertyChange?.(property)
+    },
+    [onActivePropertyChange, onPropertyChange, showGraphPane],
+  )
 
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        resetHeaderFrameInputs();
-        skipNextHeaderFrameBlurRef.current = input;
-        event.currentTarget.blur();
+  const removeKeyframesForRows = useCallback(
+    (rows: DopesheetPropertyRow[]) => {
+      if (!onRemoveKeyframes) return
+
+      const refs = buildRowKeyframeRefs(itemId, rows)
+
+      if (refs.length === 0) return
+
+      onRemoveKeyframes(refs)
+
+      if (onSelectionChange) {
+        onSelectionChange(
+          removeSelectionIds(
+            selectedKeyframeIds,
+            refs.map((ref) => ref.keyframeId),
+          ),
+        )
       }
     },
-    [resetHeaderFrameInputs]
-  );
+    [itemId, onRemoveKeyframes, onSelectionChange, selectedKeyframeIds],
+  )
 
-  const handleRowNavigate = useCallback(
-    (property: AnimatableProperty, keyframe: Keyframe | null) => {
-      if (!keyframe || !onNavigateToKeyframe) return;
-      onActivePropertyChange?.(property);
-      onNavigateToKeyframe(keyframe.frame);
-      onSelectionChange?.(new Set([keyframe.id]));
-      selectionAnchorByPropertyRef.current.set(property, keyframe.id);
+  const handleClearProperty = useCallback(
+    (property: AnimatableProperty) => {
+      const row = propertyRowByProperty.get(property)
+      if (!row || !canClearRow(row)) return
+
+      activateProperty(property)
+      removeKeyframesForRows([row])
     },
-    [onActivePropertyChange, onNavigateToKeyframe, onSelectionChange]
-  );
+    [activateProperty, canClearRow, propertyRowByProperty, removeKeyframesForRows],
+  )
 
-  const handleRowToggleKeyframe = useCallback(
-    (property: AnimatableProperty, currentKeyframes: Keyframe[]) => {
-      onActivePropertyChange?.(property);
-      if (currentKeyframes.length > 0) {
-        if (!onRemoveKeyframes) return;
-        const refs = currentKeyframes.map((keyframe) => ({
+  const handleAddGroupKeyframes = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      if (disabled || (!onAddKeyframe && !onAddKeyframes)) return
+
+      const entries = buildGroupAddEntries(group.rows, currentFrame, canAddKeyframeForRow)
+
+      if (entries.length === 0) {
+        return
+      }
+
+      if (onAddKeyframes) {
+        onAddKeyframes(entries)
+        return
+      }
+
+      for (const entry of entries) {
+        onAddKeyframe?.(entry.property, entry.frame)
+      }
+    },
+    [canAddKeyframeForRow, currentFrame, disabled, onAddKeyframe, onAddKeyframes],
+  )
+
+  const handleClearGroup = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      removeKeyframesForRows(group.rows.filter((row) => canClearRow(row)))
+    },
+    [canClearRow, removeKeyframesForRows],
+  )
+
+  const handleGroupToggleKeyframes = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      const removableCurrentKeyframes = getRemovableGroupCurrentKeyframes(
+        group.currentKeyframes,
+        isPropertyLocked,
+      )
+
+      if (removableCurrentKeyframes.length > 0) {
+        if (!onRemoveKeyframes) return
+
+        const refs = removableCurrentKeyframes.map(({ property, keyframe }) => ({
           itemId,
           property,
           keyframeId: keyframe.id,
-        }));
-        onRemoveKeyframes(refs);
+        }))
+        onRemoveKeyframes(refs)
+
         if (onSelectionChange) {
-          const nextSelection = new Set(selectedKeyframeIds);
-          for (const keyframe of currentKeyframes) {
-            nextSelection.delete(keyframe.id);
-          }
-          onSelectionChange(nextSelection);
+          onSelectionChange(
+            removeSelectionIds(
+              selectedKeyframeIds,
+              removableCurrentKeyframes.map(({ keyframe }) => keyframe.id),
+            ),
+          )
         }
-        return;
+        return
       }
 
-      if (isCurrentFrameBlocked || !onAddKeyframe) return;
-      onAddKeyframe(property, currentFrame);
+      handleAddGroupKeyframes(group)
+    },
+    [
+      handleAddGroupKeyframes,
+      isPropertyLocked,
+      itemId,
+      onRemoveKeyframes,
+      onSelectionChange,
+      selectedKeyframeIds,
+    ],
+  )
+
+  const handleRowNavigate = useCallback(
+    (property: AnimatableProperty, keyframe: Keyframe | null) => {
+      if (!keyframe || !onNavigateToKeyframe) return
+      activateProperty(property)
+      onNavigateToKeyframe(keyframe.frame)
+      onSelectionChange?.(new Set([keyframe.id]))
+      selectionAnchorByPropertyRef.current.set(property, keyframe.id)
+    },
+    [activateProperty, onNavigateToKeyframe, onSelectionChange],
+  )
+
+  const handleRowToggleKeyframe = useCallback(
+    (property: AnimatableProperty, currentKeyframes: Keyframe[]) => {
+      if (isPropertyLocked(property)) return
+      activateProperty(property)
+      if (currentKeyframes.length > 0) {
+        if (!onRemoveKeyframes) return
+        const refs = buildPropertyKeyframeRefs(itemId, property, currentKeyframes)
+        onRemoveKeyframes(refs)
+        if (onSelectionChange) {
+          onSelectionChange(
+            removeSelectionIds(
+              selectedKeyframeIds,
+              currentKeyframes.map((keyframe) => keyframe.id),
+            ),
+          )
+        }
+        return
+      }
+
+      if (isCurrentFrameBlocked || !onAddKeyframe) return
+      onAddKeyframe(property, currentFrame)
     },
     [
       currentFrame,
       isCurrentFrameBlocked,
       itemId,
-      onActivePropertyChange,
       onAddKeyframe,
       onRemoveKeyframes,
       onSelectionChange,
       selectedKeyframeIds,
-    ]
-  );
+      activateProperty,
+      isPropertyLocked,
+    ],
+  )
 
   const handleRowValueChange = useCallback((property: AnimatableProperty, value: string) => {
-    setValueDrafts((prev) => ({ ...prev, [property]: value }));
-  }, []);
+    setValueDrafts((prev) => ({ ...prev, [property]: value }))
+  }, [])
 
-  const handleRowAutoKeyToggle = useCallback((property: AnimatableProperty) => {
-    onActivePropertyChange?.(property);
-    toggleAutoKeyframeEnabled(itemId, property);
-  }, [itemId, onActivePropertyChange, toggleAutoKeyframeEnabled]);
+  const handleRowAutoKeyToggle = useCallback(
+    (property: AnimatableProperty) => {
+      if (isPropertyLocked(property)) return
+      activateProperty(property)
+      toggleAutoKeyframeEnabled(itemId, property)
+    },
+    [activateProperty, isPropertyLocked, itemId, toggleAutoKeyframeEnabled],
+  )
+
+  const handleGroupAutoKeyToggle = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      const eligibleRows = group.rows.filter((row) => !isPropertyLocked(row.property))
+      if (eligibleRows.length === 0) return
+
+      const enableAll = !eligibleRows.every(
+        (row) => autoKeyEnabledByProperty[row.property] ?? false,
+      )
+      for (const row of eligibleRows) {
+        setAutoKeyframeEnabled(itemId, row.property, enableAll)
+      }
+    },
+    [autoKeyEnabledByProperty, isPropertyLocked, itemId, setAutoKeyframeEnabled],
+  )
 
   const handleRowValueCommit = useCallback(
     (property: AnimatableProperty, options?: { allowCreate?: boolean }) => {
-      const range = PROPERTY_VALUE_RANGES[property];
-      const parsed = Number(valueDrafts[property]);
+      if (isPropertyLocked(property)) return
+      const range = PROPERTY_VALUE_RANGES[property]
+      const parsed = Number(valueDrafts[property])
 
       if (!Number.isFinite(parsed)) {
         setValueDrafts((prev) => ({
           ...prev,
           [property]: formatPropertyValue(property, propertyValues[property]),
-        }));
-        return;
+        }))
+        return
       }
 
-      const clampedValue = Math.max(range.min, Math.min(range.max, parsed));
-      onPropertyValueCommit?.(property, clampedValue, options);
+      const clampedValue = Math.max(range?.min ?? parsed, Math.min(range?.max ?? parsed, parsed))
+      onPropertyValueCommit?.(property, clampedValue, options)
       setValueDrafts((prev) => ({
         ...prev,
         [property]: formatPropertyValue(property, clampedValue),
-      }));
+      }))
     },
-    [formatPropertyValue, onPropertyValueCommit, propertyValues, valueDrafts]
-  );
+    [formatPropertyValue, isPropertyLocked, onPropertyValueCommit, propertyValues, valueDrafts],
+  )
 
   const nudgeSelectedKeyframes = useCallback(
     (deltaFrames: number) => {
-      moveSelectedKeyframesByDelta(deltaFrames);
+      moveSelectedKeyframesByDelta(deltaFrames)
     },
-    [moveSelectedKeyframesByDelta]
-  );
+    [moveSelectedKeyframesByDelta],
+  )
 
   useHotkeys(
     'delete,backspace',
     (event) => {
-      event.preventDefault();
+      event.preventDefault()
       if (selectedRefs.length > 0) {
-        onRemoveKeyframes?.(selectedRefs);
+        onRemoveKeyframes?.(selectedRefs)
       }
     },
     { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs, onRemoveKeyframes]
-  );
+    [disabled, selectedRefs, onRemoveKeyframes],
+  )
 
   useHotkeys(
     'left',
     (event) => {
-      event.preventDefault();
-      nudgeSelectedKeyframes(-1);
+      event.preventDefault()
+      nudgeSelectedKeyframes(-1)
     },
     { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes]
-  );
+    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+  )
 
   useHotkeys(
     'right',
     (event) => {
-      event.preventDefault();
-      nudgeSelectedKeyframes(1);
+      event.preventDefault()
+      nudgeSelectedKeyframes(1)
     },
     { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes]
-  );
+    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+  )
 
   useHotkeys(
     'shift+left',
     (event) => {
-      event.preventDefault();
-      nudgeSelectedKeyframes(-10);
+      event.preventDefault()
+      nudgeSelectedKeyframes(-10)
     },
     { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes]
-  );
+    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+  )
 
   useHotkeys(
     'shift+right',
     (event) => {
-      event.preventDefault();
-      nudgeSelectedKeyframes(10);
+      event.preventDefault()
+      nudgeSelectedKeyframes(10)
     },
     { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes]
-  );
+    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+  )
 
-  const dragStateRef = useRef<DragState | null>(null);
-  const marqueeStateRef = useRef<MarqueeState | null>(null);
-  const marqueeJustEndedRef = useRef(false);
-  const selectionAnchorByPropertyRef = useRef(new Map<AnimatableProperty, string>());
+  const dragStateRef = useRef<DragState | null>(null)
+  const selectionAnchorByPropertyRef = useRef(new Map<AnimatableProperty, string>())
+
+  const {
+    marqueeRect,
+    marqueeJustEndedRef,
+    getMarqueeModeFromPointerEvent,
+    beginMarqueeSelection,
+  } = useDopesheetMarquee({
+    keyframePointsRef,
+    scrollAreaRef,
+    getTimelineXFromClientX,
+    getContentYFromClientY,
+    onSelectionChange,
+  })
 
   const handleKeyframePointerDown = useCallback(
     (
       property: AnimatableProperty,
       keyframeId: string,
-      event: React.PointerEvent<HTMLButtonElement>
+      event: React.PointerEvent<HTMLButtonElement>,
     ) => {
-      if (disabled) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onActivePropertyChange?.(property);
+      if (disabled) return
+      if (isPropertyLocked(property)) return
+      event.preventDefault()
+      event.stopPropagation()
+      onActivePropertyChange?.(property)
 
       if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
-        const propertyKeyframes = rowKeyframesByProperty.get(property) ?? [];
-        const clickedIndex = propertyKeyframes.findIndex((keyframe) => keyframe.id === keyframeId);
-        const anchorId = selectionAnchorByPropertyRef.current.get(property);
+        const propertyKeyframes = rowKeyframesByProperty.get(property) ?? []
+        const clickedIndex = propertyKeyframes.findIndex((keyframe) => keyframe.id === keyframeId)
+        const anchorId = selectionAnchorByPropertyRef.current.get(property)
         const anchorIndex = anchorId
           ? propertyKeyframes.findIndex((keyframe) => keyframe.id === anchorId)
-          : -1;
+          : -1
 
-        const nextSelection = new Set(selectedKeyframeIds);
+        const nextSelection = new Set(selectedKeyframeIds)
         if (clickedIndex >= 0 && anchorIndex >= 0) {
-          const start = Math.min(clickedIndex, anchorIndex);
-          const end = Math.max(clickedIndex, anchorIndex);
+          const start = Math.min(clickedIndex, anchorIndex)
+          const end = Math.max(clickedIndex, anchorIndex)
           for (let i = start; i <= end; i++) {
-            const keyframe = propertyKeyframes[i];
-            if (keyframe) nextSelection.add(keyframe.id);
+            const keyframe = propertyKeyframes[i]
+            if (keyframe) nextSelection.add(keyframe.id)
           }
         } else {
-          nextSelection.add(keyframeId);
+          nextSelection.add(keyframeId)
         }
-        onSelectionChange?.(nextSelection);
-        selectionAnchorByPropertyRef.current.set(property, keyframeId);
-        return;
+        onSelectionChange?.(nextSelection)
+        selectionAnchorByPropertyRef.current.set(property, keyframeId)
+        return
       }
 
       if (event.ctrlKey || event.metaKey) {
-        const nextSelection = new Set(selectedKeyframeIds);
+        const nextSelection = new Set(selectedKeyframeIds)
         if (nextSelection.has(keyframeId)) {
-          nextSelection.delete(keyframeId);
+          nextSelection.delete(keyframeId)
         } else {
-          nextSelection.add(keyframeId);
+          nextSelection.add(keyframeId)
         }
-        onSelectionChange?.(nextSelection);
-        selectionAnchorByPropertyRef.current.set(property, keyframeId);
-        return;
+        onSelectionChange?.(nextSelection)
+        selectionAnchorByPropertyRef.current.set(property, keyframeId)
+        return
       }
 
       const baseSelection = selectedKeyframeIds.has(keyframeId)
         ? new Set(selectedKeyframeIds)
-        : new Set([keyframeId]);
+        : new Set([keyframeId])
 
       if (!selectedKeyframeIds.has(keyframeId)) {
-        onSelectionChange?.(baseSelection);
+        onSelectionChange?.(baseSelection)
       }
-      selectionAnchorByPropertyRef.current.set(property, keyframeId);
+      selectionAnchorByPropertyRef.current.set(property, keyframeId)
 
-      const selectedIdsForDrag = baseSelection.has(keyframeId) && baseSelection.size > 1
-        ? Array.from(baseSelection)
-        : [keyframeId];
+      const selectedIdsForDrag =
+        baseSelection.has(keyframeId) && baseSelection.size > 1
+          ? Array.from(baseSelection)
+          : [keyframeId]
 
-      const initialFrames = new Map<string, number>();
+      const initialFrames = new Map<string, number>()
       for (const id of selectedIdsForDrag) {
-        const meta = keyframeMetaByIdRef.current.get(id);
-        if (!meta) continue;
-        initialFrames.set(id, meta.keyframe.frame);
+        const meta = keyframeMetaByIdRef.current.get(id)
+        if (!meta) continue
+        initialFrames.set(id, meta.keyframe.frame)
       }
 
       dragStateRef.current = {
@@ -1076,322 +1439,482 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         startClientX: event.clientX,
         pointerId: event.pointerId,
         started: false,
-      };
-      scheduleDragPreviewFrames(null);
+        duplicateOnCommit: !!onDuplicateKeyframes && event.altKey,
+      }
+      scheduleDragPreviewFrames(null)
 
-      event.currentTarget.setPointerCapture(event.pointerId);
+      setPointerCaptureSafely(event.currentTarget, event.pointerId)
     },
     [
       disabled,
+      isPropertyLocked,
+      onDuplicateKeyframes,
       onActivePropertyChange,
       rowKeyframesByProperty,
       scheduleDragPreviewFrames,
       selectedKeyframeIds,
       onSelectionChange,
-    ]
-  );
+    ],
+  )
+  const handleGroupKeyframePointerDown = useCallback(
+    (
+      frameGroup: DopesheetPropertyGroup['frameGroups'][number],
+      event: React.PointerEvent<HTMLButtonElement>,
+    ) => {
+      if (disabled) return
+      if (event.button !== 0) return
 
-  const updateSelectionFromMarquee = useCallback(
-    (state: MarqueeState) => {
-      const minX = Math.min(state.startX, state.currentX);
-      const maxX = Math.max(state.startX, state.currentX);
-      const minY = Math.min(state.startY, state.currentY);
-      const maxY = Math.max(state.startY, state.currentY);
+      const movableEntries = frameGroup.keyframes.filter(
+        ({ property }) => !isPropertyLocked(property),
+      )
+      if (movableEntries.length === 0) return
 
-      const hitIds = new Set<string>();
-      for (const point of keyframePointsRef.current) {
-        if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) {
-          hitIds.add(point.keyframeId);
-        }
+      event.preventDefault()
+      event.stopPropagation()
+
+      const keyframeIds = movableEntries.map(({ keyframe }) => keyframe.id)
+      const anchorEntry = movableEntries[0]
+      if (!anchorEntry) return
+
+      if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        onSelectionChange?.(new Set([...selectedKeyframeIds, ...keyframeIds]))
+        return
       }
 
-      let nextSelection = new Set<string>();
-      if (state.mode === 'replace') {
-        nextSelection = hitIds;
-      } else if (state.mode === 'add') {
-        nextSelection = new Set([...state.baseSelection, ...hitIds]);
-      } else {
-        nextSelection = new Set(state.baseSelection);
-        for (const keyframeId of hitIds) {
+      if (event.ctrlKey || event.metaKey) {
+        const nextSelection = new Set(selectedKeyframeIds)
+        for (const keyframeId of keyframeIds) {
           if (nextSelection.has(keyframeId)) {
-            nextSelection.delete(keyframeId);
+            nextSelection.delete(keyframeId)
           } else {
-            nextSelection.add(keyframeId);
+            nextSelection.add(keyframeId)
           }
         }
+        onSelectionChange?.(nextSelection)
+        return
       }
 
-      onSelectionChange?.(nextSelection);
-      setMarqueeRect({
-        x: minX,
-        y: minY,
-        width: Math.max(1, maxX - minX),
-        height: Math.max(1, maxY - minY),
-      });
-    },
-    [onSelectionChange]
-  );
+      const allSelected = keyframeIds.every((keyframeId) => selectedKeyframeIds.has(keyframeId))
+      const baseSelection = allSelected ? new Set(selectedKeyframeIds) : new Set(keyframeIds)
+      if (!allSelected) {
+        onSelectionChange?.(baseSelection)
+      }
+      onActivePropertyChange?.(anchorEntry.property)
+      for (const { property, keyframe } of movableEntries) {
+        selectionAnchorByPropertyRef.current.set(property, keyframe.id)
+      }
 
+      const selectedIdsForDrag =
+        allSelected && baseSelection.size > keyframeIds.length
+          ? Array.from(baseSelection)
+          : keyframeIds
+      const initialFrames = new Map<string, number>()
+      for (const keyframeId of selectedIdsForDrag) {
+        const meta = keyframeMetaByIdRef.current.get(keyframeId)
+        if (!meta) continue
+        initialFrames.set(keyframeId, meta.keyframe.frame)
+      }
+
+      dragStateRef.current = {
+        anchorKeyframeId: anchorEntry.keyframe.id,
+        selectedKeyframeIds: selectedIdsForDrag,
+        initialFrames,
+        startClientX: event.clientX,
+        pointerId: event.pointerId,
+        started: false,
+        duplicateOnCommit: !!onDuplicateKeyframes && event.altKey,
+      }
+      scheduleDragPreviewFrames(null)
+
+      setPointerCaptureSafely(event.currentTarget, event.pointerId)
+    },
+    [
+      disabled,
+      isPropertyLocked,
+      onDuplicateKeyframes,
+      onActivePropertyChange,
+      onSelectionChange,
+      scheduleDragPreviewFrames,
+      selectedKeyframeIds,
+    ],
+  )
   const handleRowPointerDown = useCallback(
     (property: AnimatableProperty, event: React.PointerEvent<HTMLDivElement>) => {
-      if (disabled) return;
-      if (event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onActivePropertyChange?.(property);
+      if (disabled) return
+      if (isPropertyLocked(property)) return
+      if (event.button !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      onActivePropertyChange?.(property)
 
-      const mode: MarqueeMode = event.shiftKey
-        ? 'add'
-        : (event.ctrlKey || event.metaKey)
-          ? 'toggle'
-          : 'replace';
+      beginMarqueeSelection(
+        event.pointerId,
+        event.clientX,
+        event.clientY,
+        getMarqueeModeFromPointerEvent(event),
+        new Set(selectedKeyframeIds),
+      )
 
-      const startX = getTimelineXFromClientX(event.clientX);
-      const startY = getContentYFromClientY(event.clientY);
-      marqueeStateRef.current = {
-        pointerId: event.pointerId,
-        startX,
-        startY,
-        currentX: startX,
-        currentY: startY,
-        mode,
-        baseSelection: new Set(selectedKeyframeIds),
-        started: false,
-      };
-
-      event.currentTarget.setPointerCapture(event.pointerId);
+      setPointerCaptureSafely(event.currentTarget, event.pointerId)
     },
-    [disabled, getTimelineXFromClientX, getContentYFromClientY, onActivePropertyChange, selectedKeyframeIds]
-  );
+    [
+      beginMarqueeSelection,
+      disabled,
+      getMarqueeModeFromPointerEvent,
+      isPropertyLocked,
+      onActivePropertyChange,
+      selectedKeyframeIds,
+    ],
+  )
+
+  const handleTimelineBackgroundPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (disabled) return
+      if (event.button !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+
+      beginMarqueeSelection(
+        event.pointerId,
+        event.clientX,
+        event.clientY,
+        getMarqueeModeFromPointerEvent(event),
+        new Set(selectedKeyframeIds),
+      )
+
+      setPointerCaptureSafely(event.currentTarget, event.pointerId)
+    },
+    [beginMarqueeSelection, disabled, getMarqueeModeFromPointerEvent, selectedKeyframeIds],
+  )
 
   useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      if (disabled || !onKeyframeMove) return;
-      const dragState = dragStateRef.current;
-      if (!dragState) return;
-      if (dragState.pointerId !== event.pointerId) return;
+    if (!onKeyframeMove && !onDuplicateKeyframes) return
 
-      const deltaX = event.clientX - dragState.startClientX;
+    const handlePointerMove = (event: PointerEvent) => {
+      if (disabled) return
+      const dragState = dragStateRef.current
+      if (!dragState) return
+      if (dragState.pointerId !== event.pointerId) return
+
+      const deltaX = event.clientX - dragState.startClientX
       if (!dragState.started && Math.abs(deltaX) > DRAG_THRESHOLD) {
-        dragState.started = true;
-        onDragStart?.();
+        dragState.started = true
+        if (!dragState.duplicateOnCommit) {
+          onDragStart?.()
+        }
       }
 
-      if (!dragState.started) return;
+      if (!dragState.started) return
 
-      const deltaFramesRaw = (deltaX / effectiveTimelineWidth) * frameRange;
-      let deltaFrames = Math.round(deltaFramesRaw);
+      const deltaFramesRaw = (deltaX / effectiveTimelineWidth) * frameRange
+      let deltaFrames = Math.round(deltaFramesRaw)
 
       if (snapEnabled && !event.ctrlKey && !event.metaKey) {
-        const anchorInitialFrame = dragState.initialFrames.get(dragState.anchorKeyframeId);
+        const anchorInitialFrame = dragState.initialFrames.get(dragState.anchorKeyframeId)
         if (anchorInitialFrame !== undefined) {
-          const anchorCandidate = clampFrame(anchorInitialFrame + deltaFrames, totalFrames);
-          const snappedAnchor = snapFrame(anchorCandidate);
-          deltaFrames += snappedAnchor - anchorCandidate;
+          const anchorCandidate = clampFrame(anchorInitialFrame + deltaFrames, totalFrames)
+          const snappedAnchor = snapFrame(anchorCandidate)
+          deltaFrames += snappedAnchor - anchorCandidate
         }
       }
 
-      const nextPreviewFrames: Record<string, number> = {};
-      for (const selectedId of dragState.selectedKeyframeIds) {
-        const initial = dragState.initialFrames.get(selectedId);
-        if (initial === undefined) continue;
-        const meta = keyframeMetaByIdRef.current.get(selectedId);
-        if (!meta) continue;
-
-        let nextFrame = clampFrame(initial + deltaFrames, totalFrames);
-        nextFrame = clampToAvoidBlockedRanges(nextFrame, initial, transitionBlockedRanges);
-        nextFrame = clampFrame(nextFrame, totalFrames);
-
-        if (nextFrame === meta.keyframe.frame) continue;
-        nextPreviewFrames[selectedId] = nextFrame;
-      }
-
-      scheduleDragPreviewFrames(
-        Object.keys(nextPreviewFrames).length > 0 ? nextPreviewFrames : null
-      );
-    };
+      const preview = buildSelectionFramePreview(dragState.selectedKeyframeIds, deltaFrames)
+      scheduleDragPreviewFrames(preview.previewFrames)
+    }
 
     const handlePointerUp = (event: PointerEvent) => {
-      const dragState = dragStateRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const dragState = dragStateRef.current
+      if (!dragState || dragState.pointerId !== event.pointerId) return
 
       if (dragState.started) {
-        const previewFrames = appliedDragPreviewFramesRef.current;
-        if (previewFrames) {
-          for (const selectedId of dragState.selectedKeyframeIds) {
-            const nextFrame = previewFrames[selectedId];
-            if (nextFrame === undefined) continue;
-            const meta = keyframeMetaByIdRef.current.get(selectedId);
-            if (!meta) continue;
-            onKeyframeMove(
-              { itemId, property: meta.property, keyframeId: selectedId },
-              nextFrame,
-              meta.keyframe.value
-            );
-          }
+        const previewFrames = appliedDragPreviewFramesRef.current
+        if (dragState.duplicateOnCommit) {
+          duplicateSelectionFramePreview(dragState.selectedKeyframeIds, previewFrames)
+        } else {
+          commitSelectionFramePreview(dragState.selectedKeyframeIds, previewFrames)
+          onDragEnd?.()
         }
-        onDragEnd?.();
       }
-      dragStateRef.current = null;
-      scheduleDragPreviewFrames(null);
-    };
+      dragStateRef.current = null
+      scheduleDragPreviewFrames(null)
+    }
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
+    return addWindowPointerListeners(handlePointerMove, handlePointerUp)
   }, [
     disabled,
+    buildSelectionFramePreview,
+    commitSelectionFramePreview,
+    duplicateSelectionFramePreview,
     onKeyframeMove,
+    onDuplicateKeyframes,
     onDragStart,
     onDragEnd,
     effectiveTimelineWidth,
     frameRange,
     totalFrames,
-    itemId,
     snapEnabled,
     snapFrame,
-    transitionBlockedRanges,
     scheduleDragPreviewFrames,
-  ]);
+  ])
 
-  const scrubPointerIdRef = useRef<number | null>(null);
-  const lastScrubbedFrameRef = useRef<number | null>(null);
+  const scrubPointerIdRef = useRef<number | null>(null)
+  const lastScrubbedFrameRef = useRef<number | null>(null)
+  const {
+    startScrub: startRulerScrub,
+    queueScrub: queueRulerScrub,
+    flushPendingScrub: flushPendingRulerScrub,
+  } = useCoalescedScrub(onScrub)
   const handleRulerPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (disabled) return;
-      event.preventDefault();
-      scrubPointerIdRef.current = event.pointerId;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      const frame = getFrameFromClientX(event.clientX);
-      lastScrubbedFrameRef.current = frame;
-      onScrub?.(frame);
-    },
-    [disabled, onScrub, getFrameFromClientX]
-  );
-
-  const handleRulerPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (disabled) return;
-      if (scrubPointerIdRef.current !== event.pointerId) return;
-      const frame = getFrameFromClientX(event.clientX);
-      if (frame === lastScrubbedFrameRef.current) return;
-      lastScrubbedFrameRef.current = frame;
-      onScrub?.(frame);
-    },
-    [disabled, onScrub, getFrameFromClientX]
-  );
-
-  const handleRulerPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (scrubPointerIdRef.current !== event.pointerId) return;
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // ignore pointer capture errors
-    }
-    scrubPointerIdRef.current = null;
-    lastScrubbedFrameRef.current = null;
-    onScrubEnd?.();
-  }, [onScrubEnd]);
-
-  useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      const marqueeState = marqueeStateRef.current;
-      if (!marqueeState || marqueeState.pointerId !== event.pointerId) return;
-
-      const scrollNode = scrollAreaRef.current;
-      if (scrollNode) {
-        const rect = scrollNode.getBoundingClientRect();
-        const topEdge = rect.top + MARQUEE_SCROLL_EDGE_PX;
-        const bottomEdge = rect.bottom - MARQUEE_SCROLL_EDGE_PX;
-        let scrollDelta = 0;
-
-        if (event.clientY < topEdge) {
-          const intensity = Math.min(1, (topEdge - event.clientY) / MARQUEE_SCROLL_EDGE_PX);
-          scrollDelta = -Math.max(1, Math.round(intensity * MARQUEE_SCROLL_MAX_SPEED));
-        } else if (event.clientY > bottomEdge) {
-          const intensity = Math.min(1, (event.clientY - bottomEdge) / MARQUEE_SCROLL_EDGE_PX);
-          scrollDelta = Math.max(1, Math.round(intensity * MARQUEE_SCROLL_MAX_SPEED));
-        }
-
-        if (scrollDelta !== 0) {
-          const maxScrollTop = Math.max(0, scrollNode.scrollHeight - scrollNode.clientHeight);
-          scrollNode.scrollTop = Math.max(
-            0,
-            Math.min(maxScrollTop, scrollNode.scrollTop + scrollDelta)
-          );
-        }
-      }
-
-      const x = getTimelineXFromClientX(event.clientX);
-      const y = getContentYFromClientY(event.clientY);
-      const movedEnough =
-        Math.abs(x - marqueeState.startX) > KEYFRAME_MARQUEE_THRESHOLD ||
-        Math.abs(y - marqueeState.startY) > KEYFRAME_MARQUEE_THRESHOLD;
-      if (!marqueeState.started && movedEnough) {
-        marqueeState.started = true;
-      }
-      if (!marqueeState.started) return;
-
-      marqueeState.currentX = x;
-      marqueeState.currentY = y;
-      updateSelectionFromMarquee(marqueeState);
-    };
-
-    const handlePointerUp = (event: PointerEvent) => {
-      const marqueeState = marqueeStateRef.current;
-      if (!marqueeState || marqueeState.pointerId !== event.pointerId) return;
-      if (marqueeState.started) {
-        marqueeJustEndedRef.current = true;
-        setTimeout(() => {
-          marqueeJustEndedRef.current = false;
-        }, 100);
-      } else if (marqueeState.mode === 'replace') {
-        onSelectionChange?.(new Set());
-      }
-      marqueeStateRef.current = null;
-      setMarqueeRect(null);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [getTimelineXFromClientX, getContentYFromClientY, updateSelectionFromMarquee, onSelectionChange]);
-
-  const handleWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
-      if (disabled) return;
-      event.preventDefault();
-      if (event.ctrlKey || event.metaKey) {
-        const pivotFrame = getFrameFromClientX(event.clientX);
-        if (event.deltaY > 0) {
-          zoomAroundFrame(pivotFrame, ZOOM_OUT_FACTOR);
-        } else {
-          zoomAroundFrame(pivotFrame, ZOOM_IN_FACTOR);
-        }
-        return;
-      }
-
-      const deltaFrames = Math.round((event.deltaY / effectiveTimelineWidth) * frameRange);
-      panFrames(deltaFrames);
+      if (disabled) return
+      event.preventDefault()
+      scrubPointerIdRef.current = event.pointerId
+      setPointerCaptureSafely(event.currentTarget, event.pointerId)
+      const frame = getFrameFromClientX(event.clientX)
+      lastScrubbedFrameRef.current = frame
+      onScrubStart?.()
+      startRulerScrub({
+        frame,
+        pointerX: getTimelineXFromClientX(event.clientX),
+        pixelsPerSecond: timelinePixelsPerSecond,
+      })
     },
     [
       disabled,
       getFrameFromClientX,
-      zoomAroundFrame,
-      panFrames,
-      effectiveTimelineWidth,
-      viewport.endFrame,
-      viewport.startFrame,
-    ]
-  );
+      getTimelineXFromClientX,
+      onScrubStart,
+      startRulerScrub,
+      timelinePixelsPerSecond,
+    ],
+  )
 
-  const playheadLeft = frameToX(currentFrame);
+  const handleRulerPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (disabled) return
+      if (scrubPointerIdRef.current !== event.pointerId) return
+      const frame = getFrameFromClientX(event.clientX)
+      if (frame === lastScrubbedFrameRef.current) return
+      lastScrubbedFrameRef.current = frame
+      queueRulerScrub({
+        frame,
+        pointerX: getTimelineXFromClientX(event.clientX),
+        pixelsPerSecond: timelinePixelsPerSecond,
+      })
+    },
+    [
+      disabled,
+      getFrameFromClientX,
+      getTimelineXFromClientX,
+      queueRulerScrub,
+      timelinePixelsPerSecond,
+    ],
+  )
+
+  const handleRulerPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (scrubPointerIdRef.current !== event.pointerId) return
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      } catch {
+        // ignore pointer capture errors
+      }
+      scrubPointerIdRef.current = null
+      lastScrubbedFrameRef.current = null
+      flushPendingRulerScrub(true)
+      onScrubEnd?.()
+    },
+    [flushPendingRulerScrub, onScrubEnd],
+  )
+
+  const handleWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (disabled) return
+      event.preventDefault()
+      if (event.ctrlKey || event.metaKey) {
+        const pivotFrame = getFrameFromClientX(event.clientX)
+        if (event.deltaY > 0) {
+          zoomAroundFrame(pivotFrame, ZOOM_OUT_FACTOR)
+        } else {
+          zoomAroundFrame(pivotFrame, ZOOM_IN_FACTOR)
+        }
+        return
+      }
+
+      const deltaFrames = Math.round((event.deltaY / effectiveTimelineWidth) * frameRange)
+      panFrames(deltaFrames)
+    },
+    [disabled, getFrameFromClientX, zoomAroundFrame, panFrames, effectiveTimelineWidth, frameRange],
+  )
+
+  // Split-view sheet wheel. The two panes share one horizontal time axis but
+  // scroll differently on the vertical axis: the sheet scrolls property rows,
+  // the graph zooms its value axis. So over the sheet a plain vertical wheel
+  // must scroll rows (not hijack the shared time axis), while time zoom/pan
+  // stays reachable via Ctrl (zoom) and horizontal intent (Shift / trackpad
+  // swipe). Only when the rows can't travel further do we fall back to panning
+  // time, so the gesture never dead-ends.
+  const handleSplitSheetWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (disabled) return
+
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        const pivotFrame = getFrameFromClientX(event.clientX)
+        zoomAroundFrame(pivotFrame, event.deltaY > 0 ? ZOOM_OUT_FACTOR : ZOOM_IN_FACTOR)
+        return
+      }
+
+      const horizontalDelta = event.deltaX !== 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0
+      if (horizontalDelta !== 0) {
+        event.preventDefault()
+        panFrames(Math.round((horizontalDelta / effectiveTimelineWidth) * frameRange))
+        return
+      }
+
+      const node = scrollAreaRef.current
+      if (node && node.scrollHeight > node.clientHeight + 1) {
+        const atTop = node.scrollTop <= 0
+        const atBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 1
+        const pastBound = (event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)
+        if (!pastBound) {
+          // Let the inner overflow-auto scroll the rows natively.
+          return
+        }
+      }
+
+      event.preventDefault()
+      panFrames(Math.round((event.deltaY / effectiveTimelineWidth) * frameRange))
+    },
+    [disabled, getFrameFromClientX, zoomAroundFrame, panFrames, effectiveTimelineWidth, frameRange],
+  )
+
+  const graphDisplayProperty = useMemo(() => {
+    if (graphVisibleProperties.size === 0) return null
+    if (activeSelectedProperty && graphVisibleProperties.has(activeSelectedProperty)) {
+      return activeSelectedProperty
+    }
+    return null
+  }, [activeSelectedProperty, graphVisibleProperties])
+  const graphDisplayPropertyLocked = graphDisplayProperty
+    ? isPropertyLocked(graphDisplayProperty)
+    : false
+  const focusGraphPane = useCallback(() => {
+    graphPaneRef.current?.focus()
+  }, [])
+  const handleGraphPaneKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (disabled || graphDisplayPropertyLocked || selectedRefs.length === 0) {
+        return
+      }
+
+      const hasModifier = event.ctrlKey || event.metaKey || event.altKey
+
+      if (!hasModifier && (event.key === 'Delete' || event.key === 'Backspace')) {
+        if (!onRemoveKeyframes) {
+          return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+        onRemoveKeyframes(selectedRefs)
+        return
+      }
+
+      if (!hasModifier && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        event.preventDefault()
+        event.stopPropagation()
+        nudgeSelectedKeyframes(
+          event.key === 'ArrowLeft' ? (event.shiftKey ? -10 : -1) : event.shiftKey ? 10 : 1,
+        )
+      }
+    },
+    [disabled, graphDisplayPropertyLocked, nudgeSelectedKeyframes, onRemoveKeyframes, selectedRefs],
+  )
+  const timingStripMarkers = useMemo(() => {
+    if (showGraphPane) {
+      if (!activeSelectedProperty) {
+        return []
+      }
+
+      return (keyframesByProperty[activeSelectedProperty] ?? []).map((keyframe) => ({
+        id: keyframe.id,
+        frame: keyframe.frame,
+        selected: selectedKeyframeIds.has(keyframe.id),
+        draggable: !!onKeyframeMove && selectedRefIds.includes(keyframe.id),
+      }))
+    }
+
+    return visibleKeyframes
+      .filter(({ keyframe }) => selectedKeyframeIds.has(keyframe.id))
+      .map(({ property, keyframe }) => ({
+        id: keyframe.id,
+        frame: keyframe.frame,
+        selected: true,
+        draggable: !!onKeyframeMove && !isPropertyLocked(property),
+      }))
+  }, [
+    activeSelectedProperty,
+    isPropertyLocked,
+    keyframesByProperty,
+    onKeyframeMove,
+    selectedKeyframeIds,
+    selectedRefIds,
+    visibleKeyframes,
+    showGraphPane,
+  ])
+  const constrainGraphFrameDelta = useCallback(
+    (deltaFrames: number, draggedKeyframeIds: string[]) =>
+      constrainSelectedKeyframeDelta({
+        keyframesByProperty,
+        selectedKeyframeIds: new Set(draggedKeyframeIds),
+        totalFrames,
+        deltaFrames,
+      }),
+    [keyframesByProperty, totalFrames],
+  )
+  const {
+    timingStripPreviewFrames,
+    handleTimingStripSelectionChange,
+    handleTimingStripSlideStart,
+    handleTimingStripSlideChange,
+    handleTimingStripSlideEnd,
+  } = useTimingStripDrag({
+    disabled,
+    onKeyframeMove,
+    onSelectionChange,
+    onDragStart,
+    onDragEnd,
+    buildSelectionFramePreview,
+    commitSelectionFramePreview,
+  })
+
+  // Mirror timing-strip preview into the sheet drag preview. The sheet shows in
+  // both `dopesheet` and `split`, so mirror whenever the sheet pane is visible.
+  useEffect(() => {
+    if (!showSheetPane) {
+      scheduleDragPreviewFrames(null)
+      return
+    }
+
+    scheduleDragPreviewFrames(timingStripPreviewFrames)
+  }, [scheduleDragPreviewFrames, timingStripPreviewFrames, showSheetPane])
+  const formatRulerTick = useCallback(
+    (frame: number): string => {
+      if (graphRulerUnit === 'frames' || !fps || fps <= 0) {
+        return String(frame)
+      }
+      const seconds = frame / fps
+      if (seconds >= 60) {
+        const minutes = Math.floor(seconds / 60)
+        const remainder = seconds - minutes * 60
+        return `${minutes}:${remainder.toFixed(1).padStart(4, '0')}`
+      }
+      return `${seconds.toFixed(seconds < 10 ? 2 : 1)}s`
+    },
+    [graphRulerUnit, fps],
+  )
+
   const rulerTickElements = useMemo(
     () =>
       ticks.map((frame) => (
@@ -1401,20 +1924,40 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           style={{ left: frameToX(frame) }}
         >
           <span className="absolute top-0.5 left-1 text-[10px] text-muted-foreground">
-            {frame}
+            {formatRulerTick(frame)}
           </span>
         </div>
       )),
-    [ticks, frameToX]
-  );
-  const rowElements = useMemo(
-    () =>
-      rows.map((row) => (
-        <div key={row.property} className="grid border-b border-border/60" style={{ ...propertyGridStyle, height: ROW_HEIGHT }}>
+    [ticks, frameToX, formatRulerTick],
+  )
+  const renderPropertyRowContent = useCallback(
+    (row: DopesheetPropertyRow, options?: { indented?: boolean }) => {
+      const rowLocked = isPropertyLocked(row.property)
+      const curveVisible = graphVisibleProperties.has(row.property)
+      const rowLabel = getKeyframePropertyLabel(t, row.property)
+      const showLeftClusterAtRest =
+        (autoKeyEnabledByProperty[row.property] ?? false) || rowLocked || curveVisible
+
+      return (
+        <div
+          className={cn(
+            'group h-full px-1 flex items-center gap-px bg-muted/8',
+            // Indent child property rows under their group header and draw a
+            // faint vertical spine so the column reads as a tree.
+            options?.indented &&
+              "relative pl-6 before:absolute before:inset-y-0 before:left-3 before:w-px before:bg-border/40 before:content-['']",
+            row.controls.hasKeyframeAtCurrentFrame && 'bg-primary/10',
+            showGraphPane && graphVisibleProperties.has(row.property) && 'bg-accent/40',
+            showGraphPane && !rowLocked && 'cursor-pointer',
+            rowLocked && 'opacity-70',
+          )}
+          onClick={showGraphPane && !rowLocked ? () => activateProperty(row.property) : undefined}
+        >
           <div
             className={cn(
-              'px-2 flex items-center gap-2 bg-muted/10',
-              row.controls.hasKeyframeAtCurrentFrame && 'bg-primary/10'
+              'flex items-center gap-px self-stretch',
+              !showLeftClusterAtRest &&
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
             )}
           >
             <Button
@@ -1422,121 +1965,234 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               variant="ghost"
               size="sm"
               className={cn(
-                'h-5 w-5 flex-shrink-0 p-0 text-muted-foreground hover:text-foreground',
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                curveVisible
+                  ? 'text-orange-500 hover:text-orange-400'
+                  : 'opacity-30 hover:opacity-60',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                togglePropertyCurve(row.property)
+              }}
+              title={t('timeline.keyframeEditor.showPropertyCurve', {
+                property: rowLabel,
+                defaultValue: `Show ${rowLabel} curve`,
+              })}
+              aria-label={t('timeline.keyframeEditor.showPropertyCurve', {
+                property: rowLabel,
+                defaultValue: `Show ${rowLabel} curve`,
+              })}
+              aria-pressed={curveVisible}
+            >
+              <LineChart className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                rowLocked ? 'text-red-400 hover:text-red-300' : 'opacity-30 hover:opacity-60',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                toggleLockedProperty(row.property)
+              }}
+              title={
+                rowLocked
+                  ? t('timeline.keyframeEditor.unlockPropertyRow', {
+                      property: rowLabel,
+                      defaultValue: `Unlock ${rowLabel} row`,
+                    })
+                  : t('timeline.keyframeEditor.lockPropertyRow', {
+                      property: rowLabel,
+                      defaultValue: `Lock ${rowLabel} row`,
+                    })
+              }
+              aria-label={
+                rowLocked
+                  ? t('timeline.keyframeEditor.unlockPropertyRow', {
+                      property: rowLabel,
+                      defaultValue: `Unlock ${rowLabel} row`,
+                    })
+                  : t('timeline.keyframeEditor.lockPropertyRow', {
+                      property: rowLabel,
+                      defaultValue: `Lock ${rowLabel} row`,
+                    })
+              }
+              aria-pressed={rowLocked}
+            >
+              <Lock className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
                 autoKeyEnabledByProperty[row.property] &&
-                  'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+                  'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
               )}
               onClick={() => handleRowAutoKeyToggle(row.property)}
-              disabled={disabled || !onPropertyValueCommit}
+              disabled={disabled || rowLocked || !onPropertyValueCommit}
               title={
                 autoKeyEnabledByProperty[row.property]
-                  ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
-                  : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
+                  ? t('timeline.keyframeEditor.autoKeyEnabledFor', {
+                      target: rowLabel,
+                      defaultValue: `Auto-key enabled for ${rowLabel}`,
+                    })
+                  : t('timeline.keyframeEditor.enableAutoKeyFor', {
+                      target: rowLabel,
+                      defaultValue: `Enable auto-key for ${rowLabel}`,
+                    })
               }
               aria-label={
                 autoKeyEnabledByProperty[row.property]
-                  ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
-                  : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
+                  ? t('timeline.keyframeEditor.autoKeyEnabledFor', {
+                      target: rowLabel,
+                      defaultValue: `Auto-key enabled for ${rowLabel}`,
+                    })
+                  : t('timeline.keyframeEditor.enableAutoKeyFor', {
+                      target: rowLabel,
+                      defaultValue: `Enable auto-key for ${rowLabel}`,
+                    })
               }
               aria-pressed={autoKeyEnabledByProperty[row.property] ?? false}
             >
-              <Timer className="h-3 w-3" />
+              <Timer className={MINI_ICON_CLASS} />
             </Button>
-            <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
-              {PROPERTY_LABELS[row.property]}
-            </div>
-            <div className="flex items-center gap-1 ml-auto">
-              <Input
-                type="number"
-                value={valueDrafts[row.property] ?? ''}
-                onChange={(event) => handleRowValueChange(row.property, event.target.value)}
-                onFocus={() => {
-                  onActivePropertyChange?.(row.property);
-                  setEditingValueProperty(row.property);
-                }}
-                onBlur={() => {
-                  if (skipNextBlurCommitPropertyRef.current === row.property) {
-                    skipNextBlurCommitPropertyRef.current = null;
-                  } else {
-                    handleRowValueCommit(row.property, {
-                      allowCreate: autoKeyEnabledByProperty[row.property] ?? false,
-                    });
-                  }
-                  setEditingValueProperty((current) => (current === row.property ? null : current));
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    skipNextBlurCommitPropertyRef.current = row.property;
-                    handleRowValueCommit(row.property, { allowCreate: true });
-                    setEditingValueProperty((current) => (current === row.property ? null : current));
-                    event.currentTarget.blur();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    skipNextBlurCommitPropertyRef.current = row.property;
-                    setValueDrafts((prev) => ({
-                      ...prev,
-                      [row.property]: formatPropertyValue(row.property, propertyValues[row.property]),
-                    }));
-                    setEditingValueProperty((current) => (current === row.property ? null : current));
-                    event.currentTarget.blur();
-                  }
-                }}
-                step={PROPERTY_VALUE_RANGES[row.property].decimals === 0 ? 1 : 0.1}
-                min={PROPERTY_VALUE_RANGES[row.property].min}
-                max={PROPERTY_VALUE_RANGES[row.property].max}
-                inputMode="decimal"
-                className="h-6 w-[82px] border-border/70 bg-background/85 px-1.5 text-[11px]"
-                disabled={
-                  disabled ||
-                  !onPropertyValueCommit ||
-                  (!row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked)
+          </div>
+          <div className="flex h-full min-w-0 flex-1 items-center truncate pl-[10px] pr-1 text-[9px] font-medium leading-none text-foreground/90">
+            {rowLabel}
+          </div>
+          <div className="ml-auto flex items-center gap-0">
+            <Input
+              type="number"
+              value={valueDrafts[row.property] ?? ''}
+              onChange={(event) => handleRowValueChange(row.property, event.target.value)}
+              onFocus={() => {
+                activateProperty(row.property)
+                setEditingValueProperty(row.property)
+              }}
+              onBlur={() => {
+                if (skipNextBlurCommitPropertyRef.current === row.property) {
+                  skipNextBlurCommitPropertyRef.current = null
+                } else {
+                  handleRowValueCommit(row.property, {
+                    allowCreate: autoKeyEnabledByProperty[row.property] ?? false,
+                  })
                 }
-                aria-label={`${PROPERTY_LABELS[row.property]} value at playhead`}
-              />
-              <div className="flex items-center gap-0.5 rounded-md border border-border/70 bg-background/85 p-0.5">
+                setEditingValueProperty((current) => (current === row.property ? null : current))
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  skipNextBlurCommitPropertyRef.current = row.property
+                  handleRowValueCommit(row.property, { allowCreate: true })
+                  setEditingValueProperty((current) => (current === row.property ? null : current))
+                  event.currentTarget.blur()
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  skipNextBlurCommitPropertyRef.current = row.property
+                  setValueDrafts((prev) => ({
+                    ...prev,
+                    [row.property]: formatPropertyValue(row.property, propertyValues[row.property]),
+                  }))
+                  setEditingValueProperty((current) => (current === row.property ? null : current))
+                  event.currentTarget.blur()
+                }
+              }}
+              step={(PROPERTY_VALUE_RANGES[row.property]?.decimals ?? 2) === 0 ? 1 : 0.1}
+              min={PROPERTY_VALUE_RANGES[row.property]?.min}
+              max={PROPERTY_VALUE_RANGES[row.property]?.max}
+              inputMode="decimal"
+              className={cn(
+                'h-[18px] border-border/70 bg-background/85 px-1 py-0 text-right text-[9px] leading-none tabular-nums md:text-[9px]',
+                '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none',
+                spacious ? 'w-[64px]' : 'w-[44px]',
+              )}
+              disabled={
+                disabled ||
+                rowLocked ||
+                !onPropertyValueCommit ||
+                (!row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked)
+              }
+              aria-label={t('timeline.keyframeEditor.propertyValueAtPlayhead', {
+                property: rowLabel,
+                defaultValue: `${rowLabel} value at playhead`,
+              })}
+            />
+            <div className="flex items-center gap-0 rounded-sm border border-border/70 bg-background/85 px-0">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
                 onClick={() => handleRowNavigate(row.property, row.controls.prevKeyframe)}
                 disabled={disabled || row.controls.prevKeyframe === null || !onNavigateToKeyframe}
-                title={`Previous ${PROPERTY_LABELS[row.property]} keyframe`}
+                title={t('timeline.keyframeEditor.previousPropertyKeyframe', {
+                  property: rowLabel,
+                  defaultValue: `Previous ${rowLabel} keyframe`,
+                })}
+                aria-label={t('timeline.keyframeEditor.previousPropertyKeyframe', {
+                  property: rowLabel,
+                  defaultValue: `Previous ${rowLabel} keyframe`,
+                })}
               >
-                <ChevronLeft className="h-3 w-3" />
+                <ChevronLeft className="h-[9px] w-[9px]" />
               </Button>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  'h-5 w-5 p-0 hover:bg-transparent',
+                  'h-4 w-4 p-0 hover:bg-transparent',
                   row.controls.hasKeyframeAtCurrentFrame
-                    ? 'text-primary hover:text-primary'
+                    ? 'text-neutral-200 hover:text-neutral-200'
                     : 'text-muted-foreground hover:text-foreground',
                   isCurrentFrameBlocked &&
                     !row.controls.hasKeyframeAtCurrentFrame &&
-                    'opacity-40 cursor-not-allowed'
+                    'opacity-40 cursor-not-allowed',
                 )}
                 onClick={() => handleRowToggleKeyframe(row.property, row.controls.currentKeyframes)}
                 disabled={
                   disabled ||
+                  rowLocked ||
                   (!row.controls.hasKeyframeAtCurrentFrame &&
                     (isCurrentFrameBlocked || !onAddKeyframe))
                 }
                 title={
                   row.controls.hasKeyframeAtCurrentFrame
-                    ? `Remove ${PROPERTY_LABELS[row.property]} keyframe at playhead`
-                    : `Toggle ${PROPERTY_LABELS[row.property]} keyframe at playhead`
+                    ? t('timeline.keyframeEditor.removePropertyKeyframeAtPlayhead', {
+                        property: rowLabel,
+                        defaultValue: `Remove ${rowLabel} keyframe at playhead`,
+                      })
+                    : t('timeline.keyframeEditor.togglePropertyKeyframeAtPlayhead', {
+                        property: rowLabel,
+                        defaultValue: `Toggle ${rowLabel} keyframe at playhead`,
+                      })
+                }
+                aria-label={
+                  row.controls.hasKeyframeAtCurrentFrame
+                    ? t('timeline.keyframeEditor.removePropertyKeyframeAtPlayhead', {
+                        property: rowLabel,
+                        defaultValue: `Remove ${rowLabel} keyframe at playhead`,
+                      })
+                    : t('timeline.keyframeEditor.togglePropertyKeyframeAtPlayhead', {
+                        property: rowLabel,
+                        defaultValue: `Toggle ${rowLabel} keyframe at playhead`,
+                      })
                 }
               >
                 <span
                   className={cn(
-                    'block h-2.5 w-2.5 rotate-45 border transition-colors',
+                    'block h-[7px] w-[7px] rotate-45 border transition-colors',
                     row.controls.hasKeyframeAtCurrentFrame
-                      ? 'border-primary bg-primary'
-                      : 'border-current bg-transparent'
+                      ? 'border-neutral-200 bg-neutral-200'
+                      : 'border-current bg-transparent',
                   )}
                 />
               </Button>
@@ -1544,299 +2200,834 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
                 onClick={() => handleRowNavigate(row.property, row.controls.nextKeyframe)}
                 disabled={disabled || row.controls.nextKeyframe === null || !onNavigateToKeyframe}
-                title={`Next ${PROPERTY_LABELS[row.property]} keyframe`}
+                title={t('timeline.keyframeEditor.nextPropertyKeyframe', {
+                  property: rowLabel,
+                  defaultValue: `Next ${rowLabel} keyframe`,
+                })}
+                aria-label={t('timeline.keyframeEditor.nextPropertyKeyframe', {
+                  property: rowLabel,
+                  defaultValue: `Next ${rowLabel} keyframe`,
+                })}
               >
-                <ChevronRight className="h-3 w-3" />
+                <ChevronRight className="h-[9px] w-[9px]" />
               </Button>
-              </div>
             </div>
-          </div>
-          <div
-            className="relative border-l border-border/60 overflow-hidden"
-            onPointerDown={(event) => handleRowPointerDown(row.property, event)}
-          >
-            {ticks.map((frame) => (
-              <div
-                key={frame}
-                className="absolute inset-y-0 border-l border-border/30 pointer-events-none"
-                style={{ left: frameToX(frame) }}
-              />
-            ))}
-
-            {transitionBlockedRanges.map((range, index) => (
-              <div
-                key={`${row.property}-${index}-${range.start}-${range.end}`}
-                className="absolute inset-y-0 bg-destructive/10 border-x border-destructive/20 pointer-events-none"
-                style={{
-                  left: frameToX(range.start),
-                  width: frameToX(range.end) - frameToX(range.start),
-                }}
-              />
-            ))}
-
-            {row.keyframes.map((keyframe) => {
-              const renderedX = renderedKeyframeXById.get(keyframe.id);
-              if (renderedX === undefined) return null;
-              const selected = selectedKeyframeIds.has(keyframe.id);
-              return (
-                <button
-                  key={keyframe.id}
-                  ref={(node) => setKeyframeButtonRef(keyframe.id, node)}
-                  type="button"
-                  className={cn(
-                    'absolute w-3 h-3 -ml-1.5 -mt-1.5 rotate-45 border z-10',
-                    selected
-                      ? 'bg-orange-500 border-orange-50 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
-                      : 'bg-orange-500 border-transparent hover:bg-orange-400'
-                  )}
-                  style={{
-                    left: renderedX,
-                    top: '50%',
-                  }}
-                  onPointerDown={(event) =>
-                    handleKeyframePointerDown(row.property, keyframe.id, event)
-                  }
-                  onClick={(event) => event.stopPropagation()}
-                  aria-label={`Keyframe at frame ${keyframe.frame}`}
-                />
-              );
-            })}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto"
+              onClick={(event) => {
+                event.stopPropagation()
+                handleClearProperty(row.property)
+              }}
+              disabled={!canClearRow(row)}
+              title={t('timeline.keyframeEditor.clearPropertyKeyframes', {
+                property: rowLabel,
+                defaultValue: `Clear ${rowLabel} keyframes`,
+              })}
+              aria-label={t('timeline.keyframeEditor.clearPropertyKeyframes', {
+                property: rowLabel,
+                defaultValue: `Clear ${rowLabel} keyframes`,
+              })}
+            >
+              <X className="h-[9px] w-[9px]" />
+            </Button>
           </div>
         </div>
-      )),
+      )
+    },
     [
-      rows,
-      propertyGridStyle,
-      disabled,
+      activateProperty,
+      canClearRow,
       autoKeyEnabledByProperty,
+      disabled,
       formatPropertyValue,
-      handleRowPointerDown,
+      graphVisibleProperties,
+      handleClearProperty,
       handleRowAutoKeyToggle,
       handleRowNavigate,
       handleRowToggleKeyframe,
       handleRowValueChange,
       handleRowValueCommit,
+      isPropertyLocked,
       isCurrentFrameBlocked,
-      onActivePropertyChange,
       onAddKeyframe,
       onNavigateToKeyframe,
       onPropertyValueCommit,
       propertyValues,
+      t,
+      togglePropertyCurve,
+      toggleLockedProperty,
+      valueDrafts,
+      showGraphPane,
+      spacious,
+    ],
+  )
+  const renderGroupHeaderContent = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      const groupLabel = getKeyframeGroupLabel(t, group.id, group.label)
+      const groupProperties = group.rows.map((row) => row.property)
+      const curveVisible = groupProperties.some((p) => graphVisibleProperties.has(p))
+      const allRowsLocked =
+        group.rows.length > 0 && group.rows.every((row) => isPropertyLocked(row.property))
+      const unlockedRows = group.rows.filter((row) => !isPropertyLocked(row.property))
+      const groupAutoKeyEnabled =
+        unlockedRows.length > 0 &&
+        unlockedRows.every((row) => autoKeyEnabledByProperty[row.property] ?? false)
+      const canAddAny = group.rows.some((row) => canAddKeyframeForRow(row))
+      const canClearAny = group.rows.some((row) => canClearRow(row))
+      const isOpen = expandedGroups[group.id] ?? true
+      const unlockedCurrentKeyframes = group.currentKeyframes.filter(
+        ({ property }) => !isPropertyLocked(property),
+      )
+      const hasUnlockedCurrentKeyframes = unlockedCurrentKeyframes.length > 0
+      const canToggleCurrentFrame = hasUnlockedCurrentKeyframes ? !!onRemoveKeyframes : canAddAny
+
+      const showGroupLeftClusterAtRest = curveVisible || allRowsLocked || groupAutoKeyEnabled
+
+      return (
+        <div className="group flex h-full items-center gap-px border-y border-border/60 bg-muted/70 pl-3 pr-0.5">
+          <div
+            className={cn(
+              'flex items-center gap-px self-stretch',
+              !showGroupLeftClusterAtRest &&
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+            )}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                curveVisible
+                  ? 'text-orange-500 hover:text-orange-400'
+                  : 'opacity-30 hover:opacity-60',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                toggleGroupCurves(groupProperties)
+              }}
+              disabled={groupProperties.length === 0}
+              title={t('timeline.keyframeEditor.showAllGroupCurves', {
+                group: groupLabel,
+                defaultValue: `Show all ${groupLabel} curves`,
+              })}
+              aria-label={t('timeline.keyframeEditor.showAllGroupCurves', {
+                group: groupLabel,
+                defaultValue: `Show all ${groupLabel} curves`,
+              })}
+              aria-pressed={curveVisible}
+            >
+              <LineChart className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                allRowsLocked ? 'text-red-400 hover:text-red-300' : 'opacity-30 hover:opacity-60',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                setGroupLocked(groupProperties, !allRowsLocked)
+              }}
+              disabled={groupProperties.length === 0}
+              title={
+                allRowsLocked
+                  ? t('timeline.keyframeEditor.unlockGroupRows', {
+                      group: groupLabel,
+                      defaultValue: `Unlock ${groupLabel} rows`,
+                    })
+                  : t('timeline.keyframeEditor.lockGroupRows', {
+                      group: groupLabel,
+                      defaultValue: `Lock ${groupLabel} rows`,
+                    })
+              }
+              aria-label={
+                allRowsLocked
+                  ? t('timeline.keyframeEditor.unlockGroupRows', {
+                      group: groupLabel,
+                      defaultValue: `Unlock ${groupLabel} rows`,
+                    })
+                  : t('timeline.keyframeEditor.lockGroupRows', {
+                      group: groupLabel,
+                      defaultValue: `Lock ${groupLabel} rows`,
+                    })
+              }
+              aria-pressed={allRowsLocked}
+            >
+              <Lock className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                groupAutoKeyEnabled &&
+                  'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleGroupAutoKeyToggle(group)
+              }}
+              disabled={disabled || unlockedRows.length === 0 || !onPropertyValueCommit}
+              title={
+                groupAutoKeyEnabled
+                  ? t('timeline.keyframeEditor.autoKeyEnabledFor', {
+                      target: groupLabel,
+                      defaultValue: `Auto-key enabled for ${groupLabel}`,
+                    })
+                  : t('timeline.keyframeEditor.enableAutoKeyFor', {
+                      target: groupLabel,
+                      defaultValue: `Enable auto-key for ${groupLabel}`,
+                    })
+              }
+              aria-label={
+                groupAutoKeyEnabled
+                  ? t('timeline.keyframeEditor.autoKeyEnabledFor', {
+                      target: groupLabel,
+                      defaultValue: `Auto-key enabled for ${groupLabel}`,
+                    })
+                  : t('timeline.keyframeEditor.enableAutoKeyFor', {
+                      target: groupLabel,
+                      defaultValue: `Enable auto-key for ${groupLabel}`,
+                    })
+              }
+              aria-pressed={groupAutoKeyEnabled}
+            >
+              <Timer className={MINI_ICON_CLASS} />
+            </Button>
+          </div>
+          <button
+            type="button"
+            className="group flex min-w-0 flex-1 items-center gap-px rounded-sm px-0 text-left leading-none transition-colors hover:bg-background/40"
+            onClick={() => toggleGroup(group.id)}
+            aria-expanded={isOpen}
+            aria-label={
+              isOpen
+                ? t('timeline.keyframeEditor.collapseGroup', {
+                    group: groupLabel,
+                    defaultValue: `Collapse ${groupLabel}`,
+                  })
+                : t('timeline.keyframeEditor.expandGroup', {
+                    group: groupLabel,
+                    defaultValue: `Expand ${groupLabel}`,
+                  })
+            }
+          >
+            {isOpen ? (
+              <ChevronDown
+                className={cn(
+                  MINI_ICON_CLASS,
+                  'flex-shrink-0 text-muted-foreground transition-colors group-hover:text-foreground/80',
+                )}
+              />
+            ) : (
+              <ChevronRight
+                className={cn(
+                  MINI_ICON_CLASS,
+                  'flex-shrink-0 text-muted-foreground transition-colors group-hover:text-foreground/80',
+                )}
+              />
+            )}
+            <span className="truncate pl-px text-[9px] font-semibold uppercase leading-none tracking-[0.08em] text-foreground">
+              {groupLabel}
+            </span>
+          </button>
+          <div className="ml-auto flex items-center gap-0 rounded-sm border border-border/70 bg-background/90 px-px shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'text-muted-foreground hover:text-foreground',
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleRowNavigate(
+                  group.prevKeyframe?.property ?? group.rows[0]?.property ?? 'x',
+                  group.prevKeyframe?.keyframe ?? null,
+                )
+              }}
+              disabled={disabled || group.prevKeyframe === null || !onNavigateToKeyframe}
+              title={t('timeline.keyframeEditor.previousGroupKeyframe', {
+                group: groupLabel,
+                defaultValue: `Previous ${groupLabel} keyframe`,
+              })}
+              aria-label={t('timeline.keyframeEditor.previousGroupKeyframe', {
+                group: groupLabel,
+                defaultValue: `Previous ${groupLabel} keyframe`,
+              })}
+            >
+              <ChevronLeft className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'hover:bg-transparent',
+                group.hasKeyframeAtCurrentFrame
+                  ? 'text-neutral-200 hover:text-neutral-200'
+                  : 'text-muted-foreground hover:text-foreground',
+                isCurrentFrameBlocked &&
+                  !group.hasKeyframeAtCurrentFrame &&
+                  'opacity-40 cursor-not-allowed',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleGroupToggleKeyframes(group)
+              }}
+              disabled={!canToggleCurrentFrame}
+              title={
+                hasUnlockedCurrentKeyframes
+                  ? t('timeline.keyframeEditor.removeGroupKeyframesAtPlayhead', {
+                      group: groupLabel,
+                      defaultValue: `Remove ${groupLabel} keyframes at playhead`,
+                    })
+                  : t('timeline.keyframeEditor.toggleGroupKeyframesAtPlayhead', {
+                      group: groupLabel,
+                      defaultValue: `Toggle ${groupLabel} keyframes at playhead`,
+                    })
+              }
+              aria-label={
+                hasUnlockedCurrentKeyframes
+                  ? t('timeline.keyframeEditor.removeGroupKeyframesAtPlayhead', {
+                      group: groupLabel,
+                      defaultValue: `Remove ${groupLabel} keyframes at playhead`,
+                    })
+                  : t('timeline.keyframeEditor.toggleGroupKeyframesAtPlayhead', {
+                      group: groupLabel,
+                      defaultValue: `Toggle ${groupLabel} keyframes at playhead`,
+                    })
+              }
+            >
+              <span
+                className={cn(
+                  'block h-[7px] w-[7px] rotate-45 border transition-colors',
+                  hasUnlockedCurrentKeyframes
+                    ? 'border-neutral-200 bg-neutral-200'
+                    : 'border-current bg-transparent',
+                )}
+              />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'text-muted-foreground hover:text-foreground',
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleRowNavigate(
+                  group.nextKeyframe?.property ?? group.rows[0]?.property ?? 'x',
+                  group.nextKeyframe?.keyframe ?? null,
+                )
+              }}
+              disabled={disabled || group.nextKeyframe === null || !onNavigateToKeyframe}
+              title={t('timeline.keyframeEditor.nextGroupKeyframe', {
+                group: groupLabel,
+                defaultValue: `Next ${groupLabel} keyframe`,
+              })}
+              aria-label={t('timeline.keyframeEditor.nextGroupKeyframe', {
+                group: groupLabel,
+                defaultValue: `Next ${groupLabel} keyframe`,
+              })}
+            >
+              <ChevronRight className={MINI_ICON_CLASS} />
+            </Button>
+            <div className="mx-[1px] h-3 w-px bg-border/80" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'text-muted-foreground hover:text-foreground',
+                'opacity-0 transition-opacity duration-100 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleClearGroup(group)
+              }}
+              disabled={!canClearAny}
+              title={t('timeline.keyframeEditor.clearAllGroupKeyframes', {
+                group: groupLabel,
+                defaultValue: `Clear all ${groupLabel} keyframes`,
+              })}
+              aria-label={t('timeline.keyframeEditor.clearAllGroupKeyframes', {
+                group: groupLabel,
+                defaultValue: `Clear all ${groupLabel} keyframes`,
+              })}
+            >
+              <X className={MINI_ICON_CLASS} />
+            </Button>
+          </div>
+        </div>
+      )
+    },
+    [
+      autoKeyEnabledByProperty,
+      canAddKeyframeForRow,
+      canClearRow,
+      disabled,
+      expandedGroups,
+      handleClearGroup,
+      handleGroupAutoKeyToggle,
+      handleGroupToggleKeyframes,
+      handleRowNavigate,
+      graphVisibleProperties,
+      isPropertyLocked,
+      isCurrentFrameBlocked,
+      onRemoveKeyframes,
+      onNavigateToKeyframe,
+      onPropertyValueCommit,
+      setGroupLocked,
+      t,
+      toggleGroupCurves,
+      toggleGroup,
+    ],
+  )
+  const rowElements = useMemo(
+    () =>
+      renderedSheetEntries.entries.map((entry) => {
+        if (entry.type === 'group') {
+          return (
+            <div
+              key={entry.group.id}
+              className="grid w-full border-b border-border/60"
+              style={{ ...propertyGridStyle, height: GROUP_HEADER_HEIGHT }}
+            >
+              {renderGroupHeaderContent(entry.group)}
+              <GroupTimelineCell
+                groupId={entry.group.id}
+                groupLabel={entry.group.label}
+                frameGroups={
+                  groupTimelineById.get(entry.group.id)?.frameGroups ?? EMPTY_FRAME_GROUPS
+                }
+                rows={groupTimelineById.get(entry.group.id)?.rows ?? EMPTY_STRUCTURE_ROWS}
+                ticks={ticks}
+                frameToX={frameToX}
+                getRenderedKeyframeX={getRenderedKeyframeX}
+                selectedKeyframeIds={selectedKeyframeIds}
+                disabled={disabled}
+                isPropertyLocked={isPropertyLocked}
+                onGroupKeyframePointerDown={handleGroupKeyframePointerDown}
+                onBackgroundPointerDown={handleTimelineBackgroundPointerDown}
+                sheetPreviewFrames={sheetPreviewFrames}
+                sheetPreviewDuplicateKeyframeIds={sheetPreviewDuplicateKeyframeIds}
+              />
+            </div>
+          )
+        }
+
+        const { row } = entry
+        const rowLocked = isPropertyLocked(row.property)
+        return (
+          <div
+            key={row.property}
+            className="grid border-b border-border/60"
+            style={{ ...propertyGridStyle, height: ROW_HEIGHT }}
+          >
+            {renderPropertyRowContent(row, { indented: true })}
+            <PropertyTimelineCell
+              property={row.property}
+              keyframes={rowKeyframesByProperty.get(row.property) ?? EMPTY_KEYFRAMES}
+              locked={rowLocked}
+              ticks={ticks}
+              frameToX={frameToX}
+              getRenderedKeyframeX={getRenderedKeyframeX}
+              renderedKeyframeXById={renderedKeyframeXById}
+              transitionBlockedRanges={transitionBlockedRanges}
+              selectedKeyframeIds={selectedKeyframeIds}
+              disabled={disabled}
+              onRowPointerDown={handleRowPointerDown}
+              onKeyframePointerDown={handleKeyframePointerDown}
+              setKeyframeButtonRef={setKeyframeButtonRef}
+              keyframeMetaByIdRef={keyframeMetaByIdRef}
+              sheetPreviewFrames={sheetPreviewFrames}
+              sheetPreviewDuplicateKeyframeIds={sheetPreviewDuplicateKeyframeIds}
+            />
+          </div>
+        )
+      }),
+    [
+      renderedSheetEntries.entries,
+      propertyGridStyle,
+      groupTimelineById,
+      rowKeyframesByProperty,
+      handleRowPointerDown,
+      handleTimelineBackgroundPointerDown,
+      handleGroupKeyframePointerDown,
+      renderGroupHeaderContent,
+      renderPropertyRowContent,
+      getRenderedKeyframeX,
+      isPropertyLocked,
+      disabled,
       ticks,
       frameToX,
       transitionBlockedRanges,
-      valueDrafts,
+      renderedKeyframeXById,
       selectedKeyframeIds,
+      sheetPreviewDuplicateKeyframeIds,
+      sheetPreviewFrames,
       handleKeyframePointerDown,
       setKeyframeButtonRef,
-    ]
-  );
+      keyframeMetaByIdRef,
+    ],
+  )
+  const propertyColumnElements = useMemo(
+    () =>
+      groupedPropertyRows.flatMap((group) => {
+        const groupOpen = expandedGroups[group.id] ?? true
+        const elements: React.ReactNode[] = [
+          <div key={group.id} className="h-6 border-b border-border/60">
+            {renderGroupHeaderContent(group)}
+          </div>,
+        ]
+
+        if (!groupOpen) {
+          return elements
+        }
+
+        return elements.concat(
+          group.rows.map((row) => (
+            <div
+              key={row.property}
+              className="border-b border-border/60"
+              style={{ height: ROW_HEIGHT }}
+            >
+              {renderPropertyRowContent(row, { indented: true })}
+            </div>
+          )),
+        )
+      }),
+    [expandedGroups, groupedPropertyRows, renderGroupHeaderContent, renderPropertyRowContent],
+  )
+  const emptyStateMessage = hasPropertyFilters
+    ? t('timeline.keyframeEditor.noParametersMatch')
+    : t('timeline.keyframeEditor.noKeyframesToDisplay')
+  const showEmptyGuidance = !hasPropertyFilters
+
+  // Hoisted so the graph pane and sheet body can be composed once and reused
+  // across the exclusive (`graph`/`dopesheet`) and the `split` placements.
+  const rulerHeaderElement = (
+    <DopesheetRulerHeader
+      propertyGridStyle={propertyGridStyle}
+      timelineRef={timelineRef}
+      onRulerPointerDown={handleRulerPointerDown}
+      onRulerPointerMove={handleRulerPointerMove}
+      onRulerPointerUp={handleRulerPointerUp}
+      rulerTickElements={rulerTickElements}
+      playheadFlag={
+        <DopesheetPlayheadLine
+          variant="flag"
+          relativeFrame={currentFrame}
+          itemFrom={itemFrom}
+          totalFrames={totalFrames}
+          frameToX={frameToX}
+          maxLeft={effectiveTimelineWidth - 1}
+          className="absolute top-0 bottom-0 pointer-events-none z-10"
+        />
+      }
+    />
+  )
+  // The timeline cells (ruler, rows, graph) all sit behind a 1px `border-l`, so
+  // their content origin is `columnWidth + 1`. The playhead overlay isn't inside
+  // those cells, so it must add that 1px to line up with ticks, keyframes and the
+  // ruler flag.
+  const timelineContentLeft = columnWidth + 1
+  const playheadOverlayElement = (
+    <div
+      data-testid="dopesheet-playhead-clip"
+      className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
+      style={{ left: timelineContentLeft }}
+    >
+      <DopesheetPlayheadLine
+        relativeFrame={currentFrame}
+        itemFrom={itemFrom}
+        totalFrames={totalFrames}
+        frameToX={frameToX}
+        maxLeft={effectiveTimelineWidth - 1}
+        className="absolute top-0 bottom-0"
+      />
+    </div>
+  )
+  // Split view: one shared playhead line spanning the sheet + graph panes (the
+  // graph's own line is hidden via `hidePlayhead`). A single element guarantees
+  // the two panes can't drift in position or appearance.
+  const splitPlayheadOverlayElement = (
+    <div
+      data-testid="dopesheet-playhead-clip"
+      className="absolute right-0 bottom-0 overflow-hidden pointer-events-none z-30"
+      style={{ left: timelineContentLeft, top: RULER_HEIGHT }}
+    >
+      <DopesheetPlayheadLine
+        relativeFrame={currentFrame}
+        itemFrom={itemFrom}
+        totalFrames={totalFrames}
+        frameToX={frameToX}
+        maxLeft={effectiveTimelineWidth - 1}
+        className="absolute top-0 bottom-0"
+      />
+    </div>
+  )
+  const sheetBodyElement = (
+    <DopesheetSheetBody
+      scrollAreaRef={scrollAreaRef}
+      hasRows={sheetRows.length > 0}
+      emptyStateMessage={emptyStateMessage}
+      showEmptyGuidance={showEmptyGuidance}
+      rowElements={rowElements}
+      marqueeRect={marqueeRect}
+      marqueeJustEnded={marqueeJustEndedRef.current}
+      propertyColumnWidth={columnWidth}
+      onTimelineBackgroundPointerDown={handleTimelineBackgroundPointerDown}
+    />
+  )
+  const graphPaneElement = (
+    <DopesheetGraphPane
+      hasRows={propertyRows.length > 0}
+      emptyStateMessage={emptyStateMessage}
+      showEmptyGuidance={showEmptyGuidance}
+      propertyColumnElements={propertyColumnElements}
+      propertyColumnWidth={columnWidth}
+      graphPaneRef={graphPaneRef}
+      disabled={disabled}
+      graphDisplayPropertyLocked={graphDisplayPropertyLocked}
+      focusGraphPane={focusGraphPane}
+      handleGraphPaneKeyDown={handleGraphPaneKeyDown}
+      graphPaneSize={graphPaneSize}
+      graphVisiblePropertiesSize={graphVisibleProperties.size}
+      viewport={viewport}
+      updateViewport={updateViewport}
+      itemId={itemId}
+      keyframesByProperty={keyframesByProperty}
+      graphDisplayProperty={graphDisplayProperty}
+      graphVisibleProperties={[...graphVisibleProperties]}
+      selectedKeyframeIds={selectedKeyframeIds}
+      currentFrame={currentFrame}
+      itemFrom={itemFrom}
+      totalFrames={totalFrames}
+      fps={fps}
+      onKeyframeMove={onKeyframeMove}
+      timingStripPreviewFrames={timingStripPreviewFrames}
+      constrainGraphFrameDelta={constrainGraphFrameDelta}
+      onBezierHandleMove={onBezierHandleMove}
+      onSelectionChange={onSelectionChange}
+      onPropertyChange={onPropertyChange}
+      onScrub={onScrub}
+      onScrubStart={onScrubStart}
+      onScrubEnd={onScrubEnd}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onAddKeyframe={onAddKeyframe}
+      onRemoveKeyframes={onRemoveKeyframes}
+      onNavigateToKeyframe={onNavigateToKeyframe}
+      transitionBlockedRanges={transitionBlockedRanges}
+      snapEnabled={snapEnabled}
+      graphHandleVisibility={showAllGraphHandles ? 'all' : 'selected'}
+      graphRulerUnit={graphRulerUnit}
+      autoZoomGraphHeight={autoZoomGraphHeight}
+      graphVerticalZoomValue={graphVerticalZoomValue}
+      hidePlayhead={isSplitView}
+    />
+  )
 
   return (
-    <div className={cn('flex flex-col gap-1 h-full overflow-hidden', className)} style={{ height, width }}>
+    <div
+      className={cn('flex h-full flex-col gap-0.5 overflow-hidden', className)}
+      style={{ height, width }}
+    >
       <div className="flex items-center justify-between px-2 flex-shrink-0 min-h-7">
         <div className="flex items-center gap-2">
-          <Select
-            value={activeSelectedProperty ?? 'all'}
-            onValueChange={handlePropertySelect}
-            disabled={disabled || availableProperties.length === 0}
-          >
-            <SelectTrigger className="w-[140px] h-7 text-xs focus:ring-0 focus:ring-offset-0">
-              <SelectValue placeholder="Select property" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">All Properties</SelectItem>
-              {availableProperties.map((property) => (
-                <SelectItem key={property} value={property} className="text-xs">
-                  {PROPERTY_LABELS[property]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground">
+              {t('timeline.keyframeEditor.parameters')}
+            </span>
+            <DopesheetParameterMenu
+              disabled={disabled}
+              hasAvailableProperties={availableProperties.length > 0}
+              parameterFilter={showKeyframedOnly ? 'keyframed' : 'all'}
+              onToggleKeyframedOnly={() => setShowKeyframedOnly((prev) => !prev)}
+              allPropertyGroups={allPropertyGroups}
+              visibleGroups={visibleGroups}
+              onToggleVisibleGroup={toggleVisibleGroup}
+              onExpandAll={() => setAllGroupsExpanded(true)}
+              onCollapseAll={() => setAllGroupsExpanded(false)}
+              onResetParameterView={resetParameterView}
+            />
+          </div>
+
+          {hasPropertyFilters && (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+              {t('timeline.keyframeEditor.filtered')}
+            </span>
+          )}
+
+          {showGraphPane && graphDisplayProperty && (
+            <span className="text-xs text-muted-foreground">
+              {t('timeline.keyframeEditor.graphLabel', {
+                property: getKeyframePropertyLabel(t, graphDisplayProperty),
+              })}
+            </span>
+          )}
 
           <span className="text-xs text-muted-foreground">
-            {visibleKeyframes.length} keyframe{visibleKeyframes.length !== 1 ? 's' : ''}
+            {t('timeline.keyframeEditor.keyframes', { count: visibleKeyframes.length })}
           </span>
 
-          <div className="flex items-center gap-1">
-            <div className="flex items-center gap-0.5">
-              <span className="text-[10px] text-muted-foreground">Local</span>
-              <Input
-                type="number"
-                value={localFrameInputValue}
-                onChange={(event) => setLocalFrameInputValue(event.target.value)}
-                placeholder="-"
-                onBlur={() => {
-                  if (skipNextHeaderFrameBlurRef.current === 'local') {
-                    skipNextHeaderFrameBlurRef.current = null;
-                    return;
-                  }
-                  commitLocalFrameInput();
-                }}
-                onKeyDown={(event) =>
-                  handleHeaderFrameInputKeyDown(event, 'local', commitLocalFrameInput)
-                }
-                aria-label="Local frame"
-                className="h-5 w-12 px-1 text-center text-[10px] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                min={0}
-                max={Math.max(totalFrames - 1, 0)}
-                disabled={
-                  disabled ||
-                  !onKeyframeMove ||
-                  !selectedFrameSummary.hasSelection ||
-                  selectedFrameSummary.hasMixedFrames
-                }
-              />
-            </div>
-            {globalFrame !== null && (
-              <div className="flex items-center gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Global</span>
-                <Input
-                  type="number"
-                  value={globalFrameInputValue}
-                  onChange={(event) => setGlobalFrameInputValue(event.target.value)}
-                  placeholder="-"
-                  onBlur={() => {
-                    if (skipNextHeaderFrameBlurRef.current === 'global') {
-                      skipNextHeaderFrameBlurRef.current = null;
-                      return;
-                    }
-                    commitGlobalFrameInput();
-                  }}
-                  onKeyDown={(event) =>
-                    handleHeaderFrameInputKeyDown(event, 'global', commitGlobalFrameInput)
-                  }
-                  aria-label="Global frame"
-                  className="h-5 w-14 px-1 text-center text-[10px] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                  disabled={
-                    disabled ||
-                    !onKeyframeMove ||
-                    !selectedFrameSummary.hasSelection ||
-                    selectedFrameSummary.hasMixedFrames
-                  }
-                />
-              </div>
-            )}
-          </div>
+          <DopesheetHeaderFrameInputs
+            disabled={disabled}
+            inputsEnabled={
+              Boolean(onKeyframeMove) &&
+              selectedFrameSummary.hasSelection &&
+              !selectedFrameSummary.hasMixedFrames
+            }
+            totalFrames={totalFrames}
+            globalFrame={globalFrame}
+            localFrameInputValue={localFrameInputValue}
+            globalFrameInputValue={globalFrameInputValue}
+            setLocalFrameInputValue={setLocalFrameInputValue}
+            setGlobalFrameInputValue={setGlobalFrameInputValue}
+            skipNextHeaderFrameBlurRef={skipNextHeaderFrameBlurRef}
+            commitLocalFrameInput={commitLocalFrameInput}
+            commitGlobalFrameInput={commitGlobalFrameInput}
+            handleHeaderFrameInputKeyDown={handleHeaderFrameInputKeyDown}
+          />
         </div>
 
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-            onClick={handleRemoveKeyframes}
-            disabled={disabled || selectedRefs.length === 0 || !onRemoveKeyframes}
-            title="Remove selected keyframes"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-          <div className="w-px h-4 bg-border mx-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'h-7 w-7 p-0',
-              snapEnabled && 'bg-primary text-primary-foreground hover:bg-primary/90'
-            )}
-            onClick={() => setSnapEnabled((prev) => !prev)}
+        <div className="flex items-center gap-1.5">
+          {showGraphPane && (
+            <DopesheetInterpolationButtons
+              options={interpolationOptions}
+              selected={selectedInterpolation}
+              disabled={disabled || interpolationDisabled}
+              onSelect={onInterpolationChange}
+            />
+          )}
+          <DopesheetClipboardActions
             disabled={disabled}
-            title={snapEnabled ? 'Snapping enabled' : 'Enable snapping'}
-          >
-            <Magnet className="h-3.5 w-3.5" />
-          </Button>
-          <div className="w-px h-4 bg-border mx-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={() => zoomAroundFrame(currentFrame, ZOOM_OUT_FACTOR)}
+            hasSelection={selectedRefs.length > 0}
+            hasKeyframeClipboard={hasKeyframeClipboard}
+            isKeyframeClipboardCut={isKeyframeClipboardCut}
+            onCopyKeyframes={onCopyKeyframes}
+            onCutKeyframes={onCutKeyframes}
+            onPasteKeyframes={onPasteKeyframes}
+          />
+          <DopesheetEditActions
             disabled={disabled}
-            title="Zoom out"
-          >
-            <ZoomOut className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={() => zoomAroundFrame(currentFrame, ZOOM_IN_FACTOR)}
+            hasSelection={selectedRefs.length > 0}
+            removeKeyframesAvailable={Boolean(onRemoveKeyframes)}
+            handleRemoveKeyframes={handleRemoveKeyframes}
+            horizontalZoomValue={horizontalZoomValue}
+            horizontalZoomDisabled={horizontalZoomRatioBase <= 1}
+            setHorizontalZoomValue={setHorizontalZoomValue}
+            resetViewport={resetViewport}
+            visualizationMode={showGraphPane ? 'graph' : 'dopesheet'}
+            graphVerticalZoomValue={graphVerticalZoomValue}
+            verticalZoomDisabled={visibleGraphProperties.length === 0 || verticalZoomRatioBase <= 1}
+            setGraphVerticalZoomValue={setGraphVerticalZoomValue}
+          />
+          <DopesheetLegendPopover disabled={disabled} />
+          <DopesheetViewOptionsMenu
             disabled={disabled}
-            title="Zoom in"
-          >
-            <ZoomIn className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={resetViewport}
-            disabled={disabled}
-            title="Fit to clip"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
+            visualizationMode={showGraphPane ? 'graph' : 'dopesheet'}
+            graphRulerUnit={graphRulerUnit}
+            onChangeRulerUnit={setGraphRulerUnit}
+            graphHandleVisibility={showAllGraphHandles ? 'all' : 'selected'}
+            onToggleGraphHandleVisibility={() => setShowAllGraphHandles((prev) => !prev)}
+            autoZoomGraphHeight={autoZoomGraphHeight}
+            onToggleAutoZoomGraphHeight={() => setAutoZoomGraphHeight((prev) => !prev)}
+          />
         </div>
       </div>
 
       <div
         className={cn(
           'border border-border rounded-md flex-1 min-h-0 overflow-hidden relative',
-          disabled && 'opacity-60 pointer-events-none'
+          disabled && 'opacity-60 pointer-events-none',
+          isSplitView && 'flex flex-col',
         )}
-        onWheel={handleWheel}
+        onWheel={visualizationMode === 'dopesheet' ? handleWheel : undefined}
       >
+        {isSplitView ? (
+          <>
+            {rulerHeaderElement}
+            {/* Sheet on top, curve/graph below, with ONE shared playhead line
+                ({splitPlayheadOverlayElement}) drawn over both panes so they
+                stay identical in position and appearance. */}
+            <div
+              className="relative min-h-0 flex-1 overflow-hidden"
+              onWheel={handleSplitSheetWheel}
+            >
+              {sheetBodyElement}
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden border-t border-border/60">
+              {graphPaneElement}
+            </div>
+            {splitPlayheadOverlayElement}
+          </>
+        ) : (
+          <>
+            {/* Sheet mode only: the graph renders its own aligned playhead
+                (GraphPlayhead) using the graph's coordinate space. */}
+            {showSheetPane && playheadOverlayElement}
+            {rulerHeaderElement}
+            {showGraphPane ? graphPaneElement : sheetBodyElement}
+          </>
+        )}
+      </div>
+      {showGraphPane && (
+        <div className="grid" style={propertyGridStyle}>
+          <div className="h-4 border-t border-r border-border/60 bg-background/80" />
+          <div data-testid="keyframe-timing-strip-viewport-column">
+            <KeyframeTimingStrip
+              viewport={viewport}
+              contentFrameMax={contentFrameMax}
+              markers={timingStripMarkers}
+              previewFrames={timingStripPreviewFrames}
+              disabled={disabled || timingStripMarkers.length === 0}
+              onSelectionChange={handleTimingStripSelectionChange}
+              onSlideStart={handleTimingStripSlideStart}
+              onSlideChange={handleTimingStripSlideChange}
+              onSlideEnd={handleTimingStripSlideEnd}
+            />
+          </div>
+        </div>
+      )}
+      <div className="grid" style={propertyGridStyle}>
         <div
-          data-testid="dopesheet-playhead-clip"
-          className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
-          style={{ left: PROPERTY_COLUMN_WIDTH }}
-        >
-          <div
-            data-testid="dopesheet-playhead-line"
-            className="absolute top-0 bottom-0 w-px bg-primary/80"
-            style={{ left: playheadLeft }}
+          data-testid="keyframe-navigator-property-column"
+          className="h-5 border-t border-r border-border/60 bg-background/80"
+        />
+        <div data-testid="keyframe-navigator-viewport-column">
+          <CompactNavigator
+            viewport={viewport}
+            currentFrame={currentFrame}
+            contentFrameMax={contentFrameMax}
+            minVisibleFrames={minViewportFrames}
+            disabled={disabled}
+            onViewportChange={updateViewport}
           />
-        </div>
-        <div className="grid border-b border-border bg-muted/25" style={propertyGridStyle}>
-          <div className="px-2 flex items-center text-[11px] text-muted-foreground font-medium" style={{ height: RULER_HEIGHT }}>
-            Property
-          </div>
-          <div
-            ref={timelineRef}
-            className="relative border-l border-border cursor-ew-resize overflow-hidden"
-            style={{ height: RULER_HEIGHT }}
-            onPointerDown={handleRulerPointerDown}
-            onPointerMove={handleRulerPointerMove}
-            onPointerUp={handleRulerPointerUp}
-            onPointerCancel={handleRulerPointerUp}
-          >
-            {rulerTickElements}
-          </div>
-        </div>
-
-        <div ref={scrollAreaRef} className="overflow-auto h-[calc(100%-24px)]">
-          {rows.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              No keyframes to display
-            </div>
-          ) : (
-            <div ref={bodyTimelineRef} className="relative">
-              {rowElements}
-              {marqueeRect && !marqueeJustEndedRef.current && (
-                <KeyframeMarqueeOverlay
-                  rect={{
-                    ...marqueeRect,
-                    x: PROPERTY_COLUMN_WIDTH + marqueeRect.x,
-                  }}
-                />
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>
-  );
-});
+  )
+})

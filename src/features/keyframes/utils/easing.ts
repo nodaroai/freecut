@@ -1,9 +1,1 @@
-export {
-  easeIn,
-  easeOut,
-  easeInOut,
-  cubicBezier,
-  springEasing,
-  applyEasing,
-  applyEasingConfig,
-} from '@/domain/animation/easing';
+export { applyEasing, applyEasingConfig } from '@/shared/utils/easing'

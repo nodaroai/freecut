@@ -2,12 +2,14 @@
 
 Timeline-local adapters for external feature dependencies.
 
-- `media-library-contract.ts`: internal timeline->media-library seam binding.
-  Media-library adapter files re-export from this contract to keep cross-feature
-  coupling centralized.
+- `media-library-*-contract.ts`: narrow internal timeline->media-library seam
+  bindings for store, service, resolver, transcription, subtitle, dialog, and
+  audio-preview dependencies.
 - `media-library-store.ts`: media-library store selectors used by timeline.
 - `media-library-service.ts`: media-library services (including OPFS service
   re-exports) used by timeline.
+- `media-library-audio-preview.ts`: media-library audio preview helper used by
+  timeline audio skimming.
 - `media-transcription-service.ts`: media transcription/caption insertion
   services consumed by timeline clip actions.
 - `media-library-resolver.ts`: media URL resolver utilities, media drag-data

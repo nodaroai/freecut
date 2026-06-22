@@ -1,66 +1,97 @@
-import { useEffect } from 'react';
-import { RouterProvider } from '@tanstack/react-router';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { GlobalTooltip } from '@/components/ui/global-tooltip';
-import { Toaster } from '@/components/ui/sonner';
-import { ErrorBoundary } from '@/components/error-boundary';
-import { router } from '@/app/router';
-import { isEmbedded } from '@/features/embedded/stores/embedded-store';
-import { initEmbeddedMessageHandler } from '@/features/embedded/services/embedded-message-handler';
+import { Suspense, lazy, useEffect, useState } from 'react'
+import { RouterProvider } from '@tanstack/react-router'
+import { GlobalTooltip } from '@/components/ui/global-tooltip'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { ErrorBoundary } from '@/app/error-boundary'
+import { PwaInstallPrompt } from '@/app/pwa-install-prompt'
+import { WorkspaceGate } from '@/features/workspace-gate/workspace-gate'
+import { router } from '@/app/router'
+import { isEmbedded } from '@/features/embedded/stores/embedded-store'
+import { initEmbeddedMessageHandler } from '@/features/embedded/services/embedded-message-handler'
+
+const LazyToaster = lazy(async () => {
+  const { Toaster } = await import('@/components/ui/sonner')
+  return { default: Toaster }
+})
 
 // Synchronous init — NOT dynamic import — because the message listener must be registered
 // before Nodaro's 500ms timeout sends NODARO_LOAD_VIDEO. Any async gap risks missing
 // the message. The bundle cost is acceptable since embedded mode is the primary use case
 // for this fork.
 if (isEmbedded()) {
-  initEmbeddedMessageHandler();
+  initEmbeddedMessageHandler()
 }
 
 export function App() {
+  const [showToaster, setShowToaster] = useState(false)
+
   // Prevent default browser zoom application-wide
   useEffect(() => {
-    const wheelListenerOptions: AddEventListenerOptions = { passive: false, capture: true };
-    const keyListenerOptions: AddEventListenerOptions = { capture: true };
+    const wheelListenerOptions: AddEventListenerOptions = { passive: false, capture: true }
+    const keyListenerOptions: AddEventListenerOptions = { capture: true }
 
     const preventBrowserZoom = (e: WheelEvent) => {
       // Prevent browser zoom when Ctrl/Cmd is held
       if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
+        e.preventDefault()
       }
-    };
+    }
 
     const preventKeyboardZoom = (e: KeyboardEvent) => {
       // Prevent browser zoom shortcuts: Ctrl+=/+/-, Ctrl+0
       // Only preventDefault (blocks browser zoom), event still propagates to react-hotkeys-hook
       if (e.ctrlKey || e.metaKey) {
         if (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || e.key === '0') {
-          e.preventDefault();
+          e.preventDefault()
           // DO NOT call stopPropagation() - we want react-hotkeys-hook to still receive this
         }
       }
-    };
+    }
 
     // Add listeners at capture phase to intercept before browser handles them
-    document.addEventListener('wheel', preventBrowserZoom, wheelListenerOptions);
-    document.addEventListener('keydown', preventKeyboardZoom, keyListenerOptions);
+    document.addEventListener('wheel', preventBrowserZoom, wheelListenerOptions)
+    document.addEventListener('keydown', preventKeyboardZoom, keyListenerOptions)
 
     return () => {
-      document.removeEventListener('wheel', preventBrowserZoom, wheelListenerOptions);
-      document.removeEventListener('keydown', preventKeyboardZoom, keyListenerOptions);
-    };
-  }, []);
+      document.removeEventListener('wheel', preventBrowserZoom, wheelListenerOptions)
+      document.removeEventListener('keydown', preventKeyboardZoom, keyListenerOptions)
+    }
+  }, [])
 
-  // TooltipProvider at app level to prevent re-renders cascading from Editor
-  // GlobalTooltip for performant data-tooltip based tooltips
+  useEffect(() => {
+    const show = () => setShowToaster(true)
+    window.addEventListener('freecut:ensure-toaster', show)
+    return () => {
+      window.removeEventListener('freecut:ensure-toaster', show)
+    }
+  }, [])
+
+  // TooltipProvider is required for Radix tooltip consumers across editor surfaces.
+  // GlobalTooltip handles lightweight data-tooltip attributes without per-item providers.
   // Toaster for toast notifications
   // ErrorBoundary for graceful error recovery
+  // WorkspaceGate blocks RouterProvider until a workspace handle is granted.
+  // Mounted HERE (not inside __root.tsx) so route loaders — which run before
+  // children components mount — never see an uninitialized workspace root.
   return (
     <ErrorBoundary level="app">
       <TooltipProvider delayDuration={300}>
-        <RouterProvider router={router} />
+        {/* Embedded mode mounts OPFS as its workspace root, so it skips the folder-picker gate. */}
+        {isEmbedded() ? (
+          <RouterProvider router={router} />
+        ) : (
+          <WorkspaceGate>
+            <RouterProvider router={router} />
+          </WorkspaceGate>
+        )}
         <GlobalTooltip />
-        <Toaster />
+        <PwaInstallPrompt />
+        {showToaster && (
+          <Suspense fallback={null}>
+            <LazyToaster />
+          </Suspense>
+        )}
       </TooltipProvider>
     </ErrorBoundary>
-  );
+  )
 }

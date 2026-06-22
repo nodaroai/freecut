@@ -1,219 +1,237 @@
-﻿/**
+/**
  * Filmstrip Cache Service
  *
  * Simple service that:
  * 1. Manages extraction worker
- * 2. Provides object URLs from OPFS storage
+ * 2. Provides object URLs from persisted filmstrip storage
  * 3. Notifies subscribers when new frames are available
  *
  * No ImageBitmaps in memory - just URLs for <img> tags.
  */
 
-import { createLogger } from '@/shared/logging/logger';
-import { createManagedWorkerPool } from '@/shared/utils/managed-worker-pool';
+import { createLogger } from '@/shared/logging/logger'
+import { createManagedWorkerPool } from '@/shared/utils/managed-worker-pool'
+import {
+  getObjectUrlBlob,
+  getObjectUrlDirectFileMetadata,
+  registerObjectUrl,
+  unregisterObjectUrl,
+} from '@/infrastructure/browser/object-url-registry'
 
-const logger = createLogger('FilmstripCache');
+const logger = createLogger('FilmstripCache')
 
-import { THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT } from '@/features/timeline/constants';
-import { filmstripOPFSStorage, type FilmstripFrame } from './filmstrip-opfs-storage';
-import type { ExtractRequest, WorkerResponse } from '../workers/filmstrip-extraction-worker';
+import {
+  FILMSTRIP_EXTRACT_WIDTH,
+  FILMSTRIP_EXTRACT_HEIGHT,
+  THUMBNAIL_WIDTH,
+} from '@/features/timeline/constants'
+import { filmstripStorage, type FilmstripFrame } from './filmstrip-storage'
+import { FilmstripMemoryState } from './filmstrip-memory-state'
+import type {
+  ExtractRequest,
+  WarmRequest,
+  WorkerResponse,
+} from '../workers/filmstrip-extraction-worker'
+import {
+  BACKGROUND_STRIDE_LONG,
+  BACKGROUND_STRIDE_MEDIUM,
+  BACKGROUND_STRIDE_VERY_LONG,
+  CACHE_EVICT_IDLE_MS,
+  FRAME_RATE,
+  HIGH_CORE_THRESHOLD,
+  IMAGE_FORMAT,
+  IMAGE_QUALITY,
+  LONG_CLIP_FRAME_THRESHOLD,
+  MAX_CONCURRENT_EXTRACTIONS_BASE,
+  MAX_CONCURRENT_EXTRACTIONS_HIGH_CORE,
+  MAX_FILMSTRIP_TARGET_FRAMES,
+  MAX_IDLE_WORKERS_BASE,
+  MAX_PRIORITY_DENSE_FRAMES,
+  MAX_WORKERS,
+  MEDIUM_CLIP_FRAME_THRESHOLD,
+  MEMORY_CHECK_INTERVAL_MS,
+  MEMORY_SOFT_LIMIT_BYTES,
+  MEMORY_TARGET_BYTES,
+  MIN_CORES_FOR_PARALLEL_WORKERS,
+  MIN_FILMSTRIP_TARGET_FRAMES,
+  MIN_FRAMES_PER_WORKER,
+  PROGRESS_NOTIFY_FRAME_DELTA,
+  PROGRESS_NOTIFY_INTERVAL_MS,
+  TARGET_FRAME_BUDGET_SCALE,
+  VERY_LONG_CLIP_FRAME_THRESHOLD,
+  WORKER_PARALLEL_SAVES_BASE,
+  WORKER_PARALLEL_SAVES_MEMORY_PRESSURE,
+} from './filmstrip-cache-config'
+import {
+  FilmstripMetricsAccumulator,
+  type ExtractionMetrics,
+  type ExtractionOutcome,
+  type FilmstripMetricsSnapshot,
+} from './filmstrip-cache-metrics'
 
-export { THUMBNAIL_WIDTH };
-export type { FilmstripFrame };
+export { THUMBNAIL_WIDTH }
+export type { FilmstripFrame }
 
 export interface Filmstrip {
-  frames: FilmstripFrame[];
-  isComplete: boolean;
-  isExtracting: boolean;
-  progress: number;
+  frames: FilmstripFrame[]
+  isComplete: boolean
+  isExtracting: boolean
+  progress: number
 }
 
-type FilmstripUpdateCallback = (filmstrip: Filmstrip) => void;
-
-// Configuration for parallel extraction
-const FRAME_RATE = 1; // Must match worker - 1fps for filmstrip thumbnails
-const MIN_FRAMES_PER_WORKER = 120; // Avoid over-parallelizing small/medium extractions
-const MAX_WORKERS = 2; // Max workers per extraction on high-core devices
-const MIN_CORES_FOR_PARALLEL_WORKERS = 8; // Enable worker parallelism on mid/high-end CPUs
-const HIGH_CORE_THRESHOLD = 12;
-const MAX_CONCURRENT_EXTRACTIONS_BASE = 3;
-const MAX_CONCURRENT_EXTRACTIONS_HIGH_CORE = 4;
-const MIN_FILMSTRIP_TARGET_FRAMES = 90;
-const MAX_FILMSTRIP_TARGET_FRAMES = 300;
-const TARGET_FRAME_BUDGET_SCALE = 8;
-const MAX_PRIORITY_DENSE_FRAMES = 180;
-const BACKGROUND_STRIDE_MEDIUM = 2; // 0.5fps equivalent outside priority range
-const BACKGROUND_STRIDE_LONG = 3;
-const BACKGROUND_STRIDE_VERY_LONG = 4;
-const MEDIUM_CLIP_FRAME_THRESHOLD = 300;
-const LONG_CLIP_FRAME_THRESHOLD = 1200;
-const VERY_LONG_CLIP_FRAME_THRESHOLD = 2400;
-const CACHE_EVICT_IDLE_MS = 15_000;
-const MEMORY_TARGET_BYTES = 500 * 1024 * 1024;
-const MEMORY_SOFT_LIMIT_BYTES = 420 * 1024 * 1024;
-const METRICS_HISTORY_LIMIT = 120;
-const PROGRESS_NOTIFY_INTERVAL_MS = 200;
-const PROGRESS_NOTIFY_FRAME_DELTA = 4;
-const IMAGE_FORMAT = 'image/jpeg';
-const IMAGE_QUALITY = 0.7;
-const FRAME_MEMORY_FALLBACK_BYTES = THUMBNAIL_WIDTH * THUMBNAIL_HEIGHT * 4;
-const MAX_IDLE_WORKERS_BASE = 2;
-const WORKER_PARALLEL_SAVES_BASE = 4;
-const WORKER_PARALLEL_SAVES_MEMORY_PRESSURE = 2;
-const MEMORY_CHECK_INTERVAL_MS = 500;
+type FilmstripUpdateCallback = (filmstrip: Filmstrip) => void
 
 interface WorkerState {
-  worker: Worker;
-  requestId: string;
-  startIndex: number;
-  endIndex: number;
-  completed: boolean;
-  frameCount: number;
-  lastLoadedCount: number;
-  isLoading: boolean;
-  hasPendingLoad: boolean;
+  worker: Worker
+  requestId: string
+  startIndex: number
+  endIndex: number
+  completed: boolean
+  frameCount: number
+  lastLoadedCount: number
+  isLoading: boolean
+  hasPendingLoad: boolean
 }
 
 interface PendingExtraction {
-  mediaId: string;
-  blobUrl: string;
-  duration: number;
-  skipIndices: number[];
-  priorityRange: PriorityFrameRange | null;
-  forceSingleWorker: boolean;
-  fallbackAttempted: boolean;
-  isVideoFallback: boolean;
-  workers: WorkerState[];
-  totalFrames: number;
-  progressFrames: number;
-  targetIndices: number[];
-  priorityOnly: boolean;
-  completedWorkers: number;
-  onProgress?: (progress: number) => void;
+  mediaId: string
+  blobUrl: string
+  duration: number
+  skipIndices: number[]
+  priorityRange: PriorityFrameRange | null
+  forceSingleWorker: boolean
+  fallbackAttempted: boolean
+  isVideoFallback: boolean
+  workers: WorkerState[]
+  totalFrames: number
+  progressFrames: number
+  targetIndices: number[]
+  targetFrameCount: number | null
+  requestedFrameIndices: number[] | null
+  unavailableTargetIndices: Set<number>
+  priorityOnly: boolean
+  persistCompleteToStorage: boolean
+  completedWorkers: number
+  onProgress?: (progress: number) => void
   // Track frames incrementally during extraction
-  extractedFrames: Map<number, FilmstripFrame>;
-  lastNotifyAt: number;
-  lastNotifiedFrameCount: number;
-  metrics: ExtractionMetrics;
+  extractedFrames: Map<number, FilmstripFrame>
+  lastNotifyAt: number
+  lastNotifiedFrameCount: number
+  metrics: ExtractionMetrics
 }
 
 interface PriorityFrameRange {
-  startIndex: number;
-  endIndex: number;
+  startIndex: number
+  endIndex: number
 }
 
-type ExtractionOutcome = 'completed' | 'failed' | 'aborted';
-
-interface ExtractionMetrics {
-  id: string;
-  mediaId: string;
-  startedAtMs: number;
-  firstFrameAtMs: number | null;
-  targetFrames: number;
-  existingTargetFrames: number;
-  framesToExtract: number;
-  priorityFrames: number;
-  backgroundStride: number;
-  workerCount: number;
-  usedVideoFallback: boolean;
+interface PriorityTimeWindow {
+  startTime: number
+  endTime: number
 }
 
-interface ExtractionMetricSample {
-  id: string;
-  mediaId: string;
-  startedAtMs: number;
-  durationMs: number;
-  timeToFirstFrameMs: number | null;
-  targetFrames: number;
-  existingTargetFrames: number;
-  framesToExtract: number;
-  priorityFrames: number;
-  backgroundStride: number;
-  workerCount: number;
-  usedVideoFallback: boolean;
-  extractedFrames: number;
-  outcome: ExtractionOutcome;
+interface FilmstripLoadOptions {
+  targetFrameCount?: number
+  targetFrameIndices?: number[]
 }
 
-export interface FilmstripMetricsSnapshot {
-  totals: {
-    started: number;
-    completed: number;
-    failed: number;
-    aborted: number;
-  };
-  averages: {
-    durationMs: number;
-    timeToFirstFrameMs: number;
-    extractFramesPerSecond: number;
-  };
-  memory: {
-    cacheBytes: number;
-    cacheEntries: number;
-    activeExtractions: number;
-    queuedExtractions: number;
-    usedJSHeapBytes: number | null;
-    maxConcurrentExtractions: number;
-  };
-  recent: ExtractionMetricSample[];
-}
-
-interface CacheEntryMeta {
-  sizeBytes: number;
-  lastAccessedAt: number;
+interface StartExtractionOptions extends FilmstripLoadOptions {
+  priorityOnly?: boolean
 }
 
 class FilmstripCacheService {
-  private cache = new Map<string, Filmstrip>();
-  private cacheMeta = new Map<string, CacheEntryMeta>();
-  private cacheBytes = 0;
-  private idleEvictionTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private pendingExtractions = new Map<string, PendingExtraction>();
-  private updateCallbacks = new Map<string, Set<FilmstripUpdateCallback>>();
-  private loadingPromises = new Map<string, Promise<Filmstrip>>();
-  private activeExtractions = new Set<string>();
-  private extractionQueue: string[] = [];
+  private cache = new Map<string, Filmstrip>()
+  private readonly memoryState = new FilmstripMemoryState()
+  private pendingExtractions = new Map<string, PendingExtraction>()
+  private updateCallbacks = new Map<string, Set<FilmstripUpdateCallback>>()
+  private loadingPromises = new Map<string, Promise<Filmstrip>>()
+  private activeExtractions = new Set<string>()
+  private extractionQueue: string[] = []
   private readonly workerPoolManager = createManagedWorkerPool({
-    createWorker: () => new Worker(
-      new URL('../workers/filmstrip-extraction-worker.ts', import.meta.url),
-      { type: 'module' }
-    ),
+    createWorker: () =>
+      new Worker(new URL('../workers/filmstrip-extraction-worker.ts', import.meta.url), {
+        type: 'module',
+      }),
     resetWorker: (worker) => {
-      worker.onmessage = null;
-      worker.onerror = null;
+      worker.onmessage = null
+      worker.onerror = null
     },
-  });
-  private metricsTotals = {
-    started: 0,
-    completed: 0,
-    failed: 0,
-    aborted: 0,
-  };
-  private metricsHistory: ExtractionMetricSample[] = [];
-  private lastMemoryCheckAt = 0;
+  })
+  private readonly metrics = new FilmstripMetricsAccumulator()
+  private lastMemoryCheckAt = 0
+  private prewarmStarted = false
+  // Generation counters guard against clearMedia/clearAll racing with an
+  // in-flight loadFromDisk: an async hydration captures the token at the
+  // start and discards its writes when the token has moved on.
+  private mediaGeneration = new Map<string, number>()
+  private globalGeneration = 0
+
+  private currentGenerationToken(mediaId: string): string {
+    return `${this.globalGeneration}:${this.mediaGeneration.get(mediaId) ?? 0}`
+  }
+
+  private bumpMediaGeneration(mediaId: string): void {
+    const next = (this.mediaGeneration.get(mediaId) ?? 0) + 1
+    this.mediaGeneration.set(mediaId, next)
+  }
+
+  /**
+   * Eagerly boot one extraction worker and load mediabunny so the first real
+   * extraction skips worker boot + dynamic-import latency (~100-300ms total).
+   * Idempotent and safe to call repeatedly; only the first call does work.
+   *
+   * Fires synchronously and releases the worker immediately so the next
+   * acquireWorker() call gets it back (with the `warm` message still queued).
+   * The worker processes warm → loadMediabunny → ignored 'warmed' response,
+   * then any queued extract message. Net result: mediabunny is loaded once
+   * per worker realm instead of per extraction.
+   */
+  prewarm(): void {
+    if (this.prewarmStarted) return
+    this.prewarmStarted = true
+
+    let worker: Worker
+    try {
+      worker = this.acquireWorker()
+    } catch (error) {
+      logger.warn('Failed to acquire worker for prewarm', error)
+      this.prewarmStarted = false
+      return
+    }
+
+    const requestId = crypto.randomUUID()
+    worker.postMessage({ type: 'warm', requestId } satisfies WarmRequest)
+    // Release immediately so the next acquireWorker() returns this worker
+    // (with the warm message still queued in front of any extract message).
+    this.releaseWorker(worker)
+  }
+
+  private get cacheBytes(): number {
+    return this.memoryState.sizeBytes
+  }
 
   private getQueueScore(mediaId: string): number {
-    const pending = this.pendingExtractions.get(mediaId);
-    if (!pending) return Number.POSITIVE_INFINITY;
-    return pending.metrics.framesToExtract;
+    const pending = this.pendingExtractions.get(mediaId)
+    if (!pending) return Number.POSITIVE_INFINITY
+    return pending.metrics.framesToExtract
   }
 
   private acquireWorker(): Worker {
-    return this.workerPoolManager.acquireWorker();
+    return this.workerPoolManager.acquireWorker()
   }
 
   private getMaxIdleWorkers(): number {
-    if (this.isHardMemoryPressure()) return 0;
-    if (this.isSoftMemoryPressure()) return 1;
-    return MAX_IDLE_WORKERS_BASE;
+    if (this.isHardMemoryPressure()) return 0
+    if (this.isSoftMemoryPressure()) return 1
+    return MAX_IDLE_WORKERS_BASE
   }
 
   private releaseWorker(worker: Worker): void {
-    this.workerPoolManager.releaseWorker(worker, { maxIdleWorkers: this.getMaxIdleWorkers() });
+    this.workerPoolManager.releaseWorker(worker, { maxIdleWorkers: this.getMaxIdleWorkers() })
   }
 
   private terminateWorker(worker: Worker): void {
-    this.workerPoolManager.terminateWorker(worker);
+    this.workerPoolManager.terminateWorker(worker)
   }
 
   /**
@@ -222,210 +240,323 @@ class FilmstripCacheService {
    * use cache-bytes-only heuristics, so external tab/browser memory pressure is not observable.
    */
   private getUsedJsHeapBytes(): number | null {
-    if (typeof performance === 'undefined') return null;
+    if (typeof performance === 'undefined') return null
     const withMemory = performance as Performance & {
-      memory?: { usedJSHeapSize?: number };
-    };
-    const used = withMemory.memory?.usedJSHeapSize;
-    if (typeof used !== 'number' || !Number.isFinite(used) || used <= 0) {
-      return null;
+      memory?: { usedJSHeapSize?: number }
     }
-    return used;
+    const used = withMemory.memory?.usedJSHeapSize
+    if (typeof used !== 'number' || !Number.isFinite(used) || used <= 0) {
+      return null
+    }
+    return used
   }
 
   private isSoftMemoryPressure(): boolean {
     // `usedJSHeapSize` is process-wide JS heap, not filmstrip-only memory. Unrelated
     // allocations can trigger this branch, which intentionally throttles extraction
     // concurrency in `getMaxConcurrentExtractions()` even when `cacheBytes` is low.
-    const usedHeap = this.getUsedJsHeapBytes();
+    const usedHeap = this.getUsedJsHeapBytes()
     if (usedHeap !== null && usedHeap >= MEMORY_SOFT_LIMIT_BYTES) {
-      return true;
+      return true
     }
-    return this.cacheBytes >= MEMORY_SOFT_LIMIT_BYTES;
+    return this.cacheBytes >= MEMORY_SOFT_LIMIT_BYTES
   }
 
   private isHardMemoryPressure(): boolean {
     // Same caveat as soft pressure: a large non-filmstrip heap spike can trip this
     // check and defer work in `startPendingExtraction()` until pressure clears.
-    const usedHeap = this.getUsedJsHeapBytes();
+    const usedHeap = this.getUsedJsHeapBytes()
     if (usedHeap !== null && usedHeap >= MEMORY_TARGET_BYTES) {
-      return true;
+      return true
     }
-    return this.cacheBytes >= MEMORY_TARGET_BYTES;
-  }
-
-  private estimateFilmstripBytes(frames: FilmstripFrame[]): number {
-    let total = 0;
-    for (const frame of frames) {
-      total += frame.byteSize && frame.byteSize > 0
-        ? frame.byteSize
-        : FRAME_MEMORY_FALLBACK_BYTES;
-    }
-    return total;
+    return this.cacheBytes >= MEMORY_TARGET_BYTES
   }
 
   private updateCacheMeta(mediaId: string, filmstrip: Filmstrip): void {
-    const nextSize = this.estimateFilmstripBytes(filmstrip.frames);
-    const previous = this.cacheMeta.get(mediaId);
-    if (previous) {
-      this.cacheBytes = Math.max(0, this.cacheBytes - previous.sizeBytes);
-    }
-    this.cacheBytes += nextSize;
-    this.cacheMeta.set(mediaId, {
-      sizeBytes: nextSize,
-      lastAccessedAt: Date.now(),
-    });
+    this.memoryState.updateEntry(mediaId, filmstrip)
   }
 
   private touchCacheEntry(mediaId: string): void {
-    const entry = this.cacheMeta.get(mediaId);
-    if (entry) {
-      entry.lastAccessedAt = Date.now();
-      return;
-    }
-    const cached = this.cache.get(mediaId);
-    if (!cached) return;
-    this.updateCacheMeta(mediaId, cached);
+    this.memoryState.touchEntry(mediaId, this.cache.get(mediaId) ?? null)
   }
 
   private clearCacheMeta(mediaId: string): void {
-    const previous = this.cacheMeta.get(mediaId);
-    if (!previous) return;
-    this.cacheBytes = Math.max(0, this.cacheBytes - previous.sizeBytes);
-    this.cacheMeta.delete(mediaId);
+    this.memoryState.clearEntry(mediaId)
+  }
+
+  private closeBitmap(bitmap: ImageBitmap): void {
+    try {
+      bitmap.close()
+    } catch {
+      // Already closed or detached.
+    }
+  }
+
+  private closeBitmapFrames(frames: Iterable<FilmstripFrame>): void {
+    for (const frame of frames) {
+      if (frame.bitmap) {
+        this.closeBitmap(frame.bitmap)
+      }
+    }
+  }
+
+  private closeReplacedBitmapFrames(
+    previous: Filmstrip | null | undefined,
+    next: Filmstrip | null | undefined,
+  ): void {
+    if (!previous?.frames?.length) return
+
+    const retainedBitmaps = new Set<ImageBitmap>()
+    for (const frame of next?.frames ?? []) {
+      if (frame.bitmap) {
+        retainedBitmaps.add(frame.bitmap)
+      }
+    }
+
+    for (const frame of previous.frames) {
+      if (frame.bitmap && !retainedBitmaps.has(frame.bitmap)) {
+        this.closeBitmap(frame.bitmap)
+      }
+    }
   }
 
   private clearIdleEvictionTimer(mediaId: string): void {
-    const timer = this.idleEvictionTimers.get(mediaId);
-    if (!timer) return;
-    clearTimeout(timer);
-    this.idleEvictionTimers.delete(mediaId);
+    this.memoryState.clearIdleTimer(mediaId)
   }
 
   private scheduleIdleEviction(mediaId: string): void {
-    this.clearIdleEvictionTimer(mediaId);
-    if (this.pendingExtractions.has(mediaId)) return;
-    if (this.hasSubscribers(mediaId)) return;
-    if (!this.cache.has(mediaId)) return;
+    this.clearIdleEvictionTimer(mediaId)
+    if (this.pendingExtractions.has(mediaId)) return
+    if (this.hasSubscribers(mediaId)) return
+    if (!this.cache.has(mediaId)) return
 
-    const timer = setTimeout(() => {
-      this.idleEvictionTimers.delete(mediaId);
-      this.tryEvictMedia(mediaId, 'idle-timeout');
-    }, CACHE_EVICT_IDLE_MS);
-    this.idleEvictionTimers.set(mediaId, timer);
+    this.memoryState.scheduleIdleTimer(mediaId, CACHE_EVICT_IDLE_MS, () => {
+      // Idle eviction: close decoded bitmaps to free GPU/heap memory but keep
+      // the cache entry + object URLs alive. Re-display will hit the cache
+      // (no OPFS read) and render as <img src> instead of bitmap-canvas.
+      this.softEvictMedia(mediaId, 'idle-timeout')
+    })
   }
 
   private hasSubscribers(mediaId: string): boolean {
-    const callbacks = this.updateCallbacks.get(mediaId);
-    return !!callbacks && callbacks.size > 0;
+    const callbacks = this.updateCallbacks.get(mediaId)
+    return !!callbacks && callbacks.size > 0
+  }
+
+  hasPendingExtraction(mediaId: string): boolean {
+    return this.pendingExtractions.has(mediaId) || this.loadingPromises.has(mediaId)
+  }
+
+  /**
+   * Soft eviction: close decoded bitmaps but keep frames + object URLs in the
+   * in-memory cache. Memory cost drops from ~14MB/clip (bitmaps) to ~300KB/clip
+   * (JPEG blobs referenced by object URLs). Re-display reuses the cached URLs
+   * with no OPFS round-trip.
+   */
+  private softEvictMedia(mediaId: string, reason: string): boolean {
+    if (this.pendingExtractions.has(mediaId)) return false
+    const cached = this.cache.get(mediaId)
+    if (!cached) return false
+    if (!cached.frames.some((frame) => frame.bitmap)) {
+      // Nothing to free — entry is already bitmap-less.
+      this.clearIdleEvictionTimer(mediaId)
+      return false
+    }
+
+    // Build a new frames array with bitmaps removed. Frames that have a
+    // bitmap but no URL are unrenderable without the bitmap, so leave those
+    // untouched (extraction is still in flight or never persisted JPEGs).
+    const bitmapsToClose: ImageBitmap[] = []
+    const downgradedFrames = cached.frames.map((frame) => {
+      if (!frame.bitmap) return frame
+      if (!frame.url) return frame
+      bitmapsToClose.push(frame.bitmap)
+      const { bitmap: _bitmap, ...rest } = frame
+      void _bitmap
+      return rest
+    })
+
+    const downgraded: Filmstrip = { ...cached, frames: downgradedFrames }
+    this.cache.set(mediaId, downgraded)
+    this.updateCacheMeta(mediaId, downgraded)
+    for (const bitmap of bitmapsToClose) {
+      this.closeBitmap(bitmap)
+    }
+    this.clearIdleEvictionTimer(mediaId)
+
+    // Notify mounted subscribers so any visible <canvas> tiles re-render as
+    // <img>. In practice idle eviction only fires after subscribers have
+    // dropped, but this is safe either way.
+    const callbacks = this.updateCallbacks.get(mediaId)
+    if (callbacks) {
+      for (const callback of callbacks) {
+        callback(downgraded)
+      }
+    }
+
+    logger.debug(`Soft-evicted in-memory filmstrip bitmaps ${mediaId} (${reason})`)
+    return true
   }
 
   private tryEvictMedia(mediaId: string, reason: string): boolean {
-    if (this.pendingExtractions.has(mediaId)) return false;
-    if (this.hasSubscribers(mediaId)) return false;
-    if (!this.cache.has(mediaId)) return false;
+    if (this.pendingExtractions.has(mediaId)) return false
+    if (this.hasSubscribers(mediaId)) return false
+    const cached = this.cache.get(mediaId)
+    if (!cached) return false
 
-    this.cache.delete(mediaId);
-    this.clearCacheMeta(mediaId);
-    filmstripOPFSStorage.revokeUrls(mediaId);
-    this.clearIdleEvictionTimer(mediaId);
-    logger.debug(`Evicted in-memory filmstrip ${mediaId} (${reason})`);
-    return true;
+    this.cache.delete(mediaId)
+    this.closeBitmapFrames(cached.frames)
+    this.clearCacheMeta(mediaId)
+    filmstripStorage.revokeUrls(mediaId)
+    this.clearIdleEvictionTimer(mediaId)
+    logger.debug(`Evicted in-memory filmstrip ${mediaId} (${reason})`)
+    return true
   }
 
   private enforceMemoryBudget(force = false): void {
-    const now = Date.now();
+    const now = Date.now()
     if (!force && now - this.lastMemoryCheckAt < MEMORY_CHECK_INTERVAL_MS) {
-      return;
+      return
     }
-    this.lastMemoryCheckAt = now;
+    this.lastMemoryCheckAt = now
 
-    const usedHeap = this.getUsedJsHeapBytes();
-    const shouldTrim = force
-      || this.cacheBytes > MEMORY_SOFT_LIMIT_BYTES
-      || (usedHeap !== null && usedHeap > MEMORY_SOFT_LIMIT_BYTES);
-    if (!shouldTrim) return;
+    const usedHeap = this.getUsedJsHeapBytes()
+    const shouldTrim =
+      force ||
+      this.cacheBytes > MEMORY_SOFT_LIMIT_BYTES ||
+      (usedHeap !== null && usedHeap > MEMORY_SOFT_LIMIT_BYTES)
+    if (!shouldTrim) return
 
-    const evictable = Array.from(this.cacheMeta.entries())
-      .filter(([mediaId]) => !this.pendingExtractions.has(mediaId))
-      .sort((a, b) => {
-        const aSubscribed = this.hasSubscribers(a[0]) ? 1 : 0;
-        const bSubscribed = this.hasSubscribers(b[0]) ? 1 : 0;
-        if (aSubscribed !== bSubscribed) return aSubscribed - bSubscribed;
-        return a[1].lastAccessedAt - b[1].lastAccessedAt;
-      });
+    const evictable = this.memoryState.getEvictionCandidates({
+      hasSubscribers: (mediaId) => this.hasSubscribers(mediaId),
+      pendingMediaIds: this.pendingExtractions,
+    })
 
-    for (const [mediaId] of evictable) {
+    for (const mediaId of evictable) {
       if (this.cacheBytes <= MEMORY_SOFT_LIMIT_BYTES) {
-        break;
+        break
       }
 
-      this.tryEvictMedia(mediaId, 'memory-pressure');
+      this.tryEvictMedia(mediaId, 'memory-pressure')
     }
   }
 
   private getMaxConcurrentExtractions(): number {
-    const base = typeof navigator === 'undefined'
-      ? MAX_CONCURRENT_EXTRACTIONS_BASE
-      : (navigator.hardwareConcurrency || 4) >= HIGH_CORE_THRESHOLD
-        ? MAX_CONCURRENT_EXTRACTIONS_HIGH_CORE
-        : MAX_CONCURRENT_EXTRACTIONS_BASE;
+    const base =
+      typeof navigator === 'undefined'
+        ? MAX_CONCURRENT_EXTRACTIONS_BASE
+        : (navigator.hardwareConcurrency || 4) >= HIGH_CORE_THRESHOLD
+          ? MAX_CONCURRENT_EXTRACTIONS_HIGH_CORE
+          : MAX_CONCURRENT_EXTRACTIONS_BASE
 
     if (this.isHardMemoryPressure()) {
-      return 1;
+      return 1
     }
     if (this.isSoftMemoryPressure()) {
-      return Math.min(base, 2);
+      return Math.min(base, 2)
     }
-    return base;
+    return base
   }
 
   private buildPriorityIndices(
     totalFrames: number,
-    priorityRange: PriorityFrameRange | null
+    priorityRange: PriorityFrameRange | null,
   ): number[] {
-    if (!priorityRange || totalFrames <= 0) return [];
+    if (!priorityRange || totalFrames <= 0) return []
 
-    const rangeStart = Math.max(0, Math.min(totalFrames - 1, priorityRange.startIndex));
-    const rangeEnd = Math.max(rangeStart + 1, Math.min(totalFrames, priorityRange.endIndex));
-    const rangeLength = Math.max(0, rangeEnd - rangeStart);
-    if (rangeLength === 0) return [];
+    const rangeStart = Math.max(0, Math.min(totalFrames - 1, priorityRange.startIndex))
+    const rangeEnd = Math.max(rangeStart + 1, Math.min(totalFrames, priorityRange.endIndex))
+    const rangeLength = Math.max(0, rangeEnd - rangeStart)
+    if (rangeLength === 0) return []
 
     if (rangeLength <= MAX_PRIORITY_DENSE_FRAMES) {
-      const dense: number[] = [];
-      for (let i = rangeStart; i < rangeEnd; i++) dense.push(i);
-      return dense;
+      const dense: number[] = []
+      for (let i = rangeStart; i < rangeEnd; i++) dense.push(i)
+      return dense
     }
 
-    const sampled = new Set<number>();
-    const stride = Math.ceil(rangeLength / MAX_PRIORITY_DENSE_FRAMES);
-    for (let i = rangeStart; i < rangeEnd; i += stride) sampled.add(i);
-    sampled.add(rangeStart);
-    sampled.add(rangeEnd - 1);
-    return Array.from(sampled).sort((a, b) => a - b);
+    const sampled = new Set<number>()
+    const stride = Math.ceil(rangeLength / MAX_PRIORITY_DENSE_FRAMES)
+    for (let i = rangeStart; i < rangeEnd; i += stride) sampled.add(i)
+    sampled.add(rangeStart)
+    sampled.add(rangeEnd - 1)
+    return Array.from(sampled).sort((a, b) => a - b)
   }
 
-  private getTargetFrameBudget(totalFrames: number): number {
-    if (totalFrames <= 0) return 0;
-    if (totalFrames <= MIN_FILMSTRIP_TARGET_FRAMES) return totalFrames;
+  private normalizeTargetFrameCount(targetFrameCount?: number | null): number | null {
+    if (
+      typeof targetFrameCount !== 'number' ||
+      !Number.isFinite(targetFrameCount) ||
+      targetFrameCount <= 0
+    ) {
+      return null
+    }
 
-    // Keep short clips dense, but scale sub-linearly for long clips to
-    // avoid expensive full-duration extraction when many clips are queued.
-    const scaledBudget = Math.round(Math.sqrt(totalFrames) * TARGET_FRAME_BUDGET_SCALE);
-    return Math.max(
-      MIN_FILMSTRIP_TARGET_FRAMES,
-      Math.min(
-        totalFrames,
-        Math.min(MAX_FILMSTRIP_TARGET_FRAMES, scaledBudget)
-      )
-    );
+    return Math.max(1, Math.ceil(targetFrameCount))
+  }
+
+  private normalizeTargetFrameIndices(
+    totalFrames: number,
+    targetFrameIndices?: number[] | null,
+  ): number[] {
+    if (!Array.isArray(targetFrameIndices) || targetFrameIndices.length === 0 || totalFrames <= 0) {
+      return []
+    }
+
+    const indices = new Set<number>()
+    for (const index of targetFrameIndices) {
+      if (typeof index !== 'number' || !Number.isFinite(index)) {
+        continue
+      }
+      indices.add(Math.max(0, Math.min(totalFrames - 1, Math.round(index))))
+    }
+
+    return Array.from(indices).sort((a, b) => a - b)
+  }
+
+  private buildPriorityTargetIndices(
+    totalFrames: number,
+    priorityRange: PriorityFrameRange | null,
+    targetFrameIndices?: number[] | null,
+  ): number[] {
+    const requestedFrameIndices = this.normalizeTargetFrameIndices(totalFrames, targetFrameIndices)
+    if (requestedFrameIndices.length > 0) {
+      return requestedFrameIndices
+    }
+
+    return this.buildPriorityIndices(totalFrames, priorityRange)
+  }
+
+  private getTargetFrameBudget(totalFrames: number, targetFrameCount?: number | null): number {
+    if (totalFrames <= 0) return 0
+
+    const normalizedTargetFrameCount = this.normalizeTargetFrameCount(targetFrameCount)
+    const defaultBudget =
+      totalFrames <= MIN_FILMSTRIP_TARGET_FRAMES
+        ? totalFrames
+        : Math.max(
+            MIN_FILMSTRIP_TARGET_FRAMES,
+            Math.min(
+              totalFrames,
+              Math.min(
+                MAX_FILMSTRIP_TARGET_FRAMES,
+                Math.round(Math.sqrt(totalFrames) * TARGET_FRAME_BUDGET_SCALE),
+              ),
+            ),
+          )
+
+    if (normalizedTargetFrameCount === null) {
+      return defaultBudget
+    }
+
+    return Math.max(1, Math.min(totalFrames, Math.min(defaultBudget, normalizedTargetFrameCount)))
   }
 
   private getBackgroundStride(totalFrames: number): number {
-    if (totalFrames <= MEDIUM_CLIP_FRAME_THRESHOLD) return 1;
-    if (totalFrames <= LONG_CLIP_FRAME_THRESHOLD) return BACKGROUND_STRIDE_MEDIUM;
-    if (totalFrames <= VERY_LONG_CLIP_FRAME_THRESHOLD) return BACKGROUND_STRIDE_LONG;
-    return BACKGROUND_STRIDE_VERY_LONG;
+    if (totalFrames <= MEDIUM_CLIP_FRAME_THRESHOLD) return 1
+    if (totalFrames <= LONG_CLIP_FRAME_THRESHOLD) return BACKGROUND_STRIDE_MEDIUM
+    if (totalFrames <= VERY_LONG_CLIP_FRAME_THRESHOLD) return BACKGROUND_STRIDE_LONG
+    return BACKGROUND_STRIDE_VERY_LONG
   }
 
   private createExtractionMetrics(
@@ -435,7 +566,7 @@ class FilmstripCacheService {
     existingTargetCount: number,
     priorityRange: PriorityFrameRange | null,
   ): ExtractionMetrics {
-    const startedAtMs = Date.now();
+    const startedAtMs = Date.now()
     return {
       id: crypto.randomUUID(),
       mediaId,
@@ -448,223 +579,417 @@ class FilmstripCacheService {
       backgroundStride: this.getBackgroundStride(totalFrames),
       workerCount: 0,
       usedVideoFallback: false,
-    };
+    }
   }
 
   private noteFirstFrame(metrics: ExtractionMetrics): void {
-    if (metrics.firstFrameAtMs === null) {
-      metrics.firstFrameAtMs = Date.now();
-    }
+    this.metrics.noteFirstFrame(metrics)
   }
 
   private finalizeExtractionMetrics(
     metrics: ExtractionMetrics,
     outcome: ExtractionOutcome,
-    extractedFrames: number
+    extractedFrames: number,
   ): void {
-    const now = Date.now();
-    const sample: ExtractionMetricSample = {
-      id: metrics.id,
-      mediaId: metrics.mediaId,
-      startedAtMs: metrics.startedAtMs,
-      durationMs: Math.max(0, now - metrics.startedAtMs),
-      timeToFirstFrameMs: metrics.firstFrameAtMs === null
-        ? null
-        : Math.max(0, metrics.firstFrameAtMs - metrics.startedAtMs),
-      targetFrames: metrics.targetFrames,
-      existingTargetFrames: metrics.existingTargetFrames,
-      framesToExtract: metrics.framesToExtract,
-      priorityFrames: metrics.priorityFrames,
-      backgroundStride: metrics.backgroundStride,
-      workerCount: metrics.workerCount,
-      usedVideoFallback: metrics.usedVideoFallback,
-      extractedFrames,
-      outcome,
-    };
-
-    this.metricsHistory.push(sample);
-    if (this.metricsHistory.length > METRICS_HISTORY_LIMIT) {
-      this.metricsHistory.shift();
-    }
-
-    if (outcome === 'completed') this.metricsTotals.completed++;
-    if (outcome === 'failed') this.metricsTotals.failed++;
-    if (outcome === 'aborted') this.metricsTotals.aborted++;
+    this.metrics.finalize(metrics, outcome, extractedFrames)
   }
 
   getMetricsSnapshot(): FilmstripMetricsSnapshot {
-    const recent = [...this.metricsHistory];
-    const completed = recent.filter((sample) => sample.outcome === 'completed');
-    const completedForAverages = completed.filter(
-      (sample) => sample.framesToExtract > 1 && sample.durationMs >= 250
-    );
-    const averageSamples = completedForAverages.length > 0 ? completedForAverages : completed;
-    const durationAvg = averageSamples.length > 0
-      ? averageSamples.reduce((sum, sample) => sum + sample.durationMs, 0) / averageSamples.length
-      : 0;
-    const ttfpSamples = averageSamples.filter((sample) => sample.timeToFirstFrameMs !== null);
-    const ttfpAvg = ttfpSamples.length > 0
-      ? ttfpSamples.reduce((sum, sample) => sum + (sample.timeToFirstFrameMs ?? 0), 0) / ttfpSamples.length
-      : 0;
-    const throughputAvg = averageSamples.length > 0
-      ? averageSamples.reduce((sum, sample) => {
-        const seconds = Math.max(0.001, sample.durationMs / 1000);
-        return sum + (sample.framesToExtract / seconds);
-      }, 0) / averageSamples.length
-      : 0;
-
-    return {
-      totals: { ...this.metricsTotals },
-      averages: {
-        durationMs: Math.round(durationAvg),
-        timeToFirstFrameMs: Math.round(ttfpAvg),
-        extractFramesPerSecond: Math.round(throughputAvg * 100) / 100,
-      },
-      memory: {
-        cacheBytes: this.cacheBytes,
-        cacheEntries: this.cache.size,
-        activeExtractions: this.activeExtractions.size,
-        queuedExtractions: this.extractionQueue.length,
-        usedJSHeapBytes: this.getUsedJsHeapBytes(),
-        maxConcurrentExtractions: this.getMaxConcurrentExtractions(),
-      },
-      recent,
-    };
+    return this.metrics.snapshot({
+      cacheBytes: this.cacheBytes,
+      cacheEntries: this.cache.size,
+      activeExtractions: this.activeExtractions.size,
+      queuedExtractions: this.extractionQueue.length,
+      usedJSHeapBytes: this.getUsedJsHeapBytes(),
+      maxConcurrentExtractions: this.getMaxConcurrentExtractions(),
+    })
   }
 
   clearMetrics(): void {
-    this.metricsTotals = { started: 0, completed: 0, failed: 0, aborted: 0 };
-    this.metricsHistory = [];
+    this.metrics.clear()
   }
 
   private buildTargetIndices(
     totalFrames: number,
-    priorityRange: PriorityFrameRange | null
+    priorityRange: PriorityFrameRange | null,
+    targetFrameCount?: number | null,
+    targetFrameIndices?: number[] | null,
   ): number[] {
-    if (totalFrames <= 0) return [];
+    if (totalFrames <= 0) return []
 
-    const target = new Set<number>();
-    target.add(0);
-    target.add(totalFrames - 1);
+    const requestedFrameIndices = this.normalizeTargetFrameIndices(totalFrames, targetFrameIndices)
+    if (requestedFrameIndices.length > 0) {
+      return requestedFrameIndices
+    }
 
-    const priorityIndices = this.buildPriorityIndices(totalFrames, priorityRange);
-    for (const index of priorityIndices) target.add(index);
+    const target = new Set<number>()
+    target.add(0)
+    target.add(totalFrames - 1)
+
+    const priorityIndices = this.buildPriorityIndices(totalFrames, priorityRange)
+    for (const index of priorityIndices) target.add(index)
 
     if (totalFrames <= MIN_FILMSTRIP_TARGET_FRAMES) {
       for (let i = 0; i < totalFrames; i++) {
-        target.add(i);
+        target.add(i)
       }
-      return Array.from(target).sort((a, b) => a - b);
+      return Array.from(target).sort((a, b) => a - b)
     }
 
-    const budget = this.getTargetFrameBudget(totalFrames);
+    const budget = this.getTargetFrameBudget(totalFrames, targetFrameCount)
     if (budget >= totalFrames) {
       for (let i = 0; i < totalFrames; i++) {
-        target.add(i);
+        target.add(i)
       }
-      return Array.from(target).sort((a, b) => a - b);
+      return Array.from(target).sort((a, b) => a - b)
     }
 
     // Adaptive background sampling:
     // - Keep priority range dense.
     // - Sample the non-priority tail with a duration-based stride.
     // - Treat budget as an upper bound, not a fill target.
-    const stride = this.getBackgroundStride(totalFrames);
-    const backgroundCandidates: number[] = [];
+    const stride = this.getBackgroundStride(totalFrames)
+    const backgroundCandidates: number[] = []
     for (let i = 0; i < totalFrames; i += stride) {
       if (!target.has(i)) {
-        backgroundCandidates.push(i);
+        backgroundCandidates.push(i)
       }
     }
 
-    const remainingBudget = Math.max(0, budget - target.size);
+    const remainingBudget = Math.max(0, budget - target.size)
     if (remainingBudget === 0 || backgroundCandidates.length === 0) {
-      return Array.from(target).sort((a, b) => a - b);
+      return Array.from(target).sort((a, b) => a - b)
     }
 
     if (backgroundCandidates.length <= remainingBudget) {
-      for (const index of backgroundCandidates) target.add(index);
+      for (const index of backgroundCandidates) target.add(index)
     } else {
-      const step = backgroundCandidates.length / remainingBudget;
+      const step = backgroundCandidates.length / remainingBudget
       for (let i = 0; i < remainingBudget; i++) {
-        const outsideIndex = Math.floor(i * step);
-        const chosen = backgroundCandidates[Math.min(backgroundCandidates.length - 1, outsideIndex)];
-        if (chosen !== undefined) target.add(chosen);
+        const outsideIndex = Math.floor(i * step)
+        const chosen = backgroundCandidates[Math.min(backgroundCandidates.length - 1, outsideIndex)]
+        if (chosen !== undefined) target.add(chosen)
       }
     }
 
-    return Array.from(target).sort((a, b) => a - b);
+    return Array.from(target).sort((a, b) => a - b)
+  }
+
+  private needsRefinementForTarget(
+    frames: FilmstripFrame[],
+    totalFrames: number,
+    priorityRange: PriorityFrameRange | null,
+    targetFrameCount?: number | null,
+    targetFrameIndices?: number[] | null,
+  ): boolean {
+    if (frames.length === 0) return false
+    const required = this.buildTargetIndices(
+      totalFrames,
+      priorityRange,
+      targetFrameCount,
+      targetFrameIndices,
+    )
+    if (required.length === 0) return false
+
+    const available = new Set(frames.map((frame) => frame.index))
+    return required.some((index) => !available.has(index))
   }
 
   private needsRefinementForRange(
     frames: FilmstripFrame[],
     totalFrames: number,
-    priorityRange: PriorityFrameRange | null
+    priorityRange: PriorityFrameRange | null,
   ): boolean {
-    if (!priorityRange || frames.length === 0) return false;
-    const required = this.buildPriorityIndices(totalFrames, priorityRange);
-    if (required.length === 0) return false;
+    if (!priorityRange || frames.length === 0) return false
+    const required = this.buildPriorityIndices(totalFrames, priorityRange)
+    if (required.length === 0) return false
 
-    const available = new Set(frames.map((frame) => frame.index));
-    return required.some((index) => !available.has(index));
+    const available = new Set(frames.map((frame) => frame.index))
+    return required.some((index) => !available.has(index))
+  }
+
+  private getCompletionTargetIndices(pending: PendingExtraction): number[] {
+    if (!pending.priorityOnly) {
+      return pending.targetIndices
+    }
+
+    return this.buildTargetIndices(
+      pending.totalFrames,
+      pending.priorityRange,
+      pending.targetFrameCount,
+      pending.requestedFrameIndices,
+    )
+  }
+
+  private shouldPersistCompletionMetadata(pending: PendingExtraction): boolean {
+    return pending.persistCompleteToStorage
+  }
+
+  private isExactTargetMatch(actual: number[], expected: number[]): boolean {
+    if (actual.length !== expected.length) {
+      return false
+    }
+
+    for (let index = 0; index < actual.length; index += 1) {
+      if (actual[index] !== expected[index]) {
+        return false
+      }
+    }
+
+    return true
+  }
+
+  private buildSettledFilmstrip(pending: PendingExtraction, frames: FilmstripFrame[]): Filmstrip {
+    const completionTargetIndices = this.getCompletionTargetIndices(pending)
+    const completionTargetSet = new Set(completionTargetIndices)
+    const unavailableTargetIndices = pending.unavailableTargetIndices ?? new Set<number>()
+    const extractedTargetCount = frames.reduce(
+      (count, frame) => (completionTargetSet.has(frame.index) ? count + 1 : count),
+      0,
+    )
+    let unavailableTargetCount = 0
+    for (const index of unavailableTargetIndices) {
+      if (completionTargetSet.has(index)) {
+        unavailableTargetCount += 1
+      }
+    }
+    const satisfiedTargetCount = Math.min(
+      completionTargetIndices.length,
+      extractedTargetCount + unavailableTargetCount,
+    )
+    const isComplete =
+      completionTargetIndices.length === 0 ||
+      satisfiedTargetCount === completionTargetIndices.length
+    const progress =
+      completionTargetIndices.length > 0
+        ? Math.round((satisfiedTargetCount / completionTargetIndices.length) * 100)
+        : 0
+
+    return {
+      frames,
+      isComplete,
+      isExtracting: false,
+      progress: isComplete ? 100 : Math.min(99, progress),
+    }
+  }
+
+  private waitForSettledFilmstrip(mediaId: string): Promise<Filmstrip> {
+    const current = this.cache.get(mediaId)
+    if (current && !current.isExtracting) {
+      this.touchCacheEntry(mediaId)
+      return Promise.resolve(current)
+    }
+
+    return new Promise((resolve) => {
+      let unsubscribe: (() => void) | null = null
+      let shouldUnsubscribe = false
+      unsubscribe = this.subscribe(mediaId, (filmstrip) => {
+        if (filmstrip.isExtracting) {
+          return
+        }
+        if (unsubscribe) {
+          unsubscribe()
+        } else {
+          shouldUnsubscribe = true
+        }
+        resolve(filmstrip)
+      })
+      if (shouldUnsubscribe) {
+        unsubscribe()
+      }
+    })
   }
 
   needsPriorityRefinement(
     mediaId: string,
     duration: number,
-    priorityRange?: PriorityFrameRange | null
+    priorityRange?: PriorityFrameRange | null,
+    targetFrameCount?: number,
+    targetFrameIndices?: number[],
   ): boolean {
-    const cached = this.cache.get(mediaId);
-    if (!cached || cached.isExtracting) return false;
-    if (!priorityRange || duration <= 0) return false;
+    const cached = this.cache.get(mediaId)
+    if (!cached || cached.isExtracting) return false
+    if (!priorityRange && targetFrameCount === undefined && targetFrameIndices === undefined)
+      return false
+    if (duration <= 0) return false
 
-    const totalFrames = Math.ceil(duration * FRAME_RATE);
-    const normalizedPriorityRange = this.normalizePriorityRange(priorityRange, totalFrames);
-    return this.needsRefinementForRange(cached.frames, totalFrames, normalizedPriorityRange);
+    const totalFrames = Math.ceil(duration * FRAME_RATE)
+    const normalizedPriorityRange = this.normalizePriorityRange(
+      priorityRange ?? undefined,
+      totalFrames,
+    )
+    return this.needsRefinementForTarget(
+      cached.frames,
+      totalFrames,
+      normalizedPriorityRange,
+      targetFrameCount,
+      targetFrameIndices,
+    )
+  }
+
+  async prewarmPriorityWindow(
+    mediaId: string,
+    source: Blob,
+    duration: number,
+    priorityWindow: PriorityTimeWindow,
+  ): Promise<void> {
+    if (duration <= 0) {
+      return
+    }
+
+    const totalFrames = Math.ceil(duration * FRAME_RATE)
+    if (totalFrames <= 0) {
+      return
+    }
+
+    const startIndex = Math.max(0, Math.floor(priorityWindow.startTime))
+    const endIndex = Math.max(startIndex + 1, Math.ceil(priorityWindow.endTime))
+    const normalizedPriorityRange = this.normalizePriorityRange(
+      { startIndex, endIndex },
+      totalFrames,
+    )
+    if (!normalizedPriorityRange) {
+      return
+    }
+
+    const cached = this.cache.get(mediaId)
+    if (cached?.isExtracting) {
+      return
+    }
+    if (
+      cached?.isComplete &&
+      !this.needsRefinementForRange(cached.frames, totalFrames, normalizedPriorityRange)
+    ) {
+      return
+    }
+
+    const stored = cached
+      ? {
+          frames: cached.frames,
+          existingIndices: cached.frames.map((frame) => frame.index),
+        }
+      : await filmstripStorage.load(mediaId)
+
+    const existingFrames = stored?.frames ?? []
+    const existingIndices = stored?.existingIndices ?? []
+    const needsWarmup =
+      existingFrames.length === 0 ||
+      this.needsRefinementForRange(existingFrames, totalFrames, normalizedPriorityRange)
+    if (!needsWarmup) {
+      return
+    }
+
+    if (this.pendingExtractions.has(mediaId) || this.loadingPromises.has(mediaId)) {
+      return
+    }
+
+    const blobUrl = URL.createObjectURL(source)
+    // Register so the worker-dispatch path (`startExtraction` → postMessage)
+    // can look the blob up synchronously via `getObjectUrlBlob(blobUrl)` and
+    // ship it to the worker as `fallbackBlob`. Without this, the worker has
+    // neither `sourceMetadata` (no opfsPath is known at import time yet)
+    // nor `fallbackBlob`, so mediabunny's input-source factory falls through
+    // to `new UrlSource(blobUrl)` — which then calls `fetch(blobUrl)` from
+    // the worker context and occasionally trips "Failed to fetch" retries.
+    // Registering here keeps the BlobSource path hot and silent.
+    registerObjectUrl(blobUrl, source)
+    let cleanedUp = false
+    let needsDeferredUnsubscribe = false
+    let unsubscribe: (() => void) | null = null
+    const cleanup = () => {
+      if (cleanedUp) {
+        return
+      }
+      cleanedUp = true
+      if (unsubscribe) {
+        unsubscribe()
+      } else {
+        needsDeferredUnsubscribe = true
+      }
+      unregisterObjectUrl(blobUrl)
+      URL.revokeObjectURL(blobUrl)
+    }
+
+    try {
+      this.startExtraction(
+        mediaId,
+        blobUrl,
+        duration,
+        existingIndices,
+        existingFrames,
+        undefined,
+        false,
+        normalizedPriorityRange,
+        { priorityOnly: true },
+      )
+
+      unsubscribe = this.subscribe(mediaId, (filmstrip) => {
+        if (!filmstrip.isExtracting) {
+          cleanup()
+        }
+      })
+
+      if (needsDeferredUnsubscribe && unsubscribe) {
+        unsubscribe()
+        unsubscribe = null
+      }
+
+      const current = this.cache.get(mediaId)
+      if (current && !current.isExtracting) {
+        cleanup()
+      }
+    } catch (error) {
+      cleanup()
+      throw error
+    }
   }
 
   /**
    * Subscribe to filmstrip updates
    */
   subscribe(mediaId: string, callback: FilmstripUpdateCallback): () => void {
-    this.clearIdleEvictionTimer(mediaId);
+    // Active interest in any filmstrip is the cue to prewarm the worker pool.
+    // Idempotent — only the first call does work.
+    this.prewarm()
+    this.clearIdleEvictionTimer(mediaId)
     if (!this.updateCallbacks.has(mediaId)) {
-      this.updateCallbacks.set(mediaId, new Set());
+      this.updateCallbacks.set(mediaId, new Set())
     }
-    this.updateCallbacks.get(mediaId)!.add(callback);
+    this.updateCallbacks.get(mediaId)!.add(callback)
 
     // Immediately call with current state if available
-    const current = this.cache.get(mediaId);
+    const current = this.cache.get(mediaId)
     if (current) {
-      this.touchCacheEntry(mediaId);
-      callback(current);
+      this.touchCacheEntry(mediaId)
+      callback(current)
     }
 
     return () => {
-      const callbacks = this.updateCallbacks.get(mediaId);
+      const callbacks = this.updateCallbacks.get(mediaId)
       if (callbacks) {
-        callbacks.delete(callback);
+        callbacks.delete(callback)
         if (callbacks.size === 0) {
-          this.updateCallbacks.delete(mediaId);
-          this.scheduleIdleEviction(mediaId);
+          this.updateCallbacks.delete(mediaId)
+          this.scheduleIdleEviction(mediaId)
         }
       }
-    };
+    }
   }
 
   private notifyUpdate(mediaId: string, filmstrip: Filmstrip): void {
-    this.clearIdleEvictionTimer(mediaId);
-    this.cache.set(mediaId, filmstrip);
-    this.updateCacheMeta(mediaId, filmstrip);
-    this.enforceMemoryBudget();
-    const callbacks = this.updateCallbacks.get(mediaId);
+    this.clearIdleEvictionTimer(mediaId)
+    this.closeReplacedBitmapFrames(this.cache.get(mediaId), filmstrip)
+    this.cache.set(mediaId, filmstrip)
+    this.updateCacheMeta(mediaId, filmstrip)
+    this.enforceMemoryBudget()
+    const callbacks = this.updateCallbacks.get(mediaId)
     if (callbacks) {
       for (const callback of callbacks) {
-        callback(filmstrip);
+        callback(filmstrip)
       }
     }
     if (!this.hasSubscribers(mediaId) && !filmstrip.isExtracting) {
-      this.scheduleIdleEviction(mediaId);
+      this.scheduleIdleEviction(mediaId)
     }
   }
 
@@ -676,27 +1001,35 @@ class FilmstripCacheService {
     blobUrl: string,
     duration: number,
     onProgress?: (progress: number) => void,
-    priorityRange?: PriorityFrameRange
+    priorityRange?: PriorityFrameRange,
+    options?: FilmstripLoadOptions,
   ): Promise<Filmstrip> {
-    this.clearIdleEvictionTimer(mediaId);
-    const totalFrames = Math.ceil(duration * FRAME_RATE);
-    const normalizedPriorityRange = this.normalizePriorityRange(priorityRange, totalFrames);
+    this.clearIdleEvictionTimer(mediaId)
+    const totalFrames = Math.ceil(duration * FRAME_RATE)
+    const normalizedPriorityRange = this.normalizePriorityRange(priorityRange, totalFrames)
+    const normalizedTargetFrameCount = this.normalizeTargetFrameCount(options?.targetFrameCount)
+    const normalizedTargetFrameIndices = this.normalizeTargetFrameIndices(
+      totalFrames,
+      options?.targetFrameIndices,
+    )
 
     // Return cached if complete
-    const cached = this.cache.get(mediaId);
+    const cached = this.cache.get(mediaId)
     if (cached?.isComplete && !cached.isExtracting) {
-      const needsRefinement = this.needsRefinementForRange(
+      const needsRefinement = this.needsRefinementForTarget(
         cached.frames,
         totalFrames,
-        normalizedPriorityRange
-      );
+        normalizedPriorityRange,
+        normalizedTargetFrameCount,
+        normalizedTargetFrameIndices,
+      )
       if (!needsRefinement) {
-        this.touchCacheEntry(mediaId);
-        return cached;
+        this.touchCacheEntry(mediaId)
+        return cached
       }
 
       // Kick off a focused refinement pass for the active priority window.
-      const existingIndices = cached.frames.map((frame) => frame.index);
+      const existingIndices = cached.frames.map((frame) => frame.index)
       this.startExtraction(
         mediaId,
         blobUrl,
@@ -706,38 +1039,63 @@ class FilmstripCacheService {
         onProgress,
         false,
         normalizedPriorityRange ?? undefined,
-        { priorityOnly: true }
-      );
+        {
+          priorityOnly: true,
+          targetFrameCount: normalizedTargetFrameCount ?? undefined,
+          targetFrameIndices: normalizedTargetFrameIndices,
+        },
+      )
 
-      const refining = { ...cached, isExtracting: true };
-      this.notifyUpdate(mediaId, refining);
-      return refining;
+      const refining = { ...cached, isExtracting: true }
+      this.notifyUpdate(mediaId, refining)
+      return refining
     }
 
-    const pending = this.pendingExtractions.get(mediaId);
+    const pending = this.pendingExtractions.get(mediaId)
     if (pending) {
-      const nextTotalFrames = Math.ceil(duration * FRAME_RATE);
+      const nextTotalFrames = Math.ceil(duration * FRAME_RATE)
       const nextPriorityRange = this.normalizePriorityRange(
         priorityRange ?? pending.priorityRange ?? undefined,
-        nextTotalFrames
-      );
-      pending.priorityRange = nextPriorityRange;
-      pending.duration = duration;
-      pending.onProgress = onProgress ?? pending.onProgress;
+        nextTotalFrames,
+      )
+      const nextTargetFrameCount = this.normalizeTargetFrameCount(options?.targetFrameCount)
+      const nextTargetFrameIndices = this.normalizeTargetFrameIndices(
+        nextTotalFrames,
+        options?.targetFrameIndices,
+      )
+      // Public getFilmstrip() requests are full preparation requests. If they
+      // arrive while an import-time priority warmup is pending, promote the
+      // work to the full target instead of resolving on the warm subset.
+      const nextPriorityOnly = false
+      const nextTargetIndices = this.buildTargetIndices(
+        nextTotalFrames,
+        nextPriorityRange,
+        nextTargetFrameCount,
+        nextTargetFrameIndices,
+      )
+      const nextOnProgress = onProgress ?? pending.onProgress
+      const targetCountChanged =
+        nextTargetFrameIndices.length === 0 && pending.targetFrameCount !== nextTargetFrameCount
+      const needsRestart =
+        pending.blobUrl !== blobUrl ||
+        pending.totalFrames !== nextTotalFrames ||
+        pending.priorityOnly !== nextPriorityOnly ||
+        targetCountChanged ||
+        !this.isExactTargetMatch(pending.requestedFrameIndices ?? [], nextTargetFrameIndices) ||
+        !this.isExactTargetMatch(pending.targetIndices, nextTargetIndices)
 
-      if (pending.blobUrl !== blobUrl) {
-        const currentFrames = Array.from(pending.extractedFrames.values())
-          .sort((a, b) => a.index - b.index);
-        const skipIndices = Array.from(new Set([
-          ...pending.skipIndices,
-          ...currentFrames.map((frame) => frame.index),
-        ]));
-        const forceSingleWorker = pending.forceSingleWorker;
-        const priorityOnly = pending.priorityOnly;
-        const pendingOnProgress = pending.onProgress;
+      if (needsRestart) {
+        const currentFrames = Array.from(pending.extractedFrames.values()).sort(
+          (a, b) => a.index - b.index,
+        )
+        const skipIndices = Array.from(
+          new Set([...pending.skipIndices, ...currentFrames.map((frame) => frame.index)]),
+        )
+        const forceSingleWorker = pending.forceSingleWorker
+        const pendingOnProgress = nextOnProgress
 
-        this.finalizeExtractionMetrics(pending.metrics, 'aborted', currentFrames.length);
-        this.cleanupExtraction(mediaId);
+        this.finalizeExtractionMetrics(pending.metrics, 'aborted', currentFrames.length)
+        this.cleanupExtraction(mediaId)
         this.startExtraction(
           mediaId,
           blobUrl,
@@ -747,21 +1105,29 @@ class FilmstripCacheService {
           pendingOnProgress,
           forceSingleWorker,
           nextPriorityRange ?? undefined,
-          { priorityOnly }
-        );
+          {
+            priorityOnly: nextPriorityOnly,
+            targetFrameCount: nextTargetFrameCount ?? undefined,
+            targetFrameIndices: nextTargetFrameIndices,
+          },
+        )
+      } else {
+        pending.onProgress = nextOnProgress
       }
 
-      const current = this.cache.get(mediaId);
-      if (current) {
-        this.touchCacheEntry(mediaId);
-        return current;
+      const current = this.cache.get(mediaId)
+      if (current && !current.isExtracting) {
+        this.touchCacheEntry(mediaId)
+        return current
       }
+
+      return this.waitForSettledFilmstrip(mediaId)
     }
 
     // Check for pending load
-    const loading = this.loadingPromises.get(mediaId);
+    const loading = this.loadingPromises.get(mediaId)
     if (loading) {
-      return loading;
+      return loading
     }
 
     const promise = this.loadAndExtract(
@@ -769,14 +1135,18 @@ class FilmstripCacheService {
       blobUrl,
       duration,
       onProgress,
-      normalizedPriorityRange ?? undefined
-    );
-    this.loadingPromises.set(mediaId, promise);
+      normalizedPriorityRange ?? undefined,
+      {
+        targetFrameCount: normalizedTargetFrameCount ?? undefined,
+        targetFrameIndices: normalizedTargetFrameIndices,
+      },
+    )
+    this.loadingPromises.set(mediaId, promise)
 
     try {
-      return await promise;
+      return await promise
     } finally {
-      this.loadingPromises.delete(mediaId);
+      this.loadingPromises.delete(mediaId)
     }
   }
 
@@ -785,10 +1155,31 @@ class FilmstripCacheService {
     blobUrl: string,
     duration: number,
     onProgress?: (progress: number) => void,
-    priorityRange?: PriorityFrameRange
+    priorityRange?: PriorityFrameRange,
+    options?: FilmstripLoadOptions,
   ): Promise<Filmstrip> {
-    // Try loading from storage
-    const stored = await filmstripOPFSStorage.load(mediaId);
+    // If a disk hydration is already in flight or just completed, reuse those
+    // frames instead of re-reading the OPFS directory. The in-memory cache is
+    // populated by loadFromDisk via notifyUpdate.
+    await this.diskHydrationPromises.get(mediaId)?.catch(() => undefined)
+    const cachedAfterHydration = this.cache.get(mediaId)
+    if (cachedAfterHydration?.isComplete && !cachedAfterHydration.isExtracting) {
+      return cachedAfterHydration
+    }
+
+    // Try loading from storage when we haven't already
+    const stored = cachedAfterHydration?.frames.length
+      ? {
+          metadata: {
+            width: FILMSTRIP_EXTRACT_WIDTH,
+            height: FILMSTRIP_EXTRACT_HEIGHT,
+            isComplete: cachedAfterHydration.isComplete,
+            frameCount: cachedAfterHydration.frames.length,
+          },
+          frames: cachedAfterHydration.frames,
+          existingIndices: cachedAfterHydration.frames.map((frame) => frame.index),
+        }
+      : await filmstripStorage.load(mediaId)
 
     if (stored?.metadata.isComplete) {
       // Complete - return immediately
@@ -797,31 +1188,37 @@ class FilmstripCacheService {
         isComplete: true,
         isExtracting: false,
         progress: 100,
-      };
-      this.notifyUpdate(mediaId, filmstrip);
-      return filmstrip;
+      }
+      this.notifyUpdate(mediaId, filmstrip)
+      return filmstrip
     }
 
     // Notify with existing frames (if any)
-    const existingFrames = stored?.frames || [];
-    const existingIndices = stored?.existingIndices || [];
-    const totalFrames = Math.ceil(duration * FRAME_RATE);
-    const targetIndices = this.buildTargetIndices(totalFrames, priorityRange ?? null);
-    const targetSet = new Set(targetIndices);
+    const existingFrames = stored?.frames || []
+    const existingIndices = stored?.existingIndices || []
+    const totalFrames = Math.ceil(duration * FRAME_RATE)
+    const targetIndices = this.buildTargetIndices(
+      totalFrames,
+      priorityRange ?? null,
+      options?.targetFrameCount,
+      options?.targetFrameIndices,
+    )
+    const targetSet = new Set(targetIndices)
     const existingTargetCount = existingFrames.reduce(
       (count, frame) => (targetSet.has(frame.index) ? count + 1 : count),
-      0
-    );
+      0,
+    )
 
     const initialFilmstrip: Filmstrip = {
       frames: existingFrames,
       isComplete: false,
       isExtracting: true,
-      progress: targetIndices.length > 0
-        ? Math.round((existingTargetCount / targetIndices.length) * 100)
-        : 0,
-    };
-    this.notifyUpdate(mediaId, initialFilmstrip);
+      progress:
+        targetIndices.length > 0
+          ? Math.round((existingTargetCount / targetIndices.length) * 100)
+          : 0,
+    }
+    this.notifyUpdate(mediaId, initialFilmstrip)
 
     // Start extraction (pass existing frames to avoid reloading)
     this.startExtraction(
@@ -833,10 +1230,13 @@ class FilmstripCacheService {
       onProgress,
       false,
       priorityRange,
-      undefined,
-    );
+      {
+        targetFrameCount: options?.targetFrameCount,
+        targetFrameIndices: options?.targetFrameIndices,
+      },
+    )
 
-    return initialFilmstrip;
+    return this.waitForSettledFilmstrip(mediaId)
   }
 
   private startExtraction(
@@ -848,33 +1248,52 @@ class FilmstripCacheService {
     onProgress?: (progress: number) => void,
     forceSingleWorker = false,
     priorityRange?: PriorityFrameRange,
-    options?: {
-      priorityOnly?: boolean;
-    }
+    options?: StartExtractionOptions,
   ): void {
     // Check if already extracting
     if (this.pendingExtractions.has(mediaId)) {
-      return;
+      return
     }
 
     // Calculate total frames and worker count
-    const totalFrames = Math.ceil(duration * FRAME_RATE);
-    const skipSet = new Set(skipIndices);
-    const normalizedPriorityRange = this.normalizePriorityRange(priorityRange, totalFrames);
-    const requestedPriorityOnly = options?.priorityOnly ?? false;
+    const totalFrames = Math.ceil(duration * FRAME_RATE)
+    const skipSet = new Set(skipIndices)
+    const normalizedPriorityRange = this.normalizePriorityRange(priorityRange, totalFrames)
+    const requestedPriorityOnly = options?.priorityOnly ?? false
+    const normalizedTargetFrameCount = this.normalizeTargetFrameCount(options?.targetFrameCount)
+    const normalizedTargetFrameIndices = this.normalizeTargetFrameIndices(
+      totalFrames,
+      options?.targetFrameIndices,
+    )
     const targetIndices = requestedPriorityOnly
-      ? this.buildPriorityIndices(totalFrames, normalizedPriorityRange)
-      : this.buildTargetIndices(totalFrames, normalizedPriorityRange);
+      ? this.buildPriorityTargetIndices(
+          totalFrames,
+          normalizedPriorityRange,
+          normalizedTargetFrameIndices,
+        )
+      : this.buildTargetIndices(
+          totalFrames,
+          normalizedPriorityRange,
+          normalizedTargetFrameCount,
+          normalizedTargetFrameIndices,
+        )
+    const persistCompleteToStorage =
+      normalizedTargetFrameIndices.length === 0 &&
+      !requestedPriorityOnly &&
+      this.isExactTargetMatch(
+        targetIndices,
+        this.buildTargetIndices(totalFrames, normalizedPriorityRange),
+      )
     const existingTargetCount = targetIndices.reduce(
       (count, index) => (skipSet.has(index) ? count + 1 : count),
-      0
-    );
-    const framesToExtract = Math.max(0, targetIndices.length - existingTargetCount);
+      0,
+    )
+    const framesToExtract = Math.max(0, targetIndices.length - existingTargetCount)
 
     // Initialize with existing frames
-    const extractedFrames = new Map<number, FilmstripFrame>();
+    const extractedFrames = new Map<number, FilmstripFrame>()
     for (const frame of existingFrames) {
-      extractedFrames.set(frame.index, frame);
+      extractedFrames.set(frame.index, frame)
     }
 
     // Create pending extraction state
@@ -891,7 +1310,12 @@ class FilmstripCacheService {
       totalFrames,
       progressFrames: Math.max(1, targetIndices.length),
       targetIndices,
+      targetFrameCount: normalizedTargetFrameCount,
+      requestedFrameIndices:
+        normalizedTargetFrameIndices.length > 0 ? normalizedTargetFrameIndices : null,
+      unavailableTargetIndices: new Set(),
       priorityOnly: requestedPriorityOnly,
+      persistCompleteToStorage,
       completedWorkers: 0,
       onProgress,
       extractedFrames,
@@ -902,139 +1326,149 @@ class FilmstripCacheService {
         totalFrames,
         targetIndices,
         existingTargetCount,
-        normalizedPriorityRange
+        normalizedPriorityRange,
       ),
-    };
-    this.pendingExtractions.set(mediaId, pending);
+    }
+    this.pendingExtractions.set(mediaId, pending)
 
     if (framesToExtract === 0) {
-      this.metricsTotals.started++;
-      const targetFrames = [...existingFrames].sort((a, b) => a.index - b.index);
-      this.notifyUpdate(mediaId, {
-        frames: targetFrames,
-        isComplete: true,
-        isExtracting: false,
-        progress: 100,
-      });
-      onProgress?.(100);
-      this.finalizeExtractionMetrics(pending.metrics, 'completed', targetFrames.length);
-      this.cleanupExtraction(mediaId);
-      return;
+      this.metrics.noteExtractionStarted()
+      const targetFrames = [...existingFrames].sort((a, b) => a.index - b.index)
+      const settled = this.buildSettledFilmstrip(pending, targetFrames)
+      if (settled.isComplete && this.shouldPersistCompletionMetadata(pending)) {
+        void filmstripStorage
+          .saveMetadata(mediaId, {
+            width: FILMSTRIP_EXTRACT_WIDTH,
+            height: FILMSTRIP_EXTRACT_HEIGHT,
+            isComplete: true,
+            frameCount: targetFrames.length,
+          })
+          .catch((error) => {
+            logger.warn(`Failed to persist completion metadata for ${mediaId}:`, error)
+          })
+      }
+      this.notifyUpdate(mediaId, settled)
+      onProgress?.(settled.progress)
+      this.finalizeExtractionMetrics(pending.metrics, 'completed', targetFrames.length)
+      this.cleanupExtraction(mediaId)
+      return
     }
 
-    this.metricsTotals.started++;
+    this.metrics.noteExtractionStarted()
 
     // Persist extraction session metadata once. Workers should focus on frame
     // writes; centralizing meta writes avoids cross-worker file contention.
-    void filmstripOPFSStorage.saveMetadata(mediaId, {
-      width: THUMBNAIL_WIDTH,
-      height: THUMBNAIL_HEIGHT,
-      isComplete: false,
-      frameCount: existingFrames.length,
-    }).catch((error) => {
-      logger.warn(`Failed to persist extraction metadata for ${mediaId}:`, error);
-    });
+    void filmstripStorage
+      .saveMetadata(mediaId, {
+        width: FILMSTRIP_EXTRACT_WIDTH,
+        height: FILMSTRIP_EXTRACT_HEIGHT,
+        isComplete: false,
+        frameCount: existingFrames.length,
+      })
+      .catch((error) => {
+        logger.warn(`Failed to persist extraction metadata for ${mediaId}:`, error)
+      })
 
-    this.enforceMemoryBudget();
-    this.enqueueExtraction(mediaId);
+    this.enforceMemoryBudget()
+    this.enqueueExtraction(mediaId)
   }
 
   private enqueueExtraction(mediaId: string): void {
-    this.enforceMemoryBudget();
+    this.enforceMemoryBudget()
     if (this.activeExtractions.has(mediaId)) {
-      return;
+      return
     }
 
     if (this.extractionQueue.includes(mediaId)) {
-      return;
+      return
     }
 
     if (this.activeExtractions.size >= this.getMaxConcurrentExtractions()) {
-      this.extractionQueue.push(mediaId);
-      this.extractionQueue.sort((a, b) => this.getQueueScore(a) - this.getQueueScore(b));
-      logger.debug(`Queued filmstrip extraction for ${mediaId}`);
-      return;
+      this.extractionQueue.push(mediaId)
+      this.extractionQueue.sort((a, b) => this.getQueueScore(a) - this.getQueueScore(b))
+      logger.debug(`Queued filmstrip extraction for ${mediaId}`)
+      return
     }
 
-    this.activeExtractions.add(mediaId);
-    this.startPendingExtraction(mediaId);
+    this.activeExtractions.add(mediaId)
+    this.startPendingExtraction(mediaId)
   }
 
   private startNextQueuedExtraction(): void {
     if (this.activeExtractions.size >= this.getMaxConcurrentExtractions()) {
-      return;
+      return
     }
 
     while (this.extractionQueue.length > 0) {
-      const nextMediaId = this.extractionQueue.shift();
+      const nextMediaId = this.extractionQueue.shift()
       if (!nextMediaId) {
-        return;
+        return
       }
 
       if (!this.pendingExtractions.has(nextMediaId)) {
-        continue;
+        continue
       }
 
-      this.activeExtractions.add(nextMediaId);
-      this.startPendingExtraction(nextMediaId);
-      return;
+      this.activeExtractions.add(nextMediaId)
+      this.startPendingExtraction(nextMediaId)
+      return
     }
   }
 
   private startPendingExtraction(mediaId: string): void {
-    const pending = this.pendingExtractions.get(mediaId);
+    const pending = this.pendingExtractions.get(mediaId)
     if (!pending) {
-      this.activeExtractions.delete(mediaId);
-      this.startNextQueuedExtraction();
-      return;
+      this.activeExtractions.delete(mediaId)
+      this.startNextQueuedExtraction()
+      return
     }
 
-    this.enforceMemoryBudget();
+    this.enforceMemoryBudget()
     if (this.isHardMemoryPressure() && !this.hasSubscribers(mediaId)) {
       logger.debug('Deferring filmstrip extraction under hard memory pressure (no subscribers)', {
         mediaId,
         cacheBytes: this.cacheBytes,
         usedHeapBytes: this.getUsedJsHeapBytes(),
-      });
-      const frames = Array.from(pending.extractedFrames.values())
-        .sort((a, b) => a.index - b.index);
-      const targetSet = new Set(pending.targetIndices);
+      })
+      const frames = Array.from(pending.extractedFrames.values()).sort((a, b) => a.index - b.index)
+      const targetSet = new Set(pending.targetIndices)
       const extractedTargetCount = frames.reduce(
         (count, frame) => (targetSet.has(frame.index) ? count + 1 : count),
-        0
-      );
-      const progress = pending.progressFrames > 0
-        ? Math.min(99, Math.round((extractedTargetCount / pending.progressFrames) * 100))
-        : 0;
+        0,
+      )
+      const progress =
+        pending.progressFrames > 0
+          ? Math.min(99, Math.round((extractedTargetCount / pending.progressFrames) * 100))
+          : 0
       this.notifyUpdate(mediaId, {
         frames,
         isComplete: false,
         isExtracting: false,
         progress,
-      });
-      this.finalizeExtractionMetrics(pending.metrics, 'aborted', pending.extractedFrames.size);
-      this.cleanupExtraction(mediaId);
-      return;
+      })
+      this.finalizeExtractionMetrics(pending.metrics, 'aborted', pending.extractedFrames.size)
+      this.cleanupExtraction(mediaId)
+      return
     }
 
     if (pending.isVideoFallback) {
-      void this.extractWithVideoElement(mediaId);
-      return;
+      void this.extractWithVideoElement(mediaId)
+      return
     }
 
-    this.startWorkerExtraction(pending);
+    this.startWorkerExtraction(pending)
   }
 
   private normalizePriorityRange(
     priorityRange: PriorityFrameRange | undefined,
     totalFrames: number,
   ): PriorityFrameRange | null {
-    if (!priorityRange || totalFrames <= 0) return null;
+    if (!priorityRange || totalFrames <= 0) return null
 
-    const startIndex = Math.max(0, Math.min(totalFrames - 1, priorityRange.startIndex));
-    const endIndex = Math.max(startIndex + 1, Math.min(totalFrames, priorityRange.endIndex));
+    const startIndex = Math.max(0, Math.min(totalFrames - 1, priorityRange.startIndex))
+    const endIndex = Math.max(startIndex + 1, Math.min(totalFrames, priorityRange.endIndex))
 
-    return { startIndex, endIndex };
+    return { startIndex, endIndex }
   }
 
   private getPriorityIndicesForRange(
@@ -1043,42 +1477,42 @@ class FilmstripCacheService {
     rangeEnd: number,
     rangeSkipIndices: number[],
   ): number[] {
-    if (!pending.priorityRange) return [];
+    if (!pending.priorityRange) return []
 
-    const start = Math.max(rangeStart, pending.priorityRange.startIndex);
-    const end = Math.min(rangeEnd, pending.priorityRange.endIndex);
-    if (end <= start) return [];
+    const start = Math.max(rangeStart, pending.priorityRange.startIndex)
+    const end = Math.min(rangeEnd, pending.priorityRange.endIndex)
+    if (end <= start) return []
 
-    const skipSet = new Set(rangeSkipIndices);
-    const indices: number[] = [];
+    const skipSet = new Set(rangeSkipIndices)
+    const indices: number[] = []
     for (let i = start; i < end; i++) {
       if (!skipSet.has(i)) {
-        indices.push(i);
+        indices.push(i)
       }
     }
-    return indices;
+    return indices
   }
 
   private getPriorityIndicesForTargets(
     targetIndices: number[],
     priorityRange: PriorityFrameRange | null,
-    skipSet: Set<number>
+    skipSet: Set<number>,
   ): number[] {
-    if (!priorityRange || targetIndices.length === 0) return [];
-    const start = priorityRange.startIndex;
-    const end = priorityRange.endIndex;
-    const indices: number[] = [];
+    if (!priorityRange || targetIndices.length === 0) return []
+    const start = priorityRange.startIndex
+    const end = priorityRange.endIndex
+    const indices: number[] = []
     for (const index of targetIndices) {
-      if (index < start || index >= end) continue;
+      if (index < start || index >= end) continue
       if (!skipSet.has(index)) {
-        indices.push(index);
+        indices.push(index)
       }
     }
-    return indices;
+    return indices
   }
 
   private startWorkerExtraction(pending: PendingExtraction): void {
-    this.enforceMemoryBudget();
+    this.enforceMemoryBudget()
     const {
       mediaId,
       blobUrl,
@@ -1087,54 +1521,60 @@ class FilmstripCacheService {
       forceSingleWorker,
       progressFrames,
       targetIndices,
-    } = pending;
-    const skipSet = new Set(skipIndices);
+    } = pending
+    const skipSet = new Set(skipIndices)
     const framesToExtract = targetIndices.reduce(
       (count, index) => (skipSet.has(index) ? count : count + 1),
-      0
-    );
-    const hardwareConcurrency = typeof navigator !== 'undefined'
-      ? (navigator.hardwareConcurrency || 4)
-      : 4;
-    const memoryConstrained = this.isSoftMemoryPressure();
+      0,
+    )
+    const hardwareConcurrency =
+      typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4
+    const memoryConstrained = this.isSoftMemoryPressure()
+    const hasExtractionBacklog = this.activeExtractions.size > 1 || this.extractionQueue.length > 0
 
-    // Determine workers per extraction based on hardware and frame count
-    const maxWorkers = forceSingleWorker
-      || memoryConstrained
-      || hardwareConcurrency < MIN_CORES_FOR_PARALLEL_WORKERS
-      ? 1
-      : MAX_WORKERS;
+    // When multiple clips are competing for filmstrips, prefer breadth over
+    // depth: one worker per clip keeps the UI steadier than letting a single
+    // clip consume multiple workers while others wait.
+    const maxWorkers =
+      forceSingleWorker ||
+      memoryConstrained ||
+      hasExtractionBacklog ||
+      hardwareConcurrency < MIN_CORES_FOR_PARALLEL_WORKERS
+        ? 1
+        : MAX_WORKERS
     const workerCount = Math.min(
       maxWorkers,
-      Math.max(1, Math.floor(framesToExtract / MIN_FRAMES_PER_WORKER))
-    );
+      Math.max(1, Math.floor(framesToExtract / MIN_FRAMES_PER_WORKER)),
+    )
 
-    const sortedTargetIndices = [...targetIndices].sort((a, b) => a - b);
-    const effectiveWorkerCount = Math.min(workerCount, Math.max(1, sortedTargetIndices.length));
-    const targetsPerWorker = Math.ceil(sortedTargetIndices.length / effectiveWorkerCount);
-    pending.metrics.workerCount = effectiveWorkerCount;
+    const sortedTargetIndices = [...targetIndices].sort((a, b) => a - b)
+    const effectiveWorkerCount = Math.min(workerCount, Math.max(1, sortedTargetIndices.length))
+    const targetsPerWorker = Math.ceil(sortedTargetIndices.length / effectiveWorkerCount)
+    pending.metrics.workerCount = effectiveWorkerCount
 
-    logger.info(`Starting ${effectiveWorkerCount} workers for ${mediaId} (${framesToExtract} frames)`);
+    logger.info(
+      `Starting ${effectiveWorkerCount} workers for ${mediaId} (${framesToExtract} frames)`,
+    )
 
     for (let i = 0; i < effectiveWorkerCount; i++) {
-      const chunkStart = i * targetsPerWorker;
-      const chunkEnd = Math.min(chunkStart + targetsPerWorker, sortedTargetIndices.length);
-      const rangeTargetIndices = sortedTargetIndices.slice(chunkStart, chunkEnd);
-      if (rangeTargetIndices.length === 0) continue;
+      const chunkStart = i * targetsPerWorker
+      const chunkEnd = Math.min(chunkStart + targetsPerWorker, sortedTargetIndices.length)
+      const rangeTargetIndices = sortedTargetIndices.slice(chunkStart, chunkEnd)
+      if (rangeTargetIndices.length === 0) continue
 
-      const startIndex = rangeTargetIndices[0]!;
-      const endIndex = rangeTargetIndices[rangeTargetIndices.length - 1]! + 1;
+      const startIndex = rangeTargetIndices[0]!
+      const endIndex = rangeTargetIndices[rangeTargetIndices.length - 1]! + 1
 
-      const requestId = crypto.randomUUID();
-      const worker = this.acquireWorker();
-      const rangeSkipIndices = rangeTargetIndices.filter((idx) => skipSet.has(idx));
-      const rangeSkipSet = new Set(rangeSkipIndices);
+      const requestId = crypto.randomUUID()
+      const worker = this.acquireWorker()
+      const rangeSkipIndices = rangeTargetIndices.filter((idx) => skipSet.has(idx))
+      const rangeSkipSet = new Set(rangeSkipIndices)
       const priorityIndices = this.getPriorityIndicesForTargets(
         rangeTargetIndices,
         pending.priorityRange,
         rangeSkipSet,
-      );
-      const existingTargetCount = rangeSkipIndices.length;
+      )
+      const existingTargetCount = rangeSkipIndices.length
 
       const workerState: WorkerState = {
         worker,
@@ -1146,154 +1586,161 @@ class FilmstripCacheService {
         lastLoadedCount: existingTargetCount,
         isLoading: false,
         hasPendingLoad: false,
-      };
-      pending.workers.push(workerState);
+      }
+      pending.workers.push(workerState)
 
       // Handle worker messages
       worker.onmessage = async (e: MessageEvent<WorkerResponse>) => {
-        const response = e.data;
+        const response = e.data
+
+        // Stale 'warmed' from an earlier prewarm() can arrive after this
+        // worker was reacquired — ignore it.
+        if (response.type === 'warmed') return
 
         if (response.type === 'progress') {
-          workerState.frameCount = response.frameCount;
+          workerState.frameCount = response.frameCount
 
           // Calculate overall progress from all workers
-          const totalExtracted = pending.workers.reduce((sum, w) => sum + w.frameCount, 0);
-          const overallProgress = Math.min(100, Math.round((totalExtracted / progressFrames) * 100));
-          pending.onProgress?.(overallProgress);
+          const totalExtracted = pending.workers.reduce((sum, w) => sum + w.frameCount, 0)
+          const overallProgress = Math.min(100, Math.round((totalExtracted / progressFrames) * 100))
+          pending.onProgress?.(overallProgress)
 
           // Fastest path: use transferred ImageBitmaps for instant display
           // (no JPEG encode/decode roundtrip). Bitmaps arrive before blobs.
           if (Array.isArray(response.bitmapFrames) && response.bitmapFrames.length > 0) {
             this.ingestBitmapFrames(
               mediaId,
-              response.bitmapFrames.filter((bf) =>
-                bf.index >= workerState.startIndex
-                && bf.index < workerState.endIndex
-                && !pending.extractedFrames.has(bf.index)
-              )
-            );
+              response.bitmapFrames.filter(
+                (bf) =>
+                  bf.index >= workerState.startIndex &&
+                  bf.index < workerState.endIndex &&
+                  !pending.extractedFrames.has(bf.index),
+              ),
+            )
           }
 
           // When blobs arrive (after JPEG encode), upgrade frames with proper URLs
-          // and persist to OPFS. This replaces bitmap-only frames.
+          // and persist them to the workspace. This replaces bitmap-only frames.
           if (Array.isArray(response.savedFrames) && response.savedFrames.length > 0) {
-            this.ingestSavedFrames(
+            await this.ingestSavedFrames(
               mediaId,
-              response.savedFrames.filter((frame) =>
-                frame.index >= workerState.startIndex
-                && frame.index < workerState.endIndex
-              )
-            );
-            workerState.lastLoadedCount = Math.max(workerState.lastLoadedCount, response.frameCount);
+              response.savedFrames.filter(
+                (frame) =>
+                  frame.index >= workerState.startIndex && frame.index < workerState.endIndex,
+              ),
+            )
+            workerState.lastLoadedCount = Math.max(workerState.lastLoadedCount, response.frameCount)
           } else if (response.savedIndices.length > 0) {
             // Backward-compatible fallback for workers that report only indices.
-            const newIndices = response.savedIndices.filter((index) =>
-              index >= workerState.startIndex
-              && index < workerState.endIndex
-              && !pending.extractedFrames.has(index)
-            );
+            const newIndices = response.savedIndices.filter(
+              (index) =>
+                index >= workerState.startIndex &&
+                index < workerState.endIndex &&
+                !pending.extractedFrames.has(index),
+            )
             if (newIndices.length > 0) {
               try {
-                await this.loadNewFrames(mediaId, newIndices);
+                await this.loadNewFrames(mediaId, newIndices)
               } catch (error) {
-                logger.error('Failed to load saved filmstrip frames from OPFS', {
+                logger.error('Failed to load saved filmstrip frames from persisted storage', {
                   mediaId,
                   requestId: workerState.requestId,
                   range: [workerState.startIndex, workerState.endIndex],
                   newIndicesCount: newIndices.length,
                   error,
-                });
-                this.handleWorkerError(mediaId, 'Failed to load saved frames from OPFS');
-                return;
+                })
+                this.handleWorkerError(mediaId, 'Failed to load saved frames from storage')
+                return
               }
             }
-            workerState.lastLoadedCount = Math.max(workerState.lastLoadedCount, response.frameCount);
+            workerState.lastLoadedCount = Math.max(workerState.lastLoadedCount, response.frameCount)
           } else {
             // Backward-compatible fallback for workers without savedIndices.
-            const newFrameCount = Math.max(0, response.frameCount - workerState.lastLoadedCount);
+            const newFrameCount = Math.max(0, response.frameCount - workerState.lastLoadedCount)
             if (newFrameCount > 0) {
               try {
-                await this.flushWorkerRangeLoads(mediaId, workerState);
+                await this.flushWorkerRangeLoads(mediaId, workerState)
               } catch (error) {
-                logger.error('Failed to flush worker frame range loads from OPFS', {
+                logger.error('Failed to flush worker frame range loads from persisted storage', {
                   mediaId,
                   requestId: workerState.requestId,
                   range: [workerState.startIndex, workerState.endIndex],
                   newFrameCount,
                   error,
-                });
-                this.handleWorkerError(mediaId, 'Failed to refresh worker frame range from OPFS');
-                return;
+                })
+                this.handleWorkerError(mediaId, 'Failed to refresh worker frame range from storage')
+                return
               }
             }
           }
 
           if (this.shouldNotifyProgress(pending, totalExtracted, overallProgress)) {
             // Notify with current state
-            const frames = Array.from(pending.extractedFrames.values())
-              .sort((a, b) => a.index - b.index);
+            const frames = Array.from(pending.extractedFrames.values()).sort(
+              (a, b) => a.index - b.index,
+            )
 
             this.notifyUpdate(mediaId, {
               frames,
               isComplete: false,
               isExtracting: true,
               progress: overallProgress,
-            });
+            })
           }
-
         } else if (response.type === 'complete') {
-          workerState.completed = true;
-          workerState.frameCount = response.frameCount;
-          pending.completedWorkers++;
+          workerState.completed = true
+          workerState.frameCount = response.frameCount
+          for (const index of response.unavailableIndices ?? []) {
+            pending.unavailableTargetIndices.add(index)
+          }
+          pending.completedWorkers++
 
-          logger.debug(`Worker ${i} complete: ${response.frameCount} frames`);
+          logger.debug(`Worker ${i} complete: ${response.frameCount} frames`)
 
           // Check if all workers are done
           if (pending.completedWorkers === pending.workers.length) {
             // All workers done - finalize directly from in-memory extracted frames
-            // to avoid an extra full OPFS directory scan and URL recreation pass.
-            const finalFrames = Array.from(pending.extractedFrames.values())
-              .sort((a, b) => a.index - b.index);
+            // to avoid an extra full storage scan and URL recreation pass.
+            const finalFrames = Array.from(pending.extractedFrames.values()).sort(
+              (a, b) => a.index - b.index,
+            )
+            const settled = this.buildSettledFilmstrip(pending, finalFrames)
             try {
-              await filmstripOPFSStorage.saveMetadata(mediaId, {
-                width: THUMBNAIL_WIDTH,
-                height: THUMBNAIL_HEIGHT,
-                isComplete: true,
+              await filmstripStorage.saveMetadata(mediaId, {
+                width: FILMSTRIP_EXTRACT_WIDTH,
+                height: FILMSTRIP_EXTRACT_HEIGHT,
+                isComplete: settled.isComplete && this.shouldPersistCompletionMetadata(pending),
                 frameCount: finalFrames.length,
-              });
+              })
             } catch (metadataError) {
-              logger.warn(`Failed to persist completion metadata for ${mediaId}:`, metadataError);
+              logger.warn(`Failed to persist completion metadata for ${mediaId}:`, metadataError)
             }
-            this.notifyUpdate(mediaId, {
-              frames: finalFrames,
-              isComplete: true,
-              isExtracting: false,
-              progress: 100,
-            });
-            pending.onProgress?.(100);
-            this.finalizeExtractionMetrics(pending.metrics, 'completed', finalFrames.length);
-            this.cleanupExtraction(mediaId, { reuseCompletedWorkers: true });
-            logger.info(`Filmstrip ${mediaId} complete: ${finalFrames.length} frames`);
+            this.notifyUpdate(mediaId, settled)
+            pending.onProgress?.(settled.progress)
+            this.finalizeExtractionMetrics(pending.metrics, 'completed', finalFrames.length)
+            this.cleanupExtraction(mediaId, { reuseCompletedWorkers: true })
+            logger.info(
+              `Filmstrip ${mediaId} ${settled.isComplete ? 'complete' : 'prewarmed'}: ${finalFrames.length} frames`,
+            )
           }
-
         } else if (response.type === 'error') {
           if (this.shouldRetryWithSingleWorker(response.error)) {
-            logger.warn(`Worker ${i} decode error: ${response.error}`);
+            logger.warn(`Worker ${i} decode error: ${response.error}`)
           } else {
-            logger.error(`Worker ${i} error: ${response.error}`);
+            logger.error(`Worker ${i} error: ${response.error}`)
           }
-          this.handleWorkerError(mediaId, response.error);
+          this.handleWorkerError(mediaId, response.error)
         }
-      };
+      }
 
       worker.onerror = (e) => {
         if (this.shouldRetryWithSingleWorker(e.message)) {
-          logger.warn(`Worker ${i} decode error: ${e.message}`);
+          logger.warn(`Worker ${i} decode error: ${e.message}`)
         } else {
-          logger.error(`Worker ${i} error:`, e.message);
+          logger.error(`Worker ${i} error:`, e.message)
         }
-        this.handleWorkerError(mediaId, e.message);
-      };
+        this.handleWorkerError(mediaId, e.message)
+      }
 
       // Send extraction request with range
       const request: ExtractRequest = {
@@ -1301,9 +1748,13 @@ class FilmstripCacheService {
         requestId,
         mediaId,
         blobUrl,
+        blob: getObjectUrlDirectFileMetadata(blobUrl)
+          ? undefined
+          : (getObjectUrlBlob(blobUrl) ?? undefined),
+        sourceMetadata: getObjectUrlDirectFileMetadata(blobUrl) ?? undefined,
         duration,
-        width: THUMBNAIL_WIDTH,
-        height: THUMBNAIL_HEIGHT,
+        width: FILMSTRIP_EXTRACT_WIDTH,
+        height: FILMSTRIP_EXTRACT_HEIGHT,
         skipIndices: rangeSkipIndices,
         priorityIndices,
         targetIndices: rangeTargetIndices,
@@ -1314,148 +1765,152 @@ class FilmstripCacheService {
         maxParallelSaves: memoryConstrained
           ? WORKER_PARALLEL_SAVES_MEMORY_PRESSURE
           : WORKER_PARALLEL_SAVES_BASE,
-      };
-      worker.postMessage(request);
+      }
+      worker.postMessage(request)
     }
   }
 
   private shouldNotifyProgress(
     pending: PendingExtraction,
     totalExtracted: number,
-    overallProgress: number
+    overallProgress: number,
   ): boolean {
-    const now = Date.now();
-    const frameDelta = totalExtracted - pending.lastNotifiedFrameCount;
-    const elapsed = now - pending.lastNotifyAt;
-    const shouldNotify = overallProgress >= 99
-      || frameDelta >= PROGRESS_NOTIFY_FRAME_DELTA
-      || elapsed >= PROGRESS_NOTIFY_INTERVAL_MS;
+    const now = Date.now()
+    const frameDelta = totalExtracted - pending.lastNotifiedFrameCount
+    const elapsed = now - pending.lastNotifyAt
+    const shouldNotify =
+      overallProgress >= 99 ||
+      frameDelta >= PROGRESS_NOTIFY_FRAME_DELTA ||
+      elapsed >= PROGRESS_NOTIFY_INTERVAL_MS
 
     if (shouldNotify) {
-      pending.lastNotifyAt = now;
-      pending.lastNotifiedFrameCount = totalExtracted;
-      return true;
+      pending.lastNotifyAt = now
+      pending.lastNotifiedFrameCount = totalExtracted
+      return true
     }
 
-    return false;
+    return false
   }
 
   private async loadNewFramesInRange(
     mediaId: string,
     startIndex: number,
-    endIndex: number
+    endIndex: number,
   ): Promise<number> {
-    const pending = this.pendingExtractions.get(mediaId);
-    if (!pending) return 0;
+    const pending = this.pendingExtractions.get(mediaId)
+    if (!pending) return 0
 
     // Discover what is actually saved on disk for this worker's range.
-    const inRangeExistingIndices = await filmstripOPFSStorage.getExistingIndices(
+    const inRangeExistingIndices = await filmstripStorage.getExistingIndices(
       mediaId,
       startIndex,
-      endIndex
-    );
-    const newIndices = inRangeExistingIndices.filter(index => !pending.extractedFrames.has(index));
+      endIndex,
+    )
+    const newIndices = inRangeExistingIndices.filter((index) => !pending.extractedFrames.has(index))
 
     if (newIndices.length > 0) {
-      await this.loadNewFrames(mediaId, newIndices);
+      await this.loadNewFrames(mediaId, newIndices)
     }
 
     // Track discovered file state, not a synthetic contiguous offset.
-    return inRangeExistingIndices.length;
+    return inRangeExistingIndices.length
   }
 
-  private async loadNewFrames(
-    mediaId: string,
-    indices: number[]
-  ): Promise<void> {
-    const pending = this.pendingExtractions.get(mediaId);
-    if (!pending) return;
+  private async loadNewFrames(mediaId: string, indices: number[]): Promise<void> {
+    const pending = this.pendingExtractions.get(mediaId)
+    if (!pending) return
 
-    if (indices.length === 0) return;
+    if (indices.length === 0) return
 
     const loadPromises = indices.map(async (index) => {
-      const frame = await filmstripOPFSStorage.loadSingleFrame(mediaId, index);
+      const frame = await filmstripStorage.loadSingleFrame(mediaId, index)
       if (frame) {
-        pending.extractedFrames.set(index, frame);
-        this.noteFirstFrame(pending.metrics);
+        pending.extractedFrames.set(index, frame)
+        this.noteFirstFrame(pending.metrics)
       }
-    });
-    await Promise.all(loadPromises);
+    })
+    await Promise.all(loadPromises)
   }
 
   private ingestBitmapFrames(
     mediaId: string,
-    bitmapFrames: Array<{ index: number; bitmap: ImageBitmap }>
+    bitmapFrames: Array<{ index: number; bitmap: ImageBitmap }>,
   ): void {
-    const pending = this.pendingExtractions.get(mediaId);
-    if (!pending || bitmapFrames.length === 0) return;
+    const pending = this.pendingExtractions.get(mediaId)
+    if (!pending || bitmapFrames.length === 0) return
 
     for (const bf of bitmapFrames) {
       if (pending.extractedFrames.has(bf.index)) {
         // Already have this frame (e.g., from a previous blob) — close the bitmap
-        bf.bitmap.close();
-        continue;
+        bf.bitmap.close()
+        continue
       }
-      const frame = filmstripOPFSStorage.createFrameFromBitmap(mediaId, bf.index, bf.bitmap);
+      const frame = filmstripStorage.createFrameFromBitmap(mediaId, bf.index, bf.bitmap)
       if (frame) {
-        pending.extractedFrames.set(bf.index, frame);
-        this.noteFirstFrame(pending.metrics);
+        pending.extractedFrames.set(bf.index, frame)
+        this.noteFirstFrame(pending.metrics)
       }
     }
   }
 
-  private ingestSavedFrames(
+  private async ingestSavedFrames(
     mediaId: string,
-    savedFrames: Array<{ index: number; blob: Blob }>
-  ): void {
-    const pending = this.pendingExtractions.get(mediaId);
-    if (!pending || savedFrames.length === 0) return;
+    savedFrames: Array<{ index: number; blob: Blob }>,
+  ): Promise<void> {
+    const pending = this.pendingExtractions.get(mediaId)
+    if (!pending || savedFrames.length === 0) return
+
+    const persistWrites: Promise<void>[] = []
 
     for (const saved of savedFrames) {
-      const existing = pending.extractedFrames.get(saved.index);
-      const frame = filmstripOPFSStorage.createFrameFromBlob(mediaId, saved.index, saved.blob);
+      const existing = pending.extractedFrames.get(saved.index)
+      const frame = filmstripStorage.createFrameFromBlob(mediaId, saved.index, saved.blob)
       if (frame) {
         // Close bitmap if this frame was previously bitmap-only
         if (existing?.bitmap) {
-          existing.bitmap.close();
+          existing.bitmap.close()
         }
-        pending.extractedFrames.set(saved.index, frame);
+        pending.extractedFrames.set(saved.index, frame)
         if (!existing) {
-          this.noteFirstFrame(pending.metrics);
+          this.noteFirstFrame(pending.metrics)
         }
       }
+      persistWrites.push(filmstripStorage.saveFrameBlob(mediaId, saved.index, saved.blob))
+    }
+
+    if (persistWrites.length > 0) {
+      await Promise.all(persistWrites)
     }
   }
 
-  private async flushWorkerRangeLoads(
-    mediaId: string,
-    workerState: WorkerState
-  ): Promise<void> {
+  private async flushWorkerRangeLoads(mediaId: string, workerState: WorkerState): Promise<void> {
     if (workerState.isLoading) {
-      workerState.hasPendingLoad = true;
-      return;
+      workerState.hasPendingLoad = true
+      return
     }
 
-    workerState.isLoading = true;
+    workerState.isLoading = true
     try {
       do {
-        workerState.hasPendingLoad = false;
+        workerState.hasPendingLoad = false
         const discoveredCount = await this.loadNewFramesInRange(
           mediaId,
           workerState.startIndex,
-          workerState.endIndex
-        );
-        workerState.lastLoadedCount = discoveredCount;
-      } while (workerState.hasPendingLoad);
+          workerState.endIndex,
+        )
+        workerState.lastLoadedCount = discoveredCount
+      } while (workerState.hasPendingLoad)
     } finally {
-      workerState.isLoading = false;
+      workerState.isLoading = false
     }
   }
 
   private shouldRetryWithSingleWorker(error: string): boolean {
-    const normalized = error.toLowerCase();
-    return normalized.includes('key frame is required after configure() or flush()')
-      || normalized.includes('marked as type `key` but wasn\'t a key frame');
+    const normalized = error.toLowerCase()
+    return (
+      normalized.includes('key frame is required after configure() or flush()') ||
+      normalized.includes("marked as type `key` but wasn't a key frame")
+    )
   }
 
   private startVideoElementFallback(
@@ -1466,22 +1921,47 @@ class FilmstripCacheService {
     existingFrames: FilmstripFrame[],
     onProgress?: (progress: number) => void,
     priorityRange?: PriorityFrameRange,
+    options?: StartExtractionOptions,
   ): void {
     if (this.pendingExtractions.has(mediaId)) {
-      return;
+      return
     }
 
-    const totalFrames = Math.ceil(duration * FRAME_RATE);
-    const normalizedPriorityRange = this.normalizePriorityRange(priorityRange, totalFrames);
-    const targetIndices = this.buildTargetIndices(totalFrames, normalizedPriorityRange);
-    const targetSet = new Set(targetIndices);
+    const totalFrames = Math.ceil(duration * FRAME_RATE)
+    const normalizedPriorityRange = this.normalizePriorityRange(priorityRange, totalFrames)
+    const requestedPriorityOnly = options?.priorityOnly ?? false
+    const normalizedTargetFrameCount = this.normalizeTargetFrameCount(options?.targetFrameCount)
+    const normalizedTargetFrameIndices = this.normalizeTargetFrameIndices(
+      totalFrames,
+      options?.targetFrameIndices,
+    )
+    const targetIndices = requestedPriorityOnly
+      ? this.buildPriorityTargetIndices(
+          totalFrames,
+          normalizedPriorityRange,
+          normalizedTargetFrameIndices,
+        )
+      : this.buildTargetIndices(
+          totalFrames,
+          normalizedPriorityRange,
+          normalizedTargetFrameCount,
+          normalizedTargetFrameIndices,
+        )
+    const persistCompleteToStorage =
+      normalizedTargetFrameIndices.length === 0 &&
+      !requestedPriorityOnly &&
+      this.isExactTargetMatch(
+        targetIndices,
+        this.buildTargetIndices(totalFrames, normalizedPriorityRange),
+      )
+    const targetSet = new Set(targetIndices)
     const existingTargetCount = existingFrames.reduce(
       (count, frame) => (targetSet.has(frame.index) ? count + 1 : count),
-      0
-    );
-    const extractedFrames = new Map<number, FilmstripFrame>();
+      0,
+    )
+    const extractedFrames = new Map<number, FilmstripFrame>()
     for (const frame of existingFrames) {
-      extractedFrames.set(frame.index, frame);
+      extractedFrames.set(frame.index, frame)
     }
 
     const pending: PendingExtraction = {
@@ -1497,7 +1977,12 @@ class FilmstripCacheService {
       totalFrames,
       progressFrames: Math.max(1, targetIndices.length),
       targetIndices,
-      priorityOnly: false,
+      targetFrameCount: normalizedTargetFrameCount,
+      requestedFrameIndices:
+        normalizedTargetFrameIndices.length > 0 ? normalizedTargetFrameIndices : null,
+      unavailableTargetIndices: new Set(),
+      priorityOnly: requestedPriorityOnly,
+      persistCompleteToStorage,
       completedWorkers: 0,
       onProgress,
       extractedFrames,
@@ -1508,227 +1993,227 @@ class FilmstripCacheService {
         totalFrames,
         targetIndices,
         existingTargetCount,
-        normalizedPriorityRange
+        normalizedPriorityRange,
       ),
-    };
-    pending.metrics.usedVideoFallback = true;
+    }
+    pending.metrics.usedVideoFallback = true
 
-    this.pendingExtractions.set(mediaId, pending);
-    this.metricsTotals.started++;
-    logger.warn(`Falling back to HTMLVideoElement extraction for ${mediaId}`);
+    this.pendingExtractions.set(mediaId, pending)
+    this.metrics.noteExtractionStarted()
+    logger.warn(`Falling back to HTMLVideoElement extraction for ${mediaId}`)
 
-    this.enqueueExtraction(mediaId);
+    this.enqueueExtraction(mediaId)
   }
 
   private async extractWithVideoElement(mediaId: string): Promise<void> {
-    const pending = this.pendingExtractions.get(mediaId);
-    if (!pending || !pending.isVideoFallback) return;
+    const pending = this.pendingExtractions.get(mediaId)
+    if (!pending || !pending.isVideoFallback) return
 
-    const video = document.createElement('video');
-    video.preload = 'auto';
-    video.muted = true;
-    video.playsInline = true;
+    const video = document.createElement('video')
+    video.preload = 'auto'
+    video.muted = true
+    video.playsInline = true
 
     try {
-      video.src = pending.blobUrl;
+      video.src = pending.blobUrl
       await new Promise<void>((resolve, reject) => {
         const onLoaded = () => {
-          video.removeEventListener('loadedmetadata', onLoaded);
-          video.removeEventListener('error', onError);
-          resolve();
-        };
+          video.removeEventListener('loadedmetadata', onLoaded)
+          video.removeEventListener('error', onError)
+          resolve()
+        }
         const onError = () => {
-          video.removeEventListener('loadedmetadata', onLoaded);
-          video.removeEventListener('error', onError);
-          reject(new Error('Failed to load video metadata for filmstrip fallback'));
-        };
-        video.addEventListener('loadedmetadata', onLoaded, { once: true });
-        video.addEventListener('error', onError, { once: true });
-      });
+          video.removeEventListener('loadedmetadata', onLoaded)
+          video.removeEventListener('error', onError)
+          reject(new Error('Failed to load video metadata for filmstrip fallback'))
+        }
+        video.addEventListener('loadedmetadata', onLoaded, { once: true })
+        video.addEventListener('error', onError, { once: true })
+      })
 
-      const canvas = document.createElement('canvas');
-      canvas.width = THUMBNAIL_WIDTH;
-      canvas.height = THUMBNAIL_HEIGHT;
-      const ctx = canvas.getContext('2d');
+      const canvas = document.createElement('canvas')
+      canvas.width = FILMSTRIP_EXTRACT_WIDTH
+      canvas.height = FILMSTRIP_EXTRACT_HEIGHT
+      const ctx = canvas.getContext('2d')
       if (!ctx) {
-        throw new Error('Failed to create canvas context for filmstrip fallback');
+        throw new Error('Failed to create canvas context for filmstrip fallback')
       }
 
-      const totalFrames = pending.totalFrames;
-      const targetIndices = pending.targetIndices;
-      const targetSet = new Set(targetIndices);
-      const skipSet = new Set<number>();
+      const totalFrames = pending.totalFrames
+      const targetIndices = pending.targetIndices
+      const targetSet = new Set(targetIndices)
+      const skipSet = new Set<number>()
       for (const index of pending.skipIndices) {
-        if (targetSet.has(index)) skipSet.add(index);
+        if (targetSet.has(index)) skipSet.add(index)
       }
       for (const index of pending.extractedFrames.keys()) {
-        if (targetSet.has(index)) skipSet.add(index);
+        if (targetSet.has(index)) skipSet.add(index)
       }
-      const totalTargetFrames = Math.max(1, targetIndices.length);
-      let extractedTargetCount = skipSet.size;
+      const totalTargetFrames = Math.max(1, targetIndices.length)
+      let extractedTargetCount = skipSet.size
 
-      await filmstripOPFSStorage.saveMetadata(mediaId, {
-        width: THUMBNAIL_WIDTH,
-        height: THUMBNAIL_HEIGHT,
+      await filmstripStorage.saveMetadata(mediaId, {
+        width: FILMSTRIP_EXTRACT_WIDTH,
+        height: FILMSTRIP_EXTRACT_HEIGHT,
         isComplete: false,
         frameCount: skipSet.size,
-      });
+      })
 
       const priorityIndices = this.getPriorityIndicesForRange(
         pending,
         0,
         totalFrames,
-        Array.from(skipSet)
-      ).filter((index) => targetSet.has(index));
-      const prioritySet = new Set(priorityIndices);
+        Array.from(skipSet),
+      ).filter((index) => targetSet.has(index))
+      const prioritySet = new Set(priorityIndices)
       const extractionOrder = [
         ...priorityIndices,
         ...targetIndices.filter((index) => !skipSet.has(index) && !prioritySet.has(index)),
-      ];
+      ]
 
       for (const i of extractionOrder) {
-        const currentPending = this.pendingExtractions.get(mediaId);
+        const currentPending = this.pendingExtractions.get(mediaId)
         if (!currentPending || !currentPending.isVideoFallback) {
-          return;
+          return
         }
 
-        const maxSeekTime = Math.max(0, video.duration - 0.01);
-        const targetTime = Math.min(i / FRAME_RATE, maxSeekTime);
+        const maxSeekTime = Math.max(0, video.duration - 0.01)
+        const targetTime = Math.min(i / FRAME_RATE, maxSeekTime)
 
-        await this.seekVideo(video, targetTime);
-        this.drawCoverFrame(video, ctx, canvas.width, canvas.height);
+        await this.seekVideo(video, targetTime)
+        this.drawCoverFrame(video, ctx, canvas.width, canvas.height)
 
-        const blob = await this.canvasToBlob(canvas);
-        await filmstripOPFSStorage.saveFrameBlob(mediaId, i, blob);
+        const blob = await this.canvasToBlob(canvas)
+        await filmstripStorage.saveFrameBlob(mediaId, i, blob)
 
-        const frame = await filmstripOPFSStorage.loadSingleFrame(mediaId, i);
+        const frame = await filmstripStorage.loadSingleFrame(mediaId, i)
         if (frame) {
-          currentPending.extractedFrames.set(i, frame);
-          this.noteFirstFrame(currentPending.metrics);
-          extractedTargetCount++;
+          currentPending.extractedFrames.set(i, frame)
+          this.noteFirstFrame(currentPending.metrics)
+          extractedTargetCount++
         }
 
-        const overallProgress = Math.round((extractedTargetCount / totalTargetFrames) * 100);
-        currentPending.onProgress?.(overallProgress);
+        const overallProgress = Math.round((extractedTargetCount / totalTargetFrames) * 100)
+        currentPending.onProgress?.(overallProgress)
 
         if (
-          extractedTargetCount <= 3
-          || extractedTargetCount % 10 === 0
-          || extractedTargetCount === totalTargetFrames
+          extractedTargetCount <= 3 ||
+          extractedTargetCount % 10 === 0 ||
+          extractedTargetCount === totalTargetFrames
         ) {
-          const frames = Array.from(currentPending.extractedFrames.values())
-            .sort((a, b) => a.index - b.index);
+          const frames = Array.from(currentPending.extractedFrames.values()).sort(
+            (a, b) => a.index - b.index,
+          )
           this.notifyUpdate(mediaId, {
             frames,
             isComplete: false,
             isExtracting: true,
             progress: overallProgress,
-          });
+          })
         }
       }
 
-      const finishedPending = this.pendingExtractions.get(mediaId);
+      const finishedPending = this.pendingExtractions.get(mediaId)
       if (!finishedPending || !finishedPending.isVideoFallback) {
-        return;
+        return
       }
 
-      await filmstripOPFSStorage.saveMetadata(mediaId, {
-        width: THUMBNAIL_WIDTH,
-        height: THUMBNAIL_HEIGHT,
-        isComplete: true,
+      const finalFrames = Array.from(finishedPending.extractedFrames.values()).sort(
+        (a, b) => a.index - b.index,
+      )
+      const settled = this.buildSettledFilmstrip(finishedPending, finalFrames)
+      await filmstripStorage.saveMetadata(mediaId, {
+        width: FILMSTRIP_EXTRACT_WIDTH,
+        height: FILMSTRIP_EXTRACT_HEIGHT,
+        isComplete: settled.isComplete && this.shouldPersistCompletionMetadata(finishedPending),
         frameCount: finishedPending.extractedFrames.size,
-      });
+      })
 
-      const finalFrames = Array.from(finishedPending.extractedFrames.values())
-        .sort((a, b) => a.index - b.index);
-      this.notifyUpdate(mediaId, {
-        frames: finalFrames,
-        isComplete: true,
-        isExtracting: false,
-        progress: 100,
-      });
-      finishedPending.onProgress?.(100);
-      this.finalizeExtractionMetrics(finishedPending.metrics, 'completed', finalFrames.length);
-      this.cleanupExtraction(mediaId);
-      logger.info(`Filmstrip ${mediaId} complete via video fallback: ${finalFrames.length} frames`);
+      this.notifyUpdate(mediaId, settled)
+      finishedPending.onProgress?.(settled.progress)
+      this.finalizeExtractionMetrics(finishedPending.metrics, 'completed', finalFrames.length)
+      this.cleanupExtraction(mediaId)
+      logger.info(
+        `Filmstrip ${mediaId} ${settled.isComplete ? 'complete' : 'prewarmed'} via video fallback: ${finalFrames.length} frames`,
+      )
     } catch (error) {
-      logger.error(`Video fallback extraction failed for ${mediaId}:`, error);
+      logger.error(`Video fallback extraction failed for ${mediaId}:`, error)
 
-      const currentPending = this.pendingExtractions.get(mediaId);
+      const currentPending = this.pendingExtractions.get(mediaId)
       const frames = currentPending
         ? Array.from(currentPending.extractedFrames.values()).sort((a, b) => a.index - b.index)
-        : [];
+        : []
 
       this.notifyUpdate(mediaId, {
         frames,
         isComplete: false,
         isExtracting: false,
         progress: 0,
-      });
+      })
       if (currentPending) {
-        this.finalizeExtractionMetrics(currentPending.metrics, 'failed', frames.length);
+        this.finalizeExtractionMetrics(currentPending.metrics, 'failed', frames.length)
       }
-      this.cleanupExtraction(mediaId);
+      this.cleanupExtraction(mediaId)
     } finally {
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
     }
   }
 
   private async seekVideo(video: HTMLVideoElement, targetTime: number): Promise<void> {
-    const clamped = Math.max(0, targetTime);
+    const clamped = Math.max(0, targetTime)
     if (Math.abs(video.currentTime - clamped) < 0.001) {
-      return;
+      return
     }
 
     await new Promise<void>((resolve, reject) => {
       const onSeeked = () => {
-        video.removeEventListener('seeked', onSeeked);
-        video.removeEventListener('error', onError);
-        resolve();
-      };
+        video.removeEventListener('seeked', onSeeked)
+        video.removeEventListener('error', onError)
+        resolve()
+      }
       const onError = () => {
-        video.removeEventListener('seeked', onSeeked);
-        video.removeEventListener('error', onError);
-        reject(new Error('Video seek failed during filmstrip fallback'));
-      };
+        video.removeEventListener('seeked', onSeeked)
+        video.removeEventListener('error', onError)
+        reject(new Error('Video seek failed during filmstrip fallback'))
+      }
 
-      video.addEventListener('seeked', onSeeked, { once: true });
-      video.addEventListener('error', onError, { once: true });
-      video.currentTime = clamped;
-    });
+      video.addEventListener('seeked', onSeeked, { once: true })
+      video.addEventListener('error', onError, { once: true })
+      video.currentTime = clamped
+    })
   }
 
   private drawCoverFrame(
     video: HTMLVideoElement,
     ctx: CanvasRenderingContext2D,
     targetWidth: number,
-    targetHeight: number
+    targetHeight: number,
   ): void {
-    const sourceWidth = video.videoWidth || targetWidth;
-    const sourceHeight = video.videoHeight || targetHeight;
+    const sourceWidth = video.videoWidth || targetWidth
+    const sourceHeight = video.videoHeight || targetHeight
 
-    const sourceAspect = sourceWidth / sourceHeight;
-    const targetAspect = targetWidth / targetHeight;
+    const sourceAspect = sourceWidth / sourceHeight
+    const targetAspect = targetWidth / targetHeight
 
-    let drawWidth = targetWidth;
-    let drawHeight = targetHeight;
-    let offsetX = 0;
-    let offsetY = 0;
+    let drawWidth = targetWidth
+    let drawHeight = targetHeight
+    let offsetX = 0
+    let offsetY = 0
 
     if (sourceAspect > targetAspect) {
-      drawHeight = targetHeight;
-      drawWidth = drawHeight * sourceAspect;
-      offsetX = (targetWidth - drawWidth) / 2;
+      drawHeight = targetHeight
+      drawWidth = drawHeight * sourceAspect
+      offsetX = (targetWidth - drawWidth) / 2
     } else {
-      drawWidth = targetWidth;
-      drawHeight = drawWidth / sourceAspect;
-      offsetY = (targetHeight - drawHeight) / 2;
+      drawWidth = targetWidth
+      drawHeight = drawWidth / sourceAspect
+      offsetY = (targetHeight - drawHeight) / 2
     }
 
-    ctx.clearRect(0, 0, targetWidth, targetHeight);
-    ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+    ctx.clearRect(0, 0, targetWidth, targetHeight)
+    ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight)
   }
 
   private canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -1736,40 +2221,40 @@ class FilmstripCacheService {
       canvas.toBlob(
         (blob) => {
           if (blob) {
-            resolve(blob);
-            return;
+            resolve(blob)
+            return
           }
-          reject(new Error('Failed to convert filmstrip fallback canvas to blob'));
+          reject(new Error('Failed to convert filmstrip fallback canvas to blob'))
         },
         IMAGE_FORMAT,
-        IMAGE_QUALITY
-      );
-    });
+        IMAGE_QUALITY,
+      )
+    })
   }
 
   private handleWorkerError(mediaId: string, error = ''): void {
-    const pending = this.pendingExtractions.get(mediaId);
-    if (!pending) return;
+    const pending = this.pendingExtractions.get(mediaId)
+    if (!pending) return
 
     // Keep any frames we have
-    const currentFrames = Array.from(pending.extractedFrames.values())
-      .sort((a, b) => a.index - b.index);
+    const currentFrames = Array.from(pending.extractedFrames.values()).sort(
+      (a, b) => a.index - b.index,
+    )
 
     if (
-      !pending.forceSingleWorker
-      && !pending.fallbackAttempted
-      && this.shouldRetryWithSingleWorker(error)
+      !pending.forceSingleWorker &&
+      !pending.fallbackAttempted &&
+      this.shouldRetryWithSingleWorker(error)
     ) {
-      logger.warn(`Retrying filmstrip extraction for ${mediaId} with a single worker`);
+      logger.warn(`Retrying filmstrip extraction for ${mediaId} with a single worker`)
 
-      const skipIndices = Array.from(new Set([
-        ...pending.skipIndices,
-        ...currentFrames.map(frame => frame.index),
-      ]));
+      const skipIndices = Array.from(
+        new Set([...pending.skipIndices, ...currentFrames.map((frame) => frame.index)]),
+      )
 
-      pending.fallbackAttempted = true;
-      this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length);
-      this.cleanupExtraction(mediaId);
+      pending.fallbackAttempted = true
+      this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length)
+      this.cleanupExtraction(mediaId)
       this.startExtraction(
         mediaId,
         pending.blobUrl,
@@ -1781,21 +2266,26 @@ class FilmstripCacheService {
         pending.priorityRange ?? undefined,
         {
           priorityOnly: pending.priorityOnly,
-        }
-      );
-      return;
+          targetFrameCount: pending.targetFrameCount ?? undefined,
+          targetFrameIndices: pending.requestedFrameIndices ?? undefined,
+        },
+      )
+      return
     }
 
-    if (pending.forceSingleWorker && !pending.isVideoFallback && this.shouldRetryWithSingleWorker(error)) {
-      logger.warn(`Single-worker decode failed for ${mediaId}; switching to video element fallback`);
+    if (
+      pending.forceSingleWorker &&
+      !pending.isVideoFallback &&
+      this.shouldRetryWithSingleWorker(error)
+    ) {
+      logger.warn(`Single-worker decode failed for ${mediaId}; switching to video element fallback`)
 
-      const skipIndices = Array.from(new Set([
-        ...pending.skipIndices,
-        ...currentFrames.map(frame => frame.index),
-      ]));
+      const skipIndices = Array.from(
+        new Set([...pending.skipIndices, ...currentFrames.map((frame) => frame.index)]),
+      )
 
-      this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length);
-      this.cleanupExtraction(mediaId);
+      this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length)
+      this.cleanupExtraction(mediaId)
       this.startVideoElementFallback(
         mediaId,
         pending.blobUrl,
@@ -1804,20 +2294,24 @@ class FilmstripCacheService {
         currentFrames,
         pending.onProgress,
         pending.priorityRange ?? undefined,
-      );
-      return;
+        {
+          priorityOnly: pending.priorityOnly,
+          targetFrameCount: pending.targetFrameCount ?? undefined,
+          targetFrameIndices: pending.requestedFrameIndices ?? undefined,
+        },
+      )
+      return
     }
 
     if (!pending.isVideoFallback && !pending.fallbackAttempted) {
-      logger.warn(`Worker extraction failed for ${mediaId}; switching to video fallback`);
+      logger.warn(`Worker extraction failed for ${mediaId}; switching to video fallback`)
 
-      const skipIndices = Array.from(new Set([
-        ...pending.skipIndices,
-        ...currentFrames.map(frame => frame.index),
-      ]));
+      const skipIndices = Array.from(
+        new Set([...pending.skipIndices, ...currentFrames.map((frame) => frame.index)]),
+      )
 
-      this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length);
-      this.cleanupExtraction(mediaId);
+      this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length)
+      this.cleanupExtraction(mediaId)
       this.startVideoElementFallback(
         mediaId,
         pending.blobUrl,
@@ -1826,8 +2320,13 @@ class FilmstripCacheService {
         currentFrames,
         pending.onProgress,
         pending.priorityRange ?? undefined,
-      );
-      return;
+        {
+          priorityOnly: pending.priorityOnly,
+          targetFrameCount: pending.targetFrameCount ?? undefined,
+          targetFrameIndices: pending.requestedFrameIndices ?? undefined,
+        },
+      )
+      return
     }
 
     this.notifyUpdate(mediaId, {
@@ -1835,21 +2334,18 @@ class FilmstripCacheService {
       isComplete: false,
       isExtracting: false,
       progress: 0,
-    });
-    this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length);
-    this.cleanupExtraction(mediaId);
+    })
+    this.finalizeExtractionMetrics(pending.metrics, 'failed', currentFrames.length)
+    this.cleanupExtraction(mediaId)
   }
 
-  private cleanupExtraction(
-    mediaId: string,
-    options?: { reuseCompletedWorkers?: boolean }
-  ): void {
-    const reuseCompletedWorkers = options?.reuseCompletedWorkers ?? false;
-    const pending = this.pendingExtractions.get(mediaId);
-    const wasActive = this.activeExtractions.delete(mediaId);
-    const queueIndex = this.extractionQueue.indexOf(mediaId);
+  private cleanupExtraction(mediaId: string, options?: { reuseCompletedWorkers?: boolean }): void {
+    const reuseCompletedWorkers = options?.reuseCompletedWorkers ?? false
+    const pending = this.pendingExtractions.get(mediaId)
+    const wasActive = this.activeExtractions.delete(mediaId)
+    const queueIndex = this.extractionQueue.indexOf(mediaId)
     if (queueIndex !== -1) {
-      this.extractionQueue.splice(queueIndex, 1);
+      this.extractionQueue.splice(queueIndex, 1)
     }
 
     if (pending) {
@@ -1857,21 +2353,21 @@ class FilmstripCacheService {
       // path terminates workers to avoid cross-request message bleed.
       for (const workerState of pending.workers) {
         if (reuseCompletedWorkers && workerState.completed) {
-          this.releaseWorker(workerState.worker);
+          this.releaseWorker(workerState.worker)
         } else {
-          this.terminateWorker(workerState.worker);
+          this.terminateWorker(workerState.worker)
         }
       }
-      this.pendingExtractions.delete(mediaId);
+      this.pendingExtractions.delete(mediaId)
     }
 
     if (!this.hasSubscribers(mediaId)) {
-      this.scheduleIdleEviction(mediaId);
+      this.scheduleIdleEviction(mediaId)
     }
-    this.enforceMemoryBudget();
+    this.enforceMemoryBudget()
 
     if (wasActive) {
-      this.startNextQueuedExtraction();
+      this.startNextQueuedExtraction()
     }
   }
 
@@ -1879,34 +2375,30 @@ class FilmstripCacheService {
    * Abort extraction
    */
   abort(mediaId: string): void {
-    const pending = this.pendingExtractions.get(mediaId);
+    const pending = this.pendingExtractions.get(mediaId)
     if (pending) {
       // Send abort to all workers
       for (const workerState of pending.workers) {
-        workerState.worker.postMessage({ type: 'abort', requestId: workerState.requestId });
+        workerState.worker.postMessage({ type: 'abort', requestId: workerState.requestId })
       }
-      const frames = Array.from(pending.extractedFrames.values())
-        .sort((a, b) => a.index - b.index);
-      const targetSet = new Set(pending.targetIndices);
+      const frames = Array.from(pending.extractedFrames.values()).sort((a, b) => a.index - b.index)
+      const targetSet = new Set(pending.targetIndices)
       const extractedTargetCount = frames.reduce(
         (count, frame) => (targetSet.has(frame.index) ? count + 1 : count),
-        0
-      );
-      const progress = pending.progressFrames > 0
-        ? Math.min(99, Math.round((extractedTargetCount / pending.progressFrames) * 100))
-        : 0;
+        0,
+      )
+      const progress =
+        pending.progressFrames > 0
+          ? Math.min(99, Math.round((extractedTargetCount / pending.progressFrames) * 100))
+          : 0
       this.notifyUpdate(mediaId, {
         frames,
         isComplete: false,
         isExtracting: false,
         progress,
-      });
-      this.finalizeExtractionMetrics(
-        pending.metrics,
-        'aborted',
-        pending.extractedFrames.size
-      );
-      this.cleanupExtraction(mediaId);
+      })
+      this.finalizeExtractionMetrics(pending.metrics, 'aborted', pending.extractedFrames.size)
+      this.cleanupExtraction(mediaId)
     }
   }
 
@@ -1914,41 +2406,194 @@ class FilmstripCacheService {
    * Get synchronously from cache (for avoiding flash on remount)
    */
   getFromCacheSync(mediaId: string): Filmstrip | null {
-    const cached = this.cache.get(mediaId) || null;
+    const cached = this.cache.get(mediaId) || null
     if (cached) {
-      this.clearIdleEvictionTimer(mediaId);
-      this.touchCacheEntry(mediaId);
+      this.clearIdleEvictionTimer(mediaId)
+      this.touchCacheEntry(mediaId)
     }
-    return cached;
+    return cached
+  }
+
+  private diskHydrationPromises = new Map<string, Promise<Filmstrip | null>>()
+
+  /**
+   * Hydrate from persisted storage without starting extraction.
+   *
+   * Filmstrip display does not need the source video blob URL — JPEGs on disk
+   * are enough. This lets a clip show its cached frames before useMediaBlobUrl
+   * resolves the source, which otherwise serializes (visibility → blobUrl →
+   * filmstrip) and adds 50-200ms+ to re-display.
+   *
+   * Tracked in its own dedupe map (not loadingPromises) so that a later
+   * getFilmstrip() call still starts extraction when needed instead of just
+   * returning this hydration result.
+   */
+  async loadFromDisk(mediaId: string, duration: number): Promise<Filmstrip | null> {
+    if (duration <= 0) return null
+
+    const cached = this.cache.get(mediaId)
+    if (cached?.isComplete) {
+      this.touchCacheEntry(mediaId)
+      return cached
+    }
+
+    const inflight = this.diskHydrationPromises.get(mediaId)
+    if (inflight) {
+      return inflight
+    }
+
+    const tokenAtStart = this.currentGenerationToken(mediaId)
+    const promise = (async (): Promise<Filmstrip | null> => {
+      const stored = await filmstripStorage.load(mediaId)
+      // If clearMedia/clearAll ran while we were reading from OPFS, abandon —
+      // re-inserting these frames would resurrect just-cleared cache state.
+      if (this.currentGenerationToken(mediaId) !== tokenAtStart) {
+        return this.cache.get(mediaId) ?? null
+      }
+      if (!stored) {
+        return this.cache.get(mediaId) ?? null
+      }
+
+      const totalFrames = Math.ceil(duration * FRAME_RATE)
+      const targetIndices = this.buildTargetIndices(totalFrames, null)
+      const targetSet = new Set(targetIndices)
+      const existingTargetCount = stored.frames.reduce(
+        (count, frame) => (targetSet.has(frame.index) ? count + 1 : count),
+        0,
+      )
+
+      const filmstrip: Filmstrip = {
+        frames: stored.frames,
+        isComplete: stored.metadata.isComplete,
+        isExtracting: false,
+        progress: stored.metadata.isComplete
+          ? 100
+          : targetIndices.length > 0
+            ? Math.round((existingTargetCount / targetIndices.length) * 100)
+            : 0,
+      }
+      this.notifyUpdate(mediaId, filmstrip)
+      return filmstrip
+    })()
+
+    this.diskHydrationPromises.set(mediaId, promise)
+    try {
+      return await promise
+    } finally {
+      this.diskHydrationPromises.delete(mediaId)
+    }
+  }
+
+  /**
+   * Refresh cached frame URLs from persisted storage when a visible tile reports a stale source.
+   */
+  async refreshFrames(mediaId: string, frameIndices: number[]): Promise<void> {
+    const normalizedIndices = Array.from(
+      new Set(frameIndices.filter((index) => Number.isInteger(index) && index >= 0)),
+    ).sort((a, b) => a - b)
+    if (normalizedIndices.length === 0) {
+      return
+    }
+
+    const refreshedEntries = await Promise.all(
+      normalizedIndices.map(async (index) => {
+        const frame = await filmstripStorage.loadSingleFrame(mediaId, index)
+        return frame ? ([index, frame] as const) : null
+      }),
+    )
+    const refreshedByIndex = new Map(
+      refreshedEntries.filter(
+        (entry): entry is readonly [number, FilmstripFrame] => entry !== null,
+      ),
+    )
+    if (refreshedByIndex.size === 0) {
+      return
+    }
+
+    const pending = this.pendingExtractions.get(mediaId)
+    if (pending) {
+      for (const frame of refreshedByIndex.values()) {
+        pending.extractedFrames.set(frame.index, frame)
+      }
+    }
+
+    const cached = this.cache.get(mediaId)
+    if (!cached) {
+      if (!pending) {
+        return
+      }
+
+      const frames = Array.from(pending.extractedFrames.values()).sort((a, b) => a.index - b.index)
+      const targetSet = new Set(pending.targetIndices)
+      const extractedTargetCount = frames.reduce(
+        (count, frame) => (targetSet.has(frame.index) ? count + 1 : count),
+        0,
+      )
+      const progress =
+        pending.progressFrames > 0
+          ? Math.min(99, Math.round((extractedTargetCount / pending.progressFrames) * 100))
+          : 0
+
+      this.notifyUpdate(mediaId, {
+        frames,
+        isComplete: false,
+        isExtracting: true,
+        progress,
+      })
+      return
+    }
+
+    let changed = false
+    const nextFrames = cached.frames.map((frame) => {
+      const refreshed = refreshedByIndex.get(frame.index)
+      if (!refreshed) {
+        return frame
+      }
+      if (refreshed.url !== frame.url || refreshed.bitmap !== frame.bitmap) {
+        changed = true
+      }
+      return refreshed
+    })
+
+    if (!changed) {
+      return
+    }
+
+    this.notifyUpdate(mediaId, {
+      ...cached,
+      frames: nextFrames,
+    })
   }
 
   /**
    * Clear filmstrip for a media item
    */
   async clearMedia(mediaId: string): Promise<void> {
-    this.abort(mediaId);
-    this.clearIdleEvictionTimer(mediaId);
-    this.cache.delete(mediaId);
-    this.clearCacheMeta(mediaId);
-    filmstripOPFSStorage.revokeUrls(mediaId);
-    await filmstripOPFSStorage.delete(mediaId);
+    this.bumpMediaGeneration(mediaId)
+    this.abort(mediaId)
+    this.clearIdleEvictionTimer(mediaId)
+    this.closeBitmapFrames(this.cache.get(mediaId)?.frames ?? [])
+    this.cache.delete(mediaId)
+    this.clearCacheMeta(mediaId)
+    filmstripStorage.revokeUrls(mediaId)
+    await filmstripStorage.delete(mediaId)
   }
 
   /**
    * Clear all
    */
   async clearAll(): Promise<void> {
+    this.globalGeneration += 1
+    this.mediaGeneration.clear()
     for (const mediaId of this.pendingExtractions.keys()) {
-      this.abort(mediaId);
+      this.abort(mediaId)
     }
-    for (const timer of this.idleEvictionTimers.values()) {
-      clearTimeout(timer);
+    for (const filmstrip of this.cache.values()) {
+      this.closeBitmapFrames(filmstrip.frames)
     }
-    this.idleEvictionTimers.clear();
-    this.cache.clear();
-    this.cacheMeta.clear();
-    this.cacheBytes = 0;
-    await filmstripOPFSStorage.clearAll();
+    this.cache.clear()
+    this.memoryState.clear()
+    await filmstripStorage.clearAll()
   }
 
   /**
@@ -1956,52 +2601,50 @@ class FilmstripCacheService {
    *
    * IMPORTANT:
    * - This is runtime cleanup only (workers, timers, in-memory URLs/cache).
-   * - Do NOT clear OPFS filmstrip files here.
+   * - Do NOT clear persisted filmstrip files here.
    *   Persistent filmstrip data must survive page refresh so F5 can reuse cache.
    * - Use clearAll()/clearMedia() only for explicit user/debug cache reset flows.
    */
   async dispose(): Promise<void> {
     for (const mediaId of this.pendingExtractions.keys()) {
-      this.abort(mediaId);
+      this.abort(mediaId)
     }
-    this.workerPoolManager.terminateAll();
-    for (const timer of this.idleEvictionTimers.values()) {
-      clearTimeout(timer);
-    }
-    // Revoke in-memory object URLs only; keep persisted OPFS filmstrip files.
+    this.workerPoolManager.terminateAll()
+    // Revoke in-memory object URLs only; keep persisted filmstrip files.
     for (const mediaId of this.cache.keys()) {
-      filmstripOPFSStorage.revokeUrls(mediaId);
+      filmstripStorage.revokeUrls(mediaId)
     }
-    this.idleEvictionTimers.clear();
-    this.cache.clear();
-    this.cacheMeta.clear();
-    this.cacheBytes = 0;
-    this.pendingExtractions.clear();
-    this.clearMetrics();
-    this.updateCallbacks.clear();
-    this.loadingPromises.clear();
-    this.activeExtractions.clear();
-    this.extractionQueue = [];
+    for (const filmstrip of this.cache.values()) {
+      this.closeBitmapFrames(filmstrip.frames)
+    }
+    this.cache.clear()
+    this.memoryState.clear()
+    this.pendingExtractions.clear()
+    this.clearMetrics()
+    this.updateCallbacks.clear()
+    this.loadingPromises.clear()
+    this.activeExtractions.clear()
+    this.extractionQueue = []
   }
 }
 
 // Singleton
-export const filmstripCache = new FilmstripCacheService();
+export const filmstripCache = new FilmstripCacheService()
 
 declare global {
   interface Window {
-    __filmstripCache?: FilmstripCacheService;
+    __filmstripCache?: FilmstripCacheService
     __filmstripMetrics?: {
-      getSnapshot: () => FilmstripMetricsSnapshot;
-      clear: () => void;
-    };
+      getSnapshot: () => FilmstripMetricsSnapshot
+      clear: () => void
+    }
   }
 }
 
 if (import.meta.env.DEV) {
-  window.__filmstripCache = filmstripCache;
+  window.__filmstripCache = filmstripCache
   window.__filmstripMetrics = {
     getSnapshot: () => filmstripCache.getMetricsSnapshot(),
     clear: () => filmstripCache.clearMetrics(),
-  };
+  }
 }

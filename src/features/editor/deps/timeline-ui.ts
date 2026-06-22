@@ -3,4 +3,14 @@
  * Editor modules should import timeline feature UI components from here.
  */
 
-export { Timeline, BentoLayoutDialog } from './timeline-contract';
+export {
+  importBentoLayoutDialog,
+  importFillerRemovalDialog,
+  importReverseConformDialog,
+  importSilenceRemovalDialog,
+  Timeline,
+  useBentoLayoutDialogStore,
+  useFillerRemovalDialogStore,
+  useReverseConformDialogStore,
+  useSilenceRemovalDialogStore,
+} from './timeline-contract'

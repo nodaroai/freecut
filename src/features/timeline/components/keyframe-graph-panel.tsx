@@ -1,50 +1,59 @@
-﻿/**
+/**
  * Keyframe Graph Panel Component
  *
- * Collapsible panel that shows the value graph editor for selected items.
+ * Panel that shows the value graph editor for selected items.
  * Integrates with the timeline to provide visual keyframe editing.
  */
 
-import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { useHotkeys } from 'react-hotkeys-hook';
-import { ChevronUp, ChevronDown, ClipboardPaste, Copy, Scissors, X } from 'lucide-react';
-import { toast } from 'sonner';
-import { cn } from '@/shared/ui/cn';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ErrorBoundary } from '@/components/error-boundary';
+import { memo, useState, useCallback, useMemo, useRef, useEffect, type RefObject } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useHotkeys } from 'react-hotkeys-hook'
+import { X } from 'lucide-react'
+import { toast } from 'sonner'
+import { useShallow } from 'zustand/react/shallow'
+import { cn } from '@/shared/ui/cn'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { ErrorBoundary } from '@/app/error-boundary'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from '@/components/ui/select'
 import {
-  ValueGraphEditor,
-  DopesheetEditor,
+  getBezierPresetForEasing,
+  getCropPropertyValue,
   getTransitionBlockedRanges,
   interpolatePropertyValue,
+  getTextAnimatableBaseValue,
+  isTextAnimatableProperty,
+} from '@/features/timeline/deps/keyframes'
+import {
+  DopesheetEditor,
   getAnimatablePropertiesForItem,
-} from '@/features/timeline/deps/keyframes';
+  getEffectPropertyBaseValue,
+} from '@/features/timeline/deps/keyframe-editors'
+import { resolveTransform, getSourceDimensions } from '@/features/timeline/deps/composition-runtime'
+import { useProjectStore } from '@/features/timeline/deps/projects'
 import {
-  resolveTransform,
-  getSourceDimensions,
-} from '@/features/timeline/deps/composition-runtime';
-import { useProjectStore } from '@/features/timeline/deps/projects';
-import { useSelectionStore } from '@/shared/state/selection';
-import { useTimelineStore } from '../stores/timeline-store';
-import { useKeyframesStore } from '../stores/keyframes-store';
-import { useKeyframeSelectionStore } from '../stores/keyframe-selection-store';
-import { useTimelineCommandStore } from '../stores/timeline-command-store';
-import { captureSnapshot } from '../stores/commands/snapshot';
-import type { TimelineSnapshot } from '../stores/commands/types';
-import { usePlaybackStore } from '@/shared/state/playback';
-import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
-import {
-  DEFAULT_BEZIER_POINTS,
-  DEFAULT_SPRING_PARAMS,
-} from '@/types/keyframe';
+  DEFAULT_PROJECT_FPS,
+  DEFAULT_PROJECT_HEIGHT,
+  DEFAULT_PROJECT_WIDTH,
+} from '@/shared/projects/defaults'
+import { useSelectionStore } from '@/shared/state/selection'
+import { useItemsStore } from '../stores/items-store'
+import { useKeyframesStore } from '../stores/keyframes-store'
+import { useTransitionsStore } from '../stores/transitions-store'
+import { useKeyframeSelectionStore } from '../stores/keyframe-selection-store'
+import { useTimelineCommandStore } from '../stores/timeline-command-store'
+import { captureSnapshot } from '../stores/commands/snapshot'
+import type { TimelineSnapshot } from '../stores/commands/types'
+import { usePlaybackStore } from '@/shared/state/playback'
+import { useEditorStore } from '@/shared/state/editor'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { DEFAULT_BEZIER_POINTS, DEFAULT_SPRING_PARAMS } from '@/types/keyframe'
 import type {
   AnimatableProperty,
   BezierControlPoints,
@@ -53,99 +62,178 @@ import type {
   Keyframe,
   KeyframeRef,
   SpringParameters,
-} from '@/types/keyframe';
-import type { CanvasSettings } from '@/types/transform';
-import type { TimelineItem } from '@/types/timeline';
-import * as timelineActions from '../stores/timeline-actions';
-import { HOTKEY_OPTIONS } from '@/config/hotkeys';
-import { useResolvedHotkeys } from '@/features/timeline/deps/settings';
+} from '@/types/keyframe'
+import type { CanvasSettings } from '@/types/transform'
+import type { TimelineItem } from '@/types/timeline'
+import * as timelineActions from '../stores/timeline-actions'
+import { HOTKEY_OPTIONS } from '@/config/hotkeys'
+import { useResolvedHotkeys } from '@/features/timeline/deps/settings'
+import { isEffectAnimatableProperty } from '@/types/keyframe'
 
 /** Height of the panel header bar in pixels */
-const GRAPH_PANEL_HEADER_HEIGHT = 32;
+const GRAPH_PANEL_HEADER_HEIGHT = 32
 
 /** Height of the resize handle in pixels */
-const RESIZE_HANDLE_HEIGHT = 6;
+const RESIZE_HANDLE_HEIGHT = 6
 
-/** Default height of the graph content area in pixels */
-const GRAPH_PANEL_CONTENT_HEIGHT = 200;
+/** Default ratio of parent height for the graph content area */
+const DEFAULT_PARENT_RATIO = 0.6
 
 /** Minimum content height */
-const MIN_CONTENT_HEIGHT = 100;
+const MIN_CONTENT_HEIGHT = 100
 
-/** Maximum content height */
-const MAX_CONTENT_HEIGHT = 500;
+/** Fallback maximum content height when parent size is unknown */
+const MAX_CONTENT_HEIGHT_FALLBACK = 500
+
+/** Maximum ratio the panel can occupy of its parent container */
+const MAX_PARENT_RATIO = 0.8
+
+/**
+ * Fixed height of the advanced-easing controls strip (single row of h-7
+ * controls + vertical padding + border). Reserved permanently while an item is
+ * loaded so the editor below it never resizes when a keyframe is selected — a
+ * measured/conditional strip caused a visible layout shift on selection.
+ */
+const ADVANCED_EASING_STRIP_HEIGHT = 42
+/** Strip height plus its `mb-2` gap above the editor. */
+const ADVANCED_EASING_STRIP_RESERVED = ADVANCED_EASING_STRIP_HEIGHT + 8
 
 interface KeyframeGraphPanelProps {
   /** Whether the panel is open */
-  isOpen: boolean;
-  /** Callback to toggle panel visibility */
-  onToggle: () => void;
+  isOpen: boolean
+  /** Deprecated: panel no longer collapses from the header */
+  onToggle?: () => void
   /** Callback to close the panel */
-  onClose: () => void;
+  onClose: () => void
+  /** Where the panel is docked in the layout */
+  placement?: 'bottom' | 'top' | 'side'
+  /** Side-lane docks stay persistent and should not expose a close affordance. */
+  showCloseButton?: boolean
+  /**
+   * Animate-workspace context: keeps the panel persistent/spacious and unlocks
+   * the third "split" view-mode option (sheet + graph stacked) in the toggle.
+   * The user still chooses sheet / graph / split; split is no longer forced.
+   */
+  splitView?: boolean
 }
 
-type KeyframeEditorMode = 'graph' | 'dopesheet' | 'split';
-const KEYFRAME_EDITOR_MODE_STORAGE_KEY = 'timeline:keyframeEditorMode';
-const KEYFRAME_EDITOR_SPLIT_RATIO_STORAGE_KEY = 'timeline:keyframeEditorSplitRatio';
-const SPLIT_DIVIDER_WIDTH = 8;
-const SPLIT_MIN_PANE_WIDTH = 260;
-const DEFAULT_SPLIT_VISIBLE_FRAMES = 120;
-const EASING_OPTIONS: Array<{ value: EasingType; label: string }> = [
-  { value: 'linear', label: 'Linear' },
-  { value: 'ease-in', label: 'Ease In' },
-  { value: 'ease-out', label: 'Ease Out' },
-  { value: 'ease-in-out', label: 'Ease In-Out' },
-  { value: 'cubic-bezier', label: 'Bezier' },
-  { value: 'spring', label: 'Spring' },
-];
+type KeyframeEditorMode = 'graph' | 'dopesheet' | 'split'
+const KEYFRAME_EDITOR_MODE_STORAGE_KEY = 'timeline:keyframeEditorMode'
+const EASING_OPTIONS: Array<{ value: EasingType; labelKey: string; defaultLabel: string }> = [
+  { value: 'hold', labelKey: 'timeline.keyframeEditor.easing.hold', defaultLabel: 'Hold' },
+  { value: 'linear', labelKey: 'timeline.keyframeEditor.easing.linear', defaultLabel: 'Linear' },
+  { value: 'ease-in', labelKey: 'timeline.keyframeEditor.easing.easeIn', defaultLabel: 'Ease In' },
+  {
+    value: 'ease-in-out',
+    labelKey: 'timeline.keyframeEditor.easing.easeInOut',
+    defaultLabel: 'Ease In/Out',
+  },
+  {
+    value: 'ease-out',
+    labelKey: 'timeline.keyframeEditor.easing.easeOut',
+    defaultLabel: 'Ease Out',
+  },
+  { value: 'cubic-bezier', labelKey: 'timeline.keyframeEditor.bezier', defaultLabel: 'Bezier' },
+  { value: 'spring', labelKey: 'timeline.keyframeEditor.spring', defaultLabel: 'Spring' },
+]
 const BEZIER_PRESETS = [
-  { value: 'soft', label: 'Soft', points: { x1: 0.42, y1: 0, x2: 0.58, y2: 1 } },
-  { value: 'ease-out', label: 'Ease Out', points: { x1: 0.215, y1: 0.61, x2: 0.355, y2: 1 } },
-  { value: 'ease-in', label: 'Ease In', points: { x1: 0.55, y1: 0.055, x2: 0.675, y2: 0.19 } },
-  { value: 'ease-in-out', label: 'Ease In-Out', points: { x1: 0.645, y1: 0.045, x2: 0.355, y2: 1 } },
-  { value: 'overshoot', label: 'Overshoot', points: { x1: 0.34, y1: 1.56, x2: 0.64, y2: 1 } },
-] as const;
-const BEZIER_INPUT_KEYS = ['x1', 'y1', 'x2', 'y2'] as const;
-const SPRING_INPUT_KEYS = ['tension', 'friction', 'mass'] as const;
+  {
+    value: 'soft',
+    labelKey: 'timeline.keyframeEditor.bezierPreset.soft',
+    points: { x1: 0.42, y1: 0, x2: 0.58, y2: 1 },
+  },
+  {
+    value: 'ease-out',
+    labelKey: 'timeline.keyframeEditor.bezierPreset.easeOut',
+    points: { x1: 0.215, y1: 0.61, x2: 0.355, y2: 1 },
+  },
+  {
+    value: 'ease-in',
+    labelKey: 'timeline.keyframeEditor.bezierPreset.easeIn',
+    points: { x1: 0.55, y1: 0.055, x2: 0.675, y2: 0.19 },
+  },
+  {
+    value: 'ease-in-out',
+    labelKey: 'timeline.keyframeEditor.bezierPreset.easeInOut',
+    points: { x1: 0.645, y1: 0.045, x2: 0.355, y2: 1 },
+  },
+  {
+    value: 'overshoot',
+    labelKey: 'timeline.keyframeEditor.bezierPreset.overshoot',
+    points: { x1: 0.34, y1: 1.56, x2: 0.64, y2: 1 },
+  },
+] as const
+const BEZIER_INPUT_KEYS = ['x1', 'y1', 'x2', 'y2'] as const
+const SPRING_INPUT_KEYS = ['tension', 'friction', 'mass'] as const
 
-type BezierInputKey = (typeof BEZIER_INPUT_KEYS)[number];
-type SpringInputKey = (typeof SPRING_INPUT_KEYS)[number];
-type BezierPresetValue = (typeof BEZIER_PRESETS)[number]['value'] | 'custom';
+type BezierInputKey = (typeof BEZIER_INPUT_KEYS)[number]
+type SpringInputKey = (typeof SPRING_INPUT_KEYS)[number]
+type BezierPresetValue = (typeof BEZIER_PRESETS)[number]['value'] | 'custom'
 
 function clampFrameToBlockedRanges(
   frame: number,
   initialFrame: number,
-  blockedRanges: ReturnType<typeof getTransitionBlockedRanges>
+  blockedRanges: ReturnType<typeof getTransitionBlockedRanges>,
 ): number {
   for (const range of blockedRanges) {
     if (frame >= range.start && frame < range.end) {
-      if (initialFrame < range.start) return range.start - 1;
-      if (initialFrame >= range.end) return range.end;
-      const distToStart = frame - range.start;
-      const distToEnd = range.end - frame;
-      return distToStart < distToEnd ? range.start - 1 : range.end;
+      if (initialFrame < range.start) return range.start - 1
+      if (initialFrame >= range.end) return range.end
+      const distToStart = frame - range.start
+      const distToEnd = range.end - frame
+      return distToStart < distToEnd ? range.start - 1 : range.end
     }
   }
-  return frame;
+  return frame
 }
 
 function getBaseKeyframeValue(
   item: TimelineItem,
   property: AnimatableProperty,
-  canvas: CanvasSettings
+  canvas: CanvasSettings,
 ): number {
-  if (property === 'volume') {
-    return item.volume ?? 0;
+  if (isEffectAnimatableProperty(property)) {
+    return getEffectPropertyBaseValue(item, property) ?? 0
   }
 
-  const resolved = resolveTransform(item, canvas, getSourceDimensions(item));
-  return resolved[property];
+  if (property === 'volume') {
+    return item.volume ?? 0
+  }
+
+  if (item.type === 'text' && isTextAnimatableProperty(property)) {
+    return getTextAnimatableBaseValue(item, property)
+  }
+
+  if (
+    property === 'cropLeft' ||
+    property === 'cropRight' ||
+    property === 'cropTop' ||
+    property === 'cropBottom' ||
+    property === 'cropSoftness'
+  ) {
+    const sourceDimensions = getSourceDimensions(item)
+    return getCropPropertyValue(item.crop, property, {
+      width: Math.max(1, sourceDimensions?.width ?? item.transform?.width ?? canvas.width),
+      height: Math.max(1, sourceDimensions?.height ?? item.transform?.height ?? canvas.height),
+    })
+  }
+
+  const resolved = resolveTransform(item, canvas, getSourceDimensions(item))
+  return property in resolved ? resolved[property as keyof typeof resolved] : 0
 }
 
 function buildEasingConfig(
   easing: EasingType,
-  existingConfig?: EasingConfig
+  existingConfig?: EasingConfig,
 ): EasingConfig | undefined {
+  const presetBezier = getBezierPresetForEasing(easing)
+  if (presetBezier) {
+    return {
+      type: 'cubic-bezier',
+      bezier: presetBezier,
+    }
+  }
+
   if (easing === 'cubic-bezier') {
     return {
       type: 'cubic-bezier',
@@ -153,7 +241,7 @@ function buildEasingConfig(
         existingConfig?.type === 'cubic-bezier' && existingConfig.bezier
           ? existingConfig.bezier
           : { ...DEFAULT_BEZIER_POINTS },
-    };
+    }
   }
 
   if (easing === 'spring') {
@@ -163,539 +251,858 @@ function buildEasingConfig(
         existingConfig?.type === 'spring' && existingConfig.spring
           ? existingConfig.spring
           : { ...DEFAULT_SPRING_PARAMS },
-    };
+    }
   }
 
-  return undefined;
+  return undefined
 }
 
 function areBezierPointsEqual(a: BezierControlPoints, b: BezierControlPoints): boolean {
-  return (
-    a.x1 === b.x1 &&
-    a.y1 === b.y1 &&
-    a.x2 === b.x2 &&
-    a.y2 === b.y2
-  );
+  return a.x1 === b.x1 && a.y1 === b.y1 && a.x2 === b.x2 && a.y2 === b.y2
 }
 
 function clampBezierValue(key: BezierInputKey, value: number): number {
   if (key === 'x1' || key === 'x2') {
-    return Math.max(0, Math.min(1, value));
+    return Math.max(0, Math.min(1, value))
   }
-  return Math.max(-2, Math.min(3, value));
+  return Math.max(-2, Math.min(3, value))
 }
 
 function clampSpringValue(key: SpringInputKey, value: number): number {
   switch (key) {
     case 'tension':
-      return Math.max(1, Math.min(500, value));
+      return Math.max(1, Math.min(500, value))
     case 'friction':
-      return Math.max(1, Math.min(100, value));
+      return Math.max(1, Math.min(100, value))
     case 'mass':
-      return Math.max(0.1, Math.min(10, value));
+      return Math.max(0.1, Math.min(10, value))
   }
+}
+
+function toBezierDraft(points: BezierControlPoints): Record<BezierInputKey, string> {
+  return {
+    x1: String(points.x1),
+    y1: String(points.y1),
+    x2: String(points.x2),
+    y2: String(points.y2),
+  }
+}
+
+function toSpringDraft(params: SpringParameters): Record<SpringInputKey, string> {
+  return {
+    tension: String(params.tension),
+    friction: String(params.friction),
+    mass: String(params.mass),
+  }
+}
+
+function useKeyframeEditorPlaybackFrame(
+  selectedItemId: string | null,
+  editorScrubbingRef: RefObject<boolean>,
+): number {
+  const [frame, setFrame] = useState(() => usePlaybackStore.getState().currentFrame)
+  const frameRef = useRef(frame)
+
+  useEffect(() => {
+    const nextFrame = usePlaybackStore.getState().currentFrame
+    frameRef.current = nextFrame
+    setFrame(nextFrame)
+  }, [selectedItemId])
+
+  useEffect(() => {
+    let wasPlaying = usePlaybackStore.getState().isPlaying
+    let rafId: number | null = null
+    let pendingFrame: number | null = null
+
+    // Coalesce rapid scrub updates to one commit per animation frame. Pointer
+    // moves can fire several store updates per frame; without this the keyframe
+    // editor (dopesheet/graph) re-renders multiple times per displayed frame.
+    const flush = () => {
+      rafId = null
+      if (pendingFrame === null) return
+      const nextFrame = pendingFrame
+      pendingFrame = null
+      if (frameRef.current === nextFrame) return
+      frameRef.current = nextFrame
+      setFrame(nextFrame)
+    }
+
+    const commitFrame = (nextFrame: number) => {
+      pendingFrame = nextFrame
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flush)
+      }
+    }
+
+    const unsubscribe = usePlaybackStore.subscribe((state) => {
+      const nextFrame = state.currentFrame
+
+      if (state.isPlaying) {
+        // Keep the (relatively expensive) full editor re-render out of the
+        // playback hot path. The playhead line still tracks playback via a
+        // self-subscribing overlay (see DopesheetPlayheadLine / GraphPlayhead),
+        // which moves it by direct DOM without re-rendering the editor.
+        wasPlaying = true
+        return
+      }
+
+      if (wasPlaying) {
+        wasPlaying = false
+        commitFrame(nextFrame)
+        return
+      }
+
+      const isSettledSeek = state.previewFrame === null
+      if (isSettledSeek && !editorScrubbingRef.current) {
+        commitFrame(nextFrame)
+      }
+    })
+
+    return () => {
+      unsubscribe()
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+      }
+    }
+  }, [editorScrubbingRef, selectedItemId])
+
+  return frame
 }
 
 function loadKeyframeEditorMode(): KeyframeEditorMode {
   try {
-    const value = localStorage.getItem(KEYFRAME_EDITOR_MODE_STORAGE_KEY);
+    const value = localStorage.getItem(KEYFRAME_EDITOR_MODE_STORAGE_KEY)
     if (value === 'graph' || value === 'dopesheet' || value === 'split') {
-      return value;
+      return value
     }
   } catch {
     // ignore localStorage read errors
   }
-  return 'graph';
+  // Default to the stacked split (dopesheet on top, value graph on bottom) for
+  // split-capable surfaces; non-split placements fall back to dopesheet via
+  // `effectiveEditorMode`.
+  return 'split'
 }
 
-function loadKeyframeEditorSplitRatio(): number {
-  try {
-    const value = Number(localStorage.getItem(KEYFRAME_EDITOR_SPLIT_RATIO_STORAGE_KEY));
-    if (!Number.isNaN(value) && Number.isFinite(value) && value >= 0.15 && value <= 0.85) {
-      return value;
-    }
-  } catch {
-    // ignore localStorage read errors
-  }
-  return 0.5;
+interface AdvancedEasingControlsProps {
+  selectedBezierPoints: BezierControlPoints | null
+  selectedBezierPreset: BezierPresetValue
+  hasMixedBezierConfig: boolean
+  selectedSpringParameters: SpringParameters | null
+  hasMixedSpringConfig: boolean
+  applyBezier: (bezier: BezierControlPoints) => void
+  applySpring: (spring: SpringParameters) => void
+}
+
+function AdvancedEasingControls({
+  selectedBezierPoints,
+  selectedBezierPreset,
+  hasMixedBezierConfig,
+  selectedSpringParameters,
+  hasMixedSpringConfig,
+  applyBezier,
+  applySpring,
+}: AdvancedEasingControlsProps) {
+  const { t } = useTranslation()
+  const [bezierDraft, setBezierDraft] = useState<Record<BezierInputKey, string>>(() =>
+    selectedBezierPoints
+      ? toBezierDraft(selectedBezierPoints)
+      : toBezierDraft(DEFAULT_BEZIER_POINTS),
+  )
+  const [springDraft, setSpringDraft] = useState<Record<SpringInputKey, string>>(() =>
+    selectedSpringParameters
+      ? toSpringDraft(selectedSpringParameters)
+      : toSpringDraft(DEFAULT_SPRING_PARAMS),
+  )
+
+  const handleBezierPresetChange = useCallback(
+    (value: string) => {
+      if (value === 'custom') return
+
+      const preset = BEZIER_PRESETS.find((candidate) => candidate.value === value)
+      if (!preset) return
+
+      setBezierDraft(toBezierDraft(preset.points))
+      applyBezier({ ...preset.points })
+    },
+    [applyBezier],
+  )
+
+  const handleBezierDraftChange = useCallback((key: BezierInputKey, value: string) => {
+    setBezierDraft((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const commitBezierDraft = useCallback(
+    (key: BezierInputKey) => {
+      if (!selectedBezierPoints) return
+
+      const parsed = Number(bezierDraft[key])
+      if (!Number.isFinite(parsed)) {
+        setBezierDraft((prev) => ({
+          ...prev,
+          [key]: String(selectedBezierPoints[key]),
+        }))
+        return
+      }
+
+      const nextBezier = {
+        ...selectedBezierPoints,
+        [key]: clampBezierValue(key, parsed),
+      }
+
+      setBezierDraft(toBezierDraft(nextBezier))
+      applyBezier(nextBezier)
+    },
+    [applyBezier, bezierDraft, selectedBezierPoints],
+  )
+
+  const handleSpringDraftChange = useCallback((key: SpringInputKey, value: string) => {
+    setSpringDraft((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const commitSpringDraft = useCallback(
+    (key: SpringInputKey) => {
+      if (!selectedSpringParameters) return
+
+      const parsed = Number(springDraft[key])
+      if (!Number.isFinite(parsed)) {
+        setSpringDraft((prev) => ({
+          ...prev,
+          [key]: String(selectedSpringParameters[key]),
+        }))
+        return
+      }
+
+      const nextSpring = {
+        ...selectedSpringParameters,
+        [key]: clampSpringValue(key, parsed),
+      }
+
+      setSpringDraft(toSpringDraft(nextSpring))
+      applySpring(nextSpring)
+    },
+    [applySpring, selectedSpringParameters, springDraft],
+  )
+
+  const handleDraftKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>, commit: () => void) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        commit()
+        event.currentTarget.blur()
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.currentTarget.blur()
+      }
+    },
+    [],
+  )
+
+  return (
+    <div
+      className="mb-2 flex items-center overflow-x-auto rounded-md border border-border bg-secondary/20 px-2"
+      style={{ height: ADVANCED_EASING_STRIP_HEIGHT }}
+    >
+      {selectedBezierPoints && (
+        <div className="flex w-max items-center gap-2 text-xs">
+          <span className="font-medium text-foreground">{t('timeline.keyframeEditor.bezier')}</span>
+          <Select value={selectedBezierPreset} onValueChange={handleBezierPresetChange}>
+            <SelectTrigger className="h-7 w-[130px] text-xs focus:ring-0 focus:ring-offset-0">
+              <SelectValue placeholder={t('timeline.keyframeEditor.preset')} />
+            </SelectTrigger>
+            <SelectContent>
+              {BEZIER_PRESETS.map((preset) => (
+                <SelectItem key={preset.value} value={preset.value} className="text-xs">
+                  {t(preset.labelKey)}
+                </SelectItem>
+              ))}
+              <SelectItem value="custom" className="text-xs">
+                {t('timeline.keyframeEditor.custom')}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {BEZIER_INPUT_KEYS.map((key) => (
+            <label key={key} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              <span className="uppercase">{key}</span>
+              <Input
+                value={bezierDraft[key]}
+                onChange={(event) => handleBezierDraftChange(key, event.target.value)}
+                onBlur={() => commitBezierDraft(key)}
+                onKeyDown={(event) => handleDraftKeyDown(event, () => commitBezierDraft(key))}
+                className="h-7 w-16 px-2 text-xs"
+                inputMode="decimal"
+              />
+            </label>
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={() => handleBezierPresetChange('soft')}
+          >
+            {t('common.reset')}
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
+            {hasMixedBezierConfig
+              ? t('timeline.keyframeEditor.mixedCurves')
+              : t('timeline.keyframeEditor.dragHandlesHint')}
+          </span>
+        </div>
+      )}
+      {selectedSpringParameters && (
+        <div className="flex w-max items-center gap-2 text-xs">
+          <span className="font-medium text-foreground">{t('timeline.keyframeEditor.spring')}</span>
+          {SPRING_INPUT_KEYS.map((key) => (
+            <label key={key} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              <span className="capitalize">{key}</span>
+              <Input
+                value={springDraft[key]}
+                onChange={(event) => handleSpringDraftChange(key, event.target.value)}
+                onBlur={() => commitSpringDraft(key)}
+                onKeyDown={(event) => handleDraftKeyDown(event, () => commitSpringDraft(key))}
+                className={cn('h-7 px-2 text-xs', key === 'mass' ? 'w-16' : 'w-[72px]')}
+                inputMode="decimal"
+              />
+            </label>
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={() => {
+              setSpringDraft(toSpringDraft(DEFAULT_SPRING_PARAMS))
+              applySpring({ ...DEFAULT_SPRING_PARAMS })
+            }}
+          >
+            {t('common.reset')}
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
+            {hasMixedSpringConfig
+              ? t('timeline.keyframeEditor.mixedSpring')
+              : t('timeline.keyframeEditor.springHint')}
+          </span>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
- * Collapsible panel showing the keyframe value graph editor.
+ * Panel showing the keyframe value graph editor.
  * Displays graph for the first selected item that has keyframes.
  * Automatically uses full width of container.
  */
 export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   isOpen,
-  onToggle,
   onClose,
+  placement = 'bottom',
+  showCloseButton = true,
+  splitView = false,
 }: KeyframeGraphPanelProps) {
-  const hotkeys = useResolvedHotkeys();
+  const { t } = useTranslation()
+  const easingOptions = useMemo(
+    () =>
+      EASING_OPTIONS.map((option) => ({
+        value: option.value,
+        label: t(option.labelKey, { defaultValue: option.defaultLabel }),
+      })),
+    [t],
+  )
+  const hotkeys = useResolvedHotkeys()
   // Ref to measure container width
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
+  const [parentHeight, setParentHeight] = useState(0)
+  const hasInitialSized = useRef(false)
 
   // Track content height (user can resize)
-  const [contentHeight, setContentHeight] = useState(GRAPH_PANEL_CONTENT_HEIGHT);
+  const [contentHeight, setContentHeight] = useState(MIN_CONTENT_HEIGHT)
+
+  // Dynamic max: 80% of parent minus the header and handle chrome
+  const chrome = GRAPH_PANEL_HEADER_HEIGHT + RESIZE_HANDLE_HEIGHT
+  const maxContentHeight =
+    parentHeight > 0
+      ? Math.max(MIN_CONTENT_HEIGHT, Math.floor(parentHeight * MAX_PARENT_RATIO) - chrome)
+      : MAX_CONTENT_HEIGHT_FALLBACK
+
+  // Set default height to 60% of parent on first measurement
+  useEffect(() => {
+    if (parentHeight > 0 && !hasInitialSized.current) {
+      hasInitialSized.current = true
+      const defaultHeight = Math.floor(parentHeight * DEFAULT_PARENT_RATIO) - chrome
+      setContentHeight(Math.max(MIN_CONTENT_HEIGHT, Math.min(maxContentHeight, defaultHeight)))
+    }
+  }, [parentHeight, chrome, maxContentHeight])
 
   // Resize state
-  const [isResizing, setIsResizing] = useState(false);
-  const resizeStartY = useRef(0);
-  const resizeStartHeight = useRef(0);
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeStartY = useRef(0)
+  const resizeStartHeight = useRef(0)
 
   // Measure container width on mount and resize
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const container = containerRef.current
+    if (!container) return
 
     const updateWidth = () => {
-      setContainerWidth(container.clientWidth);
-    };
+      setContainerWidth(container.clientWidth)
+    }
 
     // Initial measurement
-    updateWidth();
+    updateWidth()
 
     // Use ResizeObserver to track size changes
-    const resizeObserver = new ResizeObserver(updateWidth);
-    resizeObserver.observe(container);
+    const resizeObserver = new ResizeObserver(updateWidth)
+    resizeObserver.observe(container)
 
     return () => {
-      resizeObserver.disconnect();
-    };
-  }, [isOpen]); // Re-measure when panel opens
+      resizeObserver.disconnect()
+    }
+  }, [isOpen]) // Re-measure when panel opens
+
+  // Measure parent height so the panel can cap at MAX_PARENT_RATIO
+  useEffect(() => {
+    const panel = panelRef.current
+    const parent = panel?.parentElement
+    if (!parent) return
+
+    const update = () => setParentHeight(parent.clientHeight)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(parent)
+    return () => observer.disconnect()
+  }, [isOpen])
 
   // Handle resize drag
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    resizeStartY.current = e.clientY;
-    resizeStartHeight.current = contentHeight;
-  }, [contentHeight]);
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsResizing(true)
+      resizeStartY.current = e.clientY
+      resizeStartHeight.current = contentHeight
+    },
+    [contentHeight],
+  )
 
   // Handle resize move and end via document events
   useEffect(() => {
-    if (!isResizing) return;
+    if (!isResizing) return
 
     const handleMouseMove = (e: MouseEvent) => {
-      // Dragging up (negative deltaY) should increase height
-      const deltaY = resizeStartY.current - e.clientY;
+      const deltaY =
+        placement === 'top' ? e.clientY - resizeStartY.current : resizeStartY.current - e.clientY
       const newHeight = Math.min(
-        MAX_CONTENT_HEIGHT,
-        Math.max(MIN_CONTENT_HEIGHT, resizeStartHeight.current + deltaY)
-      );
-      setContentHeight(newHeight);
-    };
+        maxContentHeight,
+        Math.max(MIN_CONTENT_HEIGHT, resizeStartHeight.current + deltaY),
+      )
+      setContentHeight(newHeight)
+    }
 
     const handleMouseUp = () => {
-      setIsResizing(false);
+      setIsResizing(false)
       // Note: We intentionally do NOT call onHeightChange during resize
       // The timeline panel should only resize when the graph panel is opened/closed,
       // not when the user drags the resize handle within the existing space
-    };
+    }
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
 
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isResizing]);
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isResizing, placement, maxContentHeight])
 
   // Selected items
-  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
+  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
 
-  // Timeline state
-  const items = useTimelineStore((s) => s.items);
-  const keyframes = useKeyframesStore((s) => s.keyframes);
-  const transitions = useTimelineStore((s) => s.transitions);
+  const selectedItemForEditor = useItemsStore(
+    useCallback(
+      (s) => {
+        for (const itemId of selectedItemIds) {
+          const item = s.itemById[itemId]
+          if (item) {
+            return item
+          }
+        }
+
+        return null
+      },
+      [selectedItemIds],
+    ),
+  )
+  const selectedItemKeyframes = useKeyframesStore(
+    useCallback(
+      (s) =>
+        selectedItemForEditor ? (s.keyframesByItemId[selectedItemForEditor.id] ?? null) : null,
+      [selectedItemForEditor],
+    ),
+  )
+  const selectedItemTransitions = useTransitionsStore(
+    useShallow(
+      useCallback(
+        (s) => {
+          if (!selectedItemForEditor) return []
+
+          return s.transitions.filter(
+            (transition) =>
+              transition.leftClipId === selectedItemForEditor.id ||
+              transition.rightClipId === selectedItemForEditor.id,
+          )
+        },
+        [selectedItemForEditor],
+      ),
+    ),
+  )
+
   // Use _updateKeyframe directly (no undo per call) for dragging
-  const _updateKeyframe = useKeyframesStore((s) => s._updateKeyframe);
-  const currentProject = useProjectStore((s) => s.currentProject);
+  const _updateKeyframe = useKeyframesStore((s) => s._updateKeyframe)
+  const currentProject = useProjectStore((s) => s.currentProject)
+  const setKeyframeEditorShortcutScopeActive = useEditorStore(
+    (s) => s.setKeyframeEditorShortcutScopeActive,
+  )
 
   // Ref to store snapshot captured on drag start for undo batching
-  const dragSnapshotRef = useRef<TimelineSnapshot | null>(null);
+  const dragSnapshotRef = useRef<TimelineSnapshot | null>(null)
+  const [isPointerWithinEditor, setIsPointerWithinEditor] = useState(false)
+  const [isFocusWithinEditor, setIsFocusWithinEditor] = useState(false)
 
   // Keyframe selection
-  const selectedKeyframes = useKeyframeSelectionStore((s) => s.selectedKeyframes);
-  const selectKeyframe = useKeyframeSelectionStore((s) => s.selectKeyframe);
-  const selectKeyframes = useKeyframeSelectionStore((s) => s.selectKeyframes);
-  const clearKeyframeSelection = useKeyframeSelectionStore((s) => s.clearSelection);
-  const keyframeClipboard = useKeyframeSelectionStore((s) => s.clipboard);
-  const isKeyframeClipboardCut = useKeyframeSelectionStore((s) => s.isCut);
-  const copySelectedKeyframes = useKeyframeSelectionStore((s) => s.copySelectedKeyframes);
-  const cutSelectedKeyframes = useKeyframeSelectionStore((s) => s.cutSelectedKeyframes);
-  const clearKeyframeClipboard = useKeyframeSelectionStore((s) => s.clearClipboard);
+  const selectedKeyframes = useKeyframeSelectionStore((s) => s.selectedKeyframes)
+  const selectKeyframe = useKeyframeSelectionStore((s) => s.selectKeyframe)
+  const selectKeyframes = useKeyframeSelectionStore((s) => s.selectKeyframes)
+  const clearKeyframeSelection = useKeyframeSelectionStore((s) => s.clearSelection)
+  const keyframeClipboard = useKeyframeSelectionStore((s) => s.clipboard)
+  const isKeyframeClipboardCut = useKeyframeSelectionStore((s) => s.isCut)
+  const copySelectedKeyframes = useKeyframeSelectionStore((s) => s.copySelectedKeyframes)
+  const cutSelectedKeyframes = useKeyframeSelectionStore((s) => s.cutSelectedKeyframes)
+  const clearKeyframeClipboard = useKeyframeSelectionStore((s) => s.clearClipboard)
 
-  // Playback state
-  const currentFrame = usePlaybackStore((s) => s.currentFrame);
+  const keyframeEditorScrubbingRef = useRef(false)
+  const currentFrame = useKeyframeEditorPlaybackFrame(
+    selectedItemForEditor?.id ?? null,
+    keyframeEditorScrubbingRef,
+  )
 
   // Track selected property for graph editor
-  const [selectedProperty, setSelectedProperty] = useState<AnimatableProperty | null>(null);
-  const [, setActiveDopesheetProperty] = useState<AnimatableProperty | null>(null);
-  const [editorMode, setEditorMode] = useState<KeyframeEditorMode>(() => loadKeyframeEditorMode());
-  const [splitRatio, setSplitRatio] = useState<number>(() => loadKeyframeEditorSplitRatio());
-  const [splitFrameViewport, setSplitFrameViewport] = useState<{ startFrame: number; endFrame: number } | null>(null);
-  const [isSplitResizing, setIsSplitResizing] = useState(false);
-  const [advancedControlsHeight, setAdvancedControlsHeight] = useState(0);
-  const [bezierDraft, setBezierDraft] = useState<Record<BezierInputKey, string>>({
-    x1: String(DEFAULT_BEZIER_POINTS.x1),
-    y1: String(DEFAULT_BEZIER_POINTS.y1),
-    x2: String(DEFAULT_BEZIER_POINTS.x2),
-    y2: String(DEFAULT_BEZIER_POINTS.y2),
-  });
-  const [springDraft, setSpringDraft] = useState<Record<SpringInputKey, string>>({
-    tension: String(DEFAULT_SPRING_PARAMS.tension),
-    friction: String(DEFAULT_SPRING_PARAMS.friction),
-    mass: String(DEFAULT_SPRING_PARAMS.mass),
-  });
-  const splitResizeStartXRef = useRef(0);
-  const splitResizeStartRatioRef = useRef(splitRatio);
-  const advancedControlsRef = useRef<HTMLDivElement>(null);
+  const [selectedProperty, setSelectedProperty] = useState<AnimatableProperty | null>(null)
+  const [editorMode, setEditorMode] = useState<KeyframeEditorMode>(() => loadKeyframeEditorMode())
 
   useEffect(() => {
     try {
-      localStorage.setItem(KEYFRAME_EDITOR_MODE_STORAGE_KEY, editorMode);
+      localStorage.setItem(KEYFRAME_EDITOR_MODE_STORAGE_KEY, editorMode)
     } catch {
       // ignore localStorage write errors
     }
-  }, [editorMode]);
+  }, [editorMode])
+
+  // "split" is only offered in the Animate workspace (`splitView`); the docked
+  // panel is too short to stack both panes, so a persisted "split" falls back
+  // to the dopesheet there.
+  const effectiveEditorMode: KeyframeEditorMode =
+    !splitView && editorMode === 'split' ? 'dopesheet' : editorMode
 
   useEffect(() => {
-    try {
-      localStorage.setItem(KEYFRAME_EDITOR_SPLIT_RATIO_STORAGE_KEY, String(splitRatio));
-    } catch {
-      // ignore localStorage write errors
+    if (!isOpen) {
+      setIsPointerWithinEditor(false)
+      setIsFocusWithinEditor(false)
+      setKeyframeEditorShortcutScopeActive(false)
+      return
     }
-  }, [splitRatio]);
 
-  const canvas = useMemo<CanvasSettings>(() => ({
-    width: currentProject?.metadata.width ?? 1920,
-    height: currentProject?.metadata.height ?? 1080,
-    fps: currentProject?.metadata.fps ?? 30,
-  }), [currentProject]);
+    setKeyframeEditorShortcutScopeActive(isPointerWithinEditor || isFocusWithinEditor)
+  }, [isFocusWithinEditor, isOpen, isPointerWithinEditor, setKeyframeEditorShortcutScopeActive])
 
-  // Use the first selected item so the panel can create first keyframes too.
-  const selectedItemForEditor = useMemo(() => {
-    for (const itemId of selectedItemIds) {
-      const item = items.find((i) => i.id === itemId);
-      if (item) {
-        return item;
-      }
-    }
-    return null;
-  }, [selectedItemIds, items]);
+  useEffect(
+    () => () => {
+      setKeyframeEditorShortcutScopeActive(false)
+    },
+    [setKeyframeEditorShortcutScopeActive],
+  )
 
-  const selectedItemKeyframes = useMemo(
-    () => selectedItemForEditor
-      ? keyframes.find((itemKeyframes) => itemKeyframes.itemId === selectedItemForEditor.id)
-      : undefined,
-    [selectedItemForEditor, keyframes]
-  );
+  const canvas = useMemo<CanvasSettings>(
+    () => ({
+      width: currentProject?.metadata.width ?? DEFAULT_PROJECT_WIDTH,
+      height: currentProject?.metadata.height ?? DEFAULT_PROJECT_HEIGHT,
+      fps: currentProject?.metadata.fps ?? DEFAULT_PROJECT_FPS,
+    }),
+    [currentProject],
+  )
 
   const availableProperties = useMemo(
-    () => selectedItemForEditor ? getAnimatablePropertiesForItem(selectedItemForEditor) : [],
-    [selectedItemForEditor]
-  );
-
-  useEffect(() => {
-    if (selectedProperty && !availableProperties.includes(selectedProperty)) {
-      setSelectedProperty(null);
-    }
-  }, [availableProperties, selectedProperty]);
-
-  useEffect(() => {
-    setActiveDopesheetProperty((prev) =>
-      prev && availableProperties.includes(prev) ? prev : null
-    );
-  }, [availableProperties]);
-
-  useEffect(() => {
-    setActiveDopesheetProperty(null);
-  }, [selectedItemForEditor?.id]);
+    () => (selectedItemForEditor ? getAnimatablePropertiesForItem(selectedItemForEditor) : []),
+    [selectedItemForEditor],
+  )
+  const effectiveSelectedProperty = useMemo(
+    () =>
+      selectedProperty && availableProperties.includes(selectedProperty) ? selectedProperty : null,
+    [availableProperties, selectedProperty],
+  )
 
   // Build keyframes by property for the graph editor
   const keyframesByProperty = useMemo(() => {
-    if (!selectedItemForEditor) return {};
+    if (!selectedItemForEditor) return {}
 
     const keyframesByPropertyMap = new Map<AnimatableProperty, Keyframe[]>(
-      (selectedItemKeyframes?.properties ?? []).map((property) => [property.property, property.keyframes])
-    );
-    const result: Partial<Record<AnimatableProperty, Keyframe[]>> = {};
+      (selectedItemKeyframes?.properties ?? []).map((property) => [
+        property.property,
+        property.keyframes,
+      ]),
+    )
+    const result: Partial<Record<AnimatableProperty, Keyframe[]>> = {}
 
     for (const property of availableProperties) {
-      result[property] = keyframesByPropertyMap.get(property) ?? [];
+      result[property] = keyframesByPropertyMap.get(property) ?? []
     }
 
-    return result;
-  }, [availableProperties, selectedItemForEditor, selectedItemKeyframes]);
+    return result
+  }, [availableProperties, selectedItemForEditor, selectedItemKeyframes])
 
   // Selected keyframe IDs for the current item
   const selectedKeyframeIds = useMemo(() => {
-    if (!selectedItemForEditor) return new Set<string>();
+    if (!selectedItemForEditor) return new Set<string>()
 
-    const ids = new Set<string>();
+    const ids = new Set<string>()
     for (const ref of selectedKeyframes) {
       if (ref.itemId === selectedItemForEditor.id) {
-        ids.add(ref.keyframeId);
+        ids.add(ref.keyframeId)
       }
     }
-    return ids;
-  }, [selectedKeyframes, selectedItemForEditor]);
+    return ids
+  }, [selectedKeyframes, selectedItemForEditor])
 
   const selectedEditorKeyframes = useMemo(() => {
-    if (!selectedItemForEditor || !selectedItemKeyframes) return [];
+    if (!selectedItemForEditor || !selectedItemKeyframes) return []
 
-    const entries: Array<{ ref: KeyframeRef; keyframe: Keyframe }> = [];
+    const entries: Array<{ ref: KeyframeRef; keyframe: Keyframe }> = []
     for (const ref of selectedKeyframes) {
-      if (ref.itemId !== selectedItemForEditor.id) continue;
+      if (ref.itemId !== selectedItemForEditor.id) continue
 
       const keyframe = selectedItemKeyframes.properties
         .find((property) => property.property === ref.property)
-        ?.keyframes.find((candidate) => candidate.id === ref.keyframeId);
+        ?.keyframes.find((candidate) => candidate.id === ref.keyframeId)
 
       if (keyframe) {
-        entries.push({ ref, keyframe });
+        entries.push({ ref, keyframe })
       }
     }
 
-    return entries;
-  }, [selectedItemForEditor, selectedItemKeyframes, selectedKeyframes]);
+    return entries
+  }, [selectedItemForEditor, selectedItemKeyframes, selectedKeyframes])
 
   const selectedEditorEasing = useMemo(() => {
-    if (selectedEditorKeyframes.length === 0) return undefined;
+    if (selectedEditorKeyframes.length === 0) return undefined
 
-    const firstEasing = selectedEditorKeyframes[0]?.keyframe.easing;
-    if (!firstEasing) return undefined;
+    const firstEasing = selectedEditorKeyframes[0]?.keyframe.easing
+    if (!firstEasing) return undefined
 
     return selectedEditorKeyframes.every(({ keyframe }) => keyframe.easing === firstEasing)
       ? firstEasing
-      : undefined;
-  }, [selectedEditorKeyframes]);
+      : undefined
+  }, [selectedEditorKeyframes])
 
   const selectedBezierPoints = useMemo(() => {
     if (selectedEditorEasing !== 'cubic-bezier' || selectedEditorKeyframes.length === 0) {
-      return null;
+      return null
     }
 
-    const first = buildEasingConfig('cubic-bezier', selectedEditorKeyframes[0]?.keyframe.easingConfig);
+    const first = buildEasingConfig(
+      'cubic-bezier',
+      selectedEditorKeyframes[0]?.keyframe.easingConfig,
+    )
     if (first?.type !== 'cubic-bezier' || !first.bezier) {
-      return { ...DEFAULT_BEZIER_POINTS };
+      return { ...DEFAULT_BEZIER_POINTS }
     }
 
-    return first.bezier;
-  }, [selectedEditorEasing, selectedEditorKeyframes]);
+    return first.bezier
+  }, [selectedEditorEasing, selectedEditorKeyframes])
 
   const selectedBezierPreset = useMemo<BezierPresetValue>(() => {
-    if (!selectedBezierPoints) return 'custom';
+    if (!selectedBezierPoints) return 'custom'
 
-    const match = BEZIER_PRESETS.find((preset) => areBezierPointsEqual(preset.points, selectedBezierPoints));
-    return match?.value ?? 'custom';
-  }, [selectedBezierPoints]);
+    const match = BEZIER_PRESETS.find((preset) =>
+      areBezierPointsEqual(preset.points, selectedBezierPoints),
+    )
+    return match?.value ?? 'custom'
+  }, [selectedBezierPoints])
 
   const hasMixedBezierConfig = useMemo(() => {
-    if (!selectedBezierPoints) return false;
+    if (!selectedBezierPoints) return false
 
     return selectedEditorKeyframes.some(({ keyframe }) => {
-      const config = buildEasingConfig('cubic-bezier', keyframe.easingConfig);
-      return !config?.bezier || !areBezierPointsEqual(config.bezier, selectedBezierPoints);
-    });
-  }, [selectedBezierPoints, selectedEditorKeyframes]);
+      const config = buildEasingConfig('cubic-bezier', keyframe.easingConfig)
+      return !config?.bezier || !areBezierPointsEqual(config.bezier, selectedBezierPoints)
+    })
+  }, [selectedBezierPoints, selectedEditorKeyframes])
 
   const selectedSpringParameters = useMemo<SpringParameters | null>(() => {
     if (selectedEditorEasing !== 'spring' || selectedEditorKeyframes.length === 0) {
-      return null;
+      return null
     }
 
-    const first = buildEasingConfig('spring', selectedEditorKeyframes[0]?.keyframe.easingConfig);
+    const first = buildEasingConfig('spring', selectedEditorKeyframes[0]?.keyframe.easingConfig)
     if (first?.type !== 'spring' || !first.spring) {
-      return { ...DEFAULT_SPRING_PARAMS };
+      return { ...DEFAULT_SPRING_PARAMS }
     }
 
-    return first.spring;
-  }, [selectedEditorEasing, selectedEditorKeyframes]);
+    return first.spring
+  }, [selectedEditorEasing, selectedEditorKeyframes])
 
   const hasMixedSpringConfig = useMemo(() => {
-    if (!selectedSpringParameters) return false;
+    if (!selectedSpringParameters) return false
 
     return selectedEditorKeyframes.some(({ keyframe }) => {
-      const config = buildEasingConfig('spring', keyframe.easingConfig);
-      const spring = config?.spring;
+      const config = buildEasingConfig('spring', keyframe.easingConfig)
+      const spring = config?.spring
       return (
         !spring ||
         spring.tension !== selectedSpringParameters.tension ||
         spring.friction !== selectedSpringParameters.friction ||
         spring.mass !== selectedSpringParameters.mass
-      );
-    });
-  }, [selectedEditorKeyframes, selectedSpringParameters]);
+      )
+    })
+  }, [selectedEditorKeyframes, selectedSpringParameters])
 
   // Calculate relative frame for the current item
   const relativeFrame = useMemo(() => {
-    if (!selectedItemForEditor) return 0;
-    return Math.max(0, currentFrame - selectedItemForEditor.from);
-  }, [currentFrame, selectedItemForEditor]);
+    if (!selectedItemForEditor) return 0
+    return Math.max(0, currentFrame - selectedItemForEditor.from)
+  }, [currentFrame, selectedItemForEditor])
 
   // Calculate transition-blocked frame ranges for the selected item
   const transitionBlockedRanges = useMemo(() => {
-    if (!selectedItemForEditor) return [];
+    if (!selectedItemForEditor) return []
     return getTransitionBlockedRanges(
       selectedItemForEditor.id,
       selectedItemForEditor,
-      transitions
-    );
-  }, [selectedItemForEditor, transitions]);
-
-  useEffect(() => {
-    if (editorMode !== 'split' || !selectedItemForEditor) return;
-    setSplitFrameViewport({
-      startFrame: 0,
-      endFrame: Math.max(selectedItemForEditor.durationInFrames, DEFAULT_SPLIT_VISIBLE_FRAMES),
-    });
-  }, [editorMode, selectedItemForEditor?.id, selectedItemForEditor?.durationInFrames]);
-
-  useEffect(() => {
-    if (!selectedBezierPoints) return;
-    setBezierDraft({
-      x1: String(selectedBezierPoints.x1),
-      y1: String(selectedBezierPoints.y1),
-      x2: String(selectedBezierPoints.x2),
-      y2: String(selectedBezierPoints.y2),
-    });
-  }, [selectedBezierPoints]);
-
-  useEffect(() => {
-    if (!selectedSpringParameters) return;
-    setSpringDraft({
-      tension: String(selectedSpringParameters.tension),
-      friction: String(selectedSpringParameters.friction),
-      mass: String(selectedSpringParameters.mass),
-    });
-  }, [selectedSpringParameters]);
-
-  useEffect(() => {
-    const node = advancedControlsRef.current;
-    if (!node) {
-      setAdvancedControlsHeight(0);
-      return;
-    }
-
-    const updateHeight = () => {
-      setAdvancedControlsHeight(node.offsetHeight);
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(node);
-
-    return () => observer.disconnect();
-  }, [selectedEditorEasing, selectedEditorKeyframes.length, containerWidth]);
+      selectedItemTransitions,
+    )
+  }, [selectedItemForEditor, selectedItemTransitions])
 
   // Handle drag start - capture snapshot for undo batching
   const handleDragStart = useCallback(() => {
-    dragSnapshotRef.current = captureSnapshot();
-  }, []);
+    dragSnapshotRef.current = captureSnapshot()
+  }, [])
 
   // Handle drag end - commit undo entry with pre-captured snapshot
   const handleDragEnd = useCallback(() => {
-    const beforeSnapshot = dragSnapshotRef.current;
+    const beforeSnapshot = dragSnapshotRef.current
     if (beforeSnapshot) {
-      useTimelineCommandStore.getState().addUndoEntry(
-        { type: 'MOVE_KEYFRAME_GRAPH', payload: {} },
-        beforeSnapshot
-      );
-      useTimelineSettingsStore.getState().markDirty();
-      dragSnapshotRef.current = null;
+      useTimelineCommandStore
+        .getState()
+        .addUndoEntry({ type: 'MOVE_KEYFRAME_GRAPH', payload: {} }, beforeSnapshot)
+      useTimelineSettingsStore.getState().markDirty()
+      dragSnapshotRef.current = null
     }
-  }, []);
+  }, [])
 
   // Handle keyframe move in graph editor (no undo per call - batched via drag start/end)
   const handleKeyframeMove = useCallback(
     (ref: KeyframeRef, newFrame: number, newValue: number) => {
       const existingKeyframe = selectedItemKeyframes?.properties
         .find((property) => property.property === ref.property)
-        ?.keyframes.find((keyframe) => keyframe.id === ref.keyframeId);
-      const initialFrame = existingKeyframe?.frame ?? newFrame;
+        ?.keyframes.find((keyframe) => keyframe.id === ref.keyframeId)
+      const initialFrame = existingKeyframe?.frame ?? newFrame
       const clampedFrame = clampFrameToBlockedRanges(
         Math.max(0, Math.round(newFrame)),
         initialFrame,
-        transitionBlockedRanges
-      );
+        transitionBlockedRanges,
+      )
 
       _updateKeyframe(ref.itemId, ref.property, ref.keyframeId, {
         frame: clampedFrame,
         value: newValue,
-      });
+      })
     },
-    [_updateKeyframe, selectedItemKeyframes, transitionBlockedRanges]
-  );
+    [_updateKeyframe, selectedItemKeyframes, transitionBlockedRanges],
+  )
 
   const handleBezierHandleMove = useCallback(
     (ref: KeyframeRef, bezier: BezierControlPoints) => {
+      const existingKeyframe = selectedItemKeyframes?.properties
+        .find((property) => property.property === ref.property)
+        ?.keyframes.find((keyframe) => keyframe.id === ref.keyframeId)
+      const nextEasing = existingKeyframe?.easing
+
       _updateKeyframe(ref.itemId, ref.property, ref.keyframeId, {
-        easing: 'cubic-bezier',
+        easing:
+          nextEasing === 'ease-in' ||
+          nextEasing === 'ease-out' ||
+          nextEasing === 'ease-in-out' ||
+          nextEasing === 'linear'
+            ? nextEasing
+            : 'cubic-bezier',
         easingConfig: {
           type: 'cubic-bezier',
           bezier,
         },
-      });
+      })
     },
-    [_updateKeyframe]
-  );
+    [_updateKeyframe, selectedItemKeyframes],
+  )
 
   // Handle selection change in graph editor
   const handleSelectionChange = useCallback(
     (keyframeIds: Set<string>) => {
-      if (!selectedItemForEditor) return;
+      if (!selectedItemForEditor) return
 
-      const refs: KeyframeRef[] = [];
+      const refs: KeyframeRef[] = []
       for (const id of keyframeIds) {
         // Find which property this keyframe belongs to
         for (const prop of selectedItemKeyframes?.properties ?? []) {
-          const kf = prop.keyframes.find((k) => k.id === id);
+          const kf = prop.keyframes.find((k) => k.id === id)
           if (kf) {
             refs.push({
               itemId: selectedItemForEditor.id,
               property: prop.property,
               keyframeId: id,
-            });
-            break;
+            })
+            break
           }
         }
       }
 
       if (refs.length === 0) {
-        clearKeyframeSelection();
+        clearKeyframeSelection()
       } else if (refs.length === 1 && refs[0]) {
-        selectKeyframe(refs[0]);
+        selectKeyframe(refs[0])
       } else if (refs.length > 1) {
-        selectKeyframes(refs);
+        selectKeyframes(refs)
       }
     },
-    [selectedItemForEditor, selectedItemKeyframes, clearKeyframeSelection, selectKeyframe, selectKeyframes]
-  );
+    [
+      selectedItemForEditor,
+      selectedItemKeyframes,
+      clearKeyframeSelection,
+      selectKeyframe,
+      selectKeyframes,
+    ],
+  )
 
   // Handle property change in graph editor
   const handlePropertyChange = useCallback((property: AnimatableProperty | null) => {
-    setSelectedProperty(property);
-  }, []);
+    setSelectedProperty(property)
+  }, [])
 
   const handleCopyKeyframes = useCallback(() => {
-    if (selectedEditorKeyframes.length === 0) return;
-    copySelectedKeyframes();
-  }, [copySelectedKeyframes, selectedEditorKeyframes.length]);
+    if (selectedEditorKeyframes.length === 0) return
+    copySelectedKeyframes()
+  }, [copySelectedKeyframes, selectedEditorKeyframes.length])
 
   const handleCutKeyframes = useCallback(() => {
-    if (selectedEditorKeyframes.length === 0) return;
-    cutSelectedKeyframes();
-  }, [cutSelectedKeyframes, selectedEditorKeyframes.length]);
+    if (selectedEditorKeyframes.length === 0) return
+    cutSelectedKeyframes()
+  }, [cutSelectedKeyframes, selectedEditorKeyframes.length])
 
   const handleSelectedKeyframeEasingChange = useCallback(
     (value: string) => {
-      if (selectedEditorKeyframes.length === 0) return;
+      if (selectedEditorKeyframes.length === 0) return
 
-      const easing = value as EasingType;
+      const easing = value as EasingType
       timelineActions.updateKeyframes(
         selectedEditorKeyframes.map(({ ref, keyframe }) => ({
           itemId: ref.itemId,
@@ -705,17 +1112,15 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
             easing,
             easingConfig: buildEasingConfig(easing, keyframe.easingConfig),
           },
-        }))
-      );
+        })),
+      )
     },
-    [selectedEditorKeyframes]
-  );
+    [selectedEditorKeyframes],
+  )
 
   const applySelectedKeyframeUpdates = useCallback(
-    (
-      buildUpdates: (keyframe: Keyframe, ref: KeyframeRef) => Partial<Omit<Keyframe, 'id'>>
-    ) => {
-      if (selectedEditorKeyframes.length === 0) return;
+    (buildUpdates: (keyframe: Keyframe, ref: KeyframeRef) => Partial<Omit<Keyframe, 'id'>>) => {
+      if (selectedEditorKeyframes.length === 0) return
 
       timelineActions.updateKeyframes(
         selectedEditorKeyframes.map(({ ref, keyframe }) => ({
@@ -723,169 +1128,75 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
           property: ref.property,
           keyframeId: ref.keyframeId,
           updates: buildUpdates(keyframe, ref),
-        }))
-      );
+        })),
+      )
     },
-    [selectedEditorKeyframes]
-  );
+    [selectedEditorKeyframes],
+  )
 
-  const handleBezierPresetChange = useCallback(
-    (value: string) => {
-      if (value === 'custom') return;
-
-      const preset = BEZIER_PRESETS.find((candidate) => candidate.value === value);
-      if (!preset) return;
-
-      setBezierDraft({
-        x1: String(preset.points.x1),
-        y1: String(preset.points.y1),
-        x2: String(preset.points.x2),
-        y2: String(preset.points.y2),
-      });
-
+  const applyBezierToSelection = useCallback(
+    (bezier: BezierControlPoints) => {
       applySelectedKeyframeUpdates(() => ({
         easing: 'cubic-bezier',
         easingConfig: {
           type: 'cubic-bezier',
-          bezier: { ...preset.points },
+          bezier,
         },
-      }));
+      }))
     },
-    [applySelectedKeyframeUpdates]
-  );
+    [applySelectedKeyframeUpdates],
+  )
 
-  const handleBezierDraftChange = useCallback((key: BezierInputKey, value: string) => {
-    setBezierDraft((prev) => ({ ...prev, [key]: value }));
-  }, []);
-
-  const commitBezierDraft = useCallback(
-    (key: BezierInputKey) => {
-      if (!selectedBezierPoints) return;
-
-      const parsed = Number(bezierDraft[key]);
-      if (!Number.isFinite(parsed)) {
-        setBezierDraft((prev) => ({
-          ...prev,
-          [key]: String(selectedBezierPoints[key]),
-        }));
-        return;
-      }
-
-      const nextBezier = {
-        ...selectedBezierPoints,
-        [key]: clampBezierValue(key, parsed),
-      };
-
-      setBezierDraft({
-        x1: String(nextBezier.x1),
-        y1: String(nextBezier.y1),
-        x2: String(nextBezier.x2),
-        y2: String(nextBezier.y2),
-      });
-
-      applySelectedKeyframeUpdates(() => ({
-        easing: 'cubic-bezier',
-        easingConfig: {
-          type: 'cubic-bezier',
-          bezier: nextBezier,
-        },
-      }));
-    },
-    [applySelectedKeyframeUpdates, bezierDraft, selectedBezierPoints]
-  );
-
-  const handleSpringDraftChange = useCallback((key: SpringInputKey, value: string) => {
-    setSpringDraft((prev) => ({ ...prev, [key]: value }));
-  }, []);
-
-  const commitSpringDraft = useCallback(
-    (key: SpringInputKey) => {
-      if (!selectedSpringParameters) return;
-
-      const parsed = Number(springDraft[key]);
-      if (!Number.isFinite(parsed)) {
-        setSpringDraft((prev) => ({
-          ...prev,
-          [key]: String(selectedSpringParameters[key]),
-        }));
-        return;
-      }
-
-      const nextSpring = {
-        ...selectedSpringParameters,
-        [key]: clampSpringValue(key, parsed),
-      };
-
-      setSpringDraft({
-        tension: String(nextSpring.tension),
-        friction: String(nextSpring.friction),
-        mass: String(nextSpring.mass),
-      });
-
+  const applySpringToSelection = useCallback(
+    (spring: SpringParameters) => {
       applySelectedKeyframeUpdates(() => ({
         easing: 'spring',
         easingConfig: {
           type: 'spring',
-          spring: nextSpring,
+          spring,
         },
-      }));
+      }))
     },
-    [applySelectedKeyframeUpdates, selectedSpringParameters, springDraft]
-  );
-
-  const handleDraftKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>, commit: () => void) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        commit();
-        event.currentTarget.blur();
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.currentTarget.blur();
-      }
-    },
-    []
-  );
+    [applySelectedKeyframeUpdates],
+  )
 
   const handlePasteKeyframes = useCallback(() => {
     if (!selectedItemForEditor || !keyframeClipboard || keyframeClipboard.keyframes.length === 0) {
-      return;
+      return
     }
 
     const isBlockedFrame = (frame: number) =>
-      transitionBlockedRanges.some((range) => frame >= range.start && frame < range.end);
+      transitionBlockedRanges.some((range) => frame >= range.start && frame < range.end)
 
     const anchorFrame = Math.max(
       0,
-      Math.min(selectedItemForEditor.durationInFrames - 1, relativeFrame)
-    );
+      Math.min(selectedItemForEditor.durationInFrames - 1, relativeFrame),
+    )
     const payloads: Array<{
-      itemId: string;
-      property: AnimatableProperty;
-      frame: number;
-      value: number;
-      easing: EasingType;
-      easingConfig?: EasingConfig;
-    }> = [];
-    const movedSourceRefs: KeyframeRef[] = [];
-    let skippedUnsupported = 0;
-    let skippedBlocked = 0;
+      itemId: string
+      property: AnimatableProperty
+      frame: number
+      value: number
+      easing: EasingType
+      easingConfig?: EasingConfig
+    }> = []
+    let skippedUnsupported = 0
+    let skippedBlocked = 0
 
-    keyframeClipboard.keyframes.forEach((keyframe, index) => {
+    keyframeClipboard.keyframes.forEach((keyframe) => {
       if (!availableProperties.includes(keyframe.property)) {
-        skippedUnsupported += 1;
-        return;
+        skippedUnsupported += 1
+        return
       }
 
       const frame = Math.max(
         0,
-        Math.min(selectedItemForEditor.durationInFrames - 1, anchorFrame + keyframe.frame)
-      );
+        Math.min(selectedItemForEditor.durationInFrames - 1, anchorFrame + keyframe.frame),
+      )
 
       if (isBlockedFrame(frame)) {
-        skippedBlocked += 1;
-        return;
+        skippedBlocked += 1
+        return
       }
 
       payloads.push({
@@ -895,81 +1206,70 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
         value: keyframe.value,
         easing: keyframe.easing,
         easingConfig: keyframe.easingConfig,
-      });
+      })
+    })
 
-      if (isKeyframeClipboardCut) {
-        const sourceRef = keyframeClipboard.sourceRefs[index];
-        if (sourceRef) {
-          movedSourceRefs.push(sourceRef);
-        }
-      }
-    });
-
-    if (payloads.length === 0) {
-      const reasons: string[] = [];
+    const buildSkipReasons = (): string[] => {
+      const reasons: string[] = []
       if (skippedUnsupported > 0) {
-        reasons.push(
-          `${skippedUnsupported} unsupported by the selected clip`
-        );
+        reasons.push(t('timeline.keyframeEditor.reasonUnsupported', { count: skippedUnsupported }))
       }
       if (skippedBlocked > 0) {
-        reasons.push(
-          `${skippedBlocked} blocked by transition regions`
-        );
+        reasons.push(t('timeline.keyframeEditor.reasonBlocked', { count: skippedBlocked }))
       }
-
-      toast.warning('No keyframes pasted', {
-        description: reasons.join('. '),
-      });
-      return;
+      return reasons
     }
 
-    if (isKeyframeClipboardCut && movedSourceRefs.length > 0) {
-      timelineActions.removeKeyframes(movedSourceRefs);
+    if (isKeyframeClipboardCut && (skippedUnsupported > 0 || skippedBlocked > 0)) {
+      toast.warning(t('timeline.keyframeEditor.unableToPasteCut'), {
+        description: t('timeline.keyframeEditor.unableToPasteCutDescription', {
+          reasons: buildSkipReasons().join('. '),
+        }),
+      })
+      return
     }
 
-    const insertedIds = timelineActions.addKeyframes(payloads);
+    if (payloads.length === 0) {
+      toast.warning(t('timeline.keyframeEditor.noKeyframesPasted'), {
+        description: buildSkipReasons().join('. '),
+      })
+      return
+    }
+
+    const insertedIds = timelineActions.addKeyframes(payloads)
     const insertedRefs = insertedIds.map((keyframeId, index) => ({
       itemId: selectedItemForEditor.id,
       property: payloads[index]!.property,
       keyframeId,
-    }));
+    }))
 
     if (insertedRefs.length > 0) {
-      selectKeyframes(insertedRefs);
+      selectKeyframes(insertedRefs)
     } else {
-      clearKeyframeSelection();
+      clearKeyframeSelection()
     }
 
     if (isKeyframeClipboardCut) {
-      clearKeyframeClipboard();
+      clearKeyframeClipboard()
     }
 
-    const pastedCount = insertedRefs.length;
-    const skippedCount = skippedUnsupported + skippedBlocked;
-    const actionLabel = isKeyframeClipboardCut ? 'Moved' : 'Pasted';
-    const keyframeLabel = `${pastedCount} keyframe${pastedCount === 1 ? '' : 's'}`;
+    const pastedCount = insertedRefs.length
+    const skippedCount = skippedUnsupported + skippedBlocked
+    const summaryText = isKeyframeClipboardCut
+      ? t('timeline.keyframeEditor.movedKeyframes', { count: pastedCount })
+      : t('timeline.keyframeEditor.pastedKeyframes', { count: pastedCount })
 
     if (skippedCount > 0) {
-      const reasons: string[] = [];
-      if (skippedUnsupported > 0) {
-        reasons.push(
-          `${skippedUnsupported} unsupported by the selected clip`
-        );
-      }
-      if (skippedBlocked > 0) {
-        reasons.push(
-          `${skippedBlocked} blocked by transition regions`
-        );
-      }
-
-      toast.warning(`${actionLabel} ${keyframeLabel}`, {
-        description: `${skippedCount} skipped. ${reasons.join('. ')}`,
-      });
-      return;
+      toast.warning(summaryText, {
+        description: t('timeline.keyframeEditor.skippedDescription', {
+          count: skippedCount,
+          reasons: buildSkipReasons().join('. '),
+        }),
+      })
+      return
     }
 
-    toast.success(`${actionLabel} ${keyframeLabel}`);
+    toast.success(summaryText)
   }, [
     availableProperties,
     clearKeyframeClipboard,
@@ -980,303 +1280,352 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     selectKeyframes,
     selectedItemForEditor,
     transitionBlockedRanges,
-  ]);
+    t,
+  ])
 
+  // The view-mode toggle is always visible now, so the hotkeys map to it in
+  // every context (including the Animate workspace's split-capable toggle).
   useHotkeys(
     hotkeys.KEYFRAME_EDITOR_GRAPH,
     (event) => {
-      event.preventDefault();
-      setEditorMode('graph');
+      event.preventDefault()
+      setEditorMode('graph')
     },
     { ...HOTKEY_OPTIONS, enabled: isOpen },
-    [isOpen]
-  );
+    [isOpen],
+  )
 
   useHotkeys(
     hotkeys.KEYFRAME_EDITOR_DOPESHEET,
     (event) => {
-      event.preventDefault();
-      setEditorMode('dopesheet');
+      event.preventDefault()
+      setEditorMode('dopesheet')
     },
     { ...HOTKEY_OPTIONS, enabled: isOpen },
-    [isOpen]
-  );
-
-  useHotkeys(
-    hotkeys.KEYFRAME_EDITOR_SPLIT,
-    (event) => {
-      event.preventDefault();
-      setEditorMode('split');
-    },
-    { ...HOTKEY_OPTIONS, enabled: isOpen },
-    [isOpen]
-  );
+    [isOpen],
+  )
 
   useHotkeys(
     hotkeys.COPY,
     (event) => {
-      event.preventDefault();
-      handleCopyKeyframes();
+      event.preventDefault()
+      handleCopyKeyframes()
     },
     {
       ...HOTKEY_OPTIONS,
       enabled: isOpen && selectedEditorKeyframes.length > 0,
     },
-    [handleCopyKeyframes, isOpen, selectedEditorKeyframes.length]
-  );
+    [handleCopyKeyframes, isOpen, selectedEditorKeyframes.length],
+  )
 
   useHotkeys(
     hotkeys.CUT,
     (event) => {
-      event.preventDefault();
-      handleCutKeyframes();
+      event.preventDefault()
+      handleCutKeyframes()
     },
     {
       ...HOTKEY_OPTIONS,
       enabled: isOpen && selectedEditorKeyframes.length > 0,
     },
-    [handleCutKeyframes, isOpen, selectedEditorKeyframes.length]
-  );
+    [handleCutKeyframes, isOpen, selectedEditorKeyframes.length],
+  )
 
   useHotkeys(
     hotkeys.PASTE,
     (event) => {
-      event.preventDefault();
-      handlePasteKeyframes();
+      event.preventDefault()
+      handlePasteKeyframes()
     },
     {
       ...HOTKEY_OPTIONS,
       enabled: isOpen && !!selectedItemForEditor && !!keyframeClipboard,
     },
-    [handlePasteKeyframes, isOpen, keyframeClipboard, selectedItemForEditor]
-  );
+    [handlePasteKeyframes, isOpen, keyframeClipboard, selectedItemForEditor],
+  )
 
   // Handle scrubbing in graph editor - convert clip-relative frame to absolute frame
   const handleScrub = useCallback(
     (clipRelativeFrame: number) => {
-      if (!selectedItemForEditor) return;
-      
+      if (!selectedItemForEditor) return
+
       // Convert clip-relative frame to absolute frame
-      const absoluteFrame = selectedItemForEditor.from + clipRelativeFrame;
-      
+      const absoluteFrame = selectedItemForEditor.from + clipRelativeFrame
+
       // Route editor scrubbing through the preview scrub path so the preview
       // can stay on its fast-scrub presentation instead of doing full seeks.
-      usePlaybackStore.getState().setScrubFrame(absoluteFrame, selectedItemForEditor.id);
+      usePlaybackStore.getState().setScrubFrame(absoluteFrame, selectedItemForEditor.id)
     },
-    [selectedItemForEditor]
-  );
+    [selectedItemForEditor],
+  )
+  const handleScrubStart = useCallback(() => {
+    keyframeEditorScrubbingRef.current = true
+    usePlaybackStore.getState().pause()
+  }, [])
 
   const handleScrubEnd = useCallback(() => {
-    usePlaybackStore.getState().setPreviewFrame(null);
-  }, []);
+    keyframeEditorScrubbingRef.current = false
+    usePlaybackStore.getState().setPreviewFrame(null)
+  }, [])
 
   // Handle adding a keyframe at the current frame
   const handleAddKeyframe = useCallback(
     (property: AnimatableProperty, frame: number) => {
-      if (!selectedItemForEditor) return;
+      if (!selectedItemForEditor) return
 
-      const propKeyframes = keyframesByProperty[property] ?? [];
-      const baseValue = getBaseKeyframeValue(selectedItemForEditor, property, canvas);
-      const value = interpolatePropertyValue(propKeyframes, frame, baseValue);
+      const propKeyframes = keyframesByProperty[property] ?? []
+      const baseValue = getBaseKeyframeValue(selectedItemForEditor, property, canvas)
+      const value = interpolatePropertyValue(propKeyframes, frame, baseValue)
 
-      timelineActions.addKeyframe(
-        selectedItemForEditor.id,
-        property,
-        frame,
-        value
-      );
+      timelineActions.addKeyframe(selectedItemForEditor.id, property, frame, value)
     },
-    [canvas, keyframesByProperty, selectedItemForEditor]
-  );
+    [canvas, keyframesByProperty, selectedItemForEditor],
+  )
+  const handleAddKeyframes = useCallback(
+    (entries: Array<{ property: AnimatableProperty; frame: number }>) => {
+      if (!selectedItemForEditor || entries.length === 0) return
+
+      const payloads = entries.map(({ property, frame }) => {
+        const propKeyframes = keyframesByProperty[property] ?? []
+        const baseValue = getBaseKeyframeValue(selectedItemForEditor, property, canvas)
+        const value = interpolatePropertyValue(propKeyframes, frame, baseValue)
+
+        return {
+          itemId: selectedItemForEditor.id,
+          property,
+          frame,
+          value,
+        }
+      })
+
+      timelineActions.addKeyframes(payloads)
+    },
+    [canvas, keyframesByProperty, selectedItemForEditor],
+  )
+  const handleDuplicateKeyframes = useCallback(
+    (entries: Array<{ ref: KeyframeRef; frame: number; value: number }>) => {
+      if (!selectedItemForEditor || entries.length === 0) return
+
+      const payloads = entries.flatMap(({ ref, frame, value }) => {
+        const sourceKeyframe = keyframesByProperty[ref.property]?.find(
+          (keyframe) => keyframe.id === ref.keyframeId,
+        )
+        if (!sourceKeyframe) {
+          return []
+        }
+
+        return [
+          {
+            itemId: selectedItemForEditor.id,
+            property: ref.property,
+            frame,
+            value,
+            easing: sourceKeyframe.easing,
+            easingConfig: sourceKeyframe.easingConfig,
+          },
+        ]
+      })
+
+      if (payloads.length === 0) return
+
+      const insertedIds = timelineActions.addKeyframes(payloads)
+      const insertedRefs = insertedIds.map((keyframeId, index) => ({
+        itemId: selectedItemForEditor.id,
+        property: payloads[index]!.property,
+        keyframeId,
+      }))
+
+      if (insertedRefs.length > 0) {
+        selectKeyframes(insertedRefs)
+      }
+    },
+    [keyframesByProperty, selectKeyframes, selectedItemForEditor],
+  )
 
   const propertyValues = useMemo(() => {
-    if (!selectedItemForEditor) return {};
+    if (!selectedItemForEditor) return {}
 
-    const values: Partial<Record<AnimatableProperty, number>> = {};
+    const values: Partial<Record<AnimatableProperty, number>> = {}
     for (const property of availableProperties) {
-      const propKeyframes = keyframesByProperty[property] ?? [];
-      const baseValue = getBaseKeyframeValue(selectedItemForEditor, property, canvas);
-      values[property] = interpolatePropertyValue(propKeyframes, relativeFrame, baseValue);
+      const propKeyframes = keyframesByProperty[property] ?? []
+      const baseValue = getBaseKeyframeValue(selectedItemForEditor, property, canvas)
+      values[property] = interpolatePropertyValue(propKeyframes, relativeFrame, baseValue)
     }
-    return values;
-  }, [availableProperties, canvas, keyframesByProperty, relativeFrame, selectedItemForEditor]);
+    return values
+  }, [availableProperties, canvas, keyframesByProperty, relativeFrame, selectedItemForEditor])
 
   const handlePropertyValueCommit = useCallback(
-    (
-      property: AnimatableProperty,
-      value: number,
-      options?: { allowCreate?: boolean }
-    ) => {
-      if (!selectedItemForEditor) return;
+    (property: AnimatableProperty, value: number, options?: { allowCreate?: boolean }) => {
+      if (!selectedItemForEditor) return
 
       const existingKeyframe = keyframesByProperty[property]?.find(
-        (keyframe) => keyframe.frame === relativeFrame
-      );
+        (keyframe) => keyframe.frame === relativeFrame,
+      )
 
       if (existingKeyframe) {
-        timelineActions.updateKeyframe(
-          selectedItemForEditor.id,
-          property,
-          existingKeyframe.id,
-          { value }
-        );
+        timelineActions.updateKeyframe(selectedItemForEditor.id, property, existingKeyframe.id, {
+          value,
+        })
         selectKeyframe({
           itemId: selectedItemForEditor.id,
           property,
           keyframeId: existingKeyframe.id,
-        });
-        return;
+        })
+        return
       }
 
       if (options?.allowCreate === false) {
-        return;
+        return
       }
 
       const keyframeId = timelineActions.addKeyframe(
         selectedItemForEditor.id,
         property,
         relativeFrame,
-        value
-      );
+        value,
+      )
 
       if (keyframeId) {
         selectKeyframe({
           itemId: selectedItemForEditor.id,
           property,
           keyframeId,
-        });
+        })
       }
     },
-    [keyframesByProperty, relativeFrame, selectKeyframe, selectedItemForEditor]
-  );
+    [keyframesByProperty, relativeFrame, selectKeyframe, selectedItemForEditor],
+  )
 
   // Handle removing keyframes
-  const handleRemoveKeyframes = useCallback(
-    (refs: KeyframeRef[]) => {
-      if (refs.length === 0) return;
-      timelineActions.removeKeyframes(refs);
-    },
-    []
-  );
+  const handleRemoveKeyframes = useCallback((refs: KeyframeRef[]) => {
+    if (refs.length === 0) return
+    timelineActions.removeKeyframes(refs)
+  }, [])
 
   // Handle navigation to a keyframe - convert clip-relative frame to absolute
   const handleNavigateToKeyframe = useCallback(
     (clipRelativeFrame: number) => {
-      if (!selectedItemForEditor) return;
-      const absoluteFrame = selectedItemForEditor.from + clipRelativeFrame;
-      usePlaybackStore.getState().setCurrentFrame(absoluteFrame);
+      if (!selectedItemForEditor) return
+      const absoluteFrame = selectedItemForEditor.from + clipRelativeFrame
+      usePlaybackStore.getState().setCurrentFrame(absoluteFrame)
     },
-    [selectedItemForEditor]
-  );
+    [selectedItemForEditor],
+  )
+
+  const isSidePlacement = placement === 'side'
+
+  // Clamp content height when max shrinks (e.g. parent resized smaller)
+  const clampedContentHeight = Math.min(contentHeight, maxContentHeight)
+  const sideContentHeight = Math.max(
+    MIN_CONTENT_HEIGHT,
+    parentHeight > 0 ? parentHeight - GRAPH_PANEL_HEADER_HEIGHT : MIN_CONTENT_HEIGHT,
+  )
+  const resolvedContentHeight = isSidePlacement ? sideContentHeight : clampedContentHeight
 
   // Calculate total panel height for proper flex sizing
   // When closed, show just the header; when open, show header + resize handle + content
   const panelHeight = isOpen
-    ? GRAPH_PANEL_HEADER_HEIGHT + RESIZE_HANDLE_HEIGHT + contentHeight
-    : GRAPH_PANEL_HEADER_HEIGHT;
+    ? GRAPH_PANEL_HEADER_HEIGHT + RESIZE_HANDLE_HEIGHT + clampedContentHeight
+    : GRAPH_PANEL_HEADER_HEIGHT
 
-  const editorWidth = Math.max(0, containerWidth - 16);
-  const showBezierControls = selectedEditorEasing === 'cubic-bezier';
-  const showSpringControls = selectedEditorEasing === 'spring';
-  const showAdvancedControls = showBezierControls || showSpringControls;
+  const editorWidth = Math.max(0, containerWidth - 16)
+  const showBezierControls = selectedEditorEasing === 'cubic-bezier'
+  const showSpringControls = selectedEditorEasing === 'spring'
+  // The easing strip only carries bezier/spring controls now — the old
+  // "select a keyframe" hint banner is dropped. Render (and reserve height for)
+  // the strip only when there are actual controls to show, so the editor
+  // reclaims that space the rest of the time.
+  const showEasingControls = Boolean(
+    (showBezierControls && selectedBezierPoints) ||
+    (showSpringControls && selectedSpringParameters),
+  )
+  const advancedControlsKey = useMemo(
+    () =>
+      selectedEditorKeyframes
+        .map(({ ref, keyframe }) =>
+          JSON.stringify({
+            itemId: ref.itemId,
+            property: ref.property,
+            keyframeId: ref.keyframeId,
+            easing: keyframe.easing,
+            easingConfig: keyframe.easingConfig ?? null,
+          }),
+        )
+        .join('|'),
+    [selectedEditorKeyframes],
+  )
   const editorHeight = Math.max(
     0,
-    contentHeight - 16 - advancedControlsHeight - (showAdvancedControls ? 8 : 0)
-  );
-  const splitAvailableWidth = Math.max(0, editorWidth - SPLIT_DIVIDER_WIDTH);
-  const canEnforceMinPaneWidth = splitAvailableWidth >= SPLIT_MIN_PANE_WIDTH * 2;
-  const minSplitRatio = canEnforceMinPaneWidth
-    ? SPLIT_MIN_PANE_WIDTH / Math.max(1, splitAvailableWidth)
-    : 0.1;
-  const maxSplitRatio = 1 - minSplitRatio;
-  const clampedSplitRatio = Math.max(minSplitRatio, Math.min(maxSplitRatio, splitRatio));
-  const splitLeftWidth = Math.max(0, Math.round(splitAvailableWidth * clampedSplitRatio));
-  const splitRightWidth = Math.max(0, splitAvailableWidth - splitLeftWidth);
-
-  const handleSplitResizeStart = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (editorMode !== 'split') return;
-      if (splitAvailableWidth <= 0) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setIsSplitResizing(true);
-      splitResizeStartXRef.current = e.clientX;
-      splitResizeStartRatioRef.current = clampedSplitRatio;
-    },
-    [editorMode, splitAvailableWidth, clampedSplitRatio]
-  );
-
-  useEffect(() => {
-    if (!isSplitResizing) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const availableWidth = Math.max(1, editorWidth - SPLIT_DIVIDER_WIDTH);
-      const canEnforce = availableWidth >= SPLIT_MIN_PANE_WIDTH * 2;
-      const minRatio = canEnforce ? SPLIT_MIN_PANE_WIDTH / availableWidth : 0.1;
-      const maxRatio = 1 - minRatio;
-
-      const deltaX = e.clientX - splitResizeStartXRef.current;
-      const deltaRatio = deltaX / availableWidth;
-      const nextRatio = Math.max(
-        minRatio,
-        Math.min(maxRatio, splitResizeStartRatioRef.current + deltaRatio)
-      );
-      setSplitRatio(nextRatio);
-    };
-
-    const handleMouseUp = () => {
-      setIsSplitResizing(false);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isSplitResizing, editorWidth]);
-
-  // Don't show panel if no item with keyframes is selected and panel is not explicitly open
-  const hasContent = !!selectedItemForEditor;
-
-  if (!hasContent && !isOpen) {
-    return null;
+    resolvedContentHeight - 16 - (showEasingControls ? ADVANCED_EASING_STRIP_RESERVED : 0),
+  )
+  // Only render the docked editor when explicitly opened from the toolbar/hotkey.
+  // Selecting a clip should not surface the docked panel by itself.
+  if (!isOpen) {
+    return null
   }
+
+  const resizeHandle = (
+    <div
+      data-resize-handle
+      className={cn(
+        'h-1.5 cursor-ns-resize flex items-center justify-center',
+        'bg-secondary/30 hover:bg-primary/30 transition-colors',
+        isResizing && 'bg-primary/50',
+      )}
+      onMouseDown={handleResizeStart}
+    >
+      <div className="w-8 h-0.5 rounded-full bg-muted-foreground/30" />
+    </div>
+  )
 
   return (
     <div
+      ref={panelRef}
+      tabIndex={-1}
+      onPointerEnter={(event) => {
+        setIsPointerWithinEditor(true)
+        const target = event.currentTarget
+        if (!target.contains(document.activeElement)) {
+          target.focus({ preventScroll: true })
+        }
+      }}
+      onPointerLeave={() => setIsPointerWithinEditor(false)}
+      onFocusCapture={() => setIsFocusWithinEditor(true)}
+      onBlurCapture={(event) => {
+        const nextFocused = event.relatedTarget as Node | null
+        if (event.currentTarget.contains(nextFocused)) {
+          return
+        }
+        setIsFocusWithinEditor(false)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          if (selectedEditorKeyframes.length > 0) {
+            event.preventDefault()
+            event.stopPropagation()
+            handleRemoveKeyframes(selectedEditorKeyframes.map(({ ref }) => ref))
+          }
+        }
+      }}
       className={cn(
-        'flex-shrink-0 border-t border-border bg-background overflow-hidden',
+        'flex-shrink-0 bg-background overflow-hidden outline-none',
+        isSidePlacement
+          ? 'flex h-full min-h-0 flex-col border-0'
+          : placement === 'top'
+            ? 'border-b border-border'
+            : 'border-t border-border',
         isOpen ? 'opacity-100' : 'opacity-90',
-        !isResizing && 'transition-all duration-200'
+        !isSidePlacement && !isResizing && 'transition-all duration-200',
       )}
-      style={{ height: panelHeight }}
+      style={isSidePlacement ? undefined : { height: panelHeight }}
     >
-      {/* Resize handle - only visible when open */}
-      {isOpen && (
-        <div
-          className={cn(
-            'h-1.5 cursor-ns-resize flex items-center justify-center',
-            'bg-secondary/30 hover:bg-primary/30 transition-colors',
-            isResizing && 'bg-primary/50'
-          )}
-          onMouseDown={handleResizeStart}
-        >
-          <div className="w-8 h-0.5 rounded-full bg-muted-foreground/30" />
-        </div>
-      )}
+      {placement === 'bottom' && resizeHandle}
 
       {/* Header bar - always visible */}
-      <div
-        className="h-8 flex items-center justify-between px-3 bg-secondary/30 border-b border-border cursor-pointer hover:bg-secondary/50"
-        onClick={onToggle}
-      >
+      <div className="h-8 flex items-center justify-between px-3 bg-secondary/30 border-b border-border">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-5 w-5 p-0">
-            {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
-          </Button>
           <span className="text-xs font-medium text-muted-foreground">
-            Keyframe Editor
+            {t('timeline.keyframeEditor.title')}
             {selectedItemForEditor && (
               <span className="ml-2 text-foreground">
                 - {selectedItemForEditor.label || selectedItemForEditor.type}
@@ -1290,365 +1639,140 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
 
         <div className="flex items-center gap-1">
           <Button
-            variant={editorMode === 'graph' ? 'secondary' : 'ghost'}
+            variant={effectiveEditorMode === 'dopesheet' ? 'secondary' : 'ghost'}
             size="sm"
             className="h-5 px-1.5 text-[10px]"
+            title={t('timeline.keyframeEditor.legend.sheetMode')}
+            aria-label={t('timeline.keyframeEditor.legend.sheetMode')}
             onClick={(e) => {
-              e.stopPropagation();
-              setEditorMode('graph');
+              e.stopPropagation()
+              setEditorMode('dopesheet')
             }}
           >
-            Graph
+            {t('timeline.keyframeEditor.sheet')}
           </Button>
           <Button
-            variant={editorMode === 'dopesheet' ? 'secondary' : 'ghost'}
+            variant={effectiveEditorMode === 'graph' ? 'secondary' : 'ghost'}
             size="sm"
             className="h-5 px-1.5 text-[10px]"
+            title={t('timeline.keyframeEditor.legend.graphMode')}
+            aria-label={t('timeline.keyframeEditor.legend.graphMode')}
             onClick={(e) => {
-              e.stopPropagation();
-              setEditorMode('dopesheet');
+              e.stopPropagation()
+              setEditorMode('graph')
             }}
           >
-            Sheet
+            {t('timeline.keyframeEditor.graph')}
           </Button>
-          <Button
-            variant={editorMode === 'split' ? 'secondary' : 'ghost'}
-            size="sm"
-            className="h-5 px-1.5 text-[10px]"
-            onClick={(e) => {
-              e.stopPropagation();
-              setEditorMode('split');
-            }}
-          >
-            Split
-          </Button>
-          <div className="w-px h-4 bg-border/70 mx-1" />
-          <Select
-            value={selectedEditorEasing}
-            onValueChange={handleSelectedKeyframeEasingChange}
-            disabled={selectedEditorKeyframes.length === 0}
-          >
-            <SelectTrigger
-              className="h-5 w-[110px] px-1.5 text-[10px] focus:ring-0 focus:ring-offset-0"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              aria-label="Selected keyframe interpolation"
+          {splitView && (
+            <Button
+              variant={effectiveEditorMode === 'split' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-5 px-1.5 text-[10px]"
+              title={t('timeline.keyframeEditor.split')}
+              aria-label={t('timeline.keyframeEditor.split')}
+              onClick={(e) => {
+                e.stopPropagation()
+                setEditorMode('split')
+              }}
             >
-              <SelectValue
-                placeholder={
-                  selectedEditorKeyframes.length === 0 ? 'Interpolation' : 'Mixed easing'
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {EASING_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value} className="text-xs">
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleCopyKeyframes();
-            }}
-            disabled={selectedEditorKeyframes.length === 0}
-            title="Copy selected keyframes"
-          >
-            <Copy className="w-3 h-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleCutKeyframes();
-            }}
-            disabled={selectedEditorKeyframes.length === 0}
-            title="Cut selected keyframes"
-          >
-            <Scissors className="w-3 h-3" />
-          </Button>
-          <Button
-            variant={isKeyframeClipboardCut ? 'secondary' : 'ghost'}
-            size="icon"
-            className="h-5 w-5 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              handlePasteKeyframes();
-            }}
-            disabled={!selectedItemForEditor || !keyframeClipboard}
-            title={isKeyframeClipboardCut ? 'Move keyframes from clipboard' : 'Paste keyframes'}
-          >
-            <ClipboardPaste className="w-3 h-3" />
-          </Button>
-          {isKeyframeClipboardCut && keyframeClipboard && (
-            <span className="text-[10px] font-medium text-amber-500">
-              Cut
-            </span>
+              {t('timeline.keyframeEditor.split')}
+            </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-          >
-            <X className="w-3 h-3" />
-          </Button>
+          {showCloseButton && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 p-0"
+              aria-label={t('common.close')}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose()
+              }}
+            >
+              <X className="w-3 h-3" />
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Keyframe editor content */}
       {isOpen && (
-        <div ref={containerRef} className="p-2" style={{ height: contentHeight }}>
-          {showAdvancedControls && (
-            <div
-              ref={advancedControlsRef}
-              className="mb-2 rounded-md border border-border bg-secondary/20 px-2 py-1.5"
-            >
-              {showBezierControls && selectedBezierPoints && (
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="font-medium text-foreground">Bezier</span>
-                  <Select value={selectedBezierPreset} onValueChange={handleBezierPresetChange}>
-                    <SelectTrigger className="h-7 w-[130px] text-xs focus:ring-0 focus:ring-offset-0">
-                      <SelectValue placeholder="Preset" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BEZIER_PRESETS.map((preset) => (
-                        <SelectItem key={preset.value} value={preset.value} className="text-xs">
-                          {preset.label}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="custom" className="text-xs">
-                        Custom
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {BEZIER_INPUT_KEYS.map((key) => (
-                    <label key={key} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <span className="uppercase">{key}</span>
-                      <Input
-                        value={bezierDraft[key]}
-                        onChange={(event) => handleBezierDraftChange(key, event.target.value)}
-                        onBlur={() => commitBezierDraft(key)}
-                        onKeyDown={(event) => handleDraftKeyDown(event, () => commitBezierDraft(key))}
-                        className="h-7 w-16 px-2 text-xs"
-                        inputMode="decimal"
-                      />
-                    </label>
-                  ))}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[11px]"
-                    onClick={() => handleBezierPresetChange('soft')}
-                  >
-                    Reset
-                  </Button>
-                  <span className="text-[11px] text-muted-foreground">
-                    {hasMixedBezierConfig ? 'Mixed curves selected' : 'Drag graph handles for custom curves'}
-                  </span>
-                </div>
-              )}
-              {showSpringControls && selectedSpringParameters && (
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="font-medium text-foreground">Spring</span>
-                  {SPRING_INPUT_KEYS.map((key) => (
-                    <label key={key} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <span className="capitalize">{key}</span>
-                      <Input
-                        value={springDraft[key]}
-                        onChange={(event) => handleSpringDraftChange(key, event.target.value)}
-                        onBlur={() => commitSpringDraft(key)}
-                        onKeyDown={(event) => handleDraftKeyDown(event, () => commitSpringDraft(key))}
-                        className={cn(
-                          'h-7 px-2 text-xs',
-                          key === 'mass' ? 'w-16' : 'w-[72px]'
-                        )}
-                        inputMode="decimal"
-                      />
-                    </label>
-                  ))}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[11px]"
-                    onClick={() => {
-                      setSpringDraft({
-                        tension: String(DEFAULT_SPRING_PARAMS.tension),
-                        friction: String(DEFAULT_SPRING_PARAMS.friction),
-                        mass: String(DEFAULT_SPRING_PARAMS.mass),
-                      });
-                      applySelectedKeyframeUpdates(() => ({
-                        easing: 'spring',
-                        easingConfig: {
-                          type: 'spring',
-                          spring: { ...DEFAULT_SPRING_PARAMS },
-                        },
-                      }));
-                    }}
-                  >
-                    Reset
-                  </Button>
-                  <span className="text-[11px] text-muted-foreground">
-                    {hasMixedSpringConfig ? 'Mixed spring settings selected' : 'Lower friction increases bounce'}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+        <div
+          ref={containerRef}
+          className={cn('min-h-0 p-2', isSidePlacement && 'flex-1')}
+          style={isSidePlacement ? undefined : { height: clampedContentHeight }}
+        >
           {selectedItemForEditor && containerWidth > 0 ? (
-            editorMode === 'split' ? (
-              <div className="flex h-full min-w-0">
-                <div className="h-full flex-shrink-0 min-w-0" style={{ width: splitLeftWidth }}>
-                  <ErrorBoundary level="component">
-                    <DopesheetEditor
-                      frameViewport={splitFrameViewport ?? undefined}
-                      onFrameViewportChange={setSplitFrameViewport}
-                      itemId={selectedItemForEditor.id}
-                      keyframesByProperty={keyframesByProperty}
-                      propertyValues={propertyValues}
-                      selectedProperty={selectedProperty}
-                      selectedKeyframeIds={selectedKeyframeIds}
-                      currentFrame={relativeFrame}
-                      globalFrame={currentFrame}
-                      totalFrames={selectedItemForEditor.durationInFrames}
-                      width={splitLeftWidth}
-                      height={editorHeight}
-                      className="min-w-0"
-                      onKeyframeMove={handleKeyframeMove}
-                      onSelectionChange={handleSelectionChange}
-                      onPropertyChange={handlePropertyChange}
-                      onActivePropertyChange={setActiveDopesheetProperty}
-                      onScrub={handleScrub}
-                      onScrubEnd={handleScrubEnd}
-                      onDragStart={handleDragStart}
-                      onDragEnd={handleDragEnd}
-                      onAddKeyframe={handleAddKeyframe}
-                      onPropertyValueCommit={handlePropertyValueCommit}
-                      onRemoveKeyframes={handleRemoveKeyframes}
-                      onNavigateToKeyframe={handleNavigateToKeyframe}
-                      transitionBlockedRanges={transitionBlockedRanges}
-                    />
-                  </ErrorBoundary>
-                </div>
-                <div
-                  className={cn(
-                    'w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center rounded-sm select-none',
-                    isSplitResizing
-                      ? 'bg-primary/20'
-                      : 'bg-secondary/20 hover:bg-primary/10 transition-colors'
-                  )}
-                  onMouseDown={handleSplitResizeStart}
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setSplitRatio(0.5);
-                  }}
-                  title="Drag to resize panes (double-click to reset)"
-                >
-                  <div
-                    className={cn(
-                      'h-8 w-0.5 rounded-full',
-                      isSplitResizing ? 'bg-primary/80' : 'bg-muted-foreground/40'
-                    )}
-                  />
-                </div>
-                <div className="h-full flex-shrink-0 min-w-0" style={{ width: splitRightWidth }}>
-                  <ValueGraphEditor
-                    frameViewport={splitFrameViewport ?? undefined}
-                    onFrameViewportChange={setSplitFrameViewport}
-                    itemId={selectedItemForEditor.id}
-                    keyframesByProperty={keyframesByProperty}
-                    selectedProperty={selectedProperty}
-                    selectedKeyframeIds={selectedKeyframeIds}
-                    currentFrame={relativeFrame}
-                    totalFrames={selectedItemForEditor.durationInFrames}
-                    width={splitRightWidth}
-                    height={editorHeight}
-                    className="min-w-0"
-                    onKeyframeMove={handleKeyframeMove}
-                    onBezierHandleMove={handleBezierHandleMove}
-                    onSelectionChange={handleSelectionChange}
-                    onPropertyChange={handlePropertyChange}
-                    onScrub={handleScrub}
-                    onScrubEnd={handleScrubEnd}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                    onAddKeyframe={handleAddKeyframe}
-                    onRemoveKeyframes={handleRemoveKeyframes}
-                    onNavigateToKeyframe={handleNavigateToKeyframe}
-                    transitionBlockedRanges={transitionBlockedRanges}
-                  />
-                </div>
-              </div>
-            ) : editorMode === 'dopesheet' ? (
+            <>
+              {showEasingControls && (
+                <AdvancedEasingControls
+                  key={advancedControlsKey}
+                  selectedBezierPoints={showBezierControls ? selectedBezierPoints : null}
+                  selectedBezierPreset={selectedBezierPreset}
+                  hasMixedBezierConfig={hasMixedBezierConfig}
+                  selectedSpringParameters={showSpringControls ? selectedSpringParameters : null}
+                  hasMixedSpringConfig={hasMixedSpringConfig}
+                  applyBezier={applyBezierToSelection}
+                  applySpring={applySpringToSelection}
+                />
+              )}
               <ErrorBoundary level="component">
                 <DopesheetEditor
                   itemId={selectedItemForEditor.id}
                   keyframesByProperty={keyframesByProperty}
                   propertyValues={propertyValues}
-                  selectedProperty={selectedProperty}
+                  selectedProperty={effectiveSelectedProperty}
                   selectedKeyframeIds={selectedKeyframeIds}
                   currentFrame={relativeFrame}
                   globalFrame={currentFrame}
+                  itemFrom={selectedItemForEditor.from}
                   totalFrames={selectedItemForEditor.durationInFrames}
+                  fps={canvas.fps}
                   width={editorWidth}
                   height={editorHeight}
                   onKeyframeMove={handleKeyframeMove}
+                  onBezierHandleMove={handleBezierHandleMove}
                   onSelectionChange={handleSelectionChange}
                   onPropertyChange={handlePropertyChange}
-                  onActivePropertyChange={setActiveDopesheetProperty}
+                  onActivePropertyChange={setSelectedProperty}
                   onScrub={handleScrub}
+                  onScrubStart={handleScrubStart}
                   onScrubEnd={handleScrubEnd}
                   onDragStart={handleDragStart}
                   onDragEnd={handleDragEnd}
                   onAddKeyframe={handleAddKeyframe}
+                  onAddKeyframes={handleAddKeyframes}
+                  onDuplicateKeyframes={handleDuplicateKeyframes}
                   onPropertyValueCommit={handlePropertyValueCommit}
                   onRemoveKeyframes={handleRemoveKeyframes}
+                  onCopyKeyframes={handleCopyKeyframes}
+                  onCutKeyframes={handleCutKeyframes}
+                  onPasteKeyframes={handlePasteKeyframes}
+                  hasKeyframeClipboard={Boolean(keyframeClipboard?.keyframes.length)}
+                  isKeyframeClipboardCut={isKeyframeClipboardCut}
+                  selectedInterpolation={selectedEditorEasing}
+                  interpolationOptions={easingOptions}
+                  onInterpolationChange={handleSelectedKeyframeEasingChange}
+                  interpolationDisabled={selectedEditorKeyframes.length === 0}
                   onNavigateToKeyframe={handleNavigateToKeyframe}
                   transitionBlockedRanges={transitionBlockedRanges}
+                  visualizationMode={effectiveEditorMode}
+                  spacious={splitView}
                 />
               </ErrorBoundary>
-            ) : (
-              <ValueGraphEditor
-                itemId={selectedItemForEditor.id}
-                keyframesByProperty={keyframesByProperty}
-                selectedProperty={selectedProperty}
-                selectedKeyframeIds={selectedKeyframeIds}
-                currentFrame={relativeFrame}
-                totalFrames={selectedItemForEditor.durationInFrames}
-                width={editorWidth}
-                height={editorHeight}
-                onKeyframeMove={handleKeyframeMove}
-                onBezierHandleMove={handleBezierHandleMove}
-                onSelectionChange={handleSelectionChange}
-                onPropertyChange={handlePropertyChange}
-                onScrub={handleScrub}
-                onScrubEnd={handleScrubEnd}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onAddKeyframe={handleAddKeyframe}
-                onRemoveKeyframes={handleRemoveKeyframes}
-                onNavigateToKeyframe={handleNavigateToKeyframe}
-                transitionBlockedRanges={transitionBlockedRanges}
-              />
-            )
+            </>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              {selectedItemForEditor ? 'Loading...' : 'Select an item to view the editor'}
+              {selectedItemForEditor
+                ? t('common.loading')
+                : t('timeline.keyframeEditor.selectItem')}
             </div>
           )}
         </div>
       )}
+
+      {placement === 'top' && resizeHandle}
     </div>
-  );
-});
+  )
+})

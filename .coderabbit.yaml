@@ -3,4 +3,4 @@ reviews:
     enabled: true
     base_branches:
       - main
-      - develop
+      - staging

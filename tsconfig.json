@@ -5,11 +5,12 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
-    "types": ["vitest/globals", "@webgpu/types"],
+    "types": ["vite-plus/test/globals", "@webgpu/types"],
 
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
@@ -24,7 +25,6 @@
     "strictNullChecks": true,
 
     /* Path mapping */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }

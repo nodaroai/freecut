@@ -1,9 +1,9 @@
-import { X } from 'lucide-react';
-import { ColorScopesPanel } from './color-scopes-panel';
-import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { X } from 'lucide-react'
+import { ColorScopesPanel } from './color-scopes-panel'
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 
 interface ColorScopesMonitorProps {
-  onClose: () => void;
+  onClose: () => void
 }
 
 export function ColorScopesMonitor({ onClose }: ColorScopesMonitorProps) {
@@ -23,9 +23,9 @@ export function ColorScopesMonitor({ onClose }: ColorScopesMonitorProps) {
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-hidden p-3 bg-background/70">
+      <div className="flex-1 min-h-0 overflow-hidden p-2 bg-background/70">
         <ColorScopesPanel open embedded embeddedLayout="stack" />
       </div>
     </div>
-  );
+  )
 }

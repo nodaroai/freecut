@@ -6,5 +6,7 @@
 export {
   getPropertyKeyframes,
   interpolatePropertyValue,
-} from '@/features/keyframes/utils/interpolation';
-export { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver';
+} from '@/features/keyframes/utils/interpolation'
+export { resolveAnimatedCrop } from '@/features/keyframes/utils/animated-crop-resolver'
+export { resolveAnimatedColorEffects } from '@/features/keyframes/utils/effect-animatable-properties'
+export { resolveAnimatedTextItem } from '@/features/keyframes/utils/animated-text-item'

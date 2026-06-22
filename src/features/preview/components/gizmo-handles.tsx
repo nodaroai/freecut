@@ -1,20 +1,20 @@
-import type { CSSProperties } from 'react';
-import type { GizmoHandle } from '../types/gizmo';
-import { getScaleCursor, HANDLE_SIZE, ROTATION_HANDLE_OFFSET } from '../utils/coordinate-transform';
+import type { CSSProperties } from 'react'
+import type { GizmoHandle } from '../types/gizmo'
+import { getScaleCursor, HANDLE_SIZE, ROTATION_HANDLE_OFFSET } from '../utils/coordinate-transform'
 
 /**
  * Scale handle positions (corners and edges).
  */
-const SCALE_HANDLES: GizmoHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+const SCALE_HANDLES: GizmoHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 
 /**
  * Screen bounds for the gizmo container.
  */
 interface ScreenBounds {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
 /**
@@ -22,19 +22,19 @@ interface ScreenBounds {
  */
 interface GizmoHandlesProps {
   /** Screen bounds of the gizmo */
-  bounds: ScreenBounds;
+  bounds: ScreenBounds
   /** Current rotation of the item (for cursor calculation) */
-  rotation: number;
+  rotation: number
   /** Whether currently interacting (darker border color) */
-  isInteracting: boolean;
+  isInteracting: boolean
   /** Whether this is a mask shape (uses cyan instead of orange) */
-  isMask?: boolean;
+  isMask?: boolean
   /** Called when dragging starts on the border (translate) */
-  onTranslateStart: (e: React.MouseEvent) => void;
+  onTranslateStart: (e: React.MouseEvent) => void
   /** Called when dragging starts on a scale handle */
-  onScaleStart: (handle: GizmoHandle, e: React.MouseEvent) => void;
+  onScaleStart: (handle: GizmoHandle, e: React.MouseEvent) => void
   /** Called when dragging starts on the rotation handle */
-  onRotateStart: (e: React.MouseEvent) => void;
+  onRotateStart: (e: React.MouseEvent) => void
 }
 
 /**
@@ -58,8 +58,8 @@ export function GizmoHandles({
 }: GizmoHandlesProps) {
   // Get style for a scale handle
   const getHandleStyle = (handle: GizmoHandle): CSSProperties => {
-    const half = HANDLE_SIZE / 2;
-    const { width, height } = bounds;
+    const half = HANDLE_SIZE / 2
+    const { width, height } = bounds
 
     const positions: Record<string, { left: number; top: number }> = {
       nw: { left: -half, top: -half },
@@ -70,7 +70,7 @@ export function GizmoHandles({
       s: { left: width / 2 - half, top: height - half },
       sw: { left: -half, top: height - half },
       w: { left: -half, top: height / 2 - half },
-    };
+    }
 
     return {
       position: 'absolute',
@@ -78,13 +78,17 @@ export function GizmoHandles({
       height: HANDLE_SIZE,
       ...positions[handle],
       cursor: getScaleCursor(handle, rotation),
-    };
-  };
+    }
+  }
 
   // Border color based on mask state and interaction
   const borderColor = isMask
-    ? (isInteracting ? '#0891b2' : '#06b6d4') // Cyan for masks
-    : (isInteracting ? '#ea580c' : '#f97316'); // Orange for regular
+    ? isInteracting
+      ? '#0891b2'
+      : '#06b6d4' // Cyan for masks
+    : isInteracting
+      ? '#ea580c'
+      : '#f97316' // Orange for regular
 
   return (
     <>
@@ -117,7 +121,7 @@ export function GizmoHandles({
           sw: 'Resize from bottom-left corner',
           w: 'Resize from left edge',
           rotate: 'Rotate element',
-        };
+        }
         return (
           <div
             key={handle}
@@ -129,7 +133,7 @@ export function GizmoHandles({
             data-gizmo={`scale-${handle}`}
             onMouseDown={(e) => onScaleStart(handle, e)}
           />
-        );
+        )
       })}
 
       {/* Rotation handle */}
@@ -160,5 +164,5 @@ export function GizmoHandles({
         }}
       />
     </>
-  );
+  )
 }
