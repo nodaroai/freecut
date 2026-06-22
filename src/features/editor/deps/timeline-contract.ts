@@ -9,6 +9,9 @@ export type {
   TranscriptSearchMatch,
 } from '@/features/timeline/contracts/editor'
 export {
+  addItem,
+  buildDroppedMediaTimelineItem,
+  getDroppedMediaDurationInFrames,
   applyAnimationPreset,
   captureAnimationFromItem,
   getPresetCompatibility,
