@@ -11,9 +11,10 @@ const log = createLogger('embedded-message-handler');
 const ALLOWED_ORIGINS = [
   'https://app.nodaro.ai',
   'https://next.nodaro.ai',
+  'https://studio.nodaro.ai',
 ];
 
-function isAllowedOrigin(origin: string): boolean {
+export function isAllowedOrigin(origin: string): boolean {
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   if (origin.startsWith('http://localhost:')) return true;
   if (origin.endsWith('.up.railway.app') && origin.startsWith('https://')) return true;
