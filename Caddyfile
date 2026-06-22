@@ -1,8 +1,18 @@
 :3000 {
     root * /srv
     encode gzip zstd
-    file_server
     try_files {path} /index.html
+    file_server
+
+    # Content-hashed build assets (/assets/main-*.js etc.) are immutable for a
+    # given URL — cache them hard so repeat loads are fast.
+    @assets path /assets/*
+    header @assets Cache-Control "public, max-age=31536000, immutable"
+
+    # Everything else (index.html / SPA routes, sw.js, manifest) must revalidate
+    # so a new deploy is picked up on the next load or embed session.
+    @revalidate not path /assets/*
+    header @revalidate Cache-Control "no-cache"
 
     header {
         Cross-Origin-Embedder-Policy "credentialless"
