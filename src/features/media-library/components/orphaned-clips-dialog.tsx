@@ -1,7 +1,8 @@
-﻿import { useState, useMemo, useCallback, useEffect } from 'react';
-import { createLogger } from '@/shared/logging/logger';
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { createLogger } from '@/shared/logging/logger'
 
-const logger = createLogger('OrphanedClipsDialog');
+const logger = createLogger('OrphanedClipsDialog')
 
 import {
   Dialog,
@@ -10,148 +11,144 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import {
-  Link2Off,
-  RefreshCw,
-  Trash2,
-  Search,
-  Video,
-  Music,
-  Image,
-  Wand2,
-} from 'lucide-react';
-import { useMediaLibraryStore } from '../stores/media-library-store';
-import { MediaPickerDialog } from './media-picker-dialog';
-import { autoMatchOrphanedClips } from '@/features/media-library/deps/timeline-utils';
-import type { OrphanedClipInfo } from '../types';
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Link2Off, RefreshCw, Trash2, Search, Video, Music, Image, Wand2 } from 'lucide-react'
+import { useMediaLibraryStore } from '../stores/media-library-store'
+import { MediaPickerDialog } from './media-picker-dialog'
+import { autoMatchOrphanedClips } from '@/features/media-library/deps/timeline-utils'
+import type { OrphanedClipInfo } from '../types'
 
 const itemTypeIcons = {
   video: Video,
   audio: Music,
   image: Image,
-};
+}
 
 export function OrphanedClipsDialog() {
-  const showDialog = useMediaLibraryStore((s) => s.showOrphanedClipsDialog);
-  const closeDialog = useMediaLibraryStore((s) => s.closeOrphanedClipsDialog);
-  const orphanedClips = useMediaLibraryStore((s) => s.orphanedClips);
-  const mediaItems = useMediaLibraryStore((s) => s.mediaItems);
-  const relinkOrphanedClip = useMediaLibraryStore((s) => s.relinkOrphanedClip);
-  const removeOrphanedClips = useMediaLibraryStore((s) => s.removeOrphanedClips);
+  const { t } = useTranslation()
+  const showDialog = useMediaLibraryStore((s) => s.showOrphanedClipsDialog)
+  const closeDialog = useMediaLibraryStore((s) => s.closeOrphanedClipsDialog)
+  const orphanedClips = useMediaLibraryStore((s) => s.orphanedClips)
+  const mediaItems = useMediaLibraryStore((s) => s.mediaItems)
+  const relinkOrphanedClip = useMediaLibraryStore((s) => s.relinkOrphanedClip)
+  const removeOrphanedClips = useMediaLibraryStore((s) => s.removeOrphanedClips)
 
-  const [relinking, setRelinking] = useState<string | null>(null);
-  const [autoMatching, setAutoMatching] = useState(false);
-  const [relinkedIds, setRelinkedIds] = useState<Set<string>>(new Set());
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [selectedOrphan, setSelectedOrphan] = useState<OrphanedClipInfo | null>(null);
+  const [relinking, setRelinking] = useState<string | null>(null)
+  const [autoMatching, setAutoMatching] = useState(false)
+  const [relinkedIds, setRelinkedIds] = useState<Set<string>>(new Set())
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [selectedOrphan, setSelectedOrphan] = useState<OrphanedClipInfo | null>(null)
 
   const remainingOrphans = useMemo(
     () => orphanedClips.filter((o) => !relinkedIds.has(o.itemId)),
-    [orphanedClips, relinkedIds]
-  );
+    [orphanedClips, relinkedIds],
+  )
 
   const handleAutoMatch = useCallback(async () => {
-    setAutoMatching(true);
+    setAutoMatching(true)
     try {
-      const matches = autoMatchOrphanedClips(remainingOrphans, mediaItems);
+      const matches = autoMatchOrphanedClips(remainingOrphans, mediaItems)
 
       if (matches.size === 0) {
-        logger.info('No auto-matches found');
-        return;
+        logger.info('No auto-matches found')
+        return
       }
 
       // Relink all matches
       for (const [itemId, mediaId] of matches) {
-        setRelinking(itemId);
-        const success = await relinkOrphanedClip(itemId, mediaId);
+        setRelinking(itemId)
+        const success = await relinkOrphanedClip(itemId, mediaId)
         if (success) {
-          setRelinkedIds((prev) => new Set([...prev, itemId]));
+          setRelinkedIds((prev) => new Set([...prev, itemId]))
         }
       }
 
-      logger.info(`Auto-matched ${matches.size} clip(s)`);
+      logger.info(`Auto-matched ${matches.size} clip(s)`)
     } catch (error) {
-      logger.error('Auto-match failed:', error);
+      logger.error('Auto-match failed:', error)
     } finally {
-      setAutoMatching(false);
-      setRelinking(null);
+      setAutoMatching(false)
+      setRelinking(null)
     }
-  }, [remainingOrphans, mediaItems, relinkOrphanedClip]);
+  }, [remainingOrphans, mediaItems, relinkOrphanedClip])
 
   const handleSelectMedia = useCallback((orphan: OrphanedClipInfo) => {
-    setSelectedOrphan(orphan);
-    setPickerOpen(true);
-  }, []);
+    setSelectedOrphan(orphan)
+    setPickerOpen(true)
+  }, [])
 
-  const handleMediaSelected = useCallback(async (mediaId: string) => {
-    if (!selectedOrphan) return;
+  const handleMediaSelected = useCallback(
+    async (mediaId: string) => {
+      if (!selectedOrphan) return
 
-    setPickerOpen(false);
-    setRelinking(selectedOrphan.itemId);
+      setPickerOpen(false)
+      setRelinking(selectedOrphan.itemId)
 
-    try {
-      const success = await relinkOrphanedClip(selectedOrphan.itemId, mediaId);
-      if (success) {
-        setRelinkedIds((prev) => new Set([...prev, selectedOrphan.itemId]));
+      try {
+        const success = await relinkOrphanedClip(selectedOrphan.itemId, mediaId)
+        if (success) {
+          setRelinkedIds((prev) => new Set([...prev, selectedOrphan.itemId]))
+        }
+      } catch (error) {
+        logger.error('Relink failed:', error)
+      } finally {
+        setRelinking(null)
+        setSelectedOrphan(null)
       }
-    } catch (error) {
-      logger.error('Relink failed:', error);
-    } finally {
-      setRelinking(null);
-      setSelectedOrphan(null);
-    }
-  }, [selectedOrphan, relinkOrphanedClip]);
+    },
+    [selectedOrphan, relinkOrphanedClip],
+  )
 
-  const handleRemoveSingle = useCallback((itemId: string) => {
-    removeOrphanedClips([itemId]);
-    setRelinkedIds((prev) => new Set([...prev, itemId]));
-  }, [removeOrphanedClips]);
+  const handleRemoveSingle = useCallback(
+    (itemId: string) => {
+      removeOrphanedClips([itemId])
+      setRelinkedIds((prev) => new Set([...prev, itemId]))
+    },
+    [removeOrphanedClips],
+  )
 
   const handleRemoveAll = useCallback(() => {
-    const itemIds = remainingOrphans.map((o) => o.itemId);
-    removeOrphanedClips(itemIds);
-    setRelinkedIds(new Set());
-    closeDialog();
-  }, [remainingOrphans, removeOrphanedClips, closeDialog]);
+    const itemIds = remainingOrphans.map((o) => o.itemId)
+    removeOrphanedClips(itemIds)
+    setRelinkedIds(new Set())
+    closeDialog()
+  }, [remainingOrphans, removeOrphanedClips, closeDialog])
 
   const handleDismiss = useCallback(() => {
     // Keep clips as broken in timeline, just close the dialog
-    setRelinkedIds(new Set());
-    closeDialog();
-  }, [closeDialog]);
+    setRelinkedIds(new Set())
+    closeDialog()
+  }, [closeDialog])
 
   const handleClose = useCallback(() => {
-    setRelinkedIds(new Set());
-    closeDialog();
-  }, [closeDialog]);
+    setRelinkedIds(new Set())
+    closeDialog()
+  }, [closeDialog])
 
   // Auto-close if no more orphaned clips (using useEffect to avoid setState during render)
   useEffect(() => {
     if (showDialog && remainingOrphans.length === 0) {
-      handleClose();
+      handleClose()
     }
-  }, [showDialog, remainingOrphans.length, handleClose]);
+  }, [showDialog, remainingOrphans.length, handleClose])
 
   // Don't render if no orphans
   if (!showDialog || remainingOrphans.length === 0) {
-    return null;
+    return null
   }
 
   return (
     <>
       <Dialog open={showDialog} onOpenChange={(open) => !open && handleClose()}>
-        <DialogContent className="sm:max-w-[600px] max-h-[80vh]">
+        <DialogContent className="max-h-[80vh] w-[min(92vw,960px)] max-w-[960px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Link2Off className="w-5 h-5 text-destructive" />
-              Missing Media References
+              {t('media.orphanedClips.title')}
             </DialogTitle>
             <DialogDescription>
-              {remainingOrphans.length} timeline clip
-              {remainingOrphans.length !== 1 ? 's' : ''} reference
-              {remainingOrphans.length === 1 ? 's' : ''} media that no longer exists.
+              {t('media.orphanedClips.description', { count: remainingOrphans.length })}
             </DialogDescription>
           </DialogHeader>
 
@@ -168,30 +165,32 @@ export function OrphanedClipsDialog() {
               ) : (
                 <Wand2 className="w-4 h-4 mr-2" />
               )}
-              Auto-match from Library (by filename)
+              {t('media.orphanedClips.autoMatch')}
             </Button>
 
             {/* List of orphaned clips */}
             <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2">
               {remainingOrphans.map((orphan) => {
-                const IconComponent = itemTypeIcons[orphan.itemType];
+                const IconComponent = itemTypeIcons[orphan.itemType]
                 return (
                   <div
                     key={orphan.itemId}
-                    className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg border border-border"
+                    className="flex items-start gap-3 rounded-lg border border-border bg-secondary/50 p-3"
                   >
                     <div className="p-1.5 rounded bg-destructive/20">
                       <IconComponent className="w-4 h-4 text-destructive" />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{orphan.fileName}</p>
+                      <p className="text-sm font-medium leading-snug break-words">
+                        {orphan.fileName}
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        {orphan.itemType} clip â€¢ Media deleted
+                        {t(`media.orphanedClips.clipMediaDeleted.${orphan.itemType}`)}
                       </p>
                     </div>
 
-                    <div className="flex gap-1">
+                    <div className="flex shrink-0 gap-1 self-center">
                       <Button
                         size="sm"
                         variant="outline"
@@ -203,7 +202,7 @@ export function OrphanedClipsDialog() {
                         ) : (
                           <>
                             <Search className="w-3 h-3 mr-1" />
-                            Select
+                            {t('media.orphanedClips.select')}
                           </>
                         )}
                       </Button>
@@ -217,19 +216,15 @@ export function OrphanedClipsDialog() {
                       </Button>
                     </div>
                   </div>
-                );
+                )
               })}
             </div>
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button
-              variant="destructive"
-              onClick={handleRemoveAll}
-              className="order-2 sm:order-1"
-            >
+            <Button variant="destructive" onClick={handleRemoveAll} className="order-2 sm:order-1">
               <Trash2 className="w-4 h-4 mr-2" />
-              Remove All Clips
+              {t('media.orphanedClips.removeAll')}
             </Button>
             <div className="flex-1" />
             <Button
@@ -237,10 +232,10 @@ export function OrphanedClipsDialog() {
               onClick={handleDismiss}
               className="text-muted-foreground order-1 sm:order-2"
             >
-              Keep as Broken
+              {t('media.orphanedClips.keepAsBroken')}
             </Button>
             <Button variant="outline" onClick={handleClose} className="order-3">
-              Close
+              {t('common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -250,14 +245,13 @@ export function OrphanedClipsDialog() {
       <MediaPickerDialog
         open={pickerOpen}
         onClose={() => {
-          setPickerOpen(false);
-          setSelectedOrphan(null);
+          setPickerOpen(false)
+          setSelectedOrphan(null)
         }}
         onSelect={handleMediaSelected}
         filterType={selectedOrphan?.itemType}
-        title={`Select replacement for "${selectedOrphan?.fileName}"`}
+        title={t('media.orphanedClips.selectReplacement', { name: selectedOrphan?.fileName ?? '' })}
       />
     </>
-  );
+  )
 }
-

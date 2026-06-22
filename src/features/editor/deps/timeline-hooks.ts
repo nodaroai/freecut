@@ -6,4 +6,6 @@
 export {
   useTimelineShortcuts,
   useTransitionBreakageNotifications,
-} from './timeline-contract';
+  useFilmstrip,
+} from './timeline-contract'
+export type { FilmstripFrame } from './timeline-contract'

@@ -4,37 +4,30 @@
  */
 
 export {
-  resolveTransform,
-  getSourceDimensions,
-} from '@/features/composition-runtime/utils/transform-resolver';
-export {
-  applyTransformOverride,
+  createFrameCompositionSceneCache,
   resolveItemTransformAtFrame,
   resolveActiveShapeMasksAtFrame,
-  resolveFrameCompositionScene,
-} from '@/features/composition-runtime/utils/frame-scene';
+} from '@/runtime/composition-runtime/utils/frame-scene'
 export {
   applyPreviewPathVerticesToItem,
   applyPreviewPathVerticesToShape,
   type PreviewPathVerticesOverride,
-} from '@/features/composition-runtime/utils/preview-path-override';
-export { expandTextTransformToFitContent } from '@/features/composition-runtime/utils/text-layout';
+} from '@/runtime/composition-runtime/utils/preview-path-override'
+export { expandTextTransformToFitContent } from '@/runtime/composition-runtime/utils/text-layout'
 export {
-  resolveTrackRenderState,
   resolveCompositionRenderPlan,
-  collectTransitionClipItems,
-  buildItemIdMap,
-  resolveTransitionWindowsForItems,
-  collectVisibleAdjustmentLayers,
-  buildFrameRenderTasks,
   collectFrameVideoCandidates,
-  groupTransitionsByTrackOrder,
-  resolveOcclusionCutoffOrder,
   resolveFrameRenderScene,
-} from '@/features/composition-runtime/utils/scene-assembly';
+} from '@/runtime/composition-runtime/utils/scene-assembly'
+export type { FrameRenderTask } from '@/runtime/composition-runtime/utils/scene-assembly'
+export { getShapePath, rotatePath } from '@/runtime/composition-runtime/utils/shape-path'
 export {
-  calculateTransitionProgress,
-  resolveTransitionFrameState,
-} from '@/features/composition-runtime/utils/transition-scene';
-export { getShapePath, rotatePath } from '@/features/composition-runtime/utils/shape-path';
-export { hasCornerPin, drawCornerPinImage } from '@/features/composition-runtime/utils/corner-pin';
+  hasCornerPin,
+  computeCornerPinHomography,
+  invertCornerPinHomography,
+  drawCornerPinImage,
+  computeProjectiveCornerPinWarp,
+  resolveCornerPinTargetRect,
+  resolveCornerPinForSize,
+} from '@/runtime/composition-runtime/utils/corner-pin'
+export { getVideoTargetTimeSeconds } from '@/runtime/composition-runtime/utils/video-timing'

@@ -1,1 +1,5 @@
-export { mediaLibraryService, opfsService } from './media-library-contract';
+export {
+  importMediaLibraryService,
+  opfsService,
+  useEmbeddedSubtitlePickerStore,
+} from './media-library-service-contract'

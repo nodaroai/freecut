@@ -1,17 +1,17 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { PlaybackState, PlaybackActions, PreviewQuality } from './types';
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import type { PlaybackState, PlaybackActions, PreviewQuality } from './types'
 
 function normalizeFrame(frame: number): number {
-  if (!Number.isFinite(frame)) return 0;
-  return Math.max(0, Math.round(frame));
+  if (!Number.isFinite(frame)) return 0
+  return Math.max(0, Math.round(frame))
 }
 
 function normalizePreviewQuality(quality: PreviewQuality): PreviewQuality {
   if (quality === 0.5 || quality === 0.33 || quality === 0.25) {
-    return quality;
+    return quality
   }
-  return 1;
+  return 1
 }
 
 export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
@@ -20,47 +20,54 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
       // State
       currentFrame: 0,
       currentFrameEpoch: 0,
-      displayedFrame: null,
       isPlaying: false,
       playbackRate: 1,
       loop: false,
       volume: 1,
       muted: false,
+      masterBusDb: 0,
+      busAudioEq: undefined,
       zoom: -1, // -1 = auto-fit, positive values = specific zoom percentage
       previewFrame: null,
       previewFrameEpoch: 0,
       frameUpdateEpoch: 0,
       previewItemId: null,
-      captureFrame: null, // Set by VideoPreview when Player is mounted
-      captureFrameImageData: null,
-      captureCanvasSource: null,
       useProxy: true,
       previewQuality: 1 as PreviewQuality,
+      compositionVisualFrozen: false,
 
       // Actions
       setCurrentFrame: (frame) =>
         set((state) => {
-          const nextFrame = normalizeFrame(frame);
-          if (state.currentFrame === nextFrame) return state;
-          const nextEpoch = state.frameUpdateEpoch + 1;
+          const nextFrame = normalizeFrame(frame)
+          if (state.currentFrame === nextFrame) return state
+          const nextEpoch = state.frameUpdateEpoch + 1
           return {
             currentFrame: nextFrame,
             currentFrameEpoch: nextEpoch,
             frameUpdateEpoch: nextEpoch,
-          };
+          }
         }),
       setScrubFrame: (frame, itemId) =>
         set((state) => {
-          const nextFrame = normalizeFrame(frame);
-          const nextItemId = itemId ?? null;
+          const nextFrame = normalizeFrame(frame)
+          const nextItemId = itemId ?? null
           if (
-            state.currentFrame === nextFrame
-            && state.previewFrame === nextFrame
-            && state.previewItemId === nextItemId
+            !state.isPlaying &&
+            state.currentFrame === nextFrame &&
+            state.previewFrame === null &&
+            nextItemId === null
           ) {
-            return state;
+            return state
           }
-          const nextEpoch = state.frameUpdateEpoch + 1;
+          if (
+            state.currentFrame === nextFrame &&
+            state.previewFrame === nextFrame &&
+            state.previewItemId === nextItemId
+          ) {
+            return state
+          }
+          const nextEpoch = state.frameUpdateEpoch + 1
           return {
             currentFrame: nextFrame,
             currentFrameEpoch: nextEpoch,
@@ -68,7 +75,7 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
             previewItemId: nextItemId,
             previewFrameEpoch: nextEpoch,
             frameUpdateEpoch: nextEpoch,
-          };
+          }
         }),
       play: () => set((state) => (state.isPlaying ? state : { isPlaying: true })),
       pause: () => set((state) => (state.isPlaying ? { isPlaying: false } : state)),
@@ -77,38 +84,36 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
       toggleLoop: () => set((state) => ({ loop: !state.loop })),
       setVolume: (volume) => set({ volume }),
       toggleMute: () => set((state) => ({ muted: !state.muted })),
+      setMasterBusDb: (masterBusDb) =>
+        set({ masterBusDb: Math.max(-60, Math.min(12, masterBusDb)) }),
+      setBusAudioEq: (busAudioEq) => set({ busAudioEq }),
       setZoom: (zoom) => set({ zoom }),
       setPreviewFrame: (frame, itemId) =>
         set((state) => {
-          const nextFrame = frame == null ? null : normalizeFrame(frame);
-          const nextItemId = frame == null ? null : (itemId ?? null);
+          const nextFrame = frame == null ? null : normalizeFrame(frame)
+          const nextItemId = frame == null ? null : (itemId ?? null)
           if (state.previewFrame === nextFrame && state.previewItemId === nextItemId) {
-            return state;
+            return state
           }
-          const nextEpoch = state.frameUpdateEpoch + 1;
+          const nextEpoch = state.frameUpdateEpoch + 1
           return {
             previewFrame: nextFrame,
             previewItemId: nextItemId,
             previewFrameEpoch: nextEpoch,
             frameUpdateEpoch: nextEpoch,
-          };
+          }
         }),
-      setDisplayedFrame: (frame) =>
-        set((state) => {
-          const nextFrame = frame == null ? null : normalizeFrame(frame);
-          if (state.displayedFrame === nextFrame) return state;
-          return { displayedFrame: nextFrame };
-        }),
-      setCaptureFrame: (fn) => set({ captureFrame: fn }),
-      setCaptureFrameImageData: (fn) => set({ captureFrameImageData: fn }),
-      setCaptureCanvasSource: (fn) => set({ captureCanvasSource: fn }),
       toggleUseProxy: () => set((state) => ({ useProxy: !state.useProxy })),
       setPreviewQuality: (quality) =>
         set((state) => {
-          const nextQuality = normalizePreviewQuality(quality);
-          if (state.previewQuality === nextQuality) return state;
-          return { previewQuality: nextQuality };
+          const nextQuality = normalizePreviewQuality(quality)
+          if (state.previewQuality === nextQuality) return state
+          return { previewQuality: nextQuality }
         }),
+      setCompositionVisualFrozen: (frozen) =>
+        set((state) =>
+          state.compositionVisualFrozen === frozen ? state : { compositionVisualFrozen: frozen },
+        ),
     }),
     {
       name: 'playback-storage',
@@ -121,6 +126,6 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
         useProxy: state.useProxy,
         previewQuality: state.previewQuality,
       }),
-    }
-  )
-);
+    },
+  ),
+)

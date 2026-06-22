@@ -1,14 +1,32 @@
-import { createElement } from 'react';
-import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react'
+import { act, render } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
-import type { AudioItem, VideoItem } from '@/types/timeline';
+import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
+import { useSelectionStore } from '@/shared/state/selection'
+import type { AudioItem, VideoItem } from '@/types/timeline'
 
-import { useWaveformPrefetch } from './use-waveform-prefetch';
-import { useItemsStore } from '../stores/items-store';
-import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
-import { useTimelineViewportStore } from '../stores/timeline-viewport-store';
-import { useZoomStore } from '../stores/zoom-store';
+const waveformCacheMocks = vi.hoisted(() => ({
+  prefetch: vi.fn(),
+}))
+
+vi.mock('../services/waveform-cache', () => ({
+  waveformCache: {
+    prefetch: waveformCacheMocks.prefetch,
+  },
+}))
+
+import { _resetWaveformPrefetchForTest, useWaveformPrefetch } from './use-waveform-prefetch'
+import { _resetPreviewWorkBudgetForTest } from './preview-work-budget'
+import { useItemsStore } from '../stores/items-store'
+import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store'
+import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store'
+import { useSlideEditPreviewStore } from '../stores/slide-edit-preview-store'
+import { useSlipEditPreviewStore } from '../stores/slip-edit-preview-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { useTimelineViewportStore } from '../stores/timeline-viewport-store'
+import { useTrackPushPreviewStore } from '../stores/track-push-preview-store'
+import { _resetZoomStoreForTest } from '../stores/zoom-store'
 
 function makeVideoItem(id: string, from: number, duration: number): VideoItem {
   return {
@@ -20,7 +38,7 @@ function makeVideoItem(id: string, from: number, duration: number): VideoItem {
     label: `${id}.mp4`,
     src: 'blob:test',
     mediaId: `media-${id}`,
-  } as VideoItem;
+  } as VideoItem
 }
 
 function makeAudioItem(id: string, from: number, duration: number): AudioItem {
@@ -33,17 +51,33 @@ function makeAudioItem(id: string, from: number, duration: number): AudioItem {
     label: `${id}.mp3`,
     src: 'blob:test',
     mediaId: `media-${id}`,
-  } as AudioItem;
+  } as AudioItem
 }
 
-function WaveformPrefetchProbe({
-  onRender,
-}: {
-  onRender: () => void;
-}) {
-  useWaveformPrefetch();
-  onRender();
-  return null;
+function WaveformPrefetchProbe({ onRender }: { onRender: () => void }) {
+  useWaveformPrefetch()
+  onRender()
+  return null
+}
+
+async function flushPrefetchTimers() {
+  // Three passes drain the timer chain: each store update reschedules the
+  // schedulePreviewWork debounce timer, and the fired callback queues a dynamic
+  // import of the waveform-cache module.
+  for (let i = 0; i < 3; i += 1) {
+    await act(async () => {
+      vi.advanceTimersByTime(120)
+      vi.runOnlyPendingTimers()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+}
+
+async function flushWaveformPrefetch() {
+  await flushPrefetchTimers()
+  await import('../services/waveform-cache')
+  await Promise.resolve()
 }
 
 /** Replicate the prefetch range calculation */
@@ -55,83 +89,106 @@ function getPrefetchCandidates(
   fps: number,
   scrollingRight: boolean,
 ) {
-  const aheadPx = 800;
-  const behindPx = 200;
-  const visibilityMarginPx = 200;
+  const aheadPx = 800
+  const behindPx = 200
+  const visibilityMarginPx = 200
 
-  const prefetchLeftPx = scrollingRight ? scrollLeft - behindPx : scrollLeft - aheadPx;
-  const prefetchRightPx = scrollingRight ? scrollLeft + viewportWidth + aheadPx : scrollLeft + viewportWidth + behindPx;
-  const visibleLeftPx = scrollLeft - visibilityMarginPx;
-  const visibleRightPx = scrollLeft + viewportWidth + visibilityMarginPx;
+  const prefetchLeftPx = scrollingRight ? scrollLeft - behindPx : scrollLeft - aheadPx
+  const prefetchRightPx = scrollingRight
+    ? scrollLeft + viewportWidth + aheadPx
+    : scrollLeft + viewportWidth + behindPx
+  const visibleLeftPx = scrollLeft - visibilityMarginPx
+  const visibleRightPx = scrollLeft + viewportWidth + visibilityMarginPx
 
-  const prefetchStart = Math.max(0, Math.floor((prefetchLeftPx / pps) * fps));
-  const prefetchEnd = Math.ceil((prefetchRightPx / pps) * fps);
-  const visStart = Math.max(0, Math.floor((visibleLeftPx / pps) * fps));
-  const visEnd = Math.ceil((visibleRightPx / pps) * fps);
+  const prefetchStart = Math.max(0, Math.floor((prefetchLeftPx / pps) * fps))
+  const prefetchEnd = Math.ceil((prefetchRightPx / pps) * fps)
+  const visStart = Math.max(0, Math.floor((visibleLeftPx / pps) * fps))
+  const visEnd = Math.ceil((visibleRightPx / pps) * fps)
 
   return items.filter((item) => {
-    if (item.type !== 'video' && item.type !== 'audio') return false;
-    const itemEnd = item.from + item.durationInFrames;
-    if (itemEnd <= prefetchStart || item.from >= prefetchEnd) return false;
-    if (itemEnd > visStart && item.from < visEnd) return false;
-    return true;
-  });
+    if (item.type !== 'video' && item.type !== 'audio') return false
+    const itemEnd = item.from + item.durationInFrames
+    if (itemEnd <= prefetchStart || item.from >= prefetchEnd) return false
+    if (itemEnd > visStart && item.from < visEnd) return false
+    return true
+  })
 }
 
 describe('waveform prefetch filtering', () => {
-  const fps = 30;
-  const pps = 100;
+  const fps = 30
+  const pps = 100
 
   beforeEach(() => {
+    _resetWaveformPrefetchForTest()
+    _resetPreviewWorkBudgetForTest()
     useTimelineSettingsStore.setState({
       fps,
       scrollPosition: 0,
       snapEnabled: true,
       isDirty: false,
       isTimelineLoading: false,
-    });
-    useZoomStore.getState().setZoomLevelImmediate(1);
-    useItemsStore.getState().setItems([]);
-    useItemsStore.getState().setTracks([]);
+    })
+    _resetZoomStoreForTest()
+    useSelectionStore.getState().setDragState(null)
+    useRollingEditPreviewStore.getState().clearPreview()
+    useRippleEditPreviewStore.getState().clearPreview()
+    useSlipEditPreviewStore.getState().clearPreview()
+    useSlideEditPreviewStore.getState().clearPreview()
+    useTrackPushPreviewStore.getState().clearPreview()
+    useItemsStore.getState().setItems([])
+    useItemsStore.getState().setTracks([])
+    waveformCacheMocks.prefetch.mockReset()
     useTimelineViewportStore.getState().setViewport({
       scrollLeft: 0,
       scrollTop: 0,
       viewportWidth: 1000,
       viewportHeight: 120,
-    });
-  });
+    })
+  })
+
+  afterEach(() => {
+    _resetWaveformPrefetchForTest()
+    _resetPreviewWorkBudgetForTest()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
 
   it('prefetches clips in the ahead zone but not in the visible zone', () => {
     const items = [
       makeVideoItem('visible', 0, 100),
       makeVideoItem('ahead', 400, 100),
       makeVideoItem('far', 700, 100),
-    ];
-    const candidates = getPrefetchCandidates(items, 0, 1000, pps, fps, true);
-    expect(candidates.map((item) => item.id)).toEqual(['ahead']);
-  });
+    ]
+    const candidates = getPrefetchCandidates(items, 0, 1000, pps, fps, true)
+    expect(candidates.map((item) => item.id)).toEqual(['ahead'])
+  })
 
   it('biases prefetch toward scroll direction when scrolling left', () => {
-    const items = [
-      makeAudioItem('behind-close', 70, 30),
-    ];
-    const candidates = getPrefetchCandidates(items, 1000, 1000, pps, fps, false);
-    expect(candidates.map((item) => item.id)).toEqual(['behind-close']);
-  });
+    const items = [makeAudioItem('behind-close', 70, 30)]
+    const candidates = getPrefetchCandidates(items, 1000, 1000, pps, fps, false)
+    expect(candidates.map((item) => item.id)).toEqual(['behind-close'])
+  })
 
   it('skips non-audio/video items', () => {
     const items = [
-      { id: 'text', type: 'text', trackId: 'track-1', from: 400, durationInFrames: 100 } as unknown as VideoItem,
-    ];
-    const candidates = getPrefetchCandidates(items, 0, 1000, pps, fps, true);
-    expect(candidates).toEqual([]);
-  });
+      {
+        id: 'text',
+        type: 'text',
+        trackId: 'track-1',
+        from: 400,
+        durationInFrames: 100,
+      } as unknown as VideoItem,
+    ]
+    const candidates = getPrefetchCandidates(items, 0, 1000, pps, fps, true)
+    expect(candidates).toEqual([])
+  })
 
   it('does not re-render its host component on viewport updates', () => {
-    const onRender = vi.fn();
-    render(createElement(WaveformPrefetchProbe, { onRender }));
+    const onRender = vi.fn()
+    render(createElement(WaveformPrefetchProbe, { onRender }))
 
-    expect(onRender).toHaveBeenCalledTimes(1);
+    expect(onRender).toHaveBeenCalledTimes(1)
 
     act(() => {
       useTimelineViewportStore.getState().setViewport({
@@ -139,8 +196,8 @@ describe('waveform prefetch filtering', () => {
         scrollTop: 0,
         viewportWidth: 1000,
         viewportHeight: 120,
-      });
-    });
+      })
+    })
 
     act(() => {
       useTimelineViewportStore.getState().setViewport({
@@ -148,9 +205,90 @@ describe('waveform prefetch filtering', () => {
         scrollTop: 0,
         viewportWidth: 1000,
         viewportHeight: 120,
-      });
-    });
+      })
+    })
 
-    expect(onRender).toHaveBeenCalledTimes(1);
-  });
-});
+    expect(onRender).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for active drag interactions before prefetching', async () => {
+    vi.useFakeTimers()
+    let idleId = 0
+    vi.stubGlobal('requestIdleCallback', (callback: IdleRequestCallback) => {
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      } as IdleDeadline)
+      idleId += 1
+      return idleId
+    })
+    vi.stubGlobal('cancelIdleCallback', (id: number) => {
+      void id
+    })
+
+    try {
+      const item = makeVideoItem('ahead', 400, 100)
+      useItemsStore.getState().setItems([item])
+      vi.spyOn(blobUrlManager, 'get').mockReturnValue('blob:prefetch')
+
+      useSelectionStore.getState().setDragState({
+        isDragging: true,
+        draggedItemIds: [],
+        offset: { x: 0, y: 0 },
+      })
+
+      render(createElement(WaveformPrefetchProbe, { onRender: () => {} }))
+
+      act(() => {
+        vi.runAllTimers()
+      })
+
+      expect(waveformCacheMocks.prefetch).not.toHaveBeenCalled()
+
+      act(() => {
+        useSelectionStore.getState().setDragState(null)
+        useTimelineViewportStore.getState().setViewport({
+          scrollLeft: 1,
+          scrollTop: 0,
+          viewportWidth: 1000,
+          viewportHeight: 120,
+        })
+      })
+      await flushWaveformPrefetch()
+
+      expect(waveformCacheMocks.prefetch).toHaveBeenCalledWith(item.mediaId, 'blob:prefetch')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('prefetches storage-backed waveform cache even before a blob URL exists', async () => {
+    vi.useFakeTimers()
+    let idleId = 0
+    vi.stubGlobal('requestIdleCallback', (callback: IdleRequestCallback) => {
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      } as IdleDeadline)
+      idleId += 1
+      return idleId
+    })
+    vi.stubGlobal('cancelIdleCallback', (id: number) => {
+      void id
+    })
+
+    try {
+      const item = makeAudioItem('ahead', 400, 100)
+      useItemsStore.getState().setItems([item])
+      vi.spyOn(blobUrlManager, 'get').mockReturnValue(null)
+
+      render(createElement(WaveformPrefetchProbe, { onRender: () => {} }))
+
+      await flushWaveformPrefetch()
+
+      expect(waveformCacheMocks.prefetch).toHaveBeenCalledWith(item.mediaId, null)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

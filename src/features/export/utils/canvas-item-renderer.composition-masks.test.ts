@@ -1,36 +1,44 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CompositionItem, ShapeItem } from '@/types/timeline';
-import type { ItemRenderContext, ItemTransform, SubCompRenderData } from './canvas-item-renderer';
+import { describe, it, expect, vi, beforeEach } from 'vite-plus/test'
+import type { CompositionItem, ImageItem, ShapeItem } from '@/types/timeline'
+import type { ItemRenderContext, ItemTransform, SubCompRenderData } from './canvas-item-renderer'
 
 const mockFns = vi.hoisted(() => ({
   applyMasksMock: vi.fn(),
+  buildPreparedMaskMock: vi.fn((mask: ShapeItem) => ({
+    path: {} as Path2D,
+    inverted: mask.maskInvert ?? false,
+    feather: mask.maskType === 'alpha' ? (mask.maskFeather ?? 0) : 0,
+    maskType: mask.maskType ?? 'clip',
+    trackOrder: 0,
+  })),
   svgPathToPath2DMock: vi.fn(() => ({}) as unknown as Path2D),
   renderShapeMock: vi.fn(),
   getShapePathMock: vi.fn(() => 'M 0 0 L 10 0 L 10 10 Z'),
   rotatePathMock: vi.fn((path: string) => path),
-}));
+}))
 
 vi.mock('./canvas-masks', () => ({
   applyMasks: mockFns.applyMasksMock,
+  buildPreparedMask: mockFns.buildPreparedMaskMock,
   svgPathToPath2D: mockFns.svgPathToPath2DMock,
-}));
+}))
 
 vi.mock('./canvas-shapes', () => ({
   renderShape: mockFns.renderShapeMock,
-}));
+}))
 
 vi.mock('@/features/export/deps/composition-runtime', async () => {
   const actual = await vi.importActual<typeof import('@/features/export/deps/composition-runtime')>(
-    '@/features/export/deps/composition-runtime'
-  );
+    '@/features/export/deps/composition-runtime',
+  )
   return {
     ...actual,
     getShapePath: mockFns.getShapePathMock,
     rotatePath: mockFns.rotatePathMock,
-  };
-});
+  }
+})
 
-import { renderItem } from './canvas-item-renderer';
+import { renderItem } from './canvas-item-renderer'
 
 function createMockCtx(): OffscreenCanvasRenderingContext2D {
   return {
@@ -39,22 +47,77 @@ function createMockCtx(): OffscreenCanvasRenderingContext2D {
     clearRect: vi.fn(),
     drawImage: vi.fn(),
     beginPath: vi.fn(),
+    rect: vi.fn(),
     roundRect: vi.fn(),
     clip: vi.fn(),
     translate: vi.fn(),
     rotate: vi.fn(),
     globalAlpha: 1,
-  } as unknown as OffscreenCanvasRenderingContext2D;
+  } as unknown as OffscreenCanvasRenderingContext2D
+}
+
+function createCompositionMaskRenderHarness(params: {
+  compositionItem: CompositionItem
+  subData: SubCompRenderData
+  imageElements?: ItemRenderContext['imageElements']
+  poolEntryCount?: number
+}) {
+  const poolEntries = Array.from({ length: params.poolEntryCount ?? 2 }, () => ({
+    canvas: { width: 640, height: 360 } as OffscreenCanvas,
+    ctx: createMockCtx(),
+  }))
+  const acquireQueue = [...poolEntries]
+  const canvasPool = {
+    acquire: vi.fn(() => acquireQueue.shift()),
+    release: vi.fn(),
+  }
+  const rootCtx = createMockCtx()
+  const rctx: ItemRenderContext = {
+    fps: 30,
+    canvasSettings: { width: 1280, height: 720, fps: 30 },
+    canvasPool: canvasPool as unknown as ItemRenderContext['canvasPool'],
+    textMeasureCache: {} as ItemRenderContext['textMeasureCache'],
+    renderMode: 'export',
+    renderItem,
+    videoExtractors: new Map(),
+    videoElements: new Map(),
+    useMediabunny: new Set(),
+    mediabunnyDisabledItems: new Set(),
+    mediabunnyFailureCountByItem: new Map(),
+    imageElements: params.imageElements ?? new Map(),
+    gifFramesMap: new Map(),
+    keyframesMap: new Map(),
+    adjustmentLayers: [],
+    subCompRenderData: new Map([[params.compositionItem.compositionId, params.subData]]),
+  }
+  const transform: ItemTransform = {
+    x: 0,
+    y: 0,
+    width: 640,
+    height: 360,
+    rotation: 0,
+    opacity: 1,
+    cornerRadius: 0,
+  }
+
+  return {
+    canvasPool,
+    rootCtx,
+    rctx,
+    subContentCtx: poolEntries[1]!.ctx,
+    transform,
+  }
 }
 
 describe('canvas-item-renderer composition masks', () => {
   beforeEach(() => {
-    mockFns.applyMasksMock.mockReset();
-    mockFns.svgPathToPath2DMock.mockClear();
-    mockFns.renderShapeMock.mockReset();
-    mockFns.getShapePathMock.mockClear();
-    mockFns.rotatePathMock.mockClear();
-  });
+    mockFns.applyMasksMock.mockReset()
+    mockFns.buildPreparedMaskMock.mockClear()
+    mockFns.svgPathToPath2DMock.mockClear()
+    mockFns.renderShapeMock.mockReset()
+    mockFns.getShapePathMock.mockClear()
+    mockFns.rotatePathMock.mockClear()
+  })
 
   it('applies active sub-comp masks only to lower tracks and does not render mask shapes as regular content', async () => {
     const subMaskItem: ShapeItem = {
@@ -69,7 +132,7 @@ describe('canvas-item-renderer composition masks', () => {
       isMask: true,
       maskType: 'clip',
       transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 },
-    };
+    }
 
     const subContentItem: ShapeItem = {
       id: 'sub-content',
@@ -81,7 +144,7 @@ describe('canvas-item-renderer composition masks', () => {
       shapeType: 'rectangle',
       fillColor: '#ff0000',
       transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, opacity: 1 },
-    };
+    }
 
     const compositionItem: CompositionItem = {
       id: 'comp-item',
@@ -93,7 +156,7 @@ describe('canvas-item-renderer composition masks', () => {
       label: 'Composition',
       compositionWidth: 640,
       compositionHeight: 360,
-    };
+    }
 
     const subData: SubCompRenderData = {
       fps: 30,
@@ -111,72 +174,31 @@ describe('canvas-item-renderer composition masks', () => {
         },
       ],
       keyframesMap: new Map(),
-    };
+    }
 
-    const subCanvas = { width: 640, height: 360 } as OffscreenCanvas;
-    const subContentCanvas = { width: 640, height: 360 } as OffscreenCanvas;
-    const maskedItemCanvas = { width: 640, height: 360 } as OffscreenCanvas;
-    const subCtx = createMockCtx();
-    const subContentCtx = createMockCtx();
-    const maskedItemCtx = createMockCtx();
-    const rootCtx = createMockCtx();
+    const { rootCtx, rctx, transform } = createCompositionMaskRenderHarness({
+      compositionItem,
+      subData,
+      poolEntryCount: 4,
+    })
 
-    const acquireQueue = [
-      { canvas: subCanvas, ctx: subCtx },
-      { canvas: subContentCanvas, ctx: subContentCtx },
-      { canvas: maskedItemCanvas, ctx: maskedItemCtx },
-    ];
+    await renderItem(rootCtx, compositionItem, transform, 0, rctx)
 
-    const canvasPool = {
-      acquire: vi.fn(() => acquireQueue.shift()),
-      release: vi.fn(),
-    };
-
-    const rctx: ItemRenderContext = {
-      fps: 30,
-      canvasSettings: { width: 1280, height: 720, fps: 30 },
-      canvasPool: canvasPool as unknown as ItemRenderContext['canvasPool'],
-      textMeasureCache: {} as ItemRenderContext['textMeasureCache'],
-      renderMode: 'export',
-      videoExtractors: new Map(),
-      videoElements: new Map(),
-      useMediabunny: new Set(),
-      mediabunnyDisabledItems: new Set(),
-      mediabunnyFailureCountByItem: new Map(),
-      imageElements: new Map(),
-      gifFramesMap: new Map(),
-      keyframesMap: new Map(),
-      adjustmentLayers: [],
-      subCompRenderData: new Map([[compositionItem.compositionId, subData]]),
-    };
-
-    const transform: ItemTransform = {
-      x: 0,
-      y: 0,
-      width: 640,
-      height: 360,
-      rotation: 0,
-      opacity: 1,
-      cornerRadius: 0,
-    };
-
-    await renderItem(rootCtx, compositionItem, transform, 0, rctx);
-
-    expect(mockFns.renderShapeMock).toHaveBeenCalledTimes(1);
-    expect(mockFns.applyMasksMock).toHaveBeenCalledTimes(1);
+    expect(mockFns.renderShapeMock).toHaveBeenCalledTimes(1)
+    expect(mockFns.applyMasksMock).toHaveBeenCalledTimes(1)
 
     const masksArg = mockFns.applyMasksMock.mock.calls[0]?.[2] as Array<{
-      maskType: 'clip' | 'alpha';
-      inverted: boolean;
-      feather: number;
-    }>;
-    expect(masksArg).toHaveLength(1);
+      maskType: 'clip' | 'alpha'
+      inverted: boolean
+      feather: number
+    }>
+    expect(masksArg).toHaveLength(1)
     expect(masksArg[0]).toMatchObject({
       maskType: 'clip',
       inverted: false,
       feather: 0,
-    });
-  });
+    })
+  })
 
   it('does not apply a sub-comp mask to content above the mask track', async () => {
     const subMaskItem: ShapeItem = {
@@ -191,7 +213,7 @@ describe('canvas-item-renderer composition masks', () => {
       isMask: true,
       maskType: 'clip',
       transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 },
-    };
+    }
 
     const subContentItem: ShapeItem = {
       id: 'sub-content',
@@ -203,7 +225,7 @@ describe('canvas-item-renderer composition masks', () => {
       shapeType: 'rectangle',
       fillColor: '#ff0000',
       transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, opacity: 1 },
-    };
+    }
 
     const compositionItem: CompositionItem = {
       id: 'comp-item',
@@ -215,7 +237,7 @@ describe('canvas-item-renderer composition masks', () => {
       label: 'Composition',
       compositionWidth: 640,
       compositionHeight: 360,
-    };
+    }
 
     const subData: SubCompRenderData = {
       fps: 30,
@@ -233,55 +255,223 @@ describe('canvas-item-renderer composition masks', () => {
         },
       ],
       keyframesMap: new Map(),
-    };
+    }
 
-    const subCanvas = { width: 640, height: 360 } as OffscreenCanvas;
-    const subContentCanvas = { width: 640, height: 360 } as OffscreenCanvas;
-    const subCtx = createMockCtx();
-    const subContentCtx = createMockCtx();
-    const rootCtx = createMockCtx();
+    const { rootCtx, rctx, transform } = createCompositionMaskRenderHarness({
+      compositionItem,
+      subData,
+    })
 
-    const acquireQueue = [
-      { canvas: subCanvas, ctx: subCtx },
-      { canvas: subContentCanvas, ctx: subContentCtx },
-    ];
+    await renderItem(rootCtx, compositionItem, transform, 0, rctx)
 
-    const canvasPool = {
-      acquire: vi.fn(() => acquireQueue.shift()),
-      release: vi.fn(),
-    };
+    expect(mockFns.renderShapeMock).toHaveBeenCalledTimes(1)
+    expect(mockFns.applyMasksMock).not.toHaveBeenCalled()
+  })
 
-    const rctx: ItemRenderContext = {
+  it('skips lower sub-comp tracks when a top image fully occludes the canvas', async () => {
+    const bottomShape: ShapeItem = {
+      id: 'bottom-shape',
+      type: 'shape',
+      trackId: 'bottom-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Hidden shape',
+      shapeType: 'rectangle',
+      fillColor: '#ff0000',
+      transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, opacity: 1 },
+    }
+    const topImage: ImageItem = {
+      id: 'top-image',
+      type: 'image',
+      trackId: 'top-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Full cover',
+      src: 'cover.png',
+      transform: { x: 0, y: 0, width: 640, height: 360, rotation: 0, opacity: 1 },
+    }
+    const compositionItem: CompositionItem = {
+      id: 'comp-item',
+      type: 'composition',
+      compositionId: 'sub-comp-1',
+      trackId: 'track-parent',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Composition',
+      compositionWidth: 640,
+      compositionHeight: 360,
+    }
+    const subData: SubCompRenderData = {
       fps: 30,
-      canvasSettings: { width: 1280, height: 720, fps: 30 },
-      canvasPool: canvasPool as unknown as ItemRenderContext['canvasPool'],
-      textMeasureCache: {} as ItemRenderContext['textMeasureCache'],
-      renderMode: 'export',
-      videoExtractors: new Map(),
-      videoElements: new Map(),
-      useMediabunny: new Set(),
-      mediabunnyDisabledItems: new Set(),
-      mediabunnyFailureCountByItem: new Map(),
-      imageElements: new Map(),
-      gifFramesMap: new Map(),
+      durationInFrames: 60,
+      sortedTracks: [
+        { order: 1, visible: true, items: [bottomShape] },
+        { order: 0, visible: true, items: [topImage] },
+      ],
       keyframesMap: new Map(),
-      adjustmentLayers: [],
-      subCompRenderData: new Map([[compositionItem.compositionId, subData]]),
-    };
+    }
+    const { rootCtx, rctx, subContentCtx, transform } = createCompositionMaskRenderHarness({
+      compositionItem,
+      subData,
+      imageElements: new Map([
+        [
+          topImage.id,
+          { source: { width: 640, height: 360 } as ImageBitmap, width: 640, height: 360 },
+        ],
+      ]),
+    })
 
-    const transform: ItemTransform = {
-      x: 0,
-      y: 0,
-      width: 640,
-      height: 360,
-      rotation: 0,
-      opacity: 1,
-      cornerRadius: 0,
-    };
+    await renderItem(rootCtx, compositionItem, transform, 0, rctx)
 
-    await renderItem(rootCtx, compositionItem, transform, 0, rctx);
+    expect(mockFns.renderShapeMock).not.toHaveBeenCalled()
+    expect(subContentCtx.drawImage).toHaveBeenCalled()
+  })
 
-    expect(mockFns.renderShapeMock).toHaveBeenCalledTimes(1);
-    expect(mockFns.applyMasksMock).not.toHaveBeenCalled();
-  });
-});
+  it('still skips lower sub-comp tracks when an active mask cannot affect the occluding top image', async () => {
+    const bottomShape: ShapeItem = {
+      id: 'bottom-shape',
+      type: 'shape',
+      trackId: 'bottom-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Hidden shape',
+      shapeType: 'rectangle',
+      fillColor: '#ff0000',
+      transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, opacity: 1 },
+    }
+    const topImage: ImageItem = {
+      id: 'top-image',
+      type: 'image',
+      trackId: 'top-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Full cover',
+      src: 'cover.png',
+      transform: { x: 0, y: 0, width: 640, height: 360, rotation: 0, opacity: 1 },
+    }
+    const lowerMask: ShapeItem = {
+      id: 'lower-mask',
+      type: 'shape',
+      trackId: 'lower-mask-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Lower mask',
+      shapeType: 'rectangle',
+      fillColor: '#ffffff',
+      isMask: true,
+      maskType: 'clip',
+      transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 },
+    }
+    const compositionItem: CompositionItem = {
+      id: 'comp-item',
+      type: 'composition',
+      compositionId: 'sub-comp-1',
+      trackId: 'track-parent',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Composition',
+      compositionWidth: 640,
+      compositionHeight: 360,
+    }
+    const subData: SubCompRenderData = {
+      fps: 30,
+      durationInFrames: 60,
+      sortedTracks: [
+        { order: 2, visible: true, items: [bottomShape] },
+        { order: 1, visible: true, items: [lowerMask] },
+        { order: 0, visible: true, items: [topImage] },
+      ],
+      keyframesMap: new Map(),
+    }
+    const { rootCtx, rctx, transform } = createCompositionMaskRenderHarness({
+      compositionItem,
+      subData,
+      imageElements: new Map([
+        [
+          topImage.id,
+          { source: { width: 640, height: 360 } as ImageBitmap, width: 640, height: 360 },
+        ],
+      ]),
+    })
+
+    await renderItem(rootCtx, compositionItem, transform, 0, rctx)
+
+    expect(mockFns.buildPreparedMaskMock).toHaveBeenCalledTimes(1)
+    expect(mockFns.renderShapeMock).not.toHaveBeenCalled()
+    expect(mockFns.applyMasksMock).not.toHaveBeenCalled()
+  })
+
+  it('does not skip lower sub-comp tracks when a mask affects the covering top image', async () => {
+    const bottomShape: ShapeItem = {
+      id: 'bottom-shape',
+      type: 'shape',
+      trackId: 'bottom-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Visible through mask',
+      shapeType: 'rectangle',
+      fillColor: '#ff0000',
+      transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, opacity: 1 },
+    }
+    const topImage: ImageItem = {
+      id: 'top-image',
+      type: 'image',
+      trackId: 'top-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Masked cover',
+      src: 'cover.png',
+      transform: { x: 0, y: 0, width: 640, height: 360, rotation: 0, opacity: 1 },
+    }
+    const topMask: ShapeItem = {
+      id: 'top-mask',
+      type: 'shape',
+      trackId: 'top-mask-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Top mask',
+      shapeType: 'rectangle',
+      fillColor: '#ffffff',
+      isMask: true,
+      maskType: 'clip',
+      transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 },
+    }
+    const compositionItem: CompositionItem = {
+      id: 'comp-item',
+      type: 'composition',
+      compositionId: 'sub-comp-1',
+      trackId: 'track-parent',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Composition',
+      compositionWidth: 640,
+      compositionHeight: 360,
+    }
+    const subData: SubCompRenderData = {
+      fps: 30,
+      durationInFrames: 60,
+      sortedTracks: [
+        { order: 2, visible: true, items: [bottomShape] },
+        { order: 1, visible: true, items: [topImage] },
+        { order: 0, visible: true, items: [topMask] },
+      ],
+      keyframesMap: new Map(),
+    }
+    const { rootCtx, rctx, transform } = createCompositionMaskRenderHarness({
+      compositionItem,
+      subData,
+      imageElements: new Map([
+        [
+          topImage.id,
+          { source: { width: 640, height: 360 } as ImageBitmap, width: 640, height: 360 },
+        ],
+      ]),
+      poolEntryCount: 4,
+    })
+
+    await renderItem(rootCtx, compositionItem, transform, 0, rctx)
+
+    expect(mockFns.renderShapeMock).toHaveBeenCalledTimes(1)
+    expect(mockFns.applyMasksMock).toHaveBeenCalledTimes(2)
+  })
+})

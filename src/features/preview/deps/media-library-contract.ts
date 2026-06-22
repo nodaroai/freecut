@@ -3,20 +3,21 @@
  * Preview modules should import media-library stores/services/utils from here.
  */
 
-export { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store';
-export { proxyService } from '@/features/media-library/services/proxy-service';
-export { getMediaType } from '@/features/media-library/utils/validation';
+export { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
+export { proxyService } from '@/features/media-library/services/proxy-service'
+export { mediaProcessorService } from '@/features/media-library/services/media-processor-service'
+export { getMediaType, getMimeType } from '@/features/media-library/utils/validation'
+export { getProjectBrokenMediaIds } from '@/features/media-library/utils/broken-media'
 export {
   resolveMediaUrl,
   resolveProxyUrl,
   resolveMediaUrls,
   cleanupBlobUrls,
-} from '@/features/media-library/utils/media-resolver';
-export { mediaLibraryService, FileAccessError } from '@/features/media-library/services/media-library-service';
-export {
-  extractValidMediaFileEntriesFromDataTransfer,
-  supportsFileSystemDragDrop,
-} from '@/features/media-library/utils/file-drop';
+} from '@/features/media-library/utils/media-resolver'
+export { importMediaLibraryService } from '@/features/media-library/services/media-library-service-loader'
+export { FileAccessError } from '@/features/media-library/services/file-access'
+export { extractValidMediaFileEntriesFromDataTransfer } from '@/features/media-library/utils/file-drop'
 export {
   getMediaDragData,
-} from '@/features/media-library/utils/drag-data-cache';
+  clearMediaDragData,
+} from '@/features/media-library/utils/drag-data-cache'

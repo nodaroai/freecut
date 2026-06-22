@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import type { TextItem } from '@/types/timeline';
-import type { ResolvedTransform } from '@/types/transform';
-import { expandTextTransformForPreview } from './text-layout';
+import { describe, expect, it } from 'vite-plus/test'
+import type { TextItem } from '@/types/timeline'
+import type { ResolvedTransform } from '@/types/transform'
+import { expandTextTransformForPreview } from './text-layout'
 
 const baseItem: TextItem = {
   id: 'text-1',
@@ -25,17 +25,19 @@ const baseItem: TextItem = {
     rotation: 0,
     opacity: 1,
   },
-};
+}
 
 const baseTransform: ResolvedTransform = {
   x: 0,
   y: 0,
   width: 200,
   height: 80,
+  anchorX: 100,
+  anchorY: 40,
   rotation: 0,
   opacity: 1,
   cornerRadius: 0,
-};
+}
 
 describe('expandTextTransformForPreview', () => {
   it('expands height for multi-line content growth', () => {
@@ -44,11 +46,11 @@ describe('expandTextTransformForPreview', () => {
         ...baseItem,
         text: 'line one\nline two\nline three\nline four',
       },
-      baseTransform
-    );
+      baseTransform,
+    )
 
-    expect(expanded.height).toBeGreaterThan(baseTransform.height);
-  });
+    expect(expanded.height).toBeGreaterThan(baseTransform.height)
+  })
 
   it('does not auto-expand width for long single-line text', () => {
     const expanded = expandTextTransformForPreview(
@@ -59,22 +61,22 @@ describe('expandTextTransformForPreview', () => {
       {
         ...baseTransform,
         width: 120,
-      }
-    );
+      },
+    )
 
-    expect(expanded.width).toBe(120);
-  });
+    expect(expanded.width).toBe(120)
+  })
 
   it('never shrinks width or height', () => {
     const expanded = expandTextTransformForPreview(baseItem, {
       ...baseTransform,
       width: 600,
       height: 300,
-    });
+    })
 
-    expect(expanded.width).toBe(600);
-    expect(expanded.height).toBe(300);
-  });
+    expect(expanded.width).toBe(600)
+    expect(expanded.height).toBe(300)
+  })
 
   it('accounts for previewed shadow and stroke when growing bounds', () => {
     const expanded = expandTextTransformForPreview(
@@ -94,9 +96,63 @@ describe('expandTextTransformForPreview', () => {
           width: 6,
           color: '#111827',
         },
-      }
-    );
+      },
+    )
 
-    expect(expanded.height).toBeGreaterThan(48);
-  });
-});
+    expect(expanded.height).toBeGreaterThan(48)
+  })
+
+  it('accounts for previewed text padding when growing bounds', () => {
+    const expanded = expandTextTransformForPreview(
+      baseItem,
+      {
+        ...baseTransform,
+        height: 64,
+      },
+      {
+        textPadding: 48,
+      },
+    )
+
+    expect(expanded.height).toBeGreaterThan(64)
+  })
+
+  it('grows to the exact content height for a single non-wrapping line', () => {
+    // No wrap (huge width) + no stroke/shadow → height is fully determined:
+    // fontSize·lineHeight + 2·textPadding = 48·1.2 + 2·16 = 89.6. Independent
+    // of the measurer, so this locks the auto-fit height semantics.
+    const expanded = expandTextTransformForPreview(
+      { ...baseItem, text: 'Hi', textPadding: 16 },
+      { ...baseTransform, width: 2000, height: 10 },
+    )
+
+    expect(expanded.height).toBeCloseTo(48 * 1.2 + 16 * 2)
+  })
+
+  it('expands height for stacked text spans with their own sizes', () => {
+    const expanded = expandTextTransformForPreview(
+      {
+        ...baseItem,
+        text: 'Headline\nSubtitle',
+        textSpans: [
+          {
+            text: 'Headline',
+            fontSize: 56,
+            fontWeight: 'bold',
+          },
+          {
+            text: 'Subtitle',
+            fontSize: 28,
+            color: '#cbd5e1',
+          },
+        ],
+      },
+      {
+        ...baseTransform,
+        height: 70,
+      },
+    )
+
+    expect(expanded.height).toBeGreaterThan(70)
+  })
+})

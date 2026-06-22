@@ -3,10 +3,19 @@
  * Preview modules should import timeline utility helpers from here.
  */
 
-export { resolveEffectiveTrackStates } from './timeline-contract';
+export { resolveEffectiveTrackStates } from './timeline-contract'
 export {
   findBestCanvasDropPlacement,
   buildDroppedMediaTimelineItem,
+  createClassicTrack,
+  createNewVideoZoneTrack,
+  createTimelineTemplateItem,
+  getDefaultGeneratedLayerDurationInFrames,
   getDroppedMediaDurationInFrames,
+  getTrackKind,
+  isTimelineTemplateDragData,
   type DroppableMediaType,
-} from './timeline-contract';
+} from './timeline-contract'
+export { createScrubThrottleState, shouldCommitScrubFrame } from './timeline-contract'
+export { timelineToSourceFrames } from './timeline-contract'
+export { useWaveform } from './timeline-contract'

@@ -1,44 +1,48 @@
-import { create } from 'zustand';
+import { withPreviewDefaults } from './edit-preview-defaults'
+import { createEditPreviewStore } from './edit-preview-store-factory'
 
 interface RollingEditPreviewState {
   /** The item being directly trimmed (the one the user grabbed) */
-  trimmedItemId: string | null;
+  trimmedItemId: string | null
   /** The adjacent neighbor being inversely adjusted */
-  neighborItemId: string | null;
+  neighborItemId: string | null
   /** Which handle on the trimmed item: 'start' or 'end' */
-  handle: 'start' | 'end' | null;
-  /** Delta in frames applied to the neighbor (positive = extend, negative = shrink).
-   *  For the neighbor:
-   *    - If trimmedItem's end handle is dragged right → neighbor's start moves right (neighborDelta > 0 means shrink start)
-   *    - Convention: neighborDelta matches the trimmed item's delta sign convention from use-timeline-trim */
-  neighborDelta: number;
+  handle: 'start' | 'end' | null
+  /** Delta in frames applied to the neighbor */
+  neighborDelta: number
+  /** Whether the rolling edit is constrained (from either clip's source limit) */
+  constrained: boolean
 }
 
 interface RollingEditPreviewActions {
   setPreview: (params: {
-    trimmedItemId: string;
-    neighborItemId: string;
-    handle: 'start' | 'end';
-    neighborDelta: number;
-  }) => void;
-  setNeighborDelta: (neighborDelta: number) => void;
-  clearPreview: () => void;
+    trimmedItemId: string
+    neighborItemId: string
+    handle: 'start' | 'end'
+    neighborDelta: number
+    constrained?: boolean
+  }) => void
+  setNeighborDelta: (neighborDelta: number, constrained?: boolean) => void
+  clearPreview: () => void
 }
 
-export const useRollingEditPreviewStore = create<
-  RollingEditPreviewState & RollingEditPreviewActions
->()((set) => ({
+const createInitialState = (): RollingEditPreviewState => ({
   trimmedItemId: null,
   neighborItemId: null,
   handle: null,
   neighborDelta: 0,
-  setPreview: (params) => set(params),
-  setNeighborDelta: (neighborDelta) => set({ neighborDelta }),
-  clearPreview: () =>
-    set({
-      trimmedItemId: null,
-      neighborItemId: null,
-      handle: null,
-      neighborDelta: 0,
-    }),
-}));
+  constrained: false,
+})
+
+export const useRollingEditPreviewStore = createEditPreviewStore<
+  RollingEditPreviewState,
+  Parameters<RollingEditPreviewActions['setPreview']>[0],
+  Pick<RollingEditPreviewActions, 'setNeighborDelta'>
+>({
+  initialState: createInitialState,
+  normalizePreview: (params) => withPreviewDefaults(params, { constrained: false }),
+  createActions: (set) => ({
+    setNeighborDelta: (neighborDelta, constrained) =>
+      set({ neighborDelta, constrained: constrained ?? false }),
+  }),
+})

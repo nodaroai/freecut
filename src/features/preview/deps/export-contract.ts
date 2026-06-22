@@ -6,5 +6,11 @@
 export {
   SharedVideoExtractorPool,
   type VideoFrameSource,
-} from '@/features/export/utils/shared-video-extractor';
-export { createCompositionRenderer } from '@/features/export/utils/client-render-engine';
+} from '@/features/export/utils/shared-video-extractor'
+
+export type CreateCompositionRenderer =
+  (typeof import('@/features/export/utils/client-render-engine'))['createCompositionRenderer']
+export type CompositionRendererInstance = Awaited<ReturnType<CreateCompositionRenderer>>
+
+export const importCompositionRenderer = () =>
+  import('@/features/export/utils/client-render-engine')

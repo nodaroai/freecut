@@ -6,4 +6,6 @@
 export {
   resolveTransform,
   getSourceDimensions,
-} from '@/features/composition-runtime/utils/transform-resolver';
+} from '@/runtime/composition-runtime/utils/transform-resolver'
+export { expandTextTransformToFitContent } from '@/runtime/composition-runtime/utils/text-layout'
+export { hasCornerPin } from '@/runtime/composition-runtime/utils/corner-pin'

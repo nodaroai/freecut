@@ -1,119 +1,234 @@
-import type { HotkeyKey } from '@/config/hotkeys';
+import {
+  formatHotkeyBinding,
+  normalizeHotkeyBinding,
+  type HotkeyBindingMap,
+  type HotkeyKey,
+} from '@/config/hotkeys'
 
 export interface HotkeyEditorItem {
-  label: string;
-  keys: readonly HotkeyKey[];
+  /** i18n key for the command label */
+  labelKey: string
+  keys: readonly HotkeyKey[]
 }
 
 export interface HotkeyEditorSection {
-  title: string;
-  blurb: string;
-  items: readonly HotkeyEditorItem[];
+  /** i18n key for the section title */
+  titleKey: string
+  /** i18n key for the section blurb */
+  blurbKey: string
+  items: readonly HotkeyEditorItem[]
+}
+
+export interface HotkeyEditorSearchResult {
+  section: HotkeyEditorSection
+  item: HotkeyEditorItem
+}
+
+interface HotkeyEditorSearchOptions {
+  query: string
+  sections: readonly HotkeyEditorSection[]
+  hotkeys: HotkeyBindingMap
+  translate: (key: string) => string
+}
+
+export function getHotkeyBindingDisplayLabel(binding: string, unassignedLabel: string): string {
+  return binding ? formatHotkeyBinding(binding) : unassignedLabel
+}
+
+export function getHotkeyEditorSearchResults({
+  query,
+  sections,
+  hotkeys,
+  translate,
+}: HotkeyEditorSearchOptions): HotkeyEditorSearchResult[] {
+  const normalizedQuery = query.trim().toLowerCase()
+
+  if (!normalizedQuery) {
+    return []
+  }
+
+  const normalizedBindingQuery = normalizeHotkeyBinding(normalizedQuery)
+
+  return sections.flatMap((section) => {
+    const sectionLabel = translate(section.titleKey).toLowerCase()
+
+    return section.items
+      .filter((item) => {
+        const itemLabel = translate(item.labelKey).toLowerCase()
+        const bindings = item.keys.map((key) => hotkeys[key].toLowerCase())
+
+        return (
+          itemLabel.includes(normalizedQuery) ||
+          sectionLabel.includes(normalizedQuery) ||
+          item.keys.some((key) => key.toLowerCase().includes(normalizedQuery)) ||
+          bindings.some(
+            (binding) =>
+              binding.includes(normalizedQuery) ||
+              (normalizedBindingQuery.length > 0 && binding === normalizedBindingQuery),
+          )
+        )
+      })
+      .map((item) => ({ section, item }))
+  })
 }
 
 export const HOTKEY_EDITOR_SECTIONS: readonly HotkeyEditorSection[] = [
   {
-    title: 'Playback',
-    blurb: 'Transport, frame stepping, and timeline jumps.',
+    titleKey: 'projects.settings.hotkeys.sections.playback.title',
+    blurbKey: 'projects.settings.hotkeys.sections.playback.blurb',
     items: [
-      { label: 'Play/Pause', keys: ['PLAY_PAUSE'] },
-      { label: 'Previous frame', keys: ['PREVIOUS_FRAME'] },
-      { label: 'Next frame', keys: ['NEXT_FRAME'] },
-      { label: 'Go to start', keys: ['GO_TO_START'] },
-      { label: 'Go to end', keys: ['GO_TO_END'] },
-      { label: 'Previous snap point', keys: ['PREVIOUS_SNAP_POINT'] },
-      { label: 'Next snap point', keys: ['NEXT_SNAP_POINT'] },
+      { labelKey: 'projects.settings.hotkeys.items.playPause', keys: ['PLAY_PAUSE'] },
+      { labelKey: 'projects.settings.hotkeys.items.previousFrame', keys: ['PREVIOUS_FRAME'] },
+      { labelKey: 'projects.settings.hotkeys.items.nextFrame', keys: ['NEXT_FRAME'] },
+      { labelKey: 'projects.settings.hotkeys.items.goToStart', keys: ['GO_TO_START'] },
+      { labelKey: 'projects.settings.hotkeys.items.goToEnd', keys: ['GO_TO_END'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.previousSnapPoint',
+        keys: ['PREVIOUS_SNAP_POINT'],
+      },
+      { labelKey: 'projects.settings.hotkeys.items.nextSnapPoint', keys: ['NEXT_SNAP_POINT'] },
     ],
   },
   {
-    title: 'Editing',
-    blurb: 'Clip edits, delete flows, and precise canvas nudging.',
+    titleKey: 'projects.settings.hotkeys.sections.editing.title',
+    blurbKey: 'projects.settings.hotkeys.sections.editing.blurb',
     items: [
-      { label: 'Split at playhead', keys: ['SPLIT_AT_PLAYHEAD'] },
-      { label: 'Join selected clips', keys: ['JOIN_ITEMS'] },
-      { label: 'Delete selected items', keys: ['DELETE_SELECTED', 'DELETE_SELECTED_ALT'] },
-      { label: 'Ripple delete selected items', keys: ['RIPPLE_DELETE', 'RIPPLE_DELETE_ALT'] },
-      { label: 'Insert freeze frame at playhead', keys: ['FREEZE_FRAME'] },
-      { label: 'Nudge (1px)', keys: ['NUDGE_LEFT', 'NUDGE_RIGHT', 'NUDGE_UP', 'NUDGE_DOWN'] },
-      { label: 'Nudge (10px)', keys: ['NUDGE_LEFT_LARGE', 'NUDGE_RIGHT_LARGE', 'NUDGE_UP_LARGE', 'NUDGE_DOWN_LARGE'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.splitAtPlayhead',
+        keys: ['SPLIT_AT_PLAYHEAD', 'SPLIT_AT_PLAYHEAD_ALT'],
+      },
+      { labelKey: 'projects.settings.hotkeys.items.joinSelectedClips', keys: ['JOIN_ITEMS'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.deleteSelectedItems',
+        keys: ['DELETE_SELECTED', 'DELETE_SELECTED_ALT'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.rippleDeleteSelectedItems',
+        keys: ['RIPPLE_DELETE', 'RIPPLE_DELETE_ALT'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.insertFreezeFrame',
+        keys: ['FREEZE_FRAME'],
+      },
+      { labelKey: 'projects.settings.hotkeys.items.linkSelectedClips', keys: ['LINK_AUDIO_VIDEO'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.unlinkSelectedClips',
+        keys: ['UNLINK_AUDIO_VIDEO'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.toggleLinkedSelection',
+        keys: ['TOGGLE_LINKED_SELECTION'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.nudge1px',
+        keys: ['NUDGE_LEFT', 'NUDGE_RIGHT', 'NUDGE_UP', 'NUDGE_DOWN'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.nudge10px',
+        keys: ['NUDGE_LEFT_LARGE', 'NUDGE_RIGHT_LARGE', 'NUDGE_UP_LARGE', 'NUDGE_DOWN_LARGE'],
+      },
     ],
   },
   {
-    title: 'Tools',
-    blurb: 'Tool switching for timeline editing modes.',
+    titleKey: 'projects.settings.hotkeys.sections.tools.title',
+    blurbKey: 'projects.settings.hotkeys.sections.tools.blurb',
     items: [
-      { label: 'Selection tool', keys: ['SELECTION_TOOL'] },
-      { label: 'Razor tool', keys: ['RAZOR_TOOL'] },
-      { label: 'Split at cursor', keys: ['SPLIT_AT_CURSOR'] },
-      { label: 'Rate stretch tool', keys: ['RATE_STRETCH_TOOL'] },
-      { label: 'Rolling edit tool', keys: ['ROLLING_EDIT_TOOL'] },
-      { label: 'Ripple edit tool', keys: ['RIPPLE_EDIT_TOOL'] },
-      { label: 'Slip tool', keys: ['SLIP_TOOL'] },
-      { label: 'Slide tool', keys: ['SLIDE_TOOL'] },
+      { labelKey: 'projects.settings.hotkeys.items.selectionTool', keys: ['SELECTION_TOOL'] },
+      { labelKey: 'projects.settings.hotkeys.items.trimEditTool', keys: ['TRIM_EDIT_TOOL'] },
+      { labelKey: 'projects.settings.hotkeys.items.razorTool', keys: ['RAZOR_TOOL'] },
+      { labelKey: 'projects.settings.hotkeys.items.splitAtCursor', keys: ['SPLIT_AT_CURSOR'] },
+      { labelKey: 'projects.settings.hotkeys.items.rateStretchTool', keys: ['RATE_STRETCH_TOOL'] },
+      { labelKey: 'projects.settings.hotkeys.items.slipTool', keys: ['SLIP_TOOL'] },
+      { labelKey: 'projects.settings.hotkeys.items.slideTool', keys: ['SLIDE_TOOL'] },
     ],
   },
   {
-    title: 'History and UI',
-    blurb: 'Timeline history, zoom, and UI toggles.',
+    titleKey: 'projects.settings.hotkeys.sections.historyAndUi.title',
+    blurbKey: 'projects.settings.hotkeys.sections.historyAndUi.blurb',
     items: [
-      { label: 'Undo', keys: ['UNDO'] },
-      { label: 'Redo', keys: ['REDO'] },
-      { label: 'Zoom in timeline', keys: ['ZOOM_IN'] },
-      { label: 'Zoom out timeline', keys: ['ZOOM_OUT'] },
-      { label: 'Zoom to fit all content', keys: ['ZOOM_TO_FIT'] },
-      { label: 'Zoom to 100%', keys: ['ZOOM_TO_100', 'ZOOM_TO_100_ALT'] },
-      { label: 'Toggle snap', keys: ['TOGGLE_SNAP'] },
-      { label: 'Toggle keyframe editor panel', keys: ['TOGGLE_KEYFRAME_EDITOR'] },
-      { label: 'Group selected tracks', keys: ['GROUP_TRACKS'] },
-      { label: 'Ungroup selected tracks', keys: ['UNGROUP_TRACKS'] },
+      { labelKey: 'projects.settings.hotkeys.items.undo', keys: ['UNDO'] },
+      { labelKey: 'projects.settings.hotkeys.items.redo', keys: ['REDO'] },
+      { labelKey: 'projects.settings.hotkeys.items.zoomIn', keys: ['ZOOM_IN'] },
+      { labelKey: 'projects.settings.hotkeys.items.zoomOut', keys: ['ZOOM_OUT'] },
+      { labelKey: 'projects.settings.hotkeys.items.zoomToFit', keys: ['ZOOM_TO_FIT'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.zoomTo100',
+        keys: ['ZOOM_TO_100', 'ZOOM_TO_100_ALT'],
+      },
+      { labelKey: 'projects.settings.hotkeys.items.toggleSnap', keys: ['TOGGLE_SNAP'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.toggleCanvasSnap',
+        keys: ['TOGGLE_CANVAS_SNAP'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.toggleKeyframeEditorPanel',
+        keys: ['TOGGLE_KEYFRAME_EDITOR'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.editWorkspace',
+        keys: ['WORKSPACE_EDIT'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.colorWorkspace',
+        keys: ['WORKSPACE_COLOR'],
+      },
     ],
   },
   {
-    title: 'Clipboard',
-    blurb: 'Copy, cut, and paste commands shared across editor surfaces.',
+    titleKey: 'projects.settings.hotkeys.sections.clipboard.title',
+    blurbKey: 'projects.settings.hotkeys.sections.clipboard.blurb',
     items: [
-      { label: 'Copy selected items or keyframes', keys: ['COPY'] },
-      { label: 'Cut selected items or keyframes', keys: ['CUT'] },
-      { label: 'Paste items or keyframes', keys: ['PASTE'] },
+      { labelKey: 'projects.settings.hotkeys.items.copy', keys: ['COPY'] },
+      { labelKey: 'projects.settings.hotkeys.items.cut', keys: ['CUT'] },
+      { labelKey: 'projects.settings.hotkeys.items.paste', keys: ['PASTE'] },
     ],
   },
   {
-    title: 'Markers',
-    blurb: 'Marker creation, removal, and navigation.',
+    titleKey: 'projects.settings.hotkeys.sections.markers.title',
+    blurbKey: 'projects.settings.hotkeys.sections.markers.blurb',
     items: [
-      { label: 'Add marker at playhead', keys: ['ADD_MARKER'] },
-      { label: 'Remove selected marker', keys: ['REMOVE_MARKER'] },
-      { label: 'Jump to previous marker', keys: ['PREVIOUS_MARKER'] },
-      { label: 'Jump to next marker', keys: ['NEXT_MARKER'] },
+      { labelKey: 'projects.settings.hotkeys.items.addMarker', keys: ['ADD_MARKER'] },
+      { labelKey: 'projects.settings.hotkeys.items.removeMarker', keys: ['REMOVE_MARKER'] },
+      { labelKey: 'projects.settings.hotkeys.items.previousMarker', keys: ['PREVIOUS_MARKER'] },
+      { labelKey: 'projects.settings.hotkeys.items.nextMarker', keys: ['NEXT_MARKER'] },
     ],
   },
   {
-    title: 'Keyframes',
-    blurb: 'Keyframe editor actions and view switching.',
+    titleKey: 'projects.settings.hotkeys.sections.keyframes.title',
+    blurbKey: 'projects.settings.hotkeys.sections.keyframes.blurb',
     items: [
-      { label: 'Clear all keyframes from selected items', keys: ['CLEAR_KEYFRAMES'] },
-      { label: 'Switch keyframe editor to graph view', keys: ['KEYFRAME_EDITOR_GRAPH'] },
-      { label: 'Switch keyframe editor to dopesheet view', keys: ['KEYFRAME_EDITOR_DOPESHEET'] },
-      { label: 'Switch keyframe editor to split view', keys: ['KEYFRAME_EDITOR_SPLIT'] },
+      { labelKey: 'projects.settings.hotkeys.items.clearKeyframes', keys: ['CLEAR_KEYFRAMES'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.keyframeEditorGraph',
+        keys: ['KEYFRAME_EDITOR_GRAPH'],
+      },
+      {
+        labelKey: 'projects.settings.hotkeys.items.keyframeEditorDopesheet',
+        keys: ['KEYFRAME_EDITOR_DOPESHEET'],
+      },
     ],
   },
   {
-    title: 'Source Monitor',
-    blurb: 'In and out points plus insert and overwrite edits.',
+    titleKey: 'projects.settings.hotkeys.sections.sourceMonitor.title',
+    blurbKey: 'projects.settings.hotkeys.sections.sourceMonitor.blurb',
     items: [
-      { label: 'Mark In point', keys: ['MARK_IN'] },
-      { label: 'Mark Out point', keys: ['MARK_OUT'] },
-      { label: 'Clear In/Out points', keys: ['CLEAR_IN_OUT'] },
-      { label: 'Insert edit', keys: ['INSERT_EDIT'] },
-      { label: 'Overwrite edit', keys: ['OVERWRITE_EDIT'] },
+      { labelKey: 'projects.settings.hotkeys.items.markIn', keys: ['MARK_IN'] },
+      { labelKey: 'projects.settings.hotkeys.items.markOut', keys: ['MARK_OUT'] },
+      { labelKey: 'projects.settings.hotkeys.items.clearInOut', keys: ['CLEAR_IN_OUT'] },
+      { labelKey: 'projects.settings.hotkeys.items.insertEdit', keys: ['INSERT_EDIT'] },
+      { labelKey: 'projects.settings.hotkeys.items.overwriteEdit', keys: ['OVERWRITE_EDIT'] },
     ],
   },
   {
-    title: 'Project',
-    blurb: 'Save and export flows.',
+    titleKey: 'projects.settings.hotkeys.sections.project.title',
+    blurbKey: 'projects.settings.hotkeys.sections.project.blurb',
     items: [
-      { label: 'Save project', keys: ['SAVE'] },
-      { label: 'Export video', keys: ['EXPORT'] },
+      { labelKey: 'projects.settings.hotkeys.items.saveProject', keys: ['SAVE'] },
+      { labelKey: 'projects.settings.hotkeys.items.exportVideo', keys: ['EXPORT'] },
+      {
+        labelKey: 'projects.settings.hotkeys.items.openSceneBrowser',
+        keys: ['OPEN_SCENE_BROWSER'],
+      },
     ],
   },
-] as const;
+] as const

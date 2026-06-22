@@ -3,11 +3,15 @@
  * Preview modules should import timeline stores/types from here.
  */
 
-export type { TimelineState } from './timeline-contract';
+export type { SubComposition } from './timeline-contract'
 export {
   useTimelineStore,
   useItemsStore,
+  useKeyframesStore,
   useTransitionsStore,
   useTimelineSettingsStore,
+  useTimelineViewportStore,
   useMediaDependencyStore,
-} from './timeline-contract';
+  useCompositionsStore,
+  useCompositionNavigationStore,
+} from './timeline-contract'

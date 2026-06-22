@@ -1,12 +1,13 @@
-import type { CSSProperties, ReactNode } from 'react';
-import { cn } from '@/shared/ui/cn';
+import type { CSSProperties, ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import { cn } from '@/shared/ui/cn'
 
 interface InteractionLockRegionProps {
-  locked: boolean;
-  children: ReactNode;
-  className?: string;
-  overlayClassName?: string;
-  style?: CSSProperties;
+  locked: boolean
+  children: ReactNode
+  className?: string
+  overlayClassName?: string
+  style?: CSSProperties
 }
 
 /**
@@ -20,6 +21,7 @@ export function InteractionLockRegion({
   overlayClassName,
   style,
 }: InteractionLockRegionProps) {
+  const { t } = useTranslation()
   return (
     <div
       className={cn('relative min-h-0', className)}
@@ -29,7 +31,7 @@ export function InteractionLockRegion({
       <div
         className={cn(
           'h-full min-h-0',
-          locked ? 'pointer-events-none select-none opacity-60' : undefined
+          locked ? 'pointer-events-none select-none opacity-60' : undefined,
         )}
       >
         {children}
@@ -39,11 +41,11 @@ export function InteractionLockRegion({
           aria-hidden="true"
           className={cn(
             'absolute inset-0 z-10 cursor-not-allowed rounded-[inherit] bg-background/10',
-            overlayClassName
+            overlayClassName,
           )}
-          title="Finish or exit mask editing to continue"
+          title={t('editor.interactionLock.maskEditing')}
         />
       ) : null}
     </div>
-  );
+  )
 }

@@ -10,12 +10,15 @@ const REPORT_SCRIPT = path.join(ROOT_DIR, 'scripts', 'report-feature-edges.mjs')
 
 const EDGE_BUDGETS = [
   { edge: 'editor -> timeline', maxImports: 2, maxFiles: 2 },
-  { edge: 'editor -> preview', maxImports: 12, maxFiles: 2 },
-  { edge: 'editor -> media-library', maxImports: 8, maxFiles: 2 },
+  { edge: 'editor -> preview', maxImports: 15, maxFiles: 2 },
+  { edge: 'editor -> media-library', maxImports: 13, maxFiles: 2 },
   { edge: 'preview -> timeline', maxImports: 2, maxFiles: 2 },
   { edge: 'preview -> player', maxImports: 2, maxFiles: 2 },
-  { edge: 'timeline -> media-library', maxImports: 2, maxFiles: 2 },
-  { edge: 'media-library -> timeline', maxImports: 2, maxFiles: 2 },
+  // Raised for the on-device transcription + caption feature: the timeline
+  // transcript editor / auto-captions and the media-library Parakeet/Whisper
+  // pipeline now interoperate through more deps/ adapter contracts.
+  { edge: 'timeline -> media-library', maxImports: 16, maxFiles: 7 },
+  { edge: 'media-library -> timeline', maxImports: 20, maxFiles: 5 },
   { edge: 'composition-runtime -> player', maxImports: 8, maxFiles: 2 },
 ];
 

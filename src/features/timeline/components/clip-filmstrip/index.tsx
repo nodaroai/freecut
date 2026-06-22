@@ -1,105 +1,51 @@
-import { memo, useEffect, useState, useMemo, useCallback, useRef, type RefCallback } from 'react';
-import { FilmstripSkeleton } from './filmstrip-skeleton';
-import { useFilmstrip, type FilmstripFrame } from '../../hooks/use-filmstrip';
-import { resolveMediaUrl } from '@/features/timeline/deps/media-library-resolver';
-import { useMediaBlobUrl } from '../../hooks/use-media-blob-url';
-import { THUMBNAIL_WIDTH } from '../../services/filmstrip-cache';
-import { createLogger } from '@/shared/logging/logger';
+import { memo, useEffect, useState, useMemo, useCallback, useRef, type RefCallback } from 'react'
+import { FilmstripSkeleton } from './filmstrip-skeleton'
+import { computeFilmstripRenderWindow } from './render-window'
+import { useFilmstrip, type FilmstripFrame } from '../../hooks/use-filmstrip'
+import { resolveMediaUrl, resolveProxyUrl } from '@/features/timeline/deps/media-library-resolver'
+import { useMediaBlobUrl } from '../../hooks/use-media-blob-url'
+import { filmstripCache, THUMBNAIL_WIDTH } from '../../services/filmstrip-cache'
+import { createLogger } from '@/shared/logging/logger'
+import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
+import { observeParentElementHeight } from '../measure-parent-height'
 
-const logger = createLogger('ClipFilmstrip');
+const logger = createLogger('ClipFilmstrip')
 
-const ZOOM_SETTLE_MS = 80;
-const PRIORITY_PAD_SECONDS = 0.75;
-const MAX_PRIORITY_WINDOW_SECONDS = 60;
-const MAX_TILES_DURING_ZOOM = 32;
-const MAX_TILES_DURING_ZOOM_MID = 24;
-const MAX_TILES_DURING_ZOOM_HIGH = 16;
-const MAX_TILES_IDLE = 260;
-const VIEWPORT_PAD_TILES = 2;
-const VIEWPORT_PAD_TILES_INTERACTION = 1;
-const INTERACTION_PPS_QUANTUM = 8;
-const INTERACTION_PPS_QUANTUM_MID = 12;
-const INTERACTION_PPS_QUANTUM_HIGH = 18;
-const MID_INTERACTION_PPS = 120;
-const HIGH_INTERACTION_PPS = 170;
+// Pad the rendered tile window beyond the visible range so a fast scrub never
+// outruns the mounted tiles within a frame. Matches the animated-image filmstrip.
+const VIEWPORT_PAD_TILES = 2
+const VIEWPORT_PAD_PX = 600
 
 interface ClipFilmstripProps {
   /** Media ID from the timeline item */
-  mediaId: string;
-  /** Width of the clip in pixels */
-  clipWidth: number;
+  mediaId: string
+  /** Visible width of the clip in pixels */
+  clipWidth: number
+  /** Optional overscan width used to hide trailing-edge width commit lag */
+  renderWidth?: number
   /** Source start time in seconds (for trimmed clips) */
-  sourceStart: number;
+  sourceStart: number
+  /** Source end time in seconds (for trimmed clips) */
+  sourceEnd?: number
   /** Total source duration in seconds */
-  sourceDuration: number;
+  sourceDuration: number
   /** Trim start in seconds (how much trimmed from beginning) */
-  trimStart: number;
+  trimStart: number
   /** Playback speed multiplier */
-  speed: number;
+  speed: number
+  /** Whether the clip plays source media in reverse */
+  isReversed?: boolean
   /** Frames per second */
-  fps: number;
+  fps: number
   /** Whether the clip is visible (from IntersectionObserver) */
-  isVisible: boolean;
+  isVisible: boolean
   /** Visible horizontal range within this clip (0-1 ratios) */
-  visibleStartRatio?: number;
-  visibleEndRatio?: number;
+  visibleStartRatio?: number
+  visibleEndRatio?: number
   /** Pixels per second from parent (avoids redundant zoom subscription) */
-  pixelsPerSecond: number;
+  pixelsPerSecond: number
   /** Disable deferred width/zoom while active edit previews are running */
-  preferImmediateRendering?: boolean;
-}
-
-/**
- * Find closest frame using binary search
- */
-function findClosestFrame(frames: FilmstripFrame[], targetTime: number): FilmstripFrame | null {
-  if (frames.length === 0) return null;
-
-  let left = 0;
-  let right = frames.length - 1;
-  let bestFrame = frames[0]!;
-  let bestDiff = Math.abs(bestFrame.timestamp - targetTime);
-
-  while (left <= right) {
-    const mid = Math.floor((left + right) / 2);
-    const frame = frames[mid]!;
-    const diff = Math.abs(frame.timestamp - targetTime);
-
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestFrame = frame;
-    }
-
-    if (frame.timestamp < targetTime) {
-      left = mid + 1;
-    } else {
-      right = mid - 1;
-    }
-  }
-
-  return bestFrame;
-}
-
-function getTileStep(tileCount: number, maxTiles: number): number {
-  if (tileCount <= maxTiles) return 1;
-  return Math.ceil(tileCount / maxTiles);
-}
-
-function quantizePixelsPerSecond(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  if (value >= HIGH_INTERACTION_PPS) {
-    return Math.max(1, Math.round(value / INTERACTION_PPS_QUANTUM_HIGH) * INTERACTION_PPS_QUANTUM_HIGH);
-  }
-  if (value >= MID_INTERACTION_PPS) {
-    return Math.max(1, Math.round(value / INTERACTION_PPS_QUANTUM_MID) * INTERACTION_PPS_QUANTUM_MID);
-  }
-  return Math.max(1, Math.round(value / INTERACTION_PPS_QUANTUM) * INTERACTION_PPS_QUANTUM);
-}
-
-function getInteractionMaxTiles(pixelsPerSecond: number): number {
-  if (pixelsPerSecond >= HIGH_INTERACTION_PPS) return MAX_TILES_DURING_ZOOM_HIGH;
-  if (pixelsPerSecond >= MID_INTERACTION_PPS) return MAX_TILES_DURING_ZOOM_MID;
-  return MAX_TILES_DURING_ZOOM;
+  preferImmediateRendering?: boolean
 }
 
 /**
@@ -114,55 +60,84 @@ const FilmstripTile = memo(function FilmstripTile({
   height,
   width,
   sourceWidth,
+  frameIndex,
+  onSourceError,
 }: {
-  src: string;
-  bitmap?: ImageBitmap;
-  x: number;
-  height: number;
-  width: number;
-  sourceWidth: number;
+  src: string
+  bitmap?: ImageBitmap
+  x: number
+  height: number
+  width: number
+  sourceWidth: number
+  frameIndex: number
+  onSourceError?: (frameIndex: number) => void
 }) {
-  const [errorSrc, setErrorSrc] = useState<string | null>(null);
+  const [errorSrc, setErrorSrc] = useState<string | null>(null)
 
-  // Draw bitmap to canvas when ref is attached or bitmap changes
-  const canvasRefCallback: RefCallback<HTMLCanvasElement> = useCallback((canvas: HTMLCanvasElement | null) => {
-    if (!canvas || !bitmap || bitmap.width === 0 || bitmap.height === 0) return;
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext('2d');
-    try {
-      if (ctx) ctx.drawImage(bitmap, 0, 0);
-    } catch {
-      // Bitmap may have been closed/detached by the time React renders
-    }
-  }, [bitmap]);
+  // Draw bitmap to canvas when ref is attached or bitmap changes.
+  // Assigning canvas.width/height resets the backing buffer even when the value
+  // doesn't change, so guard against same-size writes to avoid wasted realloc.
+  const canvasRefCallback: RefCallback<HTMLCanvasElement> = useCallback(
+    (canvas: HTMLCanvasElement | null) => {
+      if (!canvas || !bitmap || bitmap.width === 0 || bitmap.height === 0) return
+      const targetWidth = Math.max(1, Math.round(sourceWidth))
+      const targetHeight = Math.max(1, Math.round(height))
+      if (canvas.width !== targetWidth) canvas.width = targetWidth
+      if (canvas.height !== targetHeight) canvas.height = targetHeight
+      const ctx = canvas.getContext('2d')
+      try {
+        if (ctx) {
+          const scale = Math.max(targetWidth / bitmap.width, targetHeight / bitmap.height)
+          const drawWidth = bitmap.width * scale
+          const drawHeight = bitmap.height * scale
+          const drawX = (targetWidth - drawWidth) * 0.5
+          const drawY = (targetHeight - drawHeight) * 0.5
+          ctx.clearRect(0, 0, targetWidth, targetHeight)
+          ctx.drawImage(bitmap, drawX, drawY, drawWidth, drawHeight)
+        }
+      } catch {
+        // Bitmap may have been closed/detached by the time React renders
+      }
+    },
+    [bitmap, height, sourceWidth],
+  )
 
   const handleError = useCallback(() => {
-    setErrorSrc(src);
-  }, [src]);
+    setErrorSrc(src)
+    onSourceError?.(frameIndex)
+  }, [frameIndex, onSourceError, src])
 
   // Bitmap path: render to canvas (instant, no JPEG decode)
   if (bitmap) {
     return (
-      <canvas
-        ref={canvasRefCallback}
+      <div
+        aria-hidden
         className="absolute top-0"
         style={{
           left: x,
           width,
           height,
-          objectFit: 'cover',
+          overflow: 'hidden',
         }}
-      />
-    );
+      >
+        <canvas
+          ref={canvasRefCallback}
+          className="absolute top-0 left-0"
+          style={{
+            width: sourceWidth,
+            height,
+          }}
+        />
+      </div>
+    )
   }
 
   // Hide if this specific src failed, but allow new src to try again
   if (!src || errorSrc === src) {
-    return null;
+    return null
   }
 
-  const shouldRepeat = width > sourceWidth + 1;
+  const shouldRepeat = width > sourceWidth + 1
   if (shouldRepeat) {
     return (
       <div
@@ -177,27 +152,46 @@ const FilmstripTile = memo(function FilmstripTile({
           backgroundSize: `${sourceWidth}px ${height}px`,
           backgroundPosition: 'left top',
         }}
-      />
-    );
+      >
+        <img
+          src={src}
+          alt=""
+          aria-hidden
+          className="absolute h-px w-px opacity-0 pointer-events-none"
+          onError={handleError}
+          style={{ left: 0, top: 0 }}
+        />
+      </div>
+    )
   }
 
   return (
-    <img
-      src={src}
-      alt=""
-      loading="lazy"
-      decoding="async"
+    <div
+      aria-hidden
       className="absolute top-0"
-      onError={handleError}
       style={{
         left: x,
         width,
         height,
-        objectFit: 'cover',
+        overflow: 'hidden',
       }}
-    />
-  );
-});
+    >
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="absolute top-0 left-0"
+        onError={handleError}
+        style={{
+          width: sourceWidth,
+          height,
+          objectFit: 'cover',
+        }}
+      />
+    </div>
+  )
+})
 
 /**
  * Clip Filmstrip Component
@@ -210,264 +204,374 @@ const FilmstripTile = memo(function FilmstripTile({
 export const ClipFilmstrip = memo(function ClipFilmstrip({
   mediaId,
   clipWidth,
+  renderWidth,
   sourceStart,
+  sourceEnd,
   sourceDuration,
   trimStart,
   speed,
+  isReversed = false,
   isVisible,
   visibleStartRatio = 0,
   visibleEndRatio = 1,
   pixelsPerSecond,
-  preferImmediateRendering = false,
 }: ClipFilmstripProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(0);
-  const { blobUrl, setBlobUrl, hasStartedLoadingRef, blobUrlVersion } = useMediaBlobUrl(mediaId);
-  const [isZooming, setIsZooming] = useState(false);
-  const zoomSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState(0)
+  const { blobUrl, setBlobUrl, hasStartedLoadingRef, blobUrlVersion } = useMediaBlobUrl(mediaId)
+  const refreshingFrameIndicesRef = useRef<Set<number>>(new Set())
+  const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus.get(mediaId) ?? null)
+
+  const proxyBlobUrl = useMemo(() => {
+    if (proxyStatus !== 'ready') {
+      return null
+    }
+    return resolveProxyUrl(mediaId)
+  }, [mediaId, proxyStatus])
+  const filmstripSourceUrl = proxyBlobUrl ?? blobUrl
 
   // Measure container height
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const measure = () => {
-      const parent = container.parentElement;
-      if (parent) {
-        setHeight(parent.clientHeight);
-      }
-    };
-
-    measure();
-
-    const resizeObserver = new ResizeObserver(measure);
-    if (container.parentElement) {
-      resizeObserver.observe(container.parentElement);
-    }
-
-    return () => resizeObserver.disconnect();
-  }, []);
+    return observeParentElementHeight(containerRef.current, setHeight)
+  }, [])
 
   // Calculate thumbnail width based on height (16:9 aspect ratio)
-  const thumbnailWidth = Math.round(height * (16 / 9)) || THUMBNAIL_WIDTH;
+  const thumbnailWidth = Math.round(height * (16 / 9)) || THUMBNAIL_WIDTH
 
-  const renderPixelsPerSecond = pixelsPerSecond;
-  const renderClipWidth = clipWidth;
-  const effectiveStart = Math.max(0, sourceStart + trimStart);
-  const isInteractionLod = !preferImmediateRendering && isZooming;
-  const samplingPixelsPerSecond = isInteractionLod
-    ? quantizePixelsPerSecond(renderPixelsPerSecond)
-    : renderPixelsPerSecond;
-
-  // Track active zoom interaction from pps changes and drop defer shortly
-  // after changes stop to avoid visible catch-up.
-  const lastPpsRef = useRef(pixelsPerSecond);
-  useEffect(() => {
-    if (preferImmediateRendering) return;
-    if (lastPpsRef.current === pixelsPerSecond) return;
-    lastPpsRef.current = pixelsPerSecond;
-
-    setIsZooming(true);
-    if (zoomSettleTimeoutRef.current) {
-      clearTimeout(zoomSettleTimeoutRef.current);
-    }
-    zoomSettleTimeoutRef.current = setTimeout(() => {
-      setIsZooming(false);
-      zoomSettleTimeoutRef.current = null;
-    }, ZOOM_SETTLE_MS);
-  }, [pixelsPerSecond, preferImmediateRendering]);
-
-  // Keep unmount cleanup separate: the zoom-tracking effect above intentionally
-  // handles dependency-change behavior (including early returns), and returning
-  // cleanup there would run on every change. This effect only clears a pending
-  // timeout on unmount so it cannot leak during a settle window.
-  useEffect(() => {
-    return () => {
-      if (zoomSettleTimeoutRef.current) {
-        clearTimeout(zoomSettleTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // During active edit previews, prioritize extracting the currently requested
-  // source window first so expanding clips show thumbnails sooner.
-  const priorityWindow = useMemo(() => {
-    if (isInteractionLod) {
-      return null;
-    }
-    if (sourceDuration <= 0 || renderPixelsPerSecond <= 0 || renderClipWidth <= 0) {
-      return null;
-    }
-
-    const visibleSpanSeconds = (renderClipWidth / renderPixelsPerSecond) * speed;
-    const prioritySpanSeconds = Math.min(
-      visibleSpanSeconds + PRIORITY_PAD_SECONDS * 2,
-      MAX_PRIORITY_WINDOW_SECONDS
-    );
-    const startTime = Math.max(0, effectiveStart - PRIORITY_PAD_SECONDS);
-    const endTime = Math.min(sourceDuration, startTime + prioritySpanSeconds);
-
-    if (endTime <= startTime) {
-      return null;
-    }
-
-    return { startTime, endTime };
-  }, [
+  const renderPixelsPerSecond = pixelsPerSecond
+  const visibleClipWidth = clipWidth
+  const renderClipWidth = Math.max(visibleClipWidth, renderWidth ?? visibleClipWidth)
+  const effectiveStart = Math.max(0, sourceStart + trimStart)
+  const effectiveEnd = Math.min(
     sourceDuration,
+    Math.max(
+      effectiveStart,
+      sourceEnd ?? effectiveStart + (visibleClipWidth / Math.max(1, renderPixelsPerSecond)) * speed,
+    ),
+  )
+  const initialPriorityWindowRef = useRef<{
+    mediaId: string
+    window: { startTime: number; endTime: number }
+  } | null>(null)
+  if (initialPriorityWindowRef.current?.mediaId !== mediaId) {
+    initialPriorityWindowRef.current = null
+  }
+  if (isVisible && !initialPriorityWindowRef.current && effectiveEnd > effectiveStart) {
+    initialPriorityWindowRef.current = {
+      mediaId,
+      window: {
+        startTime: effectiveStart,
+        endTime: Math.min(sourceDuration, Math.max(effectiveEnd, effectiveStart + 1)),
+      },
+    }
+  }
+
+  // Prioritize the first visible source window once per media item. Keeping this
+  // stable avoids the old zoom-driven target churn while still making a freshly
+  // dropped visible clip fill in the part the user can actually see first.
+  const priorityWindow =
+    initialPriorityWindowRef.current?.mediaId === mediaId
+      ? initialPriorityWindowRef.current.window
+      : null
+  const targetFrameCount = undefined
+  const targetFrameIndices = useMemo(() => {
+    if (!isVisible || height <= 0 || renderPixelsPerSecond <= 0) return undefined
+    if (effectiveEnd <= effectiveStart || sourceDuration <= 0) return undefined
+
+    const pixelsPerSourceSecond = renderPixelsPerSecond / Math.max(0.0001, speed)
+    const tileWidth = thumbnailWidth
+    const { startTile, endTile } = computeFilmstripRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      tileWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+      minimumPadTiles: VIEWPORT_PAD_TILES,
+      minimumPadPx: VIEWPORT_PAD_PX,
+    })
+    if (endTile <= startTile) return undefined
+
+    const totalFrameCount = Math.max(1, Math.ceil(sourceDuration))
+    const indices = new Set<number>()
+    for (let slot = startTile; slot < endTile; slot++) {
+      const slotCenterX = slot * tileWidth + tileWidth * 0.5
+      const slotCenterTime = isReversed
+        ? effectiveEnd - slotCenterX / pixelsPerSourceSecond
+        : effectiveStart + slotCenterX / pixelsPerSourceSecond
+      indices.add(Math.max(0, Math.min(totalFrameCount - 1, Math.floor(slotCenterTime))))
+    }
+
+    return indices.size > 0 ? Array.from(indices).sort((a, b) => a - b) : undefined
+  }, [
+    isVisible,
+    height,
     renderPixelsPerSecond,
-    renderClipWidth,
-    speed,
+    effectiveEnd,
     effectiveStart,
-    isInteractionLod,
-  ]);
+    sourceDuration,
+    speed,
+    thumbnailWidth,
+    renderClipWidth,
+    visibleClipWidth,
+    visibleStartRatio,
+    visibleEndRatio,
+    isReversed,
+  ])
 
   // Load blob URL lazily when visible, and retry after global invalidation.
   useEffect(() => {
-    if (!isVisible || !mediaId || hasStartedLoadingRef.current) {
-      return;
+    if (!isVisible || !mediaId || proxyBlobUrl || hasStartedLoadingRef.current) {
+      return
     }
-    hasStartedLoadingRef.current = true;
+    hasStartedLoadingRef.current = true
 
-    let mounted = true;
+    let mounted = true
     const loadBlobUrl = async () => {
       try {
-        const url = await resolveMediaUrl(mediaId);
+        const url = await resolveMediaUrl(mediaId)
         if (mounted && url) {
-          setBlobUrl(url);
+          setBlobUrl(url)
         }
       } catch (error) {
-        logger.error('Failed to load media blob URL:', error);
+        logger.error('Failed to load media blob URL:', error)
       }
-    };
+    }
 
-    loadBlobUrl();
+    loadBlobUrl()
 
     return () => {
-      mounted = false;
-    };
-  }, [mediaId, isVisible, blobUrlVersion, setBlobUrl]);
+      mounted = false
+    }
+  }, [mediaId, isVisible, proxyBlobUrl, blobUrlVersion, hasStartedLoadingRef, setBlobUrl])
 
-  // Use filmstrip hook
-  const { frames, isLoading, isComplete, error } = useFilmstrip({
+  // Use filmstrip hook. `enabled` no longer requires the source blob URL —
+  // disk-cached frames can render before useMediaBlobUrl resolves. The
+  // extraction path inside the hook still gates on blobUrl.
+  const { frames, isLoading, error } = useFilmstrip({
     mediaId,
-    blobUrl,
+    blobUrl: filmstripSourceUrl,
     duration: sourceDuration,
     isVisible,
-    enabled: !!blobUrl && sourceDuration > 0,
+    enabled: sourceDuration > 0,
     priorityWindow,
-  });
+    targetFrameCount,
+    targetFrameIndices,
+  })
+  const [stableFrames, setStableFrames] = useState<FilmstripFrame[] | null>(null)
 
-  const frameByIndex = useMemo(() => {
-    if (!frames || frames.length === 0) return null;
-    const map = new Map<number, FilmstripFrame>();
-    for (const frame of frames) {
-      map.set(frame.index, frame);
-    }
-    return map;
-  }, [frames]);
+  useEffect(() => {
+    setStableFrames(null)
+  }, [mediaId])
 
-  // Calculate tiles - maps each tile position to the best frame
-  // During active zoom, reduce tile density so we keep UI fluid without
-  // deferring zoom updates.
-  const tiles = useMemo(() => {
-    if (!frames || frames.length === 0 || thumbnailWidth === 0 || samplingPixelsPerSecond <= 0) return [];
-
-    const tileCount = Math.ceil(renderClipWidth / thumbnailWidth);
-    if (tileCount <= 0) return [];
-
-    const clampedStartRatio = Math.max(0, Math.min(1, visibleStartRatio));
-    const clampedEndRatio = Math.max(clampedStartRatio, Math.min(1, visibleEndRatio));
-    const visibleStartX = renderClipWidth * clampedStartRatio;
-    const visibleEndX = renderClipWidth * clampedEndRatio;
-    const viewportPadTiles = isInteractionLod ? VIEWPORT_PAD_TILES_INTERACTION : VIEWPORT_PAD_TILES;
-    const paddedStartX = Math.max(0, visibleStartX - thumbnailWidth * viewportPadTiles);
-    const paddedEndX = Math.min(renderClipWidth, visibleEndX + thumbnailWidth * viewportPadTiles);
-
-    const startTile = Math.max(0, Math.floor(paddedStartX / thumbnailWidth));
-    const endTile = Math.min(tileCount, Math.ceil(paddedEndX / thumbnailWidth));
-    const visibleTileCount = Math.max(0, endTile - startTile);
-    if (visibleTileCount <= 0) return [];
-
-    const maxTiles = isInteractionLod
-      ? getInteractionMaxTiles(renderPixelsPerSecond)
-      : MAX_TILES_IDLE;
-    const tileStep = getTileStep(visibleTileCount, maxTiles);
-    const result: { tileIndex: number; frame: FilmstripFrame; x: number; width: number }[] = [];
-
-    for (let tile = startTile; tile < endTile; tile += tileStep) {
-      const tileX = tile * thumbnailWidth;
-      if (tileX >= paddedEndX) break;
-      const tileWidth = Math.max(
-        1,
-        Math.min(renderClipWidth, Math.min((tile + tileStep) * thumbnailWidth, paddedEndX)) - tileX
-      );
-      const tileCenterX = tileX + tileWidth * 0.5;
-      const tileTime = effectiveStart + (tileCenterX / samplingPixelsPerSecond) * speed;
-      const nearestFrameIndex = Math.max(0, Math.round(tileTime));
-      const frame = frameByIndex?.get(nearestFrameIndex) ?? findClosestFrame(frames, tileTime);
-
-      if (frame) {
-        result.push({ tileIndex: tile, frame, x: tileX, width: tileWidth });
+  useEffect(() => {
+    if (!frames || frames.length === 0) {
+      if (!isLoading) {
+        setStableFrames(null)
       }
+      return
     }
 
-    return result;
+    setStableFrames((current) => {
+      if (isLoading && current && current.length > 0) {
+        return current
+      }
+      return frames
+    })
+  }, [frames, isLoading])
+
+  const renderFrames = stableFrames ?? frames
+
+  const handleFrameSourceError = useCallback(
+    (frameIndex: number) => {
+      if (!mediaId || refreshingFrameIndicesRef.current.has(frameIndex)) {
+        return
+      }
+
+      refreshingFrameIndicesRef.current.add(frameIndex)
+      void filmstripCache
+        .refreshFrames(mediaId, [frameIndex])
+        .catch((refreshError) => {
+          logger.warn('Failed to refresh stale filmstrip frame URL:', refreshError)
+        })
+        .finally(() => {
+          refreshingFrameIndicesRef.current.delete(frameIndex)
+        })
+    },
+    [mediaId],
+  )
+
+  // Pixel-aligned slot grid. Slots are at x = 0, thumbnailWidth, 2*thumbnailWidth, …
+  // up to the clip's right edge. Each slot's content is the closest available
+  // extracted frame for the source time at that slot's center — so extraction
+  // gaps are silently filled with the nearest frame instead of producing an
+  // alternating-size visual.
+  //
+  // - Tile width is exactly thumbnailWidth — never stretched, squashed, or
+  //   merged. Segment boundaries are handled by overflow clipping outside the
+  //   tile, so a short segment only reveals less of the full-size tile.
+  // - key=slot is the integer slot index on the pixel grid, so a slot that stays
+  //   inside the window keeps its DOM as the window slides; a slot's frame prop
+  //   updating as extraction lands doesn't remount its DOM either.
+  // - Only slots intersecting the visible window (+ pad) are emitted, mirroring
+  //   the animated-image filmstrip and the waveform's TiledCanvas. Without this
+  //   a clip spanning a large fraction of a max-zoom timeline mounts one tile per
+  //   slot across its ENTIRE width (thousands of <img>s), which React must
+  //   reconcile and the compositor must paint on every scroll frame — the
+  //   dominant cost when scrubbing the navigator at high zoom. Off-window areas
+  //   keep showing the repeating cover-frame background, so windowing is seamless.
+  const tiles = useMemo(() => {
+    if (!renderFrames || renderFrames.length === 0 || renderPixelsPerSecond <= 0) return []
+    if (effectiveEnd <= effectiveStart) return []
+
+    const pixelsPerSourceSecond = renderPixelsPerSecond / Math.max(0.0001, speed)
+    const tileWidth = thumbnailWidth
+
+    const { startTile, endTile } = computeFilmstripRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      tileWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+      minimumPadTiles: VIEWPORT_PAD_TILES,
+      minimumPadPx: VIEWPORT_PAD_PX,
+    })
+    if (endTile <= startTile) return []
+
+    const findClosestFrame = (targetTime: number): FilmstripFrame | null => {
+      if (renderFrames.length === 0) return null
+      let lo = 0
+      let hi = renderFrames.length - 1
+      let best = renderFrames[0]!
+      let bestDiff = Math.abs(best.index - targetTime)
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1
+        const f = renderFrames[mid]!
+        const diff = Math.abs(f.index - targetTime)
+        if (diff < bestDiff) {
+          best = f
+          bestDiff = diff
+        }
+        if (f.index < targetTime) lo = mid + 1
+        else hi = mid - 1
+      }
+      return best
+    }
+
+    const result: { slot: number; frame: FilmstripFrame; x: number; width: number }[] = []
+
+    for (let slot = startTile; slot < endTile; slot++) {
+      const slotX = slot * tileWidth
+      const slotCenterX = slotX + tileWidth * 0.5
+      const slotCenterTime = isReversed
+        ? effectiveEnd - slotCenterX / pixelsPerSourceSecond
+        : effectiveStart + slotCenterX / pixelsPerSourceSecond
+      const frame = findClosestFrame(slotCenterTime)
+      if (!frame) continue
+      result.push({ slot, frame, x: slotX, width: tileWidth })
+    }
+
+    return result
   }, [
-    frames,
-    frameByIndex,
+    renderFrames,
+    renderPixelsPerSecond,
     renderClipWidth,
-    samplingPixelsPerSecond,
-    effectiveStart,
-    speed,
-    thumbnailWidth,
+    visibleClipWidth,
     visibleStartRatio,
     visibleEndRatio,
-    isInteractionLod,
-  ]);
+    effectiveStart,
+    effectiveEnd,
+    isReversed,
+    speed,
+    thumbnailWidth,
+  ])
+
+  // Lock a stable cover-frame index on first paint. Without this, the middle
+  // frame moves as refinement extraction adds new frames, so the repeating
+  // background URL swaps mid-zoom and produces a visible flash. Resetting on
+  // mediaId change keeps relinked clips correct.
+  const [coverFrameIndex, setCoverFrameIndex] = useState<number | null>(null)
+  useEffect(() => {
+    setCoverFrameIndex(null)
+  }, [mediaId])
+  useEffect(() => {
+    if (coverFrameIndex !== null) return
+    if (!renderFrames || renderFrames.length === 0) return
+    const mid = renderFrames[Math.floor(renderFrames.length / 2)] ?? renderFrames[0] ?? null
+    if (mid) setCoverFrameIndex(mid.index)
+  }, [coverFrameIndex, renderFrames])
+  const coverFrame = useMemo(() => {
+    if (!renderFrames || renderFrames.length === 0) return null
+    if (coverFrameIndex !== null) {
+      const exact = renderFrames.find((frame) => frame.index === coverFrameIndex)
+      if (exact) return exact
+    }
+    return renderFrames[Math.floor(renderFrames.length / 2)] ?? renderFrames[0] ?? null
+  }, [coverFrameIndex, renderFrames])
+  const coverFrameUrl = coverFrame?.url ?? null
 
   if (error) {
-    return null;
+    return null
   }
 
   // Show skeleton while actively loading.
-  if (!frames || frames.length === 0 || height === 0) {
+  if (!renderFrames || renderFrames.length === 0 || height === 0) {
     if (!isLoading && height > 0) {
-      return <div ref={containerRef} className="absolute inset-0" />;
+      return <div ref={containerRef} className="absolute inset-0" />
     }
     return (
       <div ref={containerRef} className="absolute inset-0">
-        <FilmstripSkeleton clipWidth={clipWidth} height={height || 40} />
+        <FilmstripSkeleton clipWidth={visibleClipWidth} height={height || 40} />
       </div>
-    );
+    )
   }
 
   return (
     <div ref={containerRef} className="absolute inset-0">
-      {/* Show shimmer skeleton behind while loading */}
-      {!isComplete && (
-        <FilmstripSkeleton clipWidth={clipWidth} height={height} />
+      {/* No inline shimmer once we have any frames. The cover-frame background
+          + already-rendered tiles are the user's visual feedback. The shimmer
+          used to re-show whenever extraction refinement flipped `isComplete`
+          to false (e.g. after a zoom-triggered target update), which read as
+          a "blink/refresh" mid-zoom — even though the loaded frames never
+          actually went away. */}
+      {/* Stable cover-frame background layer — fills any gap before a tile's
+          canvas has painted its bitmap, so the user never sees a black hole. */}
+      {coverFrameUrl && (
+        <div
+          aria-hidden
+          className="absolute inset-0 overflow-hidden pointer-events-none"
+          style={{
+            backgroundImage: `url(${coverFrameUrl})`,
+            backgroundRepeat: 'repeat-x',
+            backgroundSize: `${thumbnailWidth}px ${height}px`,
+          }}
+        />
       )}
-      <div
-        className="absolute left-0 top-0 overflow-hidden pointer-events-none"
-        style={{
-          width: renderClipWidth,
-          height,
-          contentVisibility: 'auto',
-          containIntrinsicSize: `${renderClipWidth}px ${height}px`,
-        }}
-      >
-        {tiles.map(({ tileIndex, frame, x, width }) => (
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {tiles.map(({ slot, frame, x, width }) => (
           <FilmstripTile
-            key={tileIndex}
+            key={slot}
             src={frame.url}
             bitmap={frame.bitmap}
             x={x}
             height={height}
             width={width}
             sourceWidth={thumbnailWidth}
+            frameIndex={frame.index}
+            onSourceError={handleFrameSourceError}
           />
         ))}
+        {/* Hidden probe to detect stale cover background URL */}
+        {coverFrame && !coverFrame.bitmap && (
+          <img
+            src={coverFrame.url}
+            alt=""
+            aria-hidden
+            className="absolute h-px w-px opacity-0 pointer-events-none"
+            style={{ left: 0, top: 0 }}
+            onError={() => handleFrameSourceError(coverFrame.index)}
+          />
+        )}
       </div>
     </div>
-  );
-});
+  )
+})

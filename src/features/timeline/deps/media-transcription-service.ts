@@ -1,1 +1,6 @@
-export { mediaTranscriptionService } from './media-library-contract';
+export {
+  cancelMediaTranscriptionJob,
+  getMediaTranscriptionModelLabel,
+  mediaTranscriptionService,
+  runMediaTranscriptionJob,
+} from './media-transcription-service-contract'

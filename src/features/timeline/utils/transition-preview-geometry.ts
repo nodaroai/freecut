@@ -1,32 +1,45 @@
 export interface RollingPreviewLike {
-  trimmedItemId: string | null;
-  neighborItemId: string | null;
-  handle: 'start' | 'end' | null;
-  delta: number;
+  trimmedItemId: string | null
+  neighborItemId: string | null
+  handle: 'start' | 'end' | null
+  delta: number
 }
 
 export interface SlidePreviewLike {
-  itemId: string | null;
-  leftNeighborId: string | null;
-  rightNeighborId: string | null;
-  delta: number;
+  itemId: string | null
+  leftNeighborId: string | null
+  rightNeighborId: string | null
+  delta: number
 }
 
 export interface RipplePreviewLike {
-  trimmedItemId: string | null;
-  delta: number;
-  isDownstream: boolean;
+  trimmedItemId: string | null
+  delta: number
+  isDownstream: boolean
+}
+
+export interface LinkedEditPreviewLike {
+  from?: number
+  durationInFrames?: number
+  hidden?: boolean
+}
+
+export interface TrackPushPreviewLike {
+  delta: number
+  isShifted: boolean
 }
 
 export interface PreviewAdjustments {
-  rolling: RollingPreviewLike;
-  slide: SlidePreviewLike;
-  ripple: RipplePreviewLike;
+  rolling: RollingPreviewLike
+  slide: SlidePreviewLike
+  ripple: RipplePreviewLike
+  linkedEdit?: LinkedEditPreviewLike | null
+  trackPush?: TrackPushPreviewLike
 }
 
 export interface PreviewGeometry {
-  from: number;
-  durationInFrames: number;
+  from: number
+  durationInFrames: number
 }
 
 /**
@@ -39,61 +52,85 @@ export function applyPreviewGeometryToClip(
   baseDurationInFrames: number,
   adjustments: PreviewAdjustments,
 ): PreviewGeometry {
-  let from = baseFrom;
-  let durationInFrames = baseDurationInFrames;
+  let from = baseFrom
+  let durationInFrames = baseDurationInFrames
 
-  const { slide, rolling, ripple } = adjustments;
+  const { slide, rolling, ripple } = adjustments
 
   // Slide preview
   if (slide.itemId === clipId) {
-    from += slide.delta;
+    from += slide.delta
   }
   if (slide.leftNeighborId === clipId) {
-    durationInFrames += slide.delta;
+    durationInFrames += slide.delta
   }
   if (slide.rightNeighborId === clipId) {
-    from += slide.delta;
-    durationInFrames -= slide.delta;
+    from += slide.delta
+    durationInFrames -= slide.delta
   }
 
   // Rolling preview
   if (rolling.trimmedItemId === clipId && rolling.handle === 'start') {
-    from += rolling.delta;
-    durationInFrames -= rolling.delta;
+    from += rolling.delta
+    durationInFrames -= rolling.delta
   }
   if (rolling.trimmedItemId === clipId && rolling.handle === 'end') {
-    durationInFrames += rolling.delta;
+    durationInFrames += rolling.delta
   }
   if (rolling.neighborItemId === clipId && rolling.handle === 'start') {
-    durationInFrames += rolling.delta;
+    durationInFrames += rolling.delta
   }
   if (rolling.neighborItemId === clipId && rolling.handle === 'end') {
-    from += rolling.delta;
-    durationInFrames -= rolling.delta;
+    from += rolling.delta
+    durationInFrames -= rolling.delta
   }
 
   // Ripple preview
   if (ripple.trimmedItemId === clipId) {
-    durationInFrames += ripple.delta;
+    durationInFrames += ripple.delta
   }
   if (ripple.isDownstream && ripple.trimmedItemId != null && ripple.trimmedItemId !== clipId) {
-    from += ripple.delta;
+    from += ripple.delta
+  }
+
+  // Track push preview: shifted items move by delta
+  if (adjustments.trackPush?.isShifted) {
+    from += adjustments.trackPush.delta
+  }
+
+  // Linked edit preview (rate stretch and other generic previews)
+  const { linkedEdit } = adjustments
+  if (linkedEdit) {
+    if (linkedEdit.from !== undefined) from = linkedEdit.from
+    if (linkedEdit.durationInFrames !== undefined) durationInFrames = linkedEdit.durationInFrames
   }
 
   return {
     from,
     durationInFrames: Math.max(1, durationInFrames),
-  };
+  }
 }
 
 export function getTransitionBridgeBounds(
   leftClipFrom: number,
   leftClipDurationInFrames: number,
+  rightClipFrom: number,
   transitionDurationInFrames: number,
+  alignment: number | undefined = 0.5,
 ): { leftFrame: number; rightFrame: number } {
-  const rightFrame = leftClipFrom + leftClipDurationInFrames;
+  const leftEnd = leftClipFrom + leftClipDurationInFrames
+
+  if (Math.abs(leftEnd - rightClipFrom) <= 1) {
+    const clampedAlignment = Math.max(0, Math.min(1, alignment ?? 0.5))
+    const safeDuration = Math.max(1, transitionDurationInFrames)
+    return {
+      leftFrame: leftEnd - safeDuration * clampedAlignment,
+      rightFrame: rightClipFrom + safeDuration * (1 - clampedAlignment),
+    }
+  }
+
   return {
-    leftFrame: rightFrame - transitionDurationInFrames,
-    rightFrame,
-  };
+    leftFrame: leftEnd - transitionDurationInFrames,
+    rightFrame: leftEnd,
+  }
 }

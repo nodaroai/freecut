@@ -1,14 +1,17 @@
 export {
   resolveMediaUrl,
-  resolveProxyUrl,
   resolveMediaUrls,
-  cleanupBlobUrls,
-  getMediaDragData,
-  extractValidMediaFileEntriesFromDataTransfer,
-  supportsFileSystemDragDrop,
-  setMediaDragData,
+  resolveProxyUrl,
+} from './media-library-resolver-contract'
+export {
   clearMediaDragData,
   type CompositionDragData,
-  type OrphanedClipInfo,
-  getMediaType,
-} from './media-library-contract';
+  getMediaDragData,
+} from './media-library-resolver-contract'
+export {
+  extractValidMediaFileEntriesFromDataTransfer,
+  formatMediaDropRejectionMessage,
+  type ExtractedMediaFileEntry,
+} from './media-library-resolver-contract'
+export type { OrphanedClipInfo } from './media-library-resolver-contract'
+export { getMediaType, getMimeType, mediaProcessorService } from './media-library-resolver-contract'

@@ -1,30 +1,49 @@
-﻿import { memo, useCallback, useMemo } from 'react';
-import { Blend, Info } from 'lucide-react';
-import { useTimelineStore } from '@/features/editor/deps/timeline-store';
-import { useSelectionStore } from '@/shared/state/selection';
-import { areFramesAligned } from '@/features/editor/deps/timeline-utils';
-import type { Transition } from '@/types/transition';
+import { memo, useCallback, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Blend, Info } from 'lucide-react'
+import { TransitionPreview } from './transition-preview/transition-preview'
+import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useSelectionStore } from '@/shared/state/selection'
+import { resolveTransitionTargetFromSelection } from '@/features/editor/deps/timeline-utils'
 import type {
   WipeDirection,
   SlideDirection,
   FlipDirection,
   PresentationConfig,
-} from '@/types/transition';
-import { cn } from '@/shared/ui/cn';
+} from '@/types/transition'
+import { cn } from '@/shared/ui/cn'
+import { transitionRegistry } from '@/shared/timeline/transitions'
+import { TRANSITION_DRAG_MIME, useTransitionDragStore } from '@/shared/state/transition-drag'
 import {
   TRANSITION_ICON_MAP,
   TRANSITION_CATEGORY_INFO,
   TRANSITION_CATEGORY_ORDER,
-  TRANSITION_PRESENTATION_CONFIGS,
-  TRANSITION_CONFIGS_BY_CATEGORY,
-  TRANSITION_CATEGORY_START_INDICES,
-} from '@/features/editor/utils/transition-ui-config';
+  getTransitionPresentationConfigs,
+  getTransitionConfigsByCategory,
+  getTransitionCategoryStartIndices,
+} from '@/features/editor/utils/transition-ui-config'
 
 interface TransitionCardProps {
-  config: PresentationConfig;
-  configIndex: number;
-  onApply: (index: number) => void;
-  disabled?: boolean;
+  config: PresentationConfig
+  configIndex: number
+  onApply: (index: number) => void
+  clickDisabled?: boolean
+  onDragStart: (event: React.DragEvent<HTMLButtonElement>, index: number) => void
+  onDragEnd: () => void
+}
+
+/**
+ * Resolve a transition card's visual mode from its config: the fallback icon,
+ * whether an animated A/B preview is available (GPU shader or Canvas 2D path),
+ * and the direction to preview.
+ */
+function resolveTransitionCardVisuals(config: PresentationConfig) {
+  const renderer = transitionRegistry.getRenderer(config.id)
+  return {
+    Icon: TRANSITION_ICON_MAP[config.icon] ?? Blend,
+    showPreview: !!(renderer?.gpuTransitionId || renderer?.renderCanvas),
+    previewDirection: config.direction ?? config.defaultDirection,
+  }
 }
 
 /**
@@ -34,45 +53,66 @@ const TransitionCard = memo(function TransitionCard({
   config,
   configIndex,
   onApply,
-  disabled,
+  clickDisabled,
+  onDragStart,
+  onDragEnd,
 }: TransitionCardProps) {
-  const Icon = TRANSITION_ICON_MAP[config.icon] ?? Blend;
+  const { Icon, showPreview, previewDirection } = resolveTransitionCardVisuals(config)
+  const [hovered, setHovered] = useState(false)
 
   const handleClick = useCallback(() => {
-    onApply(configIndex);
-  }, [configIndex, onApply]);
+    if (clickDisabled) return
+    onApply(configIndex)
+  }, [clickDisabled, configIndex, onApply])
 
   return (
     <button
+      type="button"
       onClick={handleClick}
-      disabled={disabled}
+      draggable={true}
+      onDragStart={(event) => onDragStart(event, configIndex)}
+      onDragEnd={onDragEnd}
+      onPointerEnter={showPreview ? () => setHovered(true) : undefined}
+      onPointerLeave={showPreview ? () => setHovered(false) : undefined}
+      aria-disabled={clickDisabled}
       className={cn(
-        'flex flex-col items-center justify-center gap-1 p-2 rounded-lg',
+        'flex flex-col items-center gap-1 p-2 rounded-lg min-w-[60px]',
         'border border-border bg-secondary/30',
         'hover:bg-secondary/50 hover:border-primary/50',
-        'transition-colors group text-center',
-        'min-w-[60px] h-[56px]',
-        disabled && 'opacity-50 cursor-not-allowed hover:bg-secondary/30 hover:border-border'
+        'transition-colors group text-center cursor-grab active:cursor-grabbing',
+        clickDisabled && 'focus-visible:outline-muted-foreground/40',
       )}
       title={config.description}
     >
-      <Icon className="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
+      {showPreview ? (
+        <TransitionPreview
+          presentationId={config.id}
+          direction={previewDirection}
+          active={hovered}
+        />
+      ) : (
+        <div className="flex aspect-video w-full items-center justify-center rounded-[3px] bg-black/40">
+          <Icon className="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
+        </div>
+      )}
       <span className="text-[10px] text-muted-foreground group-hover:text-foreground truncate w-full">
         {config.label}
       </span>
     </button>
-  );
-});
+  )
+})
 
 /**
  * Category section with header and grid of cards
  */
 interface CategorySectionProps {
-  category: string;
-  configs: PresentationConfig[];
-  startIndex: number;
-  onApply: (index: number) => void;
-  disabled?: boolean;
+  category: string
+  configs: PresentationConfig[]
+  startIndex: number
+  onApply: (index: number) => void
+  clickDisabled?: boolean
+  onDragStart: (event: React.DragEvent<HTMLButtonElement>, index: number) => void
+  onDragEnd: () => void
 }
 
 const CategorySection = memo(function CategorySection({
@@ -80,155 +120,130 @@ const CategorySection = memo(function CategorySection({
   configs,
   startIndex,
   onApply,
-  disabled,
+  clickDisabled,
+  onDragStart,
+  onDragEnd,
 }: CategorySectionProps) {
-  const info = TRANSITION_CATEGORY_INFO[category] || { title: category };
+  const { t } = useTranslation()
+  const info = TRANSITION_CATEGORY_INFO[category]
+  const title = info ? t(info.titleKey) : category
 
-  if (configs.length === 0) return null;
+  if (configs.length === 0) return null
 
   return (
     <div className="space-y-2">
       <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-        {info.title}
+        {title}
       </div>
-      <div className="grid grid-cols-4 gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5">
         {configs.map((config, index) => (
           <TransitionCard
             key={`${config.id}-${config.direction || index}`}
             config={config}
             configIndex={startIndex + index}
             onApply={onApply}
-            disabled={disabled}
+            clickDisabled={clickDisabled}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
           />
         ))}
       </div>
     </div>
-  );
-});
-
-// Type for adjacent info result
-interface AdjacentInfo {
-  leftClipId: string;
-  rightClipId: string;
-  hasExisting: boolean;
-  existingTransitionId?: string;
-}
-
-/**
- * Compute adjacent clip info for transition.
- * This is called inside a selector to avoid re-renders.
- */
-function computeAdjacentInfo(
-  selectedItemIds: string[],
-  items: typeof useTimelineStore.getState extends () => infer S ? S extends { items: infer I } ? I : never : never,
-  transitions: Transition[]
-): AdjacentInfo | null {
-  if (selectedItemIds.length !== 1) return null;
-
-  const selectedId = selectedItemIds[0]!;
-  const selectedItem = items.find((i) => i.id === selectedId);
-  if (!selectedItem) return null;
-
-  const validTypes = ['video', 'image'];
-  if (!validTypes.includes(selectedItem.type)) return null;
-
-  const trackItems = items
-    .filter((i) => i.trackId === selectedItem.trackId && validTypes.includes(i.type))
-    .toSorted((a, b) => a.from - b.from);
-
-  const selectedEnd = selectedItem.from + selectedItem.durationInFrames;
-
-  // Build lookup of existing transition pairs
-  const transitionByPair = new Map<string, string>();
-  for (const t of transitions) {
-    transitionByPair.set(`${t.leftClipId}->${t.rightClipId}`, t.id);
-  }
-
-  // Priority 1: Find adjacent clips WITHOUT an existing transition (for adding new)
-  const rightAdjacentWithout = trackItems.find(
-    (i) => i.id !== selectedId
-      && areFramesAligned(selectedEnd, i.from)
-      && !transitionByPair.has(`${selectedId}->${i.id}`)
-  );
-  if (rightAdjacentWithout) {
-    return { leftClipId: selectedId, rightClipId: rightAdjacentWithout.id, hasExisting: false };
-  }
-
-  const leftAdjacentWithout = trackItems.findLast(
-    (i) => i.id !== selectedId
-      && areFramesAligned(i.from + i.durationInFrames, selectedItem.from)
-      && !transitionByPair.has(`${i.id}->${selectedId}`)
-  );
-  if (leftAdjacentWithout) {
-    return { leftClipId: leftAdjacentWithout.id, rightClipId: selectedId, hasExisting: false };
-  }
-
-  // Priority 2: Find existing transitions involving the selected clip
-  // (clips may be overlapping now, so use transition records directly)
-  for (const t of transitions) {
-    if (t.leftClipId === selectedId && trackItems.some((i) => i.id === t.rightClipId)) {
-      return {
-        leftClipId: selectedId,
-        rightClipId: t.rightClipId,
-        hasExisting: true,
-        existingTransitionId: t.id,
-      };
-    }
-    if (t.rightClipId === selectedId && trackItems.some((i) => i.id === t.leftClipId)) {
-      return {
-        leftClipId: t.leftClipId,
-        rightClipId: selectedId,
-        hasExisting: true,
-        existingTransitionId: t.id,
-      };
-    }
-  }
-
-  return null;
-}
+  )
+})
 
 export const TransitionsPanel = memo(function TransitionsPanel() {
-  const addTransition = useTimelineStore((s) => s.addTransition);
-  const updateTransition = useTimelineStore((s) => s.updateTransition);
-  const items = useTimelineStore((s) => s.items);
-  const transitions = useTimelineStore((s) => s.transitions);
+  const { t } = useTranslation()
+  const addTransition = useTimelineStore((s) => s.addTransition)
+  const updateTransition = useTimelineStore((s) => s.updateTransition)
+  const items = useTimelineStore((s) => s.items)
+  const transitions = useTimelineStore((s) => s.transitions)
   // Get selection
-  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
-  const selectionCount = selectedItemIds.length;
-  const selectedId = selectionCount === 1 ? selectedItemIds[0] : null;
+  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
+  const selectionCount = selectedItemIds.length
+  const selectedId = selectionCount === 1 ? selectedItemIds[0] : null
 
   const adjacentInfo = useMemo(() => {
-    if (!selectedId) return null;
-    return computeAdjacentInfo([selectedId], items, transitions);
-  }, [selectedId, items, transitions]);
+    if (!selectedId) return null
+    return resolveTransitionTargetFromSelection({
+      selectedItemIds: [selectedId],
+      items,
+      transitions,
+    })
+  }, [selectedId, items, transitions])
+
+  const setDraggedTransition = useTransitionDragStore((s) => s.setDraggedTransition)
+  const setInvalidHint = useTransitionDragStore((s) => s.setInvalidHint)
+  const clearTransitionDrag = useTransitionDragStore((s) => s.clearDrag)
+
+  const handleDragStart = useCallback(
+    (event: React.DragEvent<HTMLButtonElement>, configIndex: number) => {
+      const config = getTransitionPresentationConfigs()[configIndex]
+      if (!config) return
+
+      const dragDescriptor = {
+        presentation: config.id,
+        direction: (config.direction ?? config.defaultDirection) as
+          | WipeDirection
+          | SlideDirection
+          | FlipDirection
+          | undefined,
+      }
+
+      event.dataTransfer.effectAllowed = 'copy'
+      event.dataTransfer.setData(TRANSITION_DRAG_MIME, JSON.stringify(dragDescriptor))
+      setDraggedTransition(dragDescriptor)
+      setInvalidHint(null)
+    },
+    [setDraggedTransition, setInvalidHint],
+  )
+
+  const handleDragEnd = useCallback(() => {
+    clearTransitionDrag()
+  }, [clearTransitionDrag])
 
   // Apply a transition by config index
   const handleApplyByIndex = useCallback(
     (configIndex: number) => {
-      const config = TRANSITION_PRESENTATION_CONFIGS[configIndex];
-      if (!config) return;
+      const config = getTransitionPresentationConfigs()[configIndex]
+      if (!config) return
 
       // Get fresh state at click time
-      const { items: currentItems, transitions: currentTransitions } = useTimelineStore.getState();
-      const currentSelectedIds = useSelectionStore.getState().selectedItemIds;
-      const info = computeAdjacentInfo(currentSelectedIds, currentItems, currentTransitions);
+      const { items: currentItems, transitions: currentTransitions } = useTimelineStore.getState()
+      const currentSelectedIds = useSelectionStore.getState().selectedItemIds
+      const info = resolveTransitionTargetFromSelection({
+        selectedItemIds: currentSelectedIds,
+        items: currentItems,
+        transitions: currentTransitions,
+      })
 
-      if (!info) return;
+      if (!info || (!info.hasExisting && !info.canApply)) return
 
-      const { leftClipId, rightClipId, hasExisting, existingTransitionId } = info;
-      const presentation = config.id;
-      const direction = config.direction as WipeDirection | SlideDirection | FlipDirection | undefined;
+      const { leftClipId, rightClipId, hasExisting, existingTransitionId } = info
+      const presentation = config.id
+      const direction = (config.direction ?? config.defaultDirection) as
+        | WipeDirection
+        | SlideDirection
+        | FlipDirection
+        | undefined
 
       if (hasExisting && existingTransitionId) {
-        updateTransition(existingTransitionId, { presentation, direction });
+        updateTransition(existingTransitionId, { presentation, direction })
       } else {
-        addTransition(leftClipId, rightClipId, 'crossfade', undefined, presentation, direction);
+        addTransition(
+          leftClipId,
+          rightClipId,
+          'crossfade',
+          info.suggestedDurationInFrames,
+          presentation,
+          direction,
+        )
       }
     },
-    [addTransition, updateTransition]
-  );
+    [addTransition, updateTransition],
+  )
 
-  const hasValidSelection = adjacentInfo !== null;
+  const hasValidClickTarget = !!adjacentInfo && (adjacentInfo.hasExisting || adjacentInfo.canApply)
 
   return (
     <div className="h-full flex flex-col">
@@ -237,17 +252,18 @@ export const TransitionsPanel = memo(function TransitionsPanel() {
         <div className="flex items-start gap-2 text-xs">
           <Info className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
           <div className="text-muted-foreground leading-relaxed">
-            {hasValidSelection ? (
-              <span className="text-primary">
-                Click a transition to apply it{' '}
-                {adjacentInfo?.hasExisting ? '(will update existing)' : 'between clips'}.
+            {hasValidClickTarget ? (
+              <span className="text-primary">{t('editor.transitions.hintClickToApply')}</span>
+            ) : adjacentInfo?.reason ? (
+              <span>
+                {t('editor.transitions.hintUnavailable', { reason: adjacentInfo.reason })}
               </span>
             ) : selectionCount === 1 ? (
-              <span>No adjacent clip found. Place clips next to each other on the timeline.</span>
+              <span>{t('editor.transitions.hintSelectOne')}</span>
             ) : selectionCount > 1 ? (
-              <span>Select a single video or image clip to add a transition.</span>
+              <span>{t('editor.transitions.hintSelectSingle')}</span>
             ) : (
-              <span>Select a video or image clip to add a transition to its neighbor.</span>
+              <span>{t('editor.transitions.hintSelectClip')}</span>
             )}
           </div>
         </div>
@@ -256,23 +272,23 @@ export const TransitionsPanel = memo(function TransitionsPanel() {
       {/* Transitions grid by category */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {TRANSITION_CATEGORY_ORDER.map((category) => {
-          const configs = TRANSITION_CONFIGS_BY_CATEGORY[category];
-          if (!configs || configs.length === 0) return null;
+          const configs = getTransitionConfigsByCategory()[category]
+          if (!configs || configs.length === 0) return null
 
           return (
             <CategorySection
               key={category}
               category={category}
               configs={configs}
-              startIndex={TRANSITION_CATEGORY_START_INDICES[category]!}
+              startIndex={getTransitionCategoryStartIndices()[category]!}
               onApply={handleApplyByIndex}
-              disabled={!hasValidSelection}
+              clickDisabled={!hasValidClickTarget}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
             />
-          );
+          )
         })}
       </div>
     </div>
-  );
-});
-
-
+  )
+})

@@ -1,36 +1,38 @@
-import { memo } from 'react';
-import { Button } from '@/components/ui/button';
+import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '@/components/ui/context-menu';
-import { Eye, EyeOff, Lock, GripVertical, Volume2, VolumeX, Radio, ChevronRight, ChevronDown, FoldHorizontal } from 'lucide-react';
-import type { TimelineTrack } from '@/types/timeline';
-import { useTrackDrag } from '../hooks/use-track-drag';
-import { TIMELINE_SIDEBAR_WIDTH } from '../constants';
+} from '@/components/ui/context-menu'
+import { Power, PowerOff, Lock, GripVertical, Radio, FoldHorizontal, Link2 } from 'lucide-react'
+import type { TimelineTrack } from '@/types/timeline'
+import { useTrackDrag } from '../hooks/use-track-drag'
+import { TIMELINE_SIDEBAR_WIDTH } from '../constants'
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
+import { useItemsStore } from '../stores/items-store'
+import { isTrackDisabled } from '@/features/timeline/utils/classic-tracks'
+import { isTrackSyncLockActive } from '../utils/track-sync-lock'
 
 interface TrackHeaderProps {
-  track: TimelineTrack;
-  isActive: boolean;
-  isSelected: boolean;
-  /** Whether this group track is a drop target for dragged tracks */
-  isDropTarget?: boolean;
-  groupDepth: number;
-  /** Whether grouping is available for current selection (2+ top-level non-group tracks) */
-  canGroup: boolean;
-  onToggleLock: () => void;
-  onToggleVisibility: () => void;
-  onToggleMute: () => void;
-  onToggleSolo: () => void;
-  onToggleCollapse?: () => void;
-  onSelect: (e: React.MouseEvent) => void;
-  onCloseGaps?: () => void;
-  onGroup?: () => void;
-  onUngroup?: () => void;
-  onRemoveFromGroup?: () => void;
+  track: TimelineTrack
+  isActive: boolean
+  isSelected: boolean
+  canDeleteTrack: boolean
+  canDeleteEmptyTracks: boolean
+  onToggleLock: () => void
+  onToggleSyncLock: () => void
+  onToggleDisabled: () => void
+  onToggleSolo: () => void
+  onSelect: (e: React.MouseEvent) => void
+  onCloseGaps?: () => void
+  onAddVideoTrack: () => void
+  onAddAudioTrack: () => void
+  onDeleteTrack: () => void
+  onDeleteEmptyTracks: () => void
 }
 
 /**
@@ -41,10 +43,9 @@ function areTrackHeaderPropsEqual(prev: TrackHeaderProps, next: TrackHeaderProps
     prev.track === next.track &&
     prev.isActive === next.isActive &&
     prev.isSelected === next.isSelected &&
-    prev.isDropTarget === next.isDropTarget &&
-    prev.groupDepth === next.groupDepth &&
-    prev.canGroup === next.canGroup
-  );
+    prev.canDeleteTrack === next.canDeleteTrack &&
+    prev.canDeleteEmptyTracks === next.canDeleteEmptyTracks
+  )
   // Callbacks (onToggleLock, etc.) are ignored - they're recreated each render but functionality is same
 }
 
@@ -54,48 +55,49 @@ function areTrackHeaderPropsEqual(prev: TrackHeaderProps, next: TrackHeaderProps
  * Displays track name, controls, and handles selection.
  * Shows active state with background color.
  * Supports group tracks with collapse/expand and indentation.
- * Right-click context menu for group operations.
+ * Right-click context menu for track actions.
  * Memoized to prevent re-renders when props haven't changed.
  */
 export const TrackHeader = memo(function TrackHeader({
   track,
   isActive,
   isSelected,
-  isDropTarget,
-  groupDepth,
-  canGroup,
+  canDeleteTrack,
+  canDeleteEmptyTracks,
   onToggleLock,
-  onToggleVisibility,
-  onToggleMute,
+  onToggleSyncLock,
+  onToggleDisabled,
   onToggleSolo,
-  onToggleCollapse,
   onSelect,
   onCloseGaps,
-  onGroup,
-  onUngroup,
-  onRemoveFromGroup,
+  onAddVideoTrack,
+  onAddAudioTrack,
+  onDeleteTrack,
+  onDeleteEmptyTracks,
 }: TrackHeaderProps) {
+  const { t } = useTranslation()
+  const itemCount = useItemsStore((s) => s.itemsByTrackId[track.id]?.length ?? 0)
+  const syncLockEnabled = isTrackSyncLockActive(track)
+  const trackDisabled = isTrackDisabled(track)
+
   // Use track drag hook (visuals handled centrally by timeline.tsx via DOM)
-  const { handleDragStart } = useTrackDrag(track);
-  const isGroup = !!track.isGroup;
-  const isInGroup = !!track.parentTrackId;
+  const { handleDragStart } = useTrackDrag(track)
+  const itemCountLabel = t('timeline.trackHeader.clipCount', { count: itemCount })
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
           className={`
-            flex items-center px-1
+            flex flex-col overflow-hidden px-1
             cursor-grab active:cursor-grabbing relative
-            ${isSelected ? 'bg-primary/10' : 'hover:bg-secondary/50'}
+            ${isSelected ? 'bg-primary/10' : trackDisabled ? 'bg-muted/30 hover:bg-muted/40' : 'hover:bg-secondary/50'}
             ${isActive ? 'border-l-3 border-l-primary' : 'border-l-3 border-l-transparent'}
-            ${isDropTarget ? 'ring-2 ring-blue-500/60 bg-blue-500/15' : ''}
-            transition-all duration-150
-            ${isGroup && !isDropTarget && !isSelected ? 'bg-secondary/30' : ''}
+            ${trackDisabled ? 'text-muted-foreground' : ''}
+            transition-colors duration-150
           `}
           style={{
             height: `${track.height}px`,
-            paddingLeft: `${4 + groupDepth * 14}px`,
             // content-visibility optimization for long track lists (rendering-content-visibility)
             contentVisibility: 'auto',
             containIntrinsicSize: `${TIMELINE_SIDEBAR_WIDTH}px ${track.height}px`,
@@ -103,78 +105,41 @@ export const TrackHeader = memo(function TrackHeader({
           onClick={onSelect}
           onMouseDown={handleDragStart}
           data-track-id={track.id}
+          data-track-disabled={trackDisabled ? 'true' : undefined}
         >
-          {/* Left column: Drag handle + collapse toggle */}
-          <div className="flex items-center shrink-0 mr-0.5">
-            <GripVertical className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
-            {isGroup && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-4 w-4 shrink-0 p-0 ml-0.5"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleCollapse?.();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                aria-label={track.isCollapsed ? 'Expand group' : 'Collapse group'}
-              >
-                {track.isCollapsed ? (
-                  <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="w-3 h-3 text-muted-foreground" />
-                )}
-              </Button>
-            )}
-          </div>
-
-          {/* Right column: Name row + Icons row, centered as a block */}
-          <div className="flex items-center justify-center min-w-0 flex-1">
-          <div className="flex flex-col items-start">
-            {/* Row 1: Name */}
-            <span className="text-xs font-semibold leading-none font-mono truncate">
-              {track.name}
-            </span>
-
-            {/* Row 2: Control icons */}
-            <div className="flex items-center gap-0.5">
-            {/* Visibility Button */}
+          <div className="flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-b border-border/60">
+            <div className="flex h-5 w-4 shrink-0 items-center justify-center">
+              <GripVertical className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
+            </div>
+            {/* Disable Button */}
             <Button
               variant="ghost"
               size="icon"
-              className="h-5 w-5 rounded hover:bg-secondary"
+              className="rounded hover:bg-secondary"
+              style={{
+                width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+                height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+              }}
               onClick={(e) => {
-                e.stopPropagation();
-                onToggleVisibility();
+                e.stopPropagation()
+                onToggleDisabled()
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              aria-label={track.visible ? 'Hide track' : 'Show track'}
-              data-tooltip={track.visible ? 'Hide track' : 'Show track'}
+              aria-label={
+                trackDisabled
+                  ? t('timeline.trackHeader.enableTrack')
+                  : t('timeline.trackHeader.disableTrack')
+              }
+              data-tooltip={
+                trackDisabled
+                  ? t('timeline.trackHeader.enableTrack')
+                  : t('timeline.trackHeader.disableTrack')
+              }
             >
-              {track.visible ? (
-                <Eye className="w-3 h-3" />
+              {trackDisabled ? (
+                <PowerOff className="w-3 h-3 text-primary" />
               ) : (
-                <EyeOff className="w-3 h-3 opacity-50" />
-              )}
-            </Button>
-
-            {/* Audio Mute Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 rounded hover:bg-secondary"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleMute();
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              aria-label={track.muted ? 'Unmute track' : 'Mute track'}
-              data-tooltip={track.muted ? 'Unmute track' : 'Mute track'}
-            >
-              {track.muted ? (
-                <VolumeX className="w-3 h-3 opacity-50" />
-              ) : (
-                <Volume2 className="w-3 h-3" />
+                <Power className="w-3 h-3 opacity-70" />
               )}
             </Button>
 
@@ -182,103 +147,136 @@ export const TrackHeader = memo(function TrackHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="h-5 w-5 rounded hover:bg-secondary"
+              className="rounded hover:bg-secondary"
+              style={{
+                width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+                height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+              }}
               onClick={(e) => {
-                e.stopPropagation();
-                onToggleSolo();
+                e.stopPropagation()
+                onToggleSolo()
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              aria-label={track.solo ? 'Unsolo track' : 'Solo track'}
-              data-tooltip={track.solo ? 'Unsolo track' : 'Solo track'}
+              aria-label={
+                track.solo
+                  ? t('timeline.trackHeader.unsoloTrack')
+                  : t('timeline.trackHeader.soloTrack')
+              }
+              data-tooltip={
+                track.solo
+                  ? t('timeline.trackHeader.unsoloTrack')
+                  : t('timeline.trackHeader.soloTrack')
+              }
             >
-              <Radio
-                className={`w-3 h-3 ${track.solo ? 'text-primary' : ''}`}
-              />
+              <Radio className={`w-3 h-3 ${track.solo ? 'text-primary' : ''}`} />
             </Button>
 
             {/* Lock Button */}
             <Button
               variant="ghost"
               size="icon"
-              className="h-5 w-5 rounded hover:bg-secondary"
+              className="rounded hover:bg-secondary"
+              style={{
+                width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+                height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+              }}
               onClick={(e) => {
-                e.stopPropagation();
-                onToggleLock();
+                e.stopPropagation()
+                onToggleLock()
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              aria-label={track.locked ? 'Unlock track' : 'Lock track'}
-              data-tooltip={track.locked ? 'Unlock track' : 'Lock track'}
+              aria-label={
+                track.locked
+                  ? t('timeline.trackHeader.unlockTrack')
+                  : t('timeline.trackHeader.lockTrack')
+              }
+              data-tooltip={
+                track.locked
+                  ? t('timeline.trackHeader.unlockTrack')
+                  : t('timeline.trackHeader.lockTrack')
+              }
             >
-              <Lock
-                className={`w-3 h-3 ${track.locked ? 'opacity-50' : ''}`}
-              />
+              <Lock className={`w-3 h-3 ${track.locked ? 'text-primary' : 'opacity-70'}`} />
             </Button>
 
-            {/* Close Gaps Button - only for non-group tracks */}
-            {!isGroup && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 rounded hover:bg-secondary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseGaps?.();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                aria-label="Close all gaps"
-                data-tooltip="Close all gaps"
-              >
-                <FoldHorizontal className="w-3 h-3" />
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded hover:bg-secondary"
+              style={{
+                width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+                height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleSyncLock()
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              aria-label={
+                syncLockEnabled
+                  ? t('timeline.trackHeader.disableSyncLock')
+                  : t('timeline.trackHeader.enableSyncLock')
+              }
+              data-tooltip={
+                syncLockEnabled
+                  ? t('timeline.trackHeader.disableSyncLock')
+                  : t('timeline.trackHeader.enableSyncLock')
+              }
+            >
+              <Link2 className={`w-3 h-3 ${syncLockEnabled ? 'text-primary' : 'opacity-70'}`} />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded hover:bg-secondary"
+              style={{
+                width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+                height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                onCloseGaps?.()
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              aria-label={t('timeline.trackHeader.closeAllGaps')}
+              data-tooltip={t('timeline.trackHeader.closeAllGaps')}
+            >
+              <FoldHorizontal className="w-3 h-3" />
+            </Button>
           </div>
-          </div>
+
+          <div className="flex min-h-0 flex-1 items-center gap-1.5 overflow-hidden px-1.5">
+            <span className="min-w-0 truncate text-xs font-semibold leading-none font-mono">
+              {track.name}
+            </span>
+            <span className="shrink-0 text-[10px] leading-none text-muted-foreground">
+              {itemCountLabel}
+            </span>
           </div>
         </div>
       </ContextMenuTrigger>
 
       <ContextMenuContent className="w-52">
-        {/* Group operations */}
-        {canGroup && !isGroup && (
-          <ContextMenuItem onClick={onGroup}>
-            Group Selected Tracks
-            <span className="ml-auto text-xs text-muted-foreground">Ctrl+G</span>
-          </ContextMenuItem>
-        )}
-        {isGroup && (
-          <ContextMenuItem onClick={onUngroup}>
-            Ungroup
-            <span className="ml-auto text-xs text-muted-foreground">Ctrl+Shift+G</span>
-          </ContextMenuItem>
-        )}
-        {isInGroup && !isGroup && (
-          <ContextMenuItem onClick={onRemoveFromGroup}>
-            Remove from Group
-          </ContextMenuItem>
-        )}
+        <ContextMenuItem onClick={onCloseGaps}>
+          {t('timeline.trackHeader.closeAllGaps')}
+        </ContextMenuItem>
 
-        {/* Close gaps - non-group tracks only */}
-        {!isGroup && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onClick={onCloseGaps}>
-              Close All Gaps
-            </ContextMenuItem>
-          </>
-        )}
-
-        {/* Track controls */}
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={onToggleVisibility}>
-          {track.visible ? 'Hide Track' : 'Show Track'}
+        <ContextMenuItem onClick={onAddVideoTrack}>
+          {t('timeline.trackHeader.addVideoTrack')}
         </ContextMenuItem>
-        <ContextMenuItem onClick={onToggleMute}>
-          {track.muted ? 'Unmute Track' : 'Mute Track'}
+        <ContextMenuItem onClick={onAddAudioTrack}>
+          {t('timeline.trackHeader.addAudioTrack')}
         </ContextMenuItem>
-        <ContextMenuItem onClick={onToggleLock}>
-          {track.locked ? 'Unlock Track' : 'Lock Track'}
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={!canDeleteTrack} onClick={onDeleteTrack}>
+          {t('timeline.trackHeader.deleteTrack')}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!canDeleteEmptyTracks} onClick={onDeleteEmptyTracks}>
+          {t('timeline.trackHeader.deleteEmptyTracks')}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
-  );
-}, areTrackHeaderPropsEqual);
+  )
+}, areTrackHeaderPropsEqual)

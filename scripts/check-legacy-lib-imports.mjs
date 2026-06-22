@@ -12,14 +12,9 @@ const IMPORT_EXPORT_SPEC_REGEX =
   /\b(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g;
 const DYNAMIC_IMPORT_SPEC_REGEX = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 
-const ALLOWED_FACADE_FILES = new Set([
-  'src/infrastructure/gpu/effects.ts',
-  'src/infrastructure/gpu/compositor.ts',
-  'src/infrastructure/gpu/transitions.ts',
-  'src/infrastructure/gpu/masks.ts',
-  'src/infrastructure/gpu/scopes.ts',
-  'src/infrastructure/analysis/index.ts',
-]);
+const ALLOWED_FACADE_FILES = new Set();
+
+const ALLOWED_SHARED_LIB_IMPORT_PREFIXES = [];
 
 function normalizePath(filePath) {
   return filePath.split(path.sep).join('/');
@@ -60,6 +55,10 @@ function isAllowedLegacyLibImporter(relativePath) {
   return false;
 }
 
+function isAllowedLegacyLibImport(specifier) {
+  return ALLOWED_SHARED_LIB_IMPORT_PREFIXES.some((prefix) => specifier.startsWith(prefix));
+}
+
 function main() {
   if (!fs.existsSync(SRC_DIR)) {
     console.error('Cannot find src directory.');
@@ -75,7 +74,9 @@ function main() {
 
     const source = fs.readFileSync(absolutePath, 'utf8');
     const specifiers = collectSpecifiers(source);
-    const legacyImports = specifiers.filter((specifier) => specifier.startsWith('@/lib/'));
+    const legacyImports = specifiers.filter(
+      (specifier) => specifier.startsWith('@/lib/') && !isAllowedLegacyLibImport(specifier)
+    );
     if (legacyImports.length === 0) continue;
 
     for (const specifier of legacyImports) {

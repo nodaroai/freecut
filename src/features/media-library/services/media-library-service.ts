@@ -1,9 +1,44 @@
-﻿import type { MediaMetadata, ThumbnailData } from '@/types/storage';
-import { createLogger } from '@/shared/logging/logger';
+import type { MediaMetadata, ThumbnailData } from '@/types/storage'
+import { createLogger } from '@/shared/logging/logger'
 
-const logger = createLogger('MediaLibraryService');
+const logger = createLogger('MediaLibraryService')
+
+/**
+ * Safe wrapper around workspace-fs readMediaSource that never throws —
+ * used as a last-resort fallback in getMediaFile.
+ */
+async function readMediaSourceSafe(id: string): Promise<Blob | null> {
+  try {
+    return await readMediaSource(id)
+  } catch (error) {
+    logger.warn(`readMediaSource(${id}) failed:`, error)
+    return null
+  }
+}
+
+/**
+ * Fire-and-forget mirror of a successfully-read source file into the
+ * workspace folder so other origins (and coding agents) can read the
+ * bytes from disk. No-op when already mirrored.
+ */
+function mirrorSourceToWorkspaceInBackground(
+  id: string,
+  blob: Blob,
+  fileName: string | undefined,
+): void {
+  void (async () => {
+    try {
+      if (await hasMediaSource(id)) return
+      await writeMediaSource(id, blob, fileName)
+    } catch (error) {
+      logger.warn(`mirrorSourceToWorkspace(${id}) failed:`, error)
+    }
+  })()
+}
+
 import {
   getAllMedia as getAllMediaDB,
+  getAllMediaMetadata as getAllMediaMetadataDB,
   getMedia as getMediaDB,
   createMedia as createMediaDB,
   updateMedia as updateMediaDB,
@@ -17,145 +52,547 @@ import {
   deleteContent,
   // v3: Project-media associations
   associateMediaWithProject,
+  removeMediaBatchFromProject as removeMediaBatchFromProjectDB,
   removeMediaFromProject as removeMediaFromProjectDB,
   getProjectMediaIds,
   getProjectsUsingMedia,
   getMediaForProject as getMediaForProjectDB,
   deleteTranscript,
-} from '@/infrastructure/storage/indexeddb';
-import { gifFrameCache } from '@/features/media-library/deps/timeline-services';
-import { opfsService } from './opfs-service';
-import { proxyService } from './proxy-service';
-import { validateMediaFile, getMimeType } from '../utils/validation';
-import { getSharedProxyKey } from '../utils/proxy-key';
-import { mediaProcessorService } from './media-processor-service';
-import { generateThumbnail } from '../utils/thumbnail-generator';
+  readAiOutput,
+  saveCaptions,
+  deleteCaptions,
+  deleteScenes,
+  hasMediaSource,
+  readMediaSource,
+  writeMediaSource,
+} from '@/features/media-library/deps/storage'
+import {
+  importFilmstripCache,
+  importGifFrameCache,
+  importWaveformCache,
+} from '@/features/media-library/deps/timeline-services'
+import { opfsService } from './opfs-service'
+import { proxyService } from './proxy-service'
+import { ensureFileHandlePermission, FileAccessError } from './file-access'
+import { enqueueBackgroundMediaWork } from './background-media-work'
+import {
+  buildGeneratedMediaOpfsPath,
+  getGeneratedImageDimensions,
+  getThumbnailDimensions,
+  persistGeneratedMediaAsset,
+} from './media-asset-helpers'
+import { validateMediaFile, getMimeType } from '../utils/validation'
+import { getSharedProxyKey } from '../utils/proxy-key'
+import { mediaProcessorService } from './media-processor-service'
+import { generateThumbnail } from '../utils/thumbnail-generator'
+import {
+  needsCustomAudioDecoder,
+  startPreviewAudioConform,
+  startPreviewAudioStartupWarm,
+  deletePreviewAudioConform,
+} from '@/features/media-library/deps/composition-runtime'
+export { FileAccessError } from './file-access'
 
-function getImageDimensionsFromBitmap(bitmap: ImageBitmap): { width: number; height: number } {
-  return {
-    width: bitmap.width,
-    height: bitmap.height,
-  };
+const IMPORT_BACKGROUND_WARM_DELAY_MS = 600
+const IMPORT_BACKGROUND_HEAVY_DELAY_MS = 2200
+const PAGE_URL_IMPORT_HOSTS = [
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtu.be',
+  'vimeo.com',
+  'www.vimeo.com',
+  'dailymotion.com',
+  'www.dailymotion.com',
+]
+
+const MIME_TYPE_TO_EXTENSION: Record<string, string> = {
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
+  'video/quicktime': '.mov',
+  'video/x-matroska': '.mkv',
+  'video/matroska': '.mkv',
+  'video/x-msvideo': '.avi',
+  'audio/mp3': '.mp3',
+  'audio/mpeg': '.mp3',
+  'audio/wav': '.wav',
+  'audio/aac': '.aac',
+  'audio/x-m4a': '.m4a',
+  'audio/mp4': '.m4a',
+  'audio/ogg': '.ogg',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
 }
 
-async function getGeneratedImageDimensions(file: File): Promise<{ width: number; height: number }> {
-  if (typeof createImageBitmap === 'function') {
-    const bitmap = await createImageBitmap(file);
-    const dimensions = getImageDimensionsFromBitmap(bitmap);
-    bitmap.close();
-    return dimensions;
-  }
-
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    const url = URL.createObjectURL(file);
-
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({
-        width: image.naturalWidth,
-        height: image.naturalHeight,
-      });
-    };
-
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Failed to load generated image'));
-    };
-
-    image.src = url;
-  });
+function normalizeMimeType(value: string | null | undefined): string {
+  return value?.split(';')[0]?.trim().toLowerCase() ?? ''
 }
 
-function getThumbnailDimensions(
-  width: number,
-  height: number,
-  maxSize: number
-): { width: number; height: number } {
-  const safeWidth = Math.max(1, Math.round(width));
-  const safeHeight = Math.max(1, Math.round(height));
-
-  if (safeWidth >= safeHeight) {
-    return {
-      width: maxSize,
-      height: Math.max(1, Math.floor(maxSize * safeHeight / safeWidth)),
-    };
-  }
-
-  return {
-    width: Math.max(1, Math.floor(maxSize * safeWidth / safeHeight)),
-    height: maxSize,
-  };
+function isPageMimeType(mimeType: string): boolean {
+  return mimeType.startsWith('text/') || mimeType === 'application/xhtml+xml'
 }
 
-async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
-  if (typeof blob.arrayBuffer === 'function') {
-    return blob.arrayBuffer();
-  }
-
-  return new Response(blob).arrayBuffer();
+function isKnownMediaPageHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase()
+  return PAGE_URL_IMPORT_HOSTS.some(
+    (host) => normalized === host || normalized.endsWith(`.${host}`),
+  )
 }
-/**
- * Check and request permission for a file handle
- * @returns true if permission granted, false otherwise
- */
-async function ensureFileHandlePermission(
-  handle: FileSystemFileHandle
-): Promise<boolean> {
-  try {
-    // Check current permission state
-    const permission = await handle.queryPermission({ mode: 'read' });
-    if (permission === 'granted') {
-      return true;
+
+function extractContentDispositionFileName(contentDisposition: string | null): string | null {
+  if (!contentDisposition) return null
+
+  const utf8Match = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  const rawUtf8Name = utf8Match?.[1]?.trim()
+  if (rawUtf8Name) {
+    try {
+      return decodeURIComponent(rawUtf8Name.replace(/^"(.*)"$/, '$1'))
+    } catch {
+      return rawUtf8Name.replace(/^"(.*)"$/, '$1')
     }
+  }
 
-    // Request permission if not granted
-    const newPermission = await handle.requestPermission({ mode: 'read' });
-    return newPermission === 'granted';
-  } catch (error) {
-    logger.error('Failed to get file handle permission:', error);
-    return false;
+  const basicMatch = contentDisposition.match(/filename\s*=\s*("?)([^";]+)\1/i)
+  return basicMatch?.[2]?.trim() || null
+}
+
+function extractFileNameFromUrl(input: string): string | null {
+  try {
+    const url = new URL(input)
+    const segment = url.pathname.split('/').filter(Boolean).pop()
+    if (!segment) return null
+    return decodeURIComponent(segment)
+  } catch {
+    return null
   }
 }
 
-/**
- * Error thrown when file handle permission is denied or file is missing
- */
-export class FileAccessError extends Error {
-  constructor(
-    message: string,
-    public readonly type: 'permission_denied' | 'file_missing' | 'unknown'
-  ) {
-    super(message);
-    this.name = 'FileAccessError';
+function inferExtensionFromMimeType(mimeType: string): string {
+  return MIME_TYPE_TO_EXTENSION[mimeType] ?? ''
+}
+
+function buildImportedUrlFileName(
+  requestedUrl: string,
+  responseUrl: string | undefined,
+  contentDisposition: string | null,
+  mimeType: string,
+): string {
+  const fileName =
+    extractContentDispositionFileName(contentDisposition) ??
+    extractFileNameFromUrl(responseUrl ?? requestedUrl) ??
+    extractFileNameFromUrl(requestedUrl)
+
+  if (fileName && fileName.length > 0) {
+    return fileName
   }
+
+  const extension = inferExtensionFromMimeType(mimeType)
+  return `remote-media${extension}`
+}
+
+function parseMediaImportUrl(input: string): URL {
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(input)
+  } catch {
+    throw new Error('Enter a valid http:// or https:// media URL.')
+  }
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('Only http:// and https:// media URLs are supported.')
+  }
+
+  return parsedUrl
 }
 
 /**
- * Media Library Service - Coordinates OPFS + IndexedDB + metadata extraction
+ * Media Library Service - Coordinates handle/OPFS media access with
+ * workspace-backed metadata, thumbnails, and derived caches.
  *
  * Includes in-memory thumbnail URL cache to prevent flicker on re-renders.
  *
- * Provides atomic operations for media management, ensuring OPFS and IndexedDB
- * stay in sync.
+ * Provides atomic operations for media management while keeping origin-scoped
+ * sources and the workspace folder in sync.
  */
 class MediaLibraryService {
   /** In-memory cache for thumbnail blob URLs to prevent flicker on re-renders */
-  private thumbnailUrlCache = new Map<string, string>();
+  private thumbnailUrlCache = new Map<string, string>()
+  private preparationPromises = new Map<string, Set<Promise<void>>>()
+
+  async waitForMediaPreparation(mediaIds: string[]): Promise<void> {
+    const promises = mediaIds.flatMap((mediaId) => [
+      ...(this.preparationPromises.get(mediaId) ?? []),
+    ])
+    if (promises.length === 0) return
+    await Promise.allSettled(promises)
+  }
+
+  private async deleteTranscriptSafely(mediaId: string): Promise<void> {
+    try {
+      await deleteTranscript(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete transcript:', error)
+    }
+  }
+
+  private async deleteCaptionsSafely(mediaId: string): Promise<void> {
+    try {
+      await deleteCaptions(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete captions:', error)
+    }
+  }
+
+  private async deleteScenesSafely(mediaId: string): Promise<void> {
+    try {
+      await deleteScenes(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete scenes:', error)
+    }
+  }
+
+  private async deleteThumbnailsSafely(mediaId: string): Promise<void> {
+    this.clearThumbnailCache(mediaId)
+    try {
+      await deleteThumbnailsByMediaId(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete thumbnails:', error)
+    }
+  }
+
+  private async clearGifFrameCacheSafely(mediaId: string): Promise<void> {
+    try {
+      const { gifFrameCache } = await importGifFrameCache()
+      await gifFrameCache.clearMedia(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete GIF frame cache:', error)
+    }
+  }
 
   /**
-   * Get all media items from IndexedDB
+   * Clear the filmstrip cache for a fully-dereferenced media item. Removes
+   * both the OPFS primary copy and the workspace-folder mirror so the
+   * workspace stays tidy after the last project using this media is gone.
+   */
+  private async clearFilmstripCacheSafely(mediaId: string): Promise<void> {
+    try {
+      const { filmstripCache } = await importFilmstripCache()
+      await filmstripCache.clearMedia(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete filmstrip cache:', error)
+    }
+  }
+
+  /**
+   * Clear waveform caches for a fully-dereferenced media item. Removes
+   * the in-memory LRU entry, the persisted binned waveform cache, and the
+   * OPFS + workspace-folder multi-resolution mirrors.
+   */
+  private async clearWaveformCacheSafely(mediaId: string): Promise<void> {
+    try {
+      const { waveformCache } = await importWaveformCache()
+      await waveformCache.clearMedia(mediaId)
+    } catch (error) {
+      logger.warn('Failed to delete waveform cache:', error)
+    }
+  }
+
+  private async deleteProxySafely(
+    media: MediaMetadata,
+    options?: { preserveSharedAliases?: boolean },
+  ): Promise<void> {
+    try {
+      const sharedProxyKey = getSharedProxyKey(media)
+      if (options?.preserveSharedAliases) {
+        const allMedia = await getAllMediaDB()
+        const hasSharedAlias = allMedia.some(
+          (entry) => entry.id !== media.id && getSharedProxyKey(entry) === sharedProxyKey,
+        )
+
+        if (hasSharedAlias) {
+          proxyService.clearProxyKey(media.id)
+          return
+        }
+      }
+
+      await proxyService.deleteProxy(media.id, sharedProxyKey)
+    } catch (error) {
+      logger.warn('Failed to delete proxy:', error)
+    } finally {
+      proxyService.clearProxyKey(media.id)
+    }
+  }
+
+  private async deleteOpfsContentIfUnreferenced(media: MediaMetadata): Promise<void> {
+    if (media.storageType !== 'opfs') {
+      return
+    }
+
+    // If contentHash is missing but opfsPath exists, delete the OPFS file directly
+    // to avoid orphaning files that were stored without content-addressing.
+    if (!media.contentHash) {
+      if (media.opfsPath) {
+        try {
+          await opfsService.deleteFile(media.opfsPath)
+        } catch (error) {
+          logger.warn('Failed to delete OPFS file (no contentHash):', error)
+        }
+      }
+      return
+    }
+
+    const newRefCount = await decrementContentRef(media.contentHash)
+
+    if (newRefCount !== 0 || !media.opfsPath) {
+      return
+    }
+
+    try {
+      await opfsService.deleteFile(media.opfsPath)
+    } catch (error) {
+      logger.warn('Failed to delete file from OPFS:', error)
+    }
+
+    try {
+      await deleteContent(media.contentHash)
+    } catch (error) {
+      logger.warn('Failed to delete content record:', error)
+    }
+  }
+
+  private async cleanupMediaIfUnreferenced(media: MediaMetadata): Promise<void> {
+    const remainingProjects = await getProjectsUsingMedia(media.id)
+
+    if (remainingProjects.length > 0) {
+      return
+    }
+
+    await deleteMediaDB(media.id)
+
+    await this.deleteTranscriptSafely(media.id)
+    await this.deleteCaptionsSafely(media.id)
+    await this.deleteScenesSafely(media.id)
+    await this.deleteThumbnailsSafely(media.id)
+    await this.clearGifFrameCacheSafely(media.id)
+    await this.clearFilmstripCacheSafely(media.id)
+    await this.clearWaveformCacheSafely(media.id)
+    await deletePreviewAudioConform(media, { clearMetadata: false })
+    await this.deleteProxySafely(media, { preserveSharedAliases: true })
+    await this.deleteOpfsContentIfUnreferenced(media)
+  }
+
+  private schedulePostImportWork(
+    file: File,
+    mediaMetadata: MediaMetadata,
+    options: {
+      isVideo: boolean
+      previewAudioCodec?: string
+    },
+  ): void {
+    if (needsCustomAudioDecoder(options.previewAudioCodec)) {
+      enqueueBackgroundMediaWork(() => startPreviewAudioStartupWarm(mediaMetadata.id, file), {
+        priority: 'warm',
+        delayMs: IMPORT_BACKGROUND_WARM_DELAY_MS,
+      })
+      enqueueBackgroundMediaWork(() => startPreviewAudioConform(mediaMetadata.id, file), {
+        priority: 'heavy',
+        delayMs: IMPORT_BACKGROUND_HEAVY_DELAY_MS,
+      })
+    }
+
+    if (mediaMetadata.mimeType === 'image/gif') {
+      enqueueBackgroundMediaWork(
+        async () => {
+          const blobUrl = URL.createObjectURL(file)
+          try {
+            const { gifFrameCache } = await importGifFrameCache()
+            await gifFrameCache.getGifFrames(mediaMetadata.id, blobUrl)
+          } finally {
+            URL.revokeObjectURL(blobUrl)
+          }
+        },
+        {
+          priority: 'warm',
+          delayMs: IMPORT_BACKGROUND_WARM_DELAY_MS,
+        },
+      )
+    }
+  }
+
+  private async importMediaFileToOpfs(
+    file: File,
+    projectId: string,
+  ): Promise<MediaMetadata & { isDuplicate?: boolean; hasUnsupportedCodec?: boolean }> {
+    const validationResult = validateMediaFile(file)
+    if (!validationResult.valid) {
+      throw new Error(validationResult.error)
+    }
+
+    const projectMedia = await getMediaForProjectDB(projectId)
+    const existingMedia = projectMedia.find(
+      (media) => media.fileName === file.name && media.fileSize === file.size,
+    )
+    if (existingMedia) {
+      this.schedulePostImportWork(file, existingMedia, {
+        isVideo: existingMedia.mimeType.startsWith('video/'),
+        previewAudioCodec: existingMedia.mimeType.startsWith('audio/')
+          ? existingMedia.codec
+          : existingMedia.audioCodec,
+      })
+      return { ...existingMedia, isDuplicate: true }
+    }
+
+    const resolvedMimeType = getMimeType(file)
+    const { metadata, thumbnail } = await mediaProcessorService.processMedia(
+      file,
+      resolvedMimeType,
+      { thumbnailTimestamp: 1, fastMetadata: true },
+    )
+
+    let thumbnailBlob = thumbnail
+    if (!thumbnailBlob && resolvedMimeType === 'image/svg+xml') {
+      try {
+        thumbnailBlob = await generateThumbnail(file, { maxSize: 320, quality: 0.6 })
+      } catch (error) {
+        logger.warn('Failed to generate SVG thumbnail on main thread:', error)
+      }
+    }
+
+    const mediaId = crypto.randomUUID()
+    const createdAt = Date.now()
+    const opfsPath = buildGeneratedMediaOpfsPath(mediaId)
+    const codecCheck = mediaProcessorService.hasUnsupportedAudioCodec(metadata)
+    const previewAudioCodec =
+      metadata.type === 'audio'
+        ? metadata.codec
+        : metadata.type === 'video'
+          ? metadata.audioCodec
+          : undefined
+
+    const thumbnailDimensions = thumbnailBlob
+      ? metadata.type === 'audio'
+        ? { width: 320, height: 180 }
+        : getThumbnailDimensions(
+            Math.max(1, 'width' in metadata ? metadata.width || 1 : 1),
+            Math.max(1, 'height' in metadata ? metadata.height || 1 : 1),
+            320,
+          )
+      : undefined
+
+    const mediaMetadata: MediaMetadata = {
+      id: mediaId,
+      storageType: 'opfs',
+      opfsPath,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: resolvedMimeType,
+      duration: 'duration' in metadata ? metadata.duration : 0,
+      width: 'width' in metadata ? metadata.width : 0,
+      height: 'height' in metadata ? metadata.height : 0,
+      fps: metadata.type === 'video' ? metadata.fps : 0,
+      codec:
+        metadata.type === 'video'
+          ? metadata.codec
+          : metadata.type === 'audio'
+            ? metadata.codec || 'unknown'
+            : 'unknown',
+      bitrate: 'bitrate' in metadata ? (metadata.bitrate ?? 0) : 0,
+      audioCodec: metadata.type === 'video' ? metadata.audioCodec : undefined,
+      audioCodecSupported: metadata.type === 'video' ? metadata.audioCodecSupported : true,
+      keyframeTimestamps: metadata.type === 'video' ? metadata.keyframeTimestamps : undefined,
+      gopInterval: metadata.type === 'video' ? metadata.gopInterval : undefined,
+      tags: [],
+      createdAt,
+      updatedAt: createdAt,
+    }
+
+    const persistedMedia = await persistGeneratedMediaAsset({
+      file,
+      projectId,
+      mediaMetadata,
+      thumbnailBlob,
+      thumbnailWidth: thumbnailDimensions?.width,
+      thumbnailHeight: thumbnailDimensions?.height,
+    })
+
+    this.schedulePostImportWork(file, persistedMedia, {
+      isVideo: metadata.type === 'video',
+      previewAudioCodec,
+    })
+
+    return {
+      ...persistedMedia,
+      hasUnsupportedCodec: codecCheck.unsupported,
+    }
+  }
+
+  private async fetchMediaFromUrl(url: string): Promise<File> {
+    const parsedUrl = parseMediaImportUrl(url.trim())
+
+    let response: Response
+    try {
+      response = await fetch(parsedUrl.toString())
+    } catch (error) {
+      logger.warn(`Failed to fetch media URL "${parsedUrl.toString()}":`, error)
+      throw new Error(
+        'Could not download that URL. The site may block cross-origin downloads, require sign-in, or need a direct file link.',
+      )
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download media (${response.status}${response.statusText ? ` ${response.statusText}` : ''}).`,
+      )
+    }
+
+    const responseMimeType = normalizeMimeType(response.headers.get('content-type'))
+    if (isPageMimeType(responseMimeType)) {
+      if (isKnownMediaPageHost(parsedUrl.hostname)) {
+        throw new Error(
+          'YouTube and similar page URLs are not direct media files here yet. Paste a direct MP4/MP3/image URL, or download the media first.',
+        )
+      }
+      throw new Error(
+        'That URL points to a web page, not a media file. Paste the direct file URL instead.',
+      )
+    }
+
+    const blob = await response.blob()
+    if (blob.size === 0) {
+      throw new Error('The downloaded file was empty.')
+    }
+
+    const mimeType = normalizeMimeType(blob.type) || responseMimeType
+    const fileName = buildImportedUrlFileName(
+      parsedUrl.toString(),
+      response.url,
+      response.headers.get('content-disposition'),
+      mimeType,
+    )
+
+    return new File([blob], fileName, {
+      type: mimeType || blob.type,
+      lastModified: Date.now(),
+    })
+  }
+
+  /**
+   * Get all media items from workspace storage
    */
   async getAllMedia(): Promise<MediaMetadata[]> {
-    return getAllMediaDB();
+    return getAllMediaDB()
   }
 
   /**
    * Get a single media item by ID
    */
   async getMedia(id: string): Promise<MediaMetadata | null> {
-    const media = await getMediaDB(id);
-    return media || null;
+    const media = await getMediaDB(id)
+    return media || null
   }
 
   /**
@@ -173,71 +610,160 @@ class MediaLibraryService {
    */
   async importMediaWithHandle(
     handle: FileSystemFileHandle,
-    projectId: string
+    projectId: string,
+    options?: { storageMode?: 'copy' | 'link' },
   ): Promise<MediaMetadata & { isDuplicate?: boolean; hasUnsupportedCodec?: boolean }> {
     // Stage 1: Get file from handle (instant)
-    const hasPermission = await ensureFileHandlePermission(handle);
+    const hasPermission = await ensureFileHandlePermission(handle)
     if (!hasPermission) {
-      throw new FileAccessError(
-        'Permission denied to access file',
-        'permission_denied'
-      );
+      throw new FileAccessError('Permission denied to access file', 'permission_denied')
     }
 
-    const file = await handle.getFile();
+    const file = await handle.getFile()
+
+    if (options?.storageMode === 'copy') {
+      return this.importMediaFileToOpfs(file, projectId)
+    }
 
     // Stage 2: Validation
-    const validationResult = validateMediaFile(file);
+    const validationResult = validateMediaFile(file)
     if (!validationResult.valid) {
-      throw new Error(validationResult.error);
+      throw new Error(validationResult.error)
     }
 
-    // Stage 3: Check for duplicates (by fileName + fileSize)
-    const projectMedia = await getMediaForProjectDB(projectId);
+    // Stage 3a: Cross-workspace dedup by (fileName + fileSize + lastModified).
+    // A File's triple-tuple is effectively unique: the same bytes re-saved
+    // bumps lastModified, and two different files sharing name + exact byte
+    // size + exact mtime is a practical non-occurrence. Zero file I/O — all
+    // three fields come from File metadata — so unique imports pay nothing.
+    // A match reuses the existing media record across projects instead of
+    // re-mirroring the bytes into a fresh `media/{id}/` directory.
+    //
+    // `isDuplicate` is only set when the matched media is already in THIS
+    // project. Cross-project reuse (new project importing the same file) is
+    // a successful import from the UI's perspective — the media just happens
+    // to already live in the workspace, so we associate and return it as a
+    // regular import result. `getAllMedia` includes media whose only project
+    // is trashed; re-associating into the new project effectively brings
+    // those records forward, and the trash sweep's ref-counted delete still
+    // keeps the bytes alive because the new project now references them.
+    const workspaceMedia = await getAllMediaMetadataDB()
+    const workspaceDuplicate = workspaceMedia.find(
+      (m) =>
+        m.fileName === file.name &&
+        m.fileSize === file.size &&
+        m.fileLastModified === file.lastModified,
+    )
+    if (workspaceDuplicate) {
+      let resolvedDuplicate = workspaceDuplicate
+      if (workspaceDuplicate.storageType === 'handle') {
+        resolvedDuplicate = await updateMediaDB(workspaceDuplicate.id, {
+          fileHandle: handle,
+          fileName: file.name,
+          fileSize: file.size,
+          fileLastModified: file.lastModified,
+          updatedAt: Date.now(),
+        })
+      }
+      mirrorSourceToWorkspaceInBackground(resolvedDuplicate.id, file, file.name)
+      this.schedulePostImportWork(file, resolvedDuplicate, {
+        isVideo: resolvedDuplicate.mimeType.startsWith('video/'),
+        previewAudioCodec: resolvedDuplicate.mimeType.startsWith('audio/')
+          ? resolvedDuplicate.codec
+          : resolvedDuplicate.audioCodec,
+      })
+      const projectMediaIds = await getProjectMediaIds(projectId).catch(() => [] as string[])
+      const alreadyInThisProject = projectMediaIds.includes(resolvedDuplicate.id)
+      if (!alreadyInThisProject) {
+        await associateMediaWithProject(projectId, resolvedDuplicate.id)
+      }
+      return { ...resolvedDuplicate, isDuplicate: alreadyInThisProject }
+    }
 
+    // Stage 3b: Project-scoped name+size fallback for legacy records missing
+    // `fileLastModified` (imported before that field was persisted). Only
+    // fires for records already in the current project — cross-project
+    // reuse is covered by 3a.
+    const projectMediaIds = await getProjectMediaIds(projectId).catch(() => [] as string[])
+    const projectMediaIdSet = new Set(projectMediaIds)
+    const projectMedia = workspaceMedia.filter((media) => projectMediaIdSet.has(media.id))
     const existingMedia = projectMedia.find(
-      (m) => m.fileName === file.name && m.fileSize === file.size
-    );
-
+      (m) =>
+        m.fileName === file.name &&
+        m.fileSize === file.size &&
+        // Only consider legacy records that lack `fileLastModified` — current
+        // records with a different mtime must not be collapsed onto the new
+        // file since they describe different bytes.
+        (m.fileLastModified === null || m.fileLastModified === undefined),
+    )
     if (existingMedia) {
-      // File already exists in project - return existing with duplicate flag
-      return { ...existingMedia, isDuplicate: true };
+      const updates: Partial<MediaMetadata> = {
+        fileName: file.name,
+        fileSize: file.size,
+        fileLastModified: file.lastModified,
+        updatedAt: Date.now(),
+      }
+
+      if (existingMedia.storageType === 'handle' || !existingMedia.opfsPath) {
+        updates.storageType = 'handle'
+        updates.fileHandle = handle
+      }
+
+      const refreshedMedia = await updateMediaDB(existingMedia.id, updates)
+      mirrorSourceToWorkspaceInBackground(refreshedMedia.id, file, file.name)
+      this.schedulePostImportWork(file, refreshedMedia, {
+        isVideo: refreshedMedia.mimeType.startsWith('video/'),
+        previewAudioCodec: refreshedMedia.mimeType.startsWith('audio/')
+          ? refreshedMedia.codec
+          : refreshedMedia.audioCodec,
+      })
+      return { ...refreshedMedia, isDuplicate: true }
     }
 
     // Stage 4: Process media in worker (metadata + thumbnail in one pass, off main thread)
-    const resolvedMimeType = getMimeType(file);
-    const id = crypto.randomUUID();
-    let thumbnailId: string | undefined;
+    const resolvedMimeType = getMimeType(file)
+    const id = crypto.randomUUID()
+    let thumbnailId: string | undefined
 
     const { metadata, thumbnail } = await mediaProcessorService.processMedia(
       file,
       resolvedMimeType,
-      { thumbnailTimestamp: 1 }
-    );
+      { thumbnailTimestamp: 1, fastMetadata: true },
+    )
 
     // Stage 5: Save thumbnail if generated
-    if (thumbnail) {
+    // SVG thumbnails can't be generated in the worker (createImageBitmap doesn't
+    // support SVGs in workers), so fall back to main-thread generation.
+    let thumbnailBlob = thumbnail
+    if (!thumbnailBlob && resolvedMimeType === 'image/svg+xml') {
       try {
-        thumbnailId = crypto.randomUUID();
+        thumbnailBlob = await generateThumbnail(file, { maxSize: 320, quality: 0.6 })
+      } catch (error) {
+        logger.warn('Failed to generate SVG thumbnail on main thread:', error)
+      }
+    }
+    if (thumbnailBlob) {
+      try {
+        thumbnailId = crypto.randomUUID()
         const thumbnailData: ThumbnailData = {
           id: thumbnailId,
           mediaId: id,
-          blob: thumbnail,
+          blob: thumbnailBlob,
           timestamp: 1,
           width: 320,
           height: 180,
-        };
-        await saveThumbnailDB(thumbnailData);
+        }
+        await saveThumbnailDB(thumbnailData)
       } catch (error) {
-        logger.warn('Failed to save thumbnail:', error);
-        thumbnailId = undefined;
+        logger.warn('Failed to save thumbnail:', error)
+        thumbnailId = undefined
       }
     }
 
     // Check for unsupported audio codec (included in metadata from worker)
-    const codecCheck = mediaProcessorService.hasUnsupportedAudioCodec(metadata);
+    const codecCheck = mediaProcessorService.hasUnsupportedAudioCodec(metadata)
 
-    // Stage 6: Save metadata to IndexedDB with file handle
+    // Stage 6: Save metadata with the file handle-backed source reference
     const mediaMetadata: MediaMetadata = {
       id,
       storageType: 'handle',
@@ -250,37 +776,49 @@ class MediaLibraryService {
       width: 'width' in metadata ? metadata.width : 0,
       height: 'height' in metadata ? metadata.height : 0,
       fps: metadata.type === 'video' ? metadata.fps : 30,
-      codec: metadata.type === 'video'
-        ? metadata.codec
-        : metadata.type === 'audio'
-          ? (metadata.codec || 'unknown')
-          : 'unknown',
+      codec:
+        metadata.type === 'video'
+          ? metadata.codec
+          : metadata.type === 'audio'
+            ? metadata.codec || 'unknown'
+            : 'unknown',
       bitrate: 'bitrate' in metadata ? (metadata.bitrate ?? 0) : 0,
       audioCodec: metadata.type === 'video' ? metadata.audioCodec : undefined,
       audioCodecSupported: metadata.type === 'video' ? metadata.audioCodecSupported : true,
+      keyframeTimestamps: metadata.type === 'video' ? metadata.keyframeTimestamps : undefined,
+      gopInterval: metadata.type === 'video' ? metadata.gopInterval : undefined,
       thumbnailId,
       tags: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    };
+    }
 
-    await createMediaDB(mediaMetadata);
+    await createMediaDB(mediaMetadata)
+
+    // Mirror source bytes into the workspace folder so every origin (dev,
+    // prod, agents reading from disk) can see the media — not just this one.
+    // Runs in the background to avoid blocking the rest of the import flow;
+    // the lazy fallback in getMediaFile covers the gap if this loses a race.
+    mirrorSourceToWorkspaceInBackground(id, file, file.name)
 
     // Stage 7: Associate with project
-    await associateMediaWithProject(projectId, id);
+    await associateMediaWithProject(projectId, id)
 
-    // Pre-extract GIF frames in background
-    if (resolvedMimeType === 'image/gif') {
-      const blobUrl = URL.createObjectURL(file);
-      void gifFrameCache.getGifFrames(id, blobUrl)
-        .catch((err) => logger.warn('Failed to pre-extract GIF frames:', err))
-        .finally(() => URL.revokeObjectURL(blobUrl));
-    }
+    const previewAudioCodec =
+      metadata.type === 'audio'
+        ? metadata.codec
+        : metadata.type === 'video'
+          ? metadata.audioCodec
+          : undefined
+    this.schedulePostImportWork(file, mediaMetadata, {
+      isVideo: metadata.type === 'video',
+      previewAudioCodec,
+    })
 
     return {
       ...mediaMetadata,
       hasUnsupportedCodec: codecCheck.unsupported,
-    };
+    }
   }
 
   /**
@@ -289,35 +827,57 @@ class MediaLibraryService {
   async importMediaBatchWithHandles(
     handles: FileSystemFileHandle[],
     projectId: string,
-    onProgress?: (current: number, total: number, fileName: string) => void
+    onProgress?: (current: number, total: number, fileName: string) => void,
   ): Promise<MediaMetadata[]> {
-    const results: MediaMetadata[] = [];
-    const errors: { file: string; error: string }[] = [];
+    const results: MediaMetadata[] = []
+    const errors: { file: string; error: string }[] = []
 
     for (let i = 0; i < handles.length; i++) {
-      const handle = handles[i];
-      if (!handle) continue;
+      const handle = handles[i]
+      if (!handle) continue
 
-      const file = await handle.getFile().catch(() => null);
-      const fileName = file?.name ?? handle.name;
-      onProgress?.(i + 1, handles.length, fileName);
+      const file = await handle.getFile().catch(() => null)
+      const fileName = file?.name ?? handle.name
+      onProgress?.(i + 1, handles.length, fileName)
 
       try {
-        const metadata = await this.importMediaWithHandle(handle, projectId);
-        results.push(metadata);
+        const metadata = await this.importMediaWithHandle(handle, projectId)
+        results.push(metadata)
       } catch (error) {
         errors.push({
           file: fileName,
           error: error instanceof Error ? error.message : String(error),
-        });
+        })
       }
     }
 
     if (errors.length > 0) {
-      logger.warn('Some files failed to import:', errors);
+      logger.warn('Some files failed to import:', errors)
     }
 
-    return results;
+    return results
+  }
+
+  /**
+   * Import media from a direct URL.
+   *
+   * Since remote URLs do not provide a durable FileSystemFileHandle, the
+   * downloaded bytes are stored in OPFS and mirrored into the workspace.
+   *
+   * Works with direct media URLs that allow browser-side fetches. Page URLs
+   * such as YouTube/Vimeo watch pages typically do not expose a fetchable
+   * media file and should be handled upstream.
+   */
+  async importMediaFromUrl(
+    url: string,
+    projectId: string,
+  ): Promise<MediaMetadata & { isDuplicate?: boolean; hasUnsupportedCodec?: boolean }> {
+    if (!projectId) {
+      throw new Error('No project selected')
+    }
+
+    const file = await this.fetchMediaFromUrl(url)
+    return this.importMediaFileToOpfs(file, projectId)
   }
 
   /**
@@ -329,42 +889,43 @@ class MediaLibraryService {
     file: File,
     projectId: string,
     options?: {
-      width?: number;
-      height?: number;
-      tags?: string[];
-      thumbnailMaxSize?: number;
-      thumbnailQuality?: number;
-      codec?: string;
-    }
+      width?: number
+      height?: number
+      tags?: string[]
+      thumbnailMaxSize?: number
+      thumbnailQuality?: number
+      codec?: string
+    },
   ): Promise<MediaMetadata> {
     if (!projectId) {
-      throw new Error('No project selected');
+      throw new Error('No project selected')
     }
 
-    const resolvedMimeType = file.type || getMimeType(file);
+    const resolvedMimeType = file.type || getMimeType(file)
     if (!resolvedMimeType.startsWith('image/')) {
-      throw new Error(`Generated file must be an image. Received "${resolvedMimeType}".`);
+      throw new Error(`Generated file must be an image. Received "${resolvedMimeType}".`)
     }
 
-    const safeWidth = Number.isFinite(options?.width) && (options?.width ?? 0) > 0
-      ? Math.round(options?.width ?? 0)
-      : 0;
-    const safeHeight = Number.isFinite(options?.height) && (options?.height ?? 0) > 0
-      ? Math.round(options?.height ?? 0)
-      : 0;
-    const dimensions = safeWidth > 0 && safeHeight > 0
-      ? { width: safeWidth, height: safeHeight }
-      : await getGeneratedImageDimensions(file);
+    const safeWidth =
+      Number.isFinite(options?.width) && (options?.width ?? 0) > 0
+        ? Math.round(options?.width ?? 0)
+        : 0
+    const safeHeight =
+      Number.isFinite(options?.height) && (options?.height ?? 0) > 0
+        ? Math.round(options?.height ?? 0)
+        : 0
+    const dimensions =
+      safeWidth > 0 && safeHeight > 0
+        ? { width: safeWidth, height: safeHeight }
+        : await getGeneratedImageDimensions(file)
 
-    const mediaId = crypto.randomUUID();
-    const createdAt = Date.now();
-    const opfsPath = `content/${mediaId.slice(0, 2)}/${mediaId.slice(2, 4)}/${mediaId}/data`;
-    const codec = options?.codec ?? resolvedMimeType.split('/')[1] ?? 'unknown';
-    const thumbnailMaxSize = options?.thumbnailMaxSize ?? 320;
-    const thumbnailQuality = options?.thumbnailQuality ?? 0.6;
+    const mediaId = crypto.randomUUID()
+    const createdAt = Date.now()
+    const opfsPath = buildGeneratedMediaOpfsPath(mediaId)
+    const codec = options?.codec ?? resolvedMimeType.split('/')[1] ?? 'unknown'
+    const thumbnailMaxSize = options?.thumbnailMaxSize ?? 320
+    const thumbnailQuality = options?.thumbnailQuality ?? 0.6
 
-    let metadataCreated = false;
-    let thumbnailSaved = false;
     const mediaMetadata: MediaMetadata = {
       id: mediaId,
       storageType: 'opfs',
@@ -381,68 +942,105 @@ class MediaLibraryService {
       tags: options?.tags ?? [],
       createdAt,
       updatedAt: createdAt,
-    };
-
-    try {
-      await opfsService.saveFile(opfsPath, await blobToArrayBuffer(file));
-
-      try {
-        const thumbnailBlob = await generateThumbnail(file, {
-          maxSize: thumbnailMaxSize,
-          quality: thumbnailQuality,
-        });
-        const thumbnailDimensions = getThumbnailDimensions(
-          dimensions.width,
-          dimensions.height,
-          thumbnailMaxSize
-        );
-        const thumbnailId = crypto.randomUUID();
-
-        await saveThumbnailDB({
-          id: thumbnailId,
-          mediaId,
-          blob: thumbnailBlob,
-          timestamp: 0,
-          width: thumbnailDimensions.width,
-          height: thumbnailDimensions.height,
-        });
-
-        mediaMetadata.thumbnailId = thumbnailId;
-        thumbnailSaved = true;
-      } catch (error) {
-        logger.warn(`Failed to save generated image thumbnail for ${file.name}:`, error);
-      }
-
-      await createMediaDB(mediaMetadata);
-      metadataCreated = true;
-      await associateMediaWithProject(projectId, mediaId);
-      return mediaMetadata;
-    } catch (error) {
-      if (metadataCreated) {
-        try {
-          await deleteMediaDB(mediaId);
-        } catch (cleanupError) {
-          logger.warn(`Failed to roll back generated media metadata ${mediaId}:`, cleanupError);
-        }
-      }
-
-      if (thumbnailSaved) {
-        this.clearThumbnailCache(mediaId);
-        try {
-          await deleteThumbnailsByMediaId(mediaId);
-        } catch (cleanupError) {
-          logger.warn(`Failed to roll back generated thumbnail ${mediaId}:`, cleanupError);
-        }
-      }
-
-      try {
-        await opfsService.deleteFile(opfsPath);
-      } catch (cleanupError) {
-        logger.warn(`Failed to roll back generated OPFS file ${opfsPath}:`, cleanupError);
-      }
-
-      throw error;
     }
+
+    let thumbnailBlob: Blob | undefined
+    let thumbnailDimensions: { width: number; height: number } | undefined
+    try {
+      thumbnailBlob = await generateThumbnail(file, {
+        maxSize: thumbnailMaxSize,
+        quality: thumbnailQuality,
+      })
+      thumbnailDimensions = getThumbnailDimensions(
+        dimensions.width,
+        dimensions.height,
+        thumbnailMaxSize,
+      )
+    } catch (error) {
+      logger.warn(`Failed to save generated image thumbnail for ${file.name}:`, error)
+    }
+
+    return persistGeneratedMediaAsset({
+      file,
+      projectId,
+      mediaMetadata,
+      thumbnailBlob,
+      thumbnailWidth: thumbnailDimensions?.width,
+      thumbnailHeight: thumbnailDimensions?.height,
+    })
+  }
+
+  /**
+   * Save generated audio into the project media library as an OPFS-backed asset.
+   */
+  async importGeneratedAudio(
+    file: File,
+    projectId: string,
+    options?: {
+      tags?: string[]
+      thumbnailMaxSize?: number
+      thumbnailQuality?: number
+      codec?: string
+    },
+  ): Promise<MediaMetadata> {
+    if (!projectId) {
+      throw new Error('No project selected')
+    }
+
+    const resolvedMimeType = file.type || getMimeType(file)
+    if (!resolvedMimeType.startsWith('audio/')) {
+      throw new Error(`Generated file must be audio. Received "${resolvedMimeType}".`)
+    }
+
+    const thumbnailMaxSize = options?.thumbnailMaxSize ?? 320
+    const thumbnailQuality = options?.thumbnailQuality ?? 0.6
+    const { metadata, thumbnail } = await mediaProcessorService.processMedia(
+      file,
+      resolvedMimeType,
+      {
+        generateThumbnail: true,
+        thumbnailMaxSize,
+        thumbnailQuality,
+      },
+    )
+
+    if (metadata.type !== 'audio') {
+      throw new Error(`Expected generated audio metadata, received "${metadata.type}".`)
+    }
+
+    const mediaId = crypto.randomUUID()
+    const createdAt = Date.now()
+    const opfsPath = buildGeneratedMediaOpfsPath(mediaId)
+    const codec = options?.codec ?? metadata.codec ?? resolvedMimeType.split('/')[1] ?? 'unknown'
+    // Nominal height — audio waveform thumbnails don't have intrinsic dimensions,
+    // so we use a 16:9 placeholder ratio for the DB record.
+    const thumbnailHeight = Math.max(1, Math.round(thumbnailMaxSize * (9 / 16)))
+    const mediaMetadata: MediaMetadata = {
+      id: mediaId,
+      storageType: 'opfs',
+      opfsPath,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: resolvedMimeType,
+      duration: metadata.duration,
+      width: 0,
+      height: 0,
+      fps: 0,
+      codec,
+      bitrate: metadata.bitrate ?? 0,
+      tags: options?.tags ?? [],
+      createdAt,
+      updatedAt: createdAt,
+    }
+
+    return persistGeneratedMediaAsset({
+      file,
+      projectId,
+      mediaMetadata,
+      thumbnailBlob: thumbnail,
+      thumbnailWidth: thumbnail ? thumbnailMaxSize : undefined,
+      thumbnailHeight: thumbnail ? thumbnailHeight : undefined,
+    })
   }
 
   /**
@@ -556,124 +1154,78 @@ class MediaLibraryService {
    * @param projectId - The project to remove media from
    * @param mediaId - The media to remove
    */
-  async deleteMediaFromProject(
-    projectId: string,
-    mediaId: string
-  ): Promise<void> {
+  async deleteMediaFromProject(projectId: string, mediaId: string): Promise<void> {
     // Get media metadata
-    const media = await getMediaDB(mediaId);
+    const media = await getMediaDB(mediaId)
     if (!media) {
-      throw new Error(`Media not found: ${mediaId}`);
+      throw new Error(`Media not found: ${mediaId}`)
     }
 
     // Remove project-media association
-    await removeMediaFromProjectDB(projectId, mediaId);
+    await removeMediaFromProjectDB(projectId, mediaId)
 
-    // Check if any other projects still use this media
-    const remainingProjects = await getProjectsUsingMedia(mediaId);
-
-    if (remainingProjects.length === 0) {
-      // No other projects use this media - safe to fully delete metadata
-
-      // Delete media metadata
-      await deleteMediaDB(mediaId);
-
-      try {
-        await deleteTranscript(mediaId);
-      } catch (error) {
-        logger.warn('Failed to delete transcript:', error);
-      }
-
-      // Delete thumbnails (clear cache first)
-      this.clearThumbnailCache(mediaId);
-      try {
-        await deleteThumbnailsByMediaId(mediaId);
-      } catch (error) {
-        logger.warn('Failed to delete thumbnails:', error);
-      }
-
-      // Delete GIF frame cache if applicable
-      try {
-        await gifFrameCache.clearMedia(mediaId);
-      } catch (error) {
-        logger.warn('Failed to delete GIF frame cache:', error);
-      }
-
-      // Delete proxy video if exists
-      try {
-        const allMedia = await getAllMediaDB();
-        const sharedProxyKey = getSharedProxyKey(media);
-        const hasSharedAlias = allMedia.some(
-          (entry) => entry.id !== mediaId && getSharedProxyKey(entry) === sharedProxyKey
-        );
-
-        if (hasSharedAlias) {
-          proxyService.clearProxyKey(mediaId);
-        } else {
-          await proxyService.deleteProxy(mediaId, sharedProxyKey);
-        }
-      } catch (error) {
-        logger.warn('Failed to delete proxy:', error);
-      } finally {
-        proxyService.clearProxyKey(mediaId);
-      }
-
-      // For OPFS storage, handle content reference counting
-      if (media.storageType === 'opfs' && media.contentHash) {
-        const newRefCount = await decrementContentRef(media.contentHash);
-
-        // If no more references to content, delete the actual file
-        if (newRefCount === 0 && media.opfsPath) {
-          try {
-            await opfsService.deleteFile(media.opfsPath);
-          } catch (error) {
-            logger.warn('Failed to delete file from OPFS:', error);
-          }
-
-          // Delete content record
-          try {
-            await deleteContent(media.contentHash);
-          } catch (error) {
-            logger.warn('Failed to delete content record:', error);
-          }
-        }
-      }
-      // For handle storage: File stays on user's disk - nothing to delete
-    }
+    await this.cleanupMediaIfUnreferenced(media)
   }
 
   /**
    * Delete multiple media items from a project in batch.
-   * Uses parallel deletion for better performance.
+   * Unlinks the whole batch from the project in one write, then cleans up any
+   * media no longer referenced by another project.
    */
-  async deleteMediaBatchFromProject(
-    projectId: string,
-    mediaIds: string[]
-  ): Promise<void> {
-    const results = await Promise.allSettled(
-      mediaIds.map((mediaId) => this.deleteMediaFromProject(projectId, mediaId))
-    );
-
-    const errors = results
-      .map((result, i) => ({ result, id: mediaIds[i] }))
-      .filter((r): r is { result: PromiseRejectedResult; id: string } =>
-        r.result.status === 'rejected'
-      );
-
-    for (const { id, result } of errors) {
-      logger.error(`Failed to delete media ${id}:`, result.reason);
+  async deleteMediaBatchFromProject(projectId: string, mediaIds: string[]): Promise<void> {
+    const uniqueMediaIds = Array.from(new Set(mediaIds.filter(Boolean)))
+    if (uniqueMediaIds.length === 0) {
+      return
     }
 
-    if (errors.length === mediaIds.length) {
+    // Snapshot metadata first so missing-media failures preserve old behavior.
+    const mediaById = new Map<string, MediaMetadata>()
+    const errors: Array<{ id: string; error: unknown }> = []
+    for (const mediaId of uniqueMediaIds) {
+      try {
+        const media = await getMediaDB(mediaId)
+        if (!media) {
+          throw new Error(`Media not found: ${mediaId}`)
+        }
+        mediaById.set(mediaId, media)
+      } catch (error) {
+        logger.error(`Failed to load media ${mediaId} for project delete:`, error)
+        errors.push({ id: mediaId, error })
+      }
+    }
+
+    if (errors.length === uniqueMediaIds.length) {
       throw new Error(
-        `Failed to delete all ${mediaIds.length} items. Check console for details.`
-      );
+        `Failed to delete all ${uniqueMediaIds.length} items. Check console for details.`,
+      )
+    }
+
+    const unlinkIds = uniqueMediaIds.filter((id) => mediaById.has(id))
+    await removeMediaBatchFromProjectDB(projectId, unlinkIds)
+
+    // After the atomic unlink, slow cleanup can stay serialized to avoid races
+    // on shared proxy aliases, content ref-counts, and OPFS deletes.
+    for (const mediaId of unlinkIds) {
+      try {
+        const media = mediaById.get(mediaId)
+        if (!media) continue
+        await this.cleanupMediaIfUnreferenced(media)
+      } catch (error) {
+        logger.error(`Failed to delete media ${mediaId}:`, error)
+        errors.push({ id: mediaId, error })
+      }
+    }
+
+    if (errors.length === uniqueMediaIds.length) {
+      throw new Error(
+        `Failed to delete all ${uniqueMediaIds.length} items. Check console for details.`,
+      )
     }
 
     if (errors.length > 0) {
       logger.warn(
-        `Partially deleted: ${mediaIds.length - errors.length}/${mediaIds.length} items deleted successfully.`
-      );
+        `Partially deleted: ${uniqueMediaIds.length - errors.length}/${uniqueMediaIds.length} items deleted successfully.`,
+      )
     }
   }
 
@@ -682,115 +1234,86 @@ class MediaLibraryService {
    * Used when deleting a project. Uses parallel deletion for better performance.
    */
   async deleteAllMediaFromProject(projectId: string): Promise<void> {
-    const mediaIds = await getProjectMediaIds(projectId);
+    const mediaIds = await getProjectMediaIds(projectId)
 
-    const results = await Promise.allSettled(
-      mediaIds.map((mediaId) => this.deleteMediaFromProject(projectId, mediaId))
-    );
-
-    results.forEach((result, i) => {
-      if (result.status === 'rejected') {
-        logger.error(`Failed to delete media ${mediaIds[i]} from project:`, result.reason);
+    for (const mediaId of mediaIds) {
+      try {
+        await this.deleteMediaFromProject(projectId, mediaId)
+      } catch (error) {
+        logger.error(`Failed to delete media ${mediaId} from project:`, error)
       }
-    });
+    }
   }
 
   /**
-   * @deprecated Use deleteMediaFromProject instead for proper reference counting
+   * Delete a media item globally — removes it from every project that uses
+   * it, then deletes metadata, thumbnails, transcripts, proxies, and any
+   * OPFS content when no longer referenced.
+   *
+   * Prefer `deleteMediaFromProject(projectId, mediaId)` when a project
+   * context exists: it preserves the media for other projects via
+   * reference counting. Use this variant only from the no-project view
+   * (global media library), or when the user explicitly wants a
+   * "delete everywhere" action.
    */
   async deleteMedia(id: string): Promise<void> {
-    logger.warn(
-      'deleteMedia is deprecated. Use deleteMediaFromProject for proper reference counting.'
-    );
-
-    const media = await getMediaDB(id);
+    const media = await getMediaDB(id)
     if (!media) {
-      throw new Error(`Media not found: ${id}`);
+      throw new Error(`Media not found: ${id}`)
     }
 
     // Clean up all project-media associations for this media
-    const projectIds = await getProjectsUsingMedia(id);
+    const projectIds = await getProjectsUsingMedia(id)
     for (const projectId of projectIds) {
       try {
-        await removeMediaFromProjectDB(projectId, id);
+        await removeMediaFromProjectDB(projectId, id)
       } catch (error) {
-        logger.warn(`Failed to remove project association for ${projectId}:`, error);
+        logger.warn(`Failed to remove project association for ${projectId}:`, error)
       }
     }
 
     // Handle OPFS storage cleanup
-    if (media.storageType === 'opfs' && media.contentHash) {
-      const newRefCount = await decrementContentRef(media.contentHash);
-
-      if (newRefCount === 0 && media.opfsPath) {
-        try {
-          await opfsService.deleteFile(media.opfsPath);
-        } catch (error) {
-          logger.warn('Failed to delete file from OPFS:', error);
-        }
-
-        try {
-          await deleteContent(media.contentHash);
-        } catch (error) {
-          logger.warn('Failed to delete content record:', error);
-        }
-      }
-    }
+    await this.deleteOpfsContentIfUnreferenced(media)
     // Handle storage: nothing to delete, file stays on disk
 
-    this.clearThumbnailCache(id);
-    try {
-      await deleteThumbnailsByMediaId(id);
-    } catch (error) {
-      logger.warn('Failed to delete thumbnails:', error);
-    }
+    await this.deleteThumbnailsSafely(id)
+    await this.clearGifFrameCacheSafely(id)
+    await this.clearFilmstripCacheSafely(id)
+    await this.clearWaveformCacheSafely(id)
+    await deletePreviewAudioConform(media, { clearMetadata: false })
+    await this.deleteProxySafely(media)
 
-    try {
-      await proxyService.deleteProxy(id, getSharedProxyKey(media));
-    } catch (error) {
-      logger.warn('Failed to delete proxy:', error);
-    } finally {
-      proxyService.clearProxyKey(id);
-    }
+    await deleteMediaDB(id)
 
-    await deleteMediaDB(id);
-
-    try {
-      await deleteTranscript(id);
-    } catch (error) {
-      logger.warn('Failed to delete transcript:', error);
-    }
+    await this.deleteTranscriptSafely(id)
+    await this.deleteCaptionsSafely(id)
+    await this.deleteScenesSafely(id)
   }
 
   /**
-   * @deprecated Use deleteMediaBatchFromProject instead
+   * Batch variant of `deleteMedia` — see its docs for when to use this
+   * vs. `deleteMediaBatchFromProject`.
    */
   async deleteMediaBatch(ids: string[]): Promise<void> {
-    logger.warn(
-      'deleteMediaBatch is deprecated. Use deleteMediaBatchFromProject for proper reference counting.'
-    );
-
-    const errors: Array<{ id: string; error: unknown }> = [];
+    const errors: Array<{ id: string; error: unknown }> = []
 
     for (const id of ids) {
       try {
-        await this.deleteMedia(id);
+        await this.deleteMedia(id)
       } catch (error) {
-        logger.error(`Failed to delete media ${id}:`, error);
-        errors.push({ id, error });
+        logger.error(`Failed to delete media ${id}:`, error)
+        errors.push({ id, error })
       }
     }
 
     if (errors.length === ids.length) {
-      throw new Error(
-        `Failed to delete all ${ids.length} items. Check console for details.`
-      );
+      throw new Error(`Failed to delete all ${ids.length} items. Check console for details.`)
     }
 
     if (errors.length > 0) {
       logger.warn(
-        `Partially deleted: ${ids.length - errors.length}/${ids.length} items deleted successfully.`
-      );
+        `Partially deleted: ${ids.length - errors.length}/${ids.length} items deleted successfully.`,
+      )
     }
   }
 
@@ -798,7 +1321,7 @@ class MediaLibraryService {
    * Get all media for a specific project
    */
   async getMediaForProject(projectId: string): Promise<MediaMetadata[]> {
-    return getMediaForProjectDB(projectId);
+    return getMediaForProjectDB(projectId)
   }
 
   /**
@@ -807,21 +1330,18 @@ class MediaLibraryService {
    * For handle-based media, the file handle is shared.
    * For OPFS-based media, the content reference is incremented.
    */
-  async copyMediaToProject(
-    mediaId: string,
-    targetProjectId: string
-  ): Promise<void> {
-    const media = await getMediaDB(mediaId);
+  async copyMediaToProject(mediaId: string, targetProjectId: string): Promise<void> {
+    const media = await getMediaDB(mediaId)
     if (!media) {
-      throw new Error(`Media not found: ${mediaId}`);
+      throw new Error(`Media not found: ${mediaId}`)
     }
 
     // Create project association
-    await associateMediaWithProject(targetProjectId, mediaId);
+    await associateMediaWithProject(targetProjectId, mediaId)
 
     // For OPFS storage, increment content reference
     if (media.storageType === 'opfs' && media.contentHash) {
-      await incrementContentRef(media.contentHash);
+      await incrementContentRef(media.contentHash)
     }
     // For handle storage, no additional action needed - handle is shared
   }
@@ -835,56 +1355,85 @@ class MediaLibraryService {
    *
    * @throws FileAccessError if permission denied or file missing
    */
-  async getMediaFile(id: string): Promise<Blob | null> {
-    const media = await getMediaDB(id);
+  async getMediaFile(idOrMedia: string | MediaMetadata): Promise<Blob | null> {
+    const media = typeof idOrMedia === 'string' ? await getMediaDB(idOrMedia) : idOrMedia
 
     if (!media) {
-      return null;
+      return null
     }
+    const id = media.id
 
-    // Handle file handle storage (local-first)
+    // Handle file handle storage (local-first, origin-scoped).
     if (media.storageType === 'handle' && media.fileHandle) {
       try {
-        const hasPermission = await ensureFileHandlePermission(media.fileHandle);
+        const hasPermission = await ensureFileHandlePermission(media.fileHandle)
         if (!hasPermission) {
           throw new FileAccessError(
             `Permission denied for "${media.fileName}". Please re-grant access.`,
-            'permission_denied'
-          );
+            'permission_denied',
+          )
         }
 
-        const file = await media.fileHandle.getFile();
-        return file;
+        const file = await media.fileHandle.getFile()
+        mirrorSourceToWorkspaceInBackground(id, file, media.fileName)
+        return file
       } catch (error) {
         if (error instanceof FileAccessError) {
-          throw error;
+          // Cross-origin recovery: if the handle exists but isn't granted here,
+          // fall through to the workspace-fs copy before surfacing the error.
+          const fallback = await readMediaSourceSafe(id)
+          if (fallback) return fallback
+          throw error
         }
-        // File might have been moved/deleted
-        logger.error('Failed to get file from handle:', error);
+        // File might have been moved/deleted.
+        logger.warn('Failed to get file from handle; trying workspace fallback:', error)
+        const fallback = await readMediaSourceSafe(id)
+        if (fallback) return fallback
         throw new FileAccessError(
           `File "${media.fileName}" not found. It may have been moved or deleted.`,
-          'file_missing'
-        );
+          'file_missing',
+        )
       }
     }
 
-    // Handle OPFS storage (legacy/fallback)
-    // Also handle old records without storageType (treat as OPFS)
+    // OPFS storage (origin-scoped).
     if (media.opfsPath) {
       try {
-        const arrayBuffer = await opfsService.getFile(media.opfsPath);
-        const blob = new Blob([arrayBuffer], {
-          type: media.mimeType,
-        });
-        return blob;
+        const blob = await opfsService.getFileBlob(media.opfsPath)
+        const normalized =
+          blob.type === media.mimeType || !media.mimeType
+            ? blob
+            : new Blob([blob], { type: media.mimeType })
+        mirrorSourceToWorkspaceInBackground(id, normalized, media.fileName)
+        return normalized
       } catch (error) {
-        logger.error('Failed to get media file from OPFS:', error);
-        return null;
+        logger.warn(
+          'Failed to get OPFS media as file blob, falling back to ArrayBuffer read:',
+          error,
+        )
+        try {
+          const arrayBuffer = await opfsService.getFile(media.opfsPath)
+          const blob = new Blob([arrayBuffer], { type: media.mimeType })
+          mirrorSourceToWorkspaceInBackground(id, blob, media.fileName)
+          return blob
+        } catch (fallbackError) {
+          logger.warn('OPFS read failed; trying workspace fallback:', fallbackError)
+          const fallback = await readMediaSourceSafe(id)
+          if (fallback) return fallback
+          logger.error('Failed to get media file from OPFS:', fallbackError)
+          return null
+        }
       }
     }
 
-    logger.error('Media has no valid storage path:', id);
-    return null;
+    // Cross-origin path: the record was authored on a different origin, so
+    // neither the handle nor OPFS is populated here — but the workspace
+    // folder is shared by every origin that picked it. Try that last.
+    const workspaceSource = await readMediaSourceSafe(id)
+    if (workspaceSource) return workspaceSource
+
+    logger.error('Media has no valid storage path:', id)
+    return null
   }
 
   /**
@@ -892,16 +1441,16 @@ class MediaLibraryService {
    * Returns true if permission is needed, false if already granted or not a handle
    */
   async needsPermission(id: string): Promise<boolean> {
-    const media = await getMediaDB(id);
+    const media = await getMediaDB(id)
     if (!media || media.storageType !== 'handle' || !media.fileHandle) {
-      return false;
+      return false
     }
 
     try {
-      const permission = await media.fileHandle.queryPermission({ mode: 'read' });
-      return permission !== 'granted';
+      const permission = await media.fileHandle.queryPermission({ mode: 'read' })
+      return permission !== 'granted'
     } catch {
-      return true; // Error means we likely need permission
+      return true // Error means we likely need permission
     }
   }
 
@@ -910,35 +1459,35 @@ class MediaLibraryService {
    * Returns true if granted, false otherwise
    */
   async requestPermission(id: string): Promise<boolean> {
-    const media = await getMediaDB(id);
+    const media = await getMediaDB(id)
     if (!media || media.storageType !== 'handle' || !media.fileHandle) {
-      return true; // Not a handle, no permission needed
+      return true // Not a handle, no permission needed
     }
 
-    return ensureFileHandlePermission(media.fileHandle);
+    return ensureFileHandlePermission(media.fileHandle)
   }
 
   /**
    * Get all media items that need permission re-request
    */
   async getMediaNeedingPermission(): Promise<MediaMetadata[]> {
-    const allMedia = await getAllMediaDB();
-    const needsPermission: MediaMetadata[] = [];
+    const allMedia = await getAllMediaDB()
+    const needsPermission: MediaMetadata[] = []
 
     for (const media of allMedia) {
       if (media.storageType === 'handle' && media.fileHandle) {
         try {
-          const permission = await media.fileHandle.queryPermission({ mode: 'read' });
+          const permission = await media.fileHandle.queryPermission({ mode: 'read' })
           if (permission !== 'granted') {
-            needsPermission.push(media);
+            needsPermission.push(media)
           }
         } catch {
-          needsPermission.push(media);
+          needsPermission.push(media)
         }
       }
     }
 
-    return needsPermission;
+    return needsPermission
   }
 
   /**
@@ -955,25 +1504,22 @@ class MediaLibraryService {
    */
   async relinkMediaHandle(
     mediaId: string,
-    newHandle: FileSystemFileHandle
+    newHandle: FileSystemFileHandle,
   ): Promise<MediaMetadata> {
     // Get existing media
-    const media = await getMediaDB(mediaId);
+    const media = await getMediaDB(mediaId)
     if (!media) {
-      throw new Error(`Media not found: ${mediaId}`);
+      throw new Error(`Media not found: ${mediaId}`)
     }
 
     // Verify we have permission to access the new file
-    const hasPermission = await ensureFileHandlePermission(newHandle);
+    const hasPermission = await ensureFileHandlePermission(newHandle)
     if (!hasPermission) {
-      throw new FileAccessError(
-        'Permission denied for the selected file',
-        'permission_denied'
-      );
+      throw new FileAccessError('Permission denied for the selected file', 'permission_denied')
     }
 
     // Verify file exists and get basic info
-    const file = await newHandle.getFile();
+    const file = await newHandle.getFile()
 
     // Update metadata with new handle and file info
     const updated = await updateMediaDB(mediaId, {
@@ -982,30 +1528,101 @@ class MediaLibraryService {
       fileSize: file.size,
       fileLastModified: file.lastModified,
       updatedAt: Date.now(),
-    });
+    })
 
-    return updated;
+    return updated
+  }
+
+  /**
+   * Update AI-generated captions for a media item.
+   *
+   * Captions live in `cache/ai/captions.json` as the authoritative source.
+   * We also mirror them onto `MediaMetadata.aiCaptions` so in-memory zustand
+   * consumers and search (`media-library-store.ts`) don't need a separate
+   * hydration pass — the mirror stays consistent because this is the only
+   * writer.
+   */
+  async updateMediaCaptions(
+    mediaId: string,
+    captions: NonNullable<MediaMetadata['aiCaptions']>,
+    options?: {
+      service?: string
+      model?: string
+      sampleIntervalSec?: number
+      embeddingModel?: string
+      embeddingDim?: number
+      imageEmbeddingModel?: string
+      imageEmbeddingDim?: number
+      /**
+       * When provided, the captions envelope and heavy assets are mirrored
+       * into the shared content-addressable cache so other mediaIds with the
+       * same source bytes skip re-analysis.
+       */
+      contentHash?: string
+    },
+  ): Promise<MediaMetadata> {
+    const existingEnvelope = await readAiOutput(mediaId, 'captions').catch(() => undefined)
+    const existingSampleInterval = (() => {
+      const fromData = existingEnvelope?.data.sampleIntervalSec
+      if (typeof fromData === 'number') return fromData
+      const fromParams = (existingEnvelope?.params as { sampleIntervalSec?: unknown } | undefined)
+        ?.sampleIntervalSec
+      return typeof fromParams === 'number' ? fromParams : undefined
+    })()
+
+    const resolvedOptions = {
+      service: options?.service ?? existingEnvelope?.service ?? 'lfm-captioning',
+      model: options?.model ?? existingEnvelope?.model ?? 'lfm-2.5-vl',
+      sampleIntervalSec: options?.sampleIntervalSec ?? existingSampleInterval,
+      embeddingModel: options?.embeddingModel ?? existingEnvelope?.data.embeddingModel,
+      embeddingDim: options?.embeddingDim ?? existingEnvelope?.data.embeddingDim,
+      imageEmbeddingModel:
+        options?.imageEmbeddingModel ?? existingEnvelope?.data.imageEmbeddingModel,
+      imageEmbeddingDim: options?.imageEmbeddingDim ?? existingEnvelope?.data.imageEmbeddingDim,
+      contentHash: options?.contentHash ?? existingEnvelope?.data.contentHash,
+    }
+
+    try {
+      await saveCaptions({
+        mediaId,
+        captions,
+        service: resolvedOptions.service,
+        model: resolvedOptions.model,
+        sampleIntervalSec: resolvedOptions.sampleIntervalSec,
+        embeddingModel: resolvedOptions.embeddingModel,
+        embeddingDim: resolvedOptions.embeddingDim,
+        imageEmbeddingModel: resolvedOptions.imageEmbeddingModel,
+        imageEmbeddingDim: resolvedOptions.imageEmbeddingDim,
+        contentHash: resolvedOptions.contentHash,
+      })
+    } catch (error) {
+      logger.warn(
+        `Failed to persist captions for ${mediaId}; metadata mirror will still update`,
+        error,
+      )
+    }
+    return updateMediaDB(mediaId, { aiCaptions: captions })
   }
 
   /**
    * Get media file as blob URL (for preview/playback)
    */
   async getMediaBlobUrl(id: string): Promise<string | null> {
-    const file = await this.getMediaFile(id);
+    const file = await this.getMediaFile(id)
 
     if (!file) {
-      return null;
+      return null
     }
 
-    return URL.createObjectURL(file);
+    return URL.createObjectURL(file)
   }
 
   /**
    * Get thumbnail for a media item
    */
   async getThumbnail(mediaId: string): Promise<ThumbnailData | null> {
-    const thumbnail = await getThumbnailByMediaId(mediaId);
-    return thumbnail || null;
+    const thumbnail = await getThumbnailByMediaId(mediaId)
+    return thumbnail || null
   }
 
   /**
@@ -1013,57 +1630,57 @@ class MediaLibraryService {
    */
   async getThumbnailBlobUrl(mediaId: string): Promise<string | null> {
     // Check cache first
-    const cached = this.thumbnailUrlCache.get(mediaId);
+    const cached = this.thumbnailUrlCache.get(mediaId)
     if (cached) {
-      return cached;
+      return cached
     }
 
-    const thumbnail = await this.getThumbnail(mediaId);
+    const thumbnail = await this.getThumbnail(mediaId)
 
     if (!thumbnail) {
-      return null;
+      return null
     }
 
-    const url = URL.createObjectURL(thumbnail.blob);
-    this.thumbnailUrlCache.set(mediaId, url);
-    return url;
+    const url = URL.createObjectURL(thumbnail.blob)
+    this.thumbnailUrlCache.set(mediaId, url)
+    return url
   }
 
   /**
    * Clear thumbnail URL from cache (call when media is deleted)
    */
   clearThumbnailCache(mediaId: string): void {
-    const url = this.thumbnailUrlCache.get(mediaId);
+    const url = this.thumbnailUrlCache.get(mediaId)
     if (url) {
-      URL.revokeObjectURL(url);
-      this.thumbnailUrlCache.delete(mediaId);
+      URL.revokeObjectURL(url)
+      this.thumbnailUrlCache.delete(mediaId)
     }
   }
 
   /**
-   * Validate sync between OPFS and IndexedDB
+   * Validate sync between OPFS and workspace-backed metadata
    * Returns list of issues found
    *
    * Note: Only validates OPFS-based media. Handle-based media is validated
    * separately via permission checks.
    */
   async validateSync(): Promise<{
-    orphanedMetadata: string[]; // Metadata without OPFS file
-    orphanedFiles: string[]; // OPFS files without metadata
+    orphanedMetadata: string[] // Metadata without OPFS file
+    orphanedFiles: string[] // OPFS files without metadata
   }> {
-    const allMedia = await getAllMediaDB();
-    const orphanedMetadata: string[] = [];
-    const orphanedFiles: string[] = [];
+    const allMedia = await getAllMediaDB()
+    const orphanedMetadata: string[] = []
+    const orphanedFiles: string[] = []
 
     // Check each OPFS-based metadata entry has corresponding OPFS file
     for (const media of allMedia) {
       // Only check OPFS storage type
       if (media.storageType === 'opfs' && media.opfsPath) {
         try {
-          await opfsService.getFile(media.opfsPath);
+          await opfsService.getFile(media.opfsPath)
         } catch {
           // File not found in OPFS
-          orphanedMetadata.push(media.id);
+          orphanedMetadata.push(media.id)
         }
       }
       // Handle-based storage is checked via needsPermission() instead
@@ -1073,29 +1690,32 @@ class MediaLibraryService {
     // files in OPFS and cross-referencing with metadata, which is expensive.
     // Can be implemented if needed.
 
-    return { orphanedMetadata, orphanedFiles };
+    return { orphanedMetadata, orphanedFiles }
   }
 
   /**
    * Repair sync issues
    */
   async repairSync(): Promise<{ cleaned: number }> {
-    const { orphanedMetadata } = await this.validateSync();
+    const { orphanedMetadata } = await this.validateSync()
 
     // Clean up orphaned metadata
     for (const id of orphanedMetadata) {
       try {
-        this.clearThumbnailCache(id);
-        await deleteMediaDB(id);
-        await deleteThumbnailsByMediaId(id);
+        const media = await getMediaDB(id)
+        await this.deleteThumbnailsSafely(id)
+        if (media) {
+          await deletePreviewAudioConform(media, { clearMetadata: false })
+        }
+        await deleteMediaDB(id)
       } catch (error) {
-        logger.error(`Failed to cleanup orphaned metadata ${id}:`, error);
+        logger.error(`Failed to cleanup orphaned metadata ${id}:`, error)
       }
     }
 
-    return { cleaned: orphanedMetadata.length };
+    return { cleaned: orphanedMetadata.length }
   }
 }
 
 // Singleton instance
-export const mediaLibraryService = new MediaLibraryService();
+export const mediaLibraryService = new MediaLibraryService()

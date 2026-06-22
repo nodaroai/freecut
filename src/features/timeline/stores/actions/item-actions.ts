@@ -1,843 +1,764 @@
-﻿/**
+/**
  * Item Actions - Cross-domain operations that affect items, transitions, and keyframes.
  */
 
-import type { TimelineItem, ImageItem } from '@/types/timeline';
-import type { MediaMetadata, ThumbnailData } from '@/types/storage';
-import { useItemsStore } from '../items-store';
-import { useTransitionsStore } from '../transitions-store';
-import { useKeyframesStore } from '../keyframes-store';
-import { useTimelineSettingsStore } from '../timeline-settings-store';
-import { useSelectionStore } from '@/shared/state/selection';
-import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
+import type { TimelineItem, TimelineTrack, VideoItem } from '@/types/timeline'
+import type { Transition } from '@/types/transition'
+import type { ReverseConformResult } from '../../services/reverse-conform-service'
+import { useItemsStore } from '../items-store'
+import { useTransitionsStore } from '../transitions-store'
+import { useKeyframesStore } from '../keyframes-store'
+import { useTimelineSettingsStore } from '../timeline-settings-store'
+import { useEditorStore } from '@/shared/state/editor'
+import { useSelectionStore } from '@/shared/state/selection'
+import { execute, applyTransitionRepairs, warnIfOverlapping } from './shared'
+import { buildLinkedLeftShiftUpdates, expandIdsWithLinkedItems } from './linked-edit'
+import { propagateRemovedIntervalsToSyncLockedTracks } from './sync-lock-ripple'
 import {
-  mediaLibraryService,
-  opfsService,
-} from '@/features/timeline/deps/media-library-service';
-import { toast } from 'sonner';
-import { execute, applyTransitionRepairs, logger } from './shared';
-import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
-import { timelineToSourceFrames } from '../../utils/source-calculations';
-import { computeClampedSlipDelta } from '../../utils/slip-utils';
-import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils';
-import { type CollisionRect } from '../../utils/collision-utils';
+  canLinkSelection,
+  expandSelectionWithLinkedItems,
+  getLinkedItemIds,
+  getSynchronizedLinkedItems,
+} from '../../utils/linked-items'
+import { isTrackSyncLockEnabled } from '../../utils/track-sync-lock'
+import { placeItemsWithoutTimelineOverlap } from './item-placement'
+import { useReverseConformDialogStore } from '../reverse-conform-dialog-store'
+import { buildLinkedAudioForVideo } from '../../utils/embedded-audio-split'
 
-function findNextAvailableSpaceOnTrack(
-  proposedFrom: number,
-  durationInFrames: number,
-  trackItems: ReadonlyArray<CollisionRect>
-): number {
-  let nextFrom = Math.max(0, proposedFrom);
-
-  for (const item of trackItems) {
-    const itemEnd = item.from + item.durationInFrames;
-    if (itemEnd <= nextFrom) {
-      continue;
-    }
-
-    if (item.from >= nextFrom + durationInFrames) {
-      break;
-    }
-
-    nextFrom = itemEnd;
-  }
-
-  return nextFrom;
+function isLinkedSelectionEnabled(): boolean {
+  return useEditorStore.getState().linkedSelectionEnabled
 }
 
-function placeItemsWithoutTimelineOverlap(items: TimelineItem[]): TimelineItem[] {
-  const occupiedRangesByTrack = new Map<string, CollisionRect[]>();
-  const placedItems: TimelineItem[] = [];
+function copyInternalTransitionsForDuplicatedItems(
+  itemIds: string[],
+  newItems: TimelineItem[],
+): void {
+  if (newItems.length === 0) return
 
-  for (const item of useItemsStore.getState().items) {
-    const trackItems = occupiedRangesByTrack.get(item.trackId);
-    if (trackItems) {
-      trackItems.push(item);
-    } else {
-      occupiedRangesByTrack.set(item.trackId, [item]);
+  const duplicatedItemByOriginalId = new Map<string, TimelineItem>()
+  for (let index = 0; index < itemIds.length; index += 1) {
+    const newItem = newItems[index]
+    if (newItem) {
+      duplicatedItemByOriginalId.set(itemIds[index]!, newItem)
     }
   }
 
-  for (const trackItems of occupiedRangesByTrack.values()) {
-    trackItems.sort((a, b) => a.from - b.from);
-  }
-
-  for (const item of items) {
-    let trackItems = occupiedRangesByTrack.get(item.trackId);
-    if (!trackItems) {
-      trackItems = [];
-      occupiedRangesByTrack.set(item.trackId, trackItems);
+  const copiedTransitions: Transition[] = []
+  for (const transition of useTransitionsStore.getState().transitions) {
+    const leftClip = duplicatedItemByOriginalId.get(transition.leftClipId)
+    const rightClip = duplicatedItemByOriginalId.get(transition.rightClipId)
+    if (!leftClip || !rightClip || leftClip.trackId !== rightClip.trackId) {
+      continue
     }
 
-    const finalFrom = findNextAvailableSpaceOnTrack(
-      item.from,
-      item.durationInFrames,
-      trackItems
-    );
-    const placedItem = finalFrom === item.from
-      ? item
-      : { ...item, from: finalFrom };
-
-    placedItems.push(placedItem);
-    trackItems.push({
-      trackId: placedItem.trackId,
-      from: placedItem.from,
-      durationInFrames: placedItem.durationInFrames,
-    });
-    trackItems.sort((a, b) => a.from - b.from);
+    copiedTransitions.push({
+      ...transition,
+      id: crypto.randomUUID(),
+      leftClipId: leftClip.id,
+      rightClipId: rightClip.id,
+      trackId: leftClip.trackId,
+    })
   }
 
-  return placedItems;
+  if (copiedTransitions.length > 0) {
+    useTransitionsStore
+      .getState()
+      .setTransitions([...useTransitionsStore.getState().transitions, ...copiedTransitions])
+  }
 }
 
 export function addItem(item: TimelineItem): void {
-  const [placedItem] = placeItemsWithoutTimelineOverlap([item]);
+  const [placedItem] = placeItemsWithoutTimelineOverlap([item])
+  if (!placedItem) return
 
-  execute('ADD_ITEM', () => {
-    useItemsStore.getState()._addItem(placedItem);
-    useTimelineSettingsStore.getState().markDirty();
-  }, { itemId: placedItem.id, type: placedItem.type });
+  execute(
+    'ADD_ITEM',
+    () => {
+      useItemsStore.getState()._addItem(placedItem)
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { itemId: placedItem.id, type: placedItem.type },
+  )
 }
 
 export function addItems(items: TimelineItem[]): void {
-  if (items.length === 0) return;
-  const placedItems = placeItemsWithoutTimelineOverlap(items);
+  if (items.length === 0) return
+  const placedItems = placeItemsWithoutTimelineOverlap(items)
 
-  execute('ADD_ITEMS', () => {
-    useItemsStore.getState()._addItems(placedItems);
-    useTimelineSettingsStore.getState().markDirty();
-  }, { count: placedItems.length });
+  execute(
+    'ADD_ITEMS',
+    () => {
+      useItemsStore.getState()._addItems(placedItems)
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { count: placedItems.length },
+  )
+}
+
+/**
+ * Add a video together with a linked audio companion in one undoable step.
+ *
+ * Used by entry points that place a bare visual item (e.g. the preview canvas
+ * drop): when the video carries embedded audio, its audio is split onto a
+ * separate audio track so video and audio stay on their own tracks. The video
+ * and audio placements are already collision-free (the caller chose the video
+ * slot; the audio lands on a free/created audio track), so they're committed
+ * directly without re-running overlap placement, which would desync the pair.
+ */
+export function addItemWithLinkedAudio(video: VideoItem): void {
+  const itemsState = useItemsStore.getState()
+  const itemsByTrackId = new Map<string, TimelineItem[]>()
+  for (const item of itemsState.items) {
+    const existing = itemsByTrackId.get(item.trackId)
+    if (existing) {
+      existing.push(item)
+    } else {
+      itemsByTrackId.set(item.trackId, [item])
+    }
+  }
+
+  const { updatedVideo, audioItem, newTrack } = buildLinkedAudioForVideo({
+    video,
+    tracks: itemsState.tracks,
+    itemsByTrackId,
+  })
+
+  execute(
+    'ADD_ITEM_WITH_LINKED_AUDIO',
+    () => {
+      const store = useItemsStore.getState()
+      if (newTrack) {
+        store.setTracks([...store.tracks, newTrack])
+      }
+      store._addItems([updatedVideo, audioItem])
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { itemId: updatedVideo.id, audioId: audioItem.id, trackCreated: !!newTrack },
+  )
+}
+
+/**
+ * Add a single item together with a freshly created track in one undoable step.
+ *
+ * Used for overlay layers (text/shape presets dropped on the canvas) that get
+ * their own new track above existing content. The caller has already planned
+ * the track (so `tracks` includes it) and positioned the item on that empty
+ * track, so the placement is collision-free and is committed directly without
+ * re-running overlap placement.
+ */
+export function addItemOnNewTrack(item: TimelineItem, tracks: TimelineTrack[]): void {
+  execute(
+    'ADD_ITEM_ON_NEW_TRACK',
+    () => {
+      const store = useItemsStore.getState()
+      store.setTracks(tracks)
+      store._addItem(item)
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { itemId: item.id, type: item.type, trackId: item.trackId },
+  )
 }
 
 export function updateItem(id: string, updates: Partial<TimelineItem>): void {
-  execute('UPDATE_ITEM', () => {
-    useItemsStore.getState()._updateItem(id, updates);
+  execute(
+    'UPDATE_ITEM',
+    () => {
+      useItemsStore.getState()._updateItem(id, updates)
 
-    // Repair transitions if position changed
-    const positionChanged = 'from' in updates || 'durationInFrames' in updates || 'trackId' in updates;
-    if (positionChanged) {
-      applyTransitionRepairs([id]);
+      // Repair transitions if position changed
+      const positionChanged =
+        'from' in updates || 'durationInFrames' in updates || 'trackId' in updates
+      if (positionChanged) {
+        applyTransitionRepairs([id])
+      }
+
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { id, updates },
+  )
+}
+
+export function unlinkItems(ids: string[]): void {
+  const items = useItemsStore.getState().items
+  const unlinkIds = new Set<string>()
+
+  for (const id of ids) {
+    for (const linkedId of getLinkedItemIds(items, id)) {
+      unlinkIds.add(linkedId)
     }
+  }
 
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, updates });
+  const linkedItems = items.filter((item) => unlinkIds.has(item.id) && item.linkedGroupId)
+  if (linkedItems.length === 0) return
+
+  // Detect video items that have a linked audio companion — their embedded audio
+  // should be muted after unlinking so it doesn't start playing when the audio is deleted.
+  const videoIdsWithAudioCompanion = new Set<string>()
+  for (const item of linkedItems) {
+    if (item.type === 'video') {
+      const hasAudio = linkedItems.some(
+        (other) => other.type === 'audio' && other.linkedGroupId === item.linkedGroupId,
+      )
+      if (hasAudio) videoIdsWithAudioCompanion.add(item.id)
+    }
+  }
+
+  execute(
+    'UNLINK_ITEMS',
+    () => {
+      const store = useItemsStore.getState()
+      for (const item of linkedItems) {
+        store._updateItem(item.id, {
+          linkedGroupId: item.id,
+          ...(videoIdsWithAudioCompanion.has(item.id) && { embeddedAudioMuted: true }),
+        })
+      }
+      useSelectionStore.getState().selectItems(linkedItems.map((item) => item.id))
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { ids: linkedItems.map((item) => item.id) },
+  )
+}
+
+export function linkItems(ids: string[]): boolean {
+  const items = useItemsStore.getState().items
+  const expandedIds = expandSelectionWithLinkedItems(items, ids)
+  const selectedItems = expandedIds
+    .map((id) => items.find((item) => item.id === id))
+    .filter((item): item is TimelineItem => item !== undefined)
+
+  if (!canLinkSelection(items, ids) || selectedItems.length < 2) {
+    return false
+  }
+
+  const linkedGroupId = crypto.randomUUID()
+  execute(
+    'LINK_ITEMS',
+    () => {
+      const store = useItemsStore.getState()
+      for (const item of selectedItems) {
+        store._updateItem(item.id, {
+          linkedGroupId,
+          ...(item.type === 'video' && { embeddedAudioMuted: undefined }),
+        })
+      }
+      useSelectionStore.getState().selectItems(selectedItems.map((item) => item.id))
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { ids: selectedItems.map((item) => item.id) },
+  )
+
+  return true
+}
+
+export function reverseItems(ids: string[]): void {
+  const items = useItemsStore.getState().items
+  const timelineFps = useTimelineSettingsStore.getState().fps
+  const expandedIds = new Set<string>()
+  for (const id of ids) {
+    const synchronizedItems = getSynchronizedLinkedItems(items, id)
+    if (synchronizedItems.length === 0) {
+      expandedIds.add(id)
+      continue
+    }
+    for (const item of synchronizedItems) {
+      expandedIds.add(item.id)
+    }
+  }
+
+  const reversibleItems = Array.from(expandedIds)
+    .map((id) => items.find((item) => item.id === id))
+    .filter(
+      (item): item is TimelineItem =>
+        item !== undefined && (item.type === 'video' || item.type === 'audio'),
+    )
+
+  if (reversibleItems.length === 0) return
+  const shouldReverse = !reversibleItems.every((item) => item.isReversed === true)
+  if (shouldReverse) {
+    const videoItems = reversibleItems.filter((item) => item.type === 'video')
+    if (videoItems.length > 0) {
+      useReverseConformDialogStore.getState().open({
+        items: reversibleItems,
+        videoItems,
+        timelineFps,
+      })
+      return
+    }
+  }
+
+  execute(
+    'REVERSE_ITEMS',
+    () => {
+      const store = useItemsStore.getState()
+      for (const item of reversibleItems) {
+        store._updateItem(item.id, {
+          isReversed: shouldReverse ? true : undefined,
+          ...(!shouldReverse && {
+            reverseConformSrc: undefined,
+            reverseConformPath: undefined,
+            reverseConformKey: undefined,
+            reverseConformPreviewSrc: undefined,
+            reverseConformPreviewPath: undefined,
+            reverseConformPreviewKey: undefined,
+            reverseConformPreviewUsesProxy: undefined,
+            reverseConformStatus: undefined,
+          }),
+        } as Partial<TimelineItem>)
+      }
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { ids: reversibleItems.map((item) => item.id), reversed: shouldReverse },
+  )
+}
+
+export function commitPreparedReverseItems(
+  items: TimelineItem[],
+  results: ReverseConformResult[],
+): void {
+  if (items.length === 0) return
+  const resultByItemId = new Map(results.map((result) => [result.itemId, result]))
+
+  execute(
+    'REVERSE_ITEMS',
+    () => {
+      const store = useItemsStore.getState()
+      for (const item of items) {
+        const result = resultByItemId.get(item.id)
+        store._updateItem(item.id, {
+          isReversed: true,
+          ...(item.type === 'video' &&
+            result && {
+              ...(result.quality === 'full'
+                ? {
+                    reverseConformSrc: result.src,
+                    reverseConformPath: result.path,
+                    reverseConformKey: result.key,
+                  }
+                : {
+                    reverseConformPreviewSrc: result.src,
+                    reverseConformPreviewPath: result.path,
+                    reverseConformPreviewKey: result.key,
+                    reverseConformPreviewUsesProxy: result.usesProxy,
+                  }),
+              reverseConformStatus: 'ready',
+            }),
+        } as Partial<TimelineItem>)
+      }
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { ids: items.map((item) => item.id), reversed: true, conformed: results.length },
+  )
 }
 
 export function removeItems(ids: string[]): void {
-  execute('REMOVE_ITEMS', () => {
-    // Remove items
-    useItemsStore.getState()._removeItems(ids);
+  const expandedIds = expandIdsWithLinkedItems(
+    useItemsStore.getState().items,
+    ids,
+    isLinkedSelectionEnabled(),
+  )
+  if (expandedIds.length === 0) return
 
-    // Cascade: Remove transitions referencing deleted items
-    useTransitionsStore.getState()._removeTransitionsForItems(ids);
+  execute(
+    'REMOVE_ITEMS',
+    () => {
+      // Remove items
+      useItemsStore.getState()._removeItems(expandedIds)
 
-    // Cascade: Remove keyframes for deleted items
-    useKeyframesStore.getState()._removeKeyframesForItems(ids);
+      // Cascade: Remove transitions referencing deleted items
+      useTransitionsStore.getState()._removeTransitionsForItems(expandedIds)
 
-    useTimelineSettingsStore.getState().markDirty();
-  }, { ids });
+      // Cascade: Remove keyframes for deleted items
+      useKeyframesStore.getState()._removeKeyframesForItems(expandedIds)
+
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { ids: expandedIds },
+  )
 }
 
 export function rippleDeleteItems(ids: string[]): void {
-  execute('RIPPLE_DELETE_ITEMS', () => {
-    useItemsStore.getState()._rippleDeleteItems(ids);
+  const items = useItemsStore.getState().items
+  const linkedSelectionEnabled = isLinkedSelectionEnabled()
+  const expandedIds = expandIdsWithLinkedItems(items, ids, linkedSelectionEnabled)
+  if (expandedIds.length === 0) return
 
-    // Cascade: Remove transitions and keyframes
-    useTransitionsStore.getState()._removeTransitionsForItems(ids);
-    useKeyframesStore.getState()._removeKeyframesForItems(ids);
+  const idsToDelete = new Set(expandedIds)
+  const remainingItems = items.filter((item) => !idsToDelete.has(item.id))
+  const baseShiftByItemId = new Map<string, number>()
+  const editedTrackIds = new Set(
+    items.filter((item) => idsToDelete.has(item.id)).map((item) => item.trackId),
+  )
+  const removedIntervals = items
+    .filter((item) => idsToDelete.has(item.id))
+    .map((item) => ({
+      start: item.from,
+      end: item.from + item.durationInFrames,
+    }))
 
-    useTimelineSettingsStore.getState().markDirty();
-  }, { ids });
+  // Per-track: shift downstream items on the same track as each deleted item.
+  // Linked counterparts and attached captions on tracks that won't be handled
+  // by sync-lock ripple get shifted manually. Solo clips on unrelated tracks
+  // are left in place.
+  for (const item of remainingItems) {
+    const shiftAmount = items
+      .filter((candidate) => idsToDelete.has(candidate.id))
+      .filter(
+        (deletedItem) =>
+          deletedItem.trackId === item.trackId &&
+          deletedItem.from + deletedItem.durationInFrames <= item.from,
+      )
+      .reduce((sum, deletedItem) => sum + deletedItem.durationInFrames, 0)
+
+    if (shiftAmount > 0) {
+      baseShiftByItemId.set(item.id, shiftAmount)
+    }
+  }
+
+  const trackById = new Map(useItemsStore.getState().tracks.map((track) => [track.id, track]))
+  const itemById = new Map(remainingItems.map((item) => [item.id, item]))
+  const shiftByItemId = new Map<string, number>()
+
+  for (const [itemId, shiftAmount] of baseShiftByItemId) {
+    if (shiftAmount <= 0) continue
+
+    const relatedIds = expandIdsWithLinkedItems(remainingItems, [itemId], linkedSelectionEnabled)
+    for (const relatedId of relatedIds) {
+      const relatedItem = itemById.get(relatedId)
+      if (!relatedItem) continue
+
+      const handledBySyncLock =
+        !editedTrackIds.has(relatedItem.trackId) &&
+        isTrackSyncLockEnabled(trackById.get(relatedItem.trackId))
+      if (handledBySyncLock) {
+        continue
+      }
+
+      shiftByItemId.set(relatedId, Math.max(shiftByItemId.get(relatedId) ?? 0, shiftAmount))
+    }
+  }
+
+  const updates = remainingItems.flatMap((item) => {
+    const shiftAmount = shiftByItemId.get(item.id) ?? 0
+    return shiftAmount > 0 ? [{ id: item.id, from: item.from - shiftAmount }] : []
+  })
+
+  // Detect non-shifted items that would be overlapped by shifted items.
+  // These get deleted rather than creating overlaps.
+  const shiftedById = new Map(updates.map((u) => [u.id, u.from]))
+  const coveredIds: string[] = []
+  for (const item of remainingItems) {
+    if (shiftedById.has(item.id) || idsToDelete.has(item.id)) continue
+    const itemEnd = item.from + item.durationInFrames
+    // Check if any shifted item on the same track would overlap this item
+    for (const other of remainingItems) {
+      const newFrom = shiftedById.get(other.id)
+      if (newFrom === undefined || other.trackId !== item.trackId) continue
+      const newEnd = newFrom + other.durationInFrames
+      if (newFrom < itemEnd && newEnd > item.from) {
+        coveredIds.push(item.id)
+        break
+      }
+    }
+  }
+
+  // Expand covered IDs with linked companions so we don't orphan them
+  const expandedCoveredIds = expandIdsWithLinkedItems(
+    remainingItems,
+    coveredIds,
+    linkedSelectionEnabled,
+  )
+  const allRemoveIds = [...expandedIds, ...expandedCoveredIds]
+
+  // Filter out updates for items that were removed as covered (including their linked companions)
+  const coveredSet = new Set(expandedCoveredIds)
+  const filteredUpdates =
+    coveredSet.size > 0 ? updates.filter((u) => !coveredSet.has(u.id)) : updates
+
+  execute(
+    'RIPPLE_DELETE_ITEMS',
+    () => {
+      useItemsStore.getState()._removeItems(allRemoveIds)
+      if (filteredUpdates.length > 0) {
+        useItemsStore.getState()._moveItems(filteredUpdates)
+      }
+
+      const syncLockResult = propagateRemovedIntervalsToSyncLockedTracks({
+        editedTrackIds,
+        intervals: removedIntervals,
+      })
+
+      // Cascade: Remove transitions and keyframes
+      const cascadedRemoveIds = Array.from(new Set([...allRemoveIds, ...syncLockResult.removedIds]))
+      useTransitionsStore.getState()._removeTransitionsForItems(cascadedRemoveIds)
+      useKeyframesStore.getState()._removeKeyframesForItems(cascadedRemoveIds)
+
+      // Repair transitions on moved clips (they may now overlap or gap differently)
+      if (filteredUpdates.length > 0) {
+        applyTransitionRepairs(filteredUpdates.map((u) => u.id))
+      }
+
+      // Repair transitions for surviving clips that were shifted
+      const repairedClipIds = Array.from(
+        new Set([...updates.map((update) => update.id), ...syncLockResult.affectedIds]),
+      )
+      if (repairedClipIds.length > 0) {
+        applyTransitionRepairs(repairedClipIds, new Set(cascadedRemoveIds))
+      }
+
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { ids: allRemoveIds },
+  )
 }
 
 export function closeGapAtPosition(trackId: string, frame: number): void {
-  execute('CLOSE_GAP', () => {
-    useItemsStore.getState()._closeGapAtPosition(trackId, frame);
+  const items = useItemsStore.getState().items
+  const targetFrame = Math.max(0, Math.round(frame))
+  const trackItems = items
+    .filter((item) => item.trackId === trackId)
+    .sort((left, right) => left.from - right.from)
 
-    // Repair all transitions on this track
-    const items = useItemsStore.getState().items;
-    const trackItemIds = items.filter((i) => i.trackId === trackId).map((i) => i.id);
-    applyTransitionRepairs(trackItemIds);
+  if (trackItems.length === 0) return
 
-    useTimelineSettingsStore.getState().markDirty();
-  }, { trackId, frame });
+  let gapStart = 0
+  let gapEnd = 0
+
+  for (const item of trackItems) {
+    if (targetFrame >= gapStart && targetFrame < item.from) {
+      gapEnd = item.from
+      break
+    }
+    gapStart = item.from + item.durationInFrames
+  }
+
+  if (gapEnd <= gapStart) return
+
+  const gapSize = gapEnd - gapStart
+  const updates = items
+    .filter((item) => item.trackId === trackId && item.from >= gapEnd)
+    .map((item) => ({ id: item.id, from: item.from - gapSize }))
+  if (updates.length === 0) return
+
+  execute(
+    'CLOSE_GAP',
+    () => {
+      useItemsStore.getState()._moveItems(updates)
+      const syncLockResult = propagateRemovedIntervalsToSyncLockedTracks({
+        editedTrackIds: new Set([trackId]),
+        intervals: [{ start: gapStart, end: gapEnd }],
+      })
+
+      const removedIds = syncLockResult.removedIds
+      if (removedIds.length > 0) {
+        useTransitionsStore.getState()._removeTransitionsForItems(removedIds)
+        useKeyframesStore.getState()._removeKeyframesForItems(removedIds)
+      }
+
+      applyTransitionRepairs(
+        Array.from(new Set([...updates.map((update) => update.id), ...syncLockResult.affectedIds])),
+        removedIds.length > 0 ? new Set(removedIds) : undefined,
+      )
+
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { trackId, frame },
+  )
 }
 
 export function closeAllGapsOnTrack(trackId: string): void {
-  execute('CLOSE_ALL_GAPS', () => {
-    const items = useItemsStore.getState().items;
-    const trackItems = items
-      .filter((i) => i.trackId === trackId)
-      .sort((a, b) => a.from - b.from);
+  const items = useItemsStore.getState().items
+  const trackItems = items
+    .filter((item) => item.trackId === trackId)
+    .sort((left, right) => left.from - right.from)
 
-    if (trackItems.length === 0) return;
+  if (trackItems.length === 0) return
 
-    // Walk items left-to-right, shift each to close any gap before it
-    let cursor = 0;
-    const updates: Array<{ id: string; from: number }> = [];
-    for (const item of trackItems) {
-      const newFrom = item.from > cursor ? cursor : item.from;
-      if (newFrom !== item.from) {
-        updates.push({ id: item.id, from: newFrom });
-      }
-      cursor = newFrom + item.durationInFrames;
+  let cursor = 0
+  const baseShiftByItemId = new Map<string, number>()
+  for (const item of trackItems) {
+    const newFrom = item.from > cursor ? cursor : item.from
+    const shiftAmount = item.from - newFrom
+    if (shiftAmount > 0) {
+      baseShiftByItemId.set(item.id, shiftAmount)
     }
+    cursor = newFrom + item.durationInFrames
+  }
 
-    if (updates.length > 0) {
-      useItemsStore.getState()._moveItems(updates);
+  const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId, isLinkedSelectionEnabled())
+  if (updates.length === 0) return
 
-      // Repair transitions on affected items
-      const trackItemIds = trackItems.map((i) => i.id);
-      applyTransitionRepairs(trackItemIds);
-      useTimelineSettingsStore.getState().markDirty();
+  execute(
+    'CLOSE_ALL_GAPS',
+    () => {
+      useItemsStore.getState()._moveItems(updates)
+      applyTransitionRepairs(updates.map((update) => update.id))
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { trackId },
+  )
+}
+
+/**
+ * Track push: move ALL items at or after the anchor clip's position — across
+ * every track — by the given frame delta.  This is a multi-track ripple
+ * move that closes or opens a gap at the anchor point.
+ * Commits as a single undo entry.
+ */
+export function trackPushItems(anchorId: string, delta: number): void {
+  if (delta === 0) return
+
+  const items = useItemsStore.getState().items
+  const anchor = items.find((i) => i.id === anchorId)
+  if (!anchor) return
+
+  const cutFrame = anchor.from
+
+  // Every item whose start is at or after the cut frame gets shifted
+  const updates: Array<{ id: string; from: number }> = []
+  for (const ti of items) {
+    if (ti.from >= cutFrame) {
+      updates.push({ id: ti.id, from: Math.max(0, ti.from + delta) })
     }
-  }, { trackId });
+  }
+
+  if (updates.length === 0) return
+
+  execute(
+    'TRACK_PUSH',
+    () => {
+      useItemsStore.getState()._moveItems(updates)
+      applyTransitionRepairs(updates.map((u) => u.id))
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { anchorId, delta },
+  )
 }
 
 export function moveItem(id: string, newFrom: number, newTrackId?: string): void {
-  execute('MOVE_ITEM', () => {
-    useItemsStore.getState()._moveItem(id, newFrom, newTrackId);
+  execute(
+    'MOVE_ITEM',
+    () => {
+      useItemsStore.getState()._moveItem(id, newFrom, newTrackId)
 
-    // Repair transitions
-    applyTransitionRepairs([id]);
+      // Repair transitions
+      applyTransitionRepairs([id])
 
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, newFrom, newTrackId });
+      useTimelineSettingsStore.getState().markDirty()
+      warnIfOverlapping('MOVE_ITEM')
+    },
+    { id, newFrom, newTrackId },
+  )
 }
 
 export function moveItems(updates: Array<{ id: string; from: number; trackId?: string }>): void {
-  execute('MOVE_ITEMS', () => {
-    useItemsStore.getState()._moveItems(updates);
+  execute(
+    'MOVE_ITEMS',
+    () => {
+      useItemsStore.getState()._moveItems(updates)
 
-    const movedItemIds = new Set(updates.map((u) => u.id));
-    const items = useItemsStore.getState().items;
-    const transitions = useTransitionsStore.getState().transitions;
+      const movedItemIds = new Set(updates.map((u) => u.id))
+      const items = useItemsStore.getState().items
+      const transitions = useTransitionsStore.getState().transitions
 
-    // Update transition trackIds when both clips of a pair move together
-    const updatedTransitions = transitions.map((t) => {
-      const leftMoved = movedItemIds.has(t.leftClipId);
-      const rightMoved = movedItemIds.has(t.rightClipId);
+      // Update transition trackIds when both clips of a pair move together
+      const updatedTransitions = transitions.map((t) => {
+        const leftMoved = movedItemIds.has(t.leftClipId)
+        const rightMoved = movedItemIds.has(t.rightClipId)
 
-      if (leftMoved && rightMoved) {
-        const leftClip = items.find((i) => i.id === t.leftClipId);
-        const rightClip = items.find((i) => i.id === t.rightClipId);
+        if (leftMoved && rightMoved) {
+          const leftClip = items.find((i) => i.id === t.leftClipId)
+          const rightClip = items.find((i) => i.id === t.rightClipId)
 
-        // If they're now on the same track, update transition trackId
-        if (leftClip && rightClip && leftClip.trackId === rightClip.trackId) {
-          return { ...t, trackId: leftClip.trackId };
+          // If they're now on the same track, update transition trackId
+          if (leftClip && rightClip && leftClip.trackId === rightClip.trackId) {
+            return { ...t, trackId: leftClip.trackId }
+          }
         }
-      }
-      return t;
-    });
+        return t
+      })
 
-    // Apply updated transitions (with trackId fixes) then repair
-    useTransitionsStore.getState().setTransitions(updatedTransitions);
-    applyTransitionRepairs(updates.map((u) => u.id));
+      // Apply updated transitions (with trackId fixes) then repair
+      useTransitionsStore.getState().setTransitions(updatedTransitions)
+      applyTransitionRepairs(updates.map((u) => u.id))
 
-    useTimelineSettingsStore.getState().markDirty();
-  }, { count: updates.length });
+      useTimelineSettingsStore.getState().markDirty()
+      warnIfOverlapping('MOVE_ITEMS')
+    },
+    { count: updates.length },
+  )
+}
+
+export function moveItemsWithTrackChanges(
+  tracks: TimelineTrack[],
+  updates: Array<{ id: string; from: number; trackId?: string }>,
+): void {
+  execute(
+    'MOVE_ITEMS_WITH_TRACKS',
+    () => {
+      useItemsStore.getState().setTracks(tracks)
+      useItemsStore.getState()._moveItems(updates)
+
+      const movedItemIds = new Set(updates.map((u) => u.id))
+      const items = useItemsStore.getState().items
+      const transitions = useTransitionsStore.getState().transitions
+
+      const updatedTransitions = transitions.map((t) => {
+        const leftMoved = movedItemIds.has(t.leftClipId)
+        const rightMoved = movedItemIds.has(t.rightClipId)
+
+        if (leftMoved && rightMoved) {
+          const leftClip = items.find((i) => i.id === t.leftClipId)
+          const rightClip = items.find((i) => i.id === t.rightClipId)
+
+          if (leftClip && rightClip && leftClip.trackId === rightClip.trackId) {
+            return { ...t, trackId: leftClip.trackId }
+          }
+        }
+        return t
+      })
+
+      useTransitionsStore.getState().setTransitions(updatedTransitions)
+      applyTransitionRepairs(updates.map((u) => u.id))
+      useTimelineSettingsStore.getState().markDirty()
+      warnIfOverlapping('MOVE_ITEMS_WITH_TRACKS')
+    },
+    { count: updates.length, trackCount: tracks.length },
+  )
 }
 
 export function duplicateItems(
   itemIds: string[],
-  positions: Array<{ from: number; trackId: string }>
+  positions: Array<{ from: number; trackId: string }>,
 ): TimelineItem[] {
-  return execute('DUPLICATE_ITEMS', () => {
-    const newItems = useItemsStore.getState()._duplicateItems(itemIds, positions);
-    useTimelineSettingsStore.getState().markDirty();
-    return newItems;
-  }, { itemIds, count: positions.length });
+  return execute(
+    'DUPLICATE_ITEMS',
+    () => {
+      const newItems = useItemsStore.getState()._duplicateItems(itemIds, positions)
+      copyInternalTransitionsForDuplicatedItems(itemIds, newItems)
+      useTimelineSettingsStore.getState().markDirty()
+      return newItems
+    },
+    { itemIds, count: positions.length },
+  )
 }
 
-export function trimItemStart(id: string, trimAmount: number): void {
-  execute('TRIM_ITEM_START', () => {
-    useItemsStore.getState()._trimItemStart(id, trimAmount);
-
-    // Repair transitions (auto-adjusts duration if clip got shorter)
-    applyTransitionRepairs([id]);
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, trimAmount });
+export function duplicateItemsWithTrackChanges(
+  tracks: TimelineTrack[],
+  itemIds: string[],
+  positions: Array<{ from: number; trackId: string }>,
+): TimelineItem[] {
+  return execute(
+    'DUPLICATE_ITEMS_WITH_TRACKS',
+    () => {
+      useItemsStore.getState().setTracks(tracks)
+      const newItems = useItemsStore.getState()._duplicateItems(itemIds, positions)
+      copyInternalTransitionsForDuplicatedItems(itemIds, newItems)
+      useTimelineSettingsStore.getState().markDirty()
+      return newItems
+    },
+    { itemIds, count: positions.length, trackCount: tracks.length },
+  )
 }
 
-export function trimItemEnd(id: string, trimAmount: number): void {
-  execute('TRIM_ITEM_END', () => {
-    useItemsStore.getState()._trimItemEnd(id, trimAmount);
-
-    // Repair transitions (auto-adjusts duration if clip got shorter)
-    applyTransitionRepairs([id]);
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, trimAmount });
-}
-
-/**
- * Check if a frame falls inside any transition overlap zone for a given item.
- * Uses the full transition duration (not alignment-based portions) because
- * the entire overlap region is part of the transition effect.
- */
-function isInTransitionOverlap(itemId: string, relativeFrame: number, itemDuration: number): boolean {
-  const transitions = useTransitionsStore.getState().transitions;
-  return transitions.some((t) =>
-    (t.leftClipId === itemId && relativeFrame >= itemDuration - t.durationInFrames) ||
-    (t.rightClipId === itemId && relativeFrame < t.durationInFrames)
-  );
-}
-
-export function splitItem(
-  id: string,
-  splitFrame: number
-): { leftItem: TimelineItem; rightItem: TimelineItem } | null {
-  const item = useItemsStore.getState().items.find((i) => i.id === id);
-  if (item) {
-    // Bounds check first â€” out-of-range splits are a silent no-op (handled by _splitItem),
-    // must not fall through to transition zone check which would false-positive.
-    if (splitFrame <= item.from || splitFrame >= item.from + item.durationInFrames) {
-      return null;
-    }
-    const relativeFrame = splitFrame - item.from;
-    if (isInTransitionOverlap(id, relativeFrame, item.durationInFrames)) {
-      toast.warning('Cannot split inside a transition zone');
-      return null;
-    }
-  }
-
-  return execute('SPLIT_ITEM', () => {
-    const result = useItemsStore.getState()._splitItem(id, splitFrame);
-    if (!result) return null;
-
-    const { rightItem } = result;
-
-    // Update transitions pointing to split item
-    const transitions = useTransitionsStore.getState().transitions;
-    const updatedTransitions = transitions.map((t) => {
-      if (t.leftClipId === id) {
-        // Transition was from this clip - now from right half
-        return { ...t, leftClipId: rightItem.id };
-      }
-      if (t.rightClipId === id) {
-        // Transition was to this clip - stays pointing to left half (original ID)
-        return t;
-      }
-      return t;
-    });
-    useTransitionsStore.getState().setTransitions(updatedTransitions);
-
-    // Keep selection anchored to the split clip for immediate downstream
-    // adjacency/transition detection across all split entry points.
-    useSelectionStore.getState().selectItems([result.leftItem.id]);
-
-    useTimelineSettingsStore.getState().markDirty();
-    return result;
-  }, { id, splitFrame });
-}
-
-export function joinItems(itemIds: string[]): void {
-  execute('JOIN_ITEMS', () => {
-    useItemsStore.getState()._joinItems(itemIds);
-
-    // Remove keyframes for joined items (except first)
-    if (itemIds.length > 1) {
-      useKeyframesStore.getState()._removeKeyframesForItems(itemIds.slice(1));
-    }
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { itemIds });
-}
-
-export function rateStretchItem(
-  id: string,
-  newFrom: number,
-  newDuration: number,
-  newSpeed: number
-): void {
-  execute('RATE_STRETCH_ITEM', () => {
-    // Get old duration BEFORE applying rate stretch (needed for keyframe scaling)
-    const oldItem = useItemsStore.getState().items.find((i) => i.id === id);
-    const oldDuration = oldItem?.durationInFrames ?? newDuration;
-
-    useItemsStore.getState()._rateStretchItem(id, newFrom, newDuration, newSpeed);
-
-    // Scale keyframes proportionally to match new duration
-    // This ensures animations maintain their relative timing within the clip
-    if (oldDuration !== newDuration) {
-      useKeyframesStore.getState()._scaleKeyframesForItem(id, oldDuration, newDuration);
-    }
-
-    // Repair transitions
-    applyTransitionRepairs([id]);
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, newFrom, newDuration, newSpeed });
-}
-
-/**
- * Insert a freeze frame at the playhead position.
- *
- * Extracts the video frame at the current playhead, stores it as a media entry,
- * splits the video clip at the playhead, and inserts a still image between the halves.
- *
- * This is async because frame extraction requires mediabunny. The timeline
- * mutations are batched in a single command for undo/redo atomicity.
- */
-export async function insertFreezeFrame(
-  itemId: string,
-  playheadFrame: number
-): Promise<boolean> {
-  const items = useItemsStore.getState().items;
-  const item = items.find((i) => i.id === itemId);
-  if (!item || item.type !== 'video') return false;
-
-  // Validate playhead is within item bounds (exclusive of edges â€” need room to split)
-  const itemStart = item.from;
-  const itemEnd = item.from + item.durationInFrames;
-  if (playheadFrame <= itemStart || playheadFrame >= itemEnd) return false;
-
-  // Block freeze frame insertion inside transition overlap zones
-  if (isInTransitionOverlap(itemId, playheadFrame - itemStart, item.durationInFrames)) {
-    return false;
-  }
-
-  const fps = useTimelineSettingsStore.getState().fps;
-  const speed = item.speed ?? 1;
-  const sourceStart = item.sourceStart ?? 0;
-  const sourceFps = item.sourceFps ?? fps;
-
-  // Calculate source frame at playhead in source-native FPS
-  const timelineOffset = playheadFrame - itemStart;
-  const sourceFrame = sourceStart + timelineToSourceFrames(timelineOffset, speed, fps, sourceFps);
-
-  // Get media metadata for resolution and fps info
-  const mediaItems = useMediaLibraryStore.getState().mediaItems;
-  const media = mediaItems.find((m) => m.id === item.mediaId);
-  if (!media) {
-    logger.error('[insertFreezeFrame] Media not found for item:', item.mediaId);
-    return false;
-  }
-
-  // Calculate timestamp in seconds for frame extraction
-  const mediaFps = media.fps || 30;
-  const timestampSeconds = sourceFrame / mediaFps;
-
-  try {
-    // Step 1: Get the media file blob
-    const blob = await mediaLibraryService.getMediaFile(media.id);
-    if (!blob) {
-      logger.error('[insertFreezeFrame] Could not access media file');
-      return false;
-    }
-
-    // Step 2: Extract frame using mediabunny at native resolution
-    const { Input, BlobSource, CanvasSink, ALL_FORMATS } = await import('mediabunny');
-    const input = new Input({
-      source: new BlobSource(blob as File),
-      formats: ALL_FORMATS,
-    });
-
-    const videoTrack = await input.getPrimaryVideoTrack();
-    if (!videoTrack) {
-      input.dispose();
-      logger.error('[insertFreezeFrame] No video track found');
-      return false;
-    }
-
-    const frameWidth = videoTrack.displayWidth;
-    const frameHeight = videoTrack.displayHeight;
-
-    const sink = new CanvasSink(videoTrack, {
-      width: frameWidth,
-      height: frameHeight,
-      fit: 'fill',
-    });
-
-    const wrapped = await sink.getCanvas(timestampSeconds);
-    if (!wrapped) {
-      (sink as unknown as { dispose?: () => void }).dispose?.();
-      input.dispose();
-      logger.error('[insertFreezeFrame] Failed to extract frame');
-      return false;
-    }
-
-    const canvas = wrapped.canvas as OffscreenCanvas | HTMLCanvasElement;
-    let frameBlob: Blob;
-    if ('convertToBlob' in canvas) {
-      frameBlob = await canvas.convertToBlob({ type: 'image/png' });
-    } else {
-      frameBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error('Failed to create blob'))),
-          'image/png'
-        );
-      });
-    }
-
-    // Clean up mediabunny resources
-    (sink as unknown as { dispose?: () => void }).dispose?.();
-    input.dispose();
-
-    // Step 3: Store frame as media in IndexedDB
-    const { createMedia, saveThumbnail, associateMediaWithProject } = await import('@/infrastructure/storage/indexeddb');
-    const currentProjectId = useMediaLibraryStore.getState().currentProjectId;
-    if (!currentProjectId) {
-      logger.error('[insertFreezeFrame] No project context');
-      return false;
-    }
-
-    const frameMediaId = crypto.randomUUID();
-    const frameBlobUrl = blobUrlManager.acquire(frameMediaId, frameBlob);
-    const fileName = `freeze-frame-${item.label || 'video'}-${Math.round(timestampSeconds * 100) / 100}s.png`;
-
-    const mediaMetadata: MediaMetadata = {
-      id: frameMediaId,
-      storageType: 'opfs',
-      fileName,
-      fileSize: frameBlob.size,
-      mimeType: 'image/png',
-      duration: 0,
-      width: frameWidth,
-      height: frameHeight,
-      fps: 0,
-      codec: 'png',
-      bitrate: 0,
-      tags: ['freeze-frame'],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    // Store the frame blob in OPFS
-    const opfsPath = `content/${frameMediaId.slice(0, 2)}/${frameMediaId.slice(2, 4)}/${frameMediaId}/data`;
-    await opfsService.saveFile(opfsPath, await frameBlob.arrayBuffer());
-    mediaMetadata.opfsPath = opfsPath;
-
-    await createMedia(mediaMetadata);
-    await associateMediaWithProject(currentProjectId, frameMediaId);
-
-    // Save thumbnail (reuse the frame blob)
-    const thumbnailId = crypto.randomUUID();
-    const thumbnailData: ThumbnailData = {
-      id: thumbnailId,
-      mediaId: frameMediaId,
-      blob: frameBlob,
-      timestamp: 0,
-      width: frameWidth,
-      height: frameHeight,
-    };
-    await saveThumbnail(thumbnailData);
-    mediaMetadata.thumbnailId = thumbnailId;
-
-    // Add to media library store
-    useMediaLibraryStore.setState((state) => ({
-      mediaItems: [mediaMetadata, ...state.mediaItems],
-    }));
-
-    // Step 4: Perform timeline mutations atomically (split + insert + shift)
-    const freezeDurationFrames = Math.round(fps * 2); // 2 seconds
-
-    execute('INSERT_FREEZE_FRAME', () => {
-      // Split the video at playhead
-      const splitResult = useItemsStore.getState()._splitItem(itemId, playheadFrame);
-      if (!splitResult) {
-        logger.error('[insertFreezeFrame] Split failed');
-        return;
-      }
-
-      const { leftItem, rightItem } = splitResult;
-
-      // Update transitions pointing to split item
-      const transitions = useTransitionsStore.getState().transitions;
-      const updatedTransitions = transitions.map((t) => {
-        if (t.leftClipId === itemId) {
-          return { ...t, leftClipId: rightItem.id };
-        }
-        return t;
-      });
-      useTransitionsStore.getState().setTransitions(updatedTransitions);
-
-      // Create ImageItem for the freeze frame
-      const freezeFrameItem: ImageItem = {
-        id: crypto.randomUUID(),
-        type: 'image',
-        trackId: item.trackId,
-        from: playheadFrame,
-        durationInFrames: freezeDurationFrames,
-        label: fileName,
-        mediaId: frameMediaId,
-        src: frameBlobUrl,
-        sourceWidth: frameWidth,
-        sourceHeight: frameHeight,
-        transform: item.transform ? { ...item.transform } : undefined,
-      };
-
-      useItemsStore.getState()._addItem(freezeFrameItem);
-
-      // Shift the right half forward by freeze frame duration
-      const newRightFrom = rightItem.from + freezeDurationFrames;
-      useItemsStore.getState()._moveItem(rightItem.id, newRightFrom);
-
-      // Also shift all items on same track that come after the right half
-      const allItems = useItemsStore.getState().items;
-      const itemsToShift = allItems.filter(
-        (i) =>
-          i.trackId === item.trackId &&
-          i.id !== rightItem.id &&
-          i.id !== leftItem.id &&
-          i.id !== freezeFrameItem.id &&
-          i.from > playheadFrame
-      );
-
-      for (const shiftItem of itemsToShift) {
-        useItemsStore.getState()._moveItem(shiftItem.id, shiftItem.from + freezeDurationFrames);
-      }
-
-      // Repair transitions
-      applyTransitionRepairs([leftItem.id, rightItem.id]);
-
-      // Select the freeze frame item
-      useSelectionStore.getState().selectItems([freezeFrameItem.id]);
-
-      useTimelineSettingsStore.getState().markDirty();
-    }, { itemId, playheadFrame, freezeDurationFrames });
-
-    return true;
-  } catch (error) {
-    logger.error('[insertFreezeFrame] Failed:', error);
-    return false;
-  }
-}
-
-/**
- * Ripple edit: trim a clip and shift all downstream items on the same track.
- *
- * Unlike normal trim which leaves gaps, ripple edit closes/opens gaps by
- * shifting everything after the trim point.
- *
- * End handle: trims the end, shifts downstream items by the change in end position.
- * Start handle: trims the start (changes source/duration), then moves the trimmed
- *   clip back to its original `from` and shifts downstream items by the duration change.
- *
- * @param id - ID of the clip being trimmed
- * @param handle - Which handle is being dragged ('start' or 'end')
- * @param trimDelta - Frames to trim (positive = shrink start / extend end,
- *                    negative = extend start / shrink end)
- */
-export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: number): void {
-  if (trimDelta === 0) return;
-
-  execute('RIPPLE_EDIT', () => {
-    const itemsBefore = useItemsStore.getState().items;
-    const item = itemsBefore.find((i) => i.id === id);
-    if (!item) return;
-
-    const oldFrom = item.from;
-    const oldEnd = item.from + item.durationInFrames;
-
-    // Apply the trim â€” skip adjacency clamping since downstream items will be shifted
-    if (handle === 'start') {
-      useItemsStore.getState()._trimItemStart(id, trimDelta, { skipAdjacentClamp: true });
-    } else {
-      useItemsStore.getState()._trimItemEnd(id, trimDelta, { skipAdjacentClamp: true });
-    }
-
-    const itemsAfterTrim = useItemsStore.getState().items;
-    const trimmedItem = itemsAfterTrim.find((i) => i.id === id);
-    if (!trimmedItem) return;
-
-    let shiftAmount: number;
-
-    if (handle === 'end') {
-      // End handle: downstream items shift by the change in end position
-      const newEnd = trimmedItem.from + trimmedItem.durationInFrames;
-      shiftAmount = newEnd - oldEnd;
-    } else {
-      // Start handle: _trimItemStart moved `from` â€” move it back and compute
-      // the shift from the duration change.
-      // _trimItemStart: newFrom = oldFrom + clamped, newDuration = oldDuration - clamped
-      // We want: from stays at oldFrom, same newDuration, downstream shifts by -clamped
-      const actualClamped = trimmedItem.from - oldFrom;
-      if (actualClamped !== 0) {
-        useItemsStore.getState()._moveItem(id, oldFrom);
-      }
-      // Duration got shorter by `actualClamped` (positive = shorter), so downstream
-      // should shift left (negative) by the same amount â†’ shift = -actualClamped
-      shiftAmount = -actualClamped;
-    }
-
-    if (shiftAmount !== 0) {
-      // Shift all items on the same track that are downstream of the trimmed item's original end.
-      // Also include transition-connected neighbors whose `from` may be before oldEnd (overlap model).
-      const freshItems = useItemsStore.getState().items;
-      const transitionNeighborIds = new Set<string>();
-      for (const t of useTransitionsStore.getState().transitions) {
-        if (t.leftClipId === id) transitionNeighborIds.add(t.rightClipId);
-      }
-      const downstream = freshItems.filter(
-        (i) => i.id !== id && i.trackId === item.trackId &&
-          (i.from >= oldEnd || transitionNeighborIds.has(i.id))
-      );
-
-      if (downstream.length > 0) {
-        const updates = downstream.map((i) => ({
-          id: i.id,
-          from: i.from + shiftAmount,
-        }));
-        useItemsStore.getState()._moveItems(updates);
-      }
-    }
-
-    // Repair transitions for the trimmed item and all downstream items
-    const finalItems = useItemsStore.getState().items;
-    const allAffected = [id, ...finalItems
-      .filter((i) => i.id !== id && i.trackId === item.trackId && i.from >= oldFrom)
-      .map((i) => i.id)];
-    applyTransitionRepairs(allAffected);
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, handle, trimDelta });
-}
-
-/**
- * Rolling edit: move the edit point between two adjacent clips.
- * Trims the left clip's end and the right clip's start by the same amount,
- * keeping total timeline duration unchanged.
- *
- * @param leftId - ID of the left clip (its end edge is being adjusted)
- * @param rightId - ID of the right clip (its start edge is being adjusted)
- * @param editPointDelta - Frames to move the edit point (positive = right, negative = left)
- */
-export function rollingTrimItems(leftId: string, rightId: string, editPointDelta: number): void {
-  if (editPointDelta === 0) return;
-
-  execute('ROLLING_EDIT', () => {
-    // Order matters: shrink first, then extend. The internal _trimItemEnd/_trimItemStart
-    // methods have clampToAdjacentItems guards that prevent extending into a neighbor.
-    // By shrinking the losing clip first, we free up space for the gaining clip to extend into.
-    if (editPointDelta > 0) {
-      // Edit point moves right: right clip shrinks (frees space), then left clip extends
-      useItemsStore.getState()._trimItemStart(rightId, editPointDelta);
-      useItemsStore.getState()._trimItemEnd(leftId, editPointDelta);
-    } else {
-      // Edit point moves left: left clip shrinks (frees space), then right clip extends
-      useItemsStore.getState()._trimItemEnd(leftId, editPointDelta);
-      useItemsStore.getState()._trimItemStart(rightId, editPointDelta);
-    }
-
-    // Repair transitions for both clips
-    applyTransitionRepairs([leftId, rightId]);
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { leftId, rightId, editPointDelta });
-}
-
-/**
- * Slip edit: shift the source window (sourceStart/sourceEnd) within a clip
- * without changing its position or duration on the timeline.
- *
- * Only works on video/audio items that have explicit source bounds.
- *
- * @param id - ID of the clip to slip
- * @param slipDelta - Frames to shift the source window (positive = later in source, negative = earlier)
- */
-export function slipItem(id: string, slipDelta: number): void {
-  if (slipDelta === 0) return;
-
-  execute('SLIP_EDIT', () => {
-    const items = useItemsStore.getState().items;
-    const item = items.find((i) => i.id === id);
-    if (!item) return;
-    if (item.type !== 'video' && item.type !== 'audio') return;
-
-    const sourceStart = item.sourceStart ?? 0;
-    const sourceEnd = item.sourceEnd;
-    const sourceDuration = item.sourceDuration;
-    if (sourceEnd === undefined) return;
-
-    const clamped = computeClampedSlipDelta(sourceStart, sourceEnd, sourceDuration, slipDelta);
-
-    if (clamped === 0) return;
-
-    useItemsStore.getState()._updateItem(id, {
-      sourceStart: sourceStart + clamped,
-      sourceEnd: sourceEnd + clamped,
-    });
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, slipDelta });
-}
-
-/**
- * Slide edit: move a clip on the timeline while adjusting its neighboring clips.
- * The left neighbor's end extends/shrinks and the right neighbor's start extends/shrinks,
- * keeping total timeline duration unchanged.
- *
- * @param id - ID of the clip being slid
- * @param slideDelta - Frames to slide (positive = right, negative = left)
- * @param leftNeighborId - ID of the left adjacent clip (null if none)
- * @param rightNeighborId - ID of the right adjacent clip (null if none)
- */
-export function slideItem(
-  id: string,
-  slideDelta: number,
-  leftNeighborId: string | null,
-  rightNeighborId: string | null,
-): void {
-  if (slideDelta === 0) return;
-
-  execute('SLIDE_EDIT', () => {
-    const items = useItemsStore.getState().items;
-    // Verify the target clip exists before mutating neighbors
-    const item = items.find((i) => i.id === id);
-    if (!item) return;
-    const leftNeighbor = leftNeighborId ? (items.find((i) => i.id === leftNeighborId) ?? null) : null;
-    const rightNeighbor = rightNeighborId ? (items.find((i) => i.id === rightNeighborId) ?? null) : null;
-
-    // For split-contiguous A-B-C chains, preserve source continuity by shifting
-    // the slid clip's source window by the same source-space delta as slide.
-    const continuitySourceDelta = computeSlideContinuitySourceDelta(
-      item,
-      leftNeighbor,
-      rightNeighbor,
-      slideDelta,
-      useTimelineSettingsStore.getState().fps,
-    );
-
-    // Adjust neighbors (order: shrink first, then extend â€” same as rolling edit)
-    if (slideDelta > 0) {
-      // Sliding right: right neighbor shrinks start (frees space), left neighbor extends end
-      if (rightNeighborId) {
-        useItemsStore.getState()._trimItemStart(rightNeighborId, slideDelta, { skipAdjacentClamp: true });
-      }
-      if (leftNeighborId) {
-        useItemsStore.getState()._trimItemEnd(leftNeighborId, slideDelta, { skipAdjacentClamp: true });
-      }
-    } else {
-      // Sliding left: left neighbor shrinks end (frees space), right neighbor extends start
-      if (leftNeighborId) {
-        useItemsStore.getState()._trimItemEnd(leftNeighborId, slideDelta, { skipAdjacentClamp: true });
-      }
-      if (rightNeighborId) {
-        useItemsStore.getState()._trimItemStart(rightNeighborId, slideDelta, { skipAdjacentClamp: true });
-      }
-    }
-
-    // Move the slid clip
-    useItemsStore.getState()._moveItem(id, item.from + slideDelta);
-    if (
-      continuitySourceDelta !== 0
-      && (item.type === 'video' || item.type === 'audio')
-      && item.sourceEnd !== undefined
-    ) {
-      useItemsStore.getState()._updateItem(id, {
-        sourceStart: (item.sourceStart ?? 0) + continuitySourceDelta,
-        sourceEnd: item.sourceEnd + continuitySourceDelta,
-      });
-    }
-
-    // Repair transitions for all affected items
-    const affectedIds = [id];
-    if (leftNeighborId) affectedIds.push(leftNeighborId);
-    if (rightNeighborId) affectedIds.push(rightNeighborId);
-    applyTransitionRepairs(affectedIds);
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, slideDelta, leftNeighborId, rightNeighborId });
-}
+export * from './item-edit-actions'
