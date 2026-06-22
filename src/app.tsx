@@ -76,9 +76,14 @@ export function App() {
   return (
     <ErrorBoundary level="app">
       <TooltipProvider delayDuration={300}>
-        <WorkspaceGate>
+        {/* Embedded mode mounts OPFS as its workspace root, so it skips the folder-picker gate. */}
+        {isEmbedded() ? (
           <RouterProvider router={router} />
-        </WorkspaceGate>
+        ) : (
+          <WorkspaceGate>
+            <RouterProvider router={router} />
+          </WorkspaceGate>
+        )}
         <GlobalTooltip />
         <PwaInstallPrompt />
         {showToaster && (

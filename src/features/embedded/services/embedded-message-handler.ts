@@ -4,6 +4,7 @@ import { roundToNearestAllowedFps } from '../utils/codec-mapping'
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract'
 import { router } from '@/app/router'
+import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
 import {
   updateProject as updateProjectDB,
   getProject as getProjectDB,
@@ -43,6 +44,9 @@ async function handleLoadVideo(event: MessageEvent) {
   store.setIsImporting(true)
 
   try {
+    // Embedded has no folder picker — mount OPFS as the workspace root before any storage op.
+    await ensureEmbeddedWorkspaceMounted()
+
     // Store parent origin for outbound messages
     store.setParentOrigin(event.origin)
 
@@ -197,6 +201,8 @@ async function handleImportFiles(event: MessageEvent) {
   const { files } = event.data.payload
   if (!files?.length) return
 
+  await ensureEmbeddedWorkspaceMounted()
+
   const projectId = useProjectStore.getState().currentProject?.id
   if (!projectId) {
     log.warn('No current project for NODARO_IMPORT_FILES')
@@ -248,6 +254,8 @@ function handleMessage(event: MessageEvent) {
 }
 
 export function initEmbeddedMessageHandler() {
+  // Warm the OPFS workspace mount so it's ready before the parent sends a video.
+  void ensureEmbeddedWorkspaceMounted()
   window.addEventListener('message', handleMessage)
   // Signal readiness to parent (uses '*' because parent origin unknown yet, no sensitive payload)
   window.parent.postMessage({ type: 'FREECUT_READY' }, '*')
