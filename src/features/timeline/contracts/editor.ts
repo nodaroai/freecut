@@ -56,4 +56,7 @@ export const importFillerRemovalDialog = () => import('../components/filler-remo
 
 // Nodaro embedded import needs these for programmatic clip placement.
 export { addItem } from '../stores/actions/item-actions'
-export { buildDroppedMediaTimelineItem, getDroppedMediaDurationInFrames } from '../utils/dropped-media'
+export {
+  buildDroppedMediaTimelineItem,
+  getDroppedMediaDurationInFrames,
+} from '../utils/dropped-media'

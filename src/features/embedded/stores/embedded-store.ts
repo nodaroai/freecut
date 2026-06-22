@@ -1,36 +1,36 @@
-import { create } from 'zustand';
+import { create } from 'zustand'
 
 interface InputMetadata {
-  codec: string;
-  width: number;
-  height: number;
-  fps: number;
+  codec: string
+  width: number
+  height: number
+  fps: number
 }
 
 interface EmbeddedState {
-  isEmbedded: boolean;
-  isImporting: boolean;
-  parentOrigin: string | null;
-  inputMetadata: InputMetadata | null;
-  pendingVideoImport: { mediaId: string } | null;
-  sendBackStatus: 'idle' | 'exporting' | 'sent' | 'error';
-  exportProgress: number;
+  isEmbedded: boolean
+  isImporting: boolean
+  parentOrigin: string | null
+  inputMetadata: InputMetadata | null
+  pendingVideoImport: { mediaId: string } | null
+  sendBackStatus: 'idle' | 'exporting' | 'sent' | 'error'
+  exportProgress: number
 }
 
 interface EmbeddedActions {
-  setIsImporting: (v: boolean) => void;
-  setParentOrigin: (origin: string) => void;
-  setInputMetadata: (meta: InputMetadata) => void;
-  setPendingVideoImport: (pending: { mediaId: string } | null) => void;
-  setSendBackStatus: (status: EmbeddedState['sendBackStatus']) => void;
-  setExportProgress: (progress: number) => void;
+  setIsImporting: (v: boolean) => void
+  setParentOrigin: (origin: string) => void
+  setInputMetadata: (meta: InputMetadata) => void
+  setPendingVideoImport: (pending: { mediaId: string } | null) => void
+  setSendBackStatus: (status: EmbeddedState['sendBackStatus']) => void
+  setExportProgress: (progress: number) => void
 }
 
 function detectEmbedded(): boolean {
   try {
-    return window.self !== window.top;
+    return window.self !== window.top
   } catch {
-    return true;
+    return true
   }
 }
 
@@ -49,8 +49,8 @@ export const useEmbeddedStore = create<EmbeddedState & EmbeddedActions>((set) =>
   setPendingVideoImport: (pendingVideoImport) => set({ pendingVideoImport }),
   setSendBackStatus: (sendBackStatus) => set({ sendBackStatus }),
   setExportProgress: (exportProgress) => set({ exportProgress }),
-}));
+}))
 
 export function isEmbedded(): boolean {
-  return useEmbeddedStore.getState().isEmbedded;
+  return useEmbeddedStore.getState().isEmbedded
 }

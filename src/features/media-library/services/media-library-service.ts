@@ -1055,35 +1055,31 @@ class MediaLibraryService {
    * @param filename - Display filename for the media entry
    * @returns MediaMetadata for the imported media
    */
-  async importMediaBlob(
-    blob: Blob,
-    projectId: string,
-    filename: string
-  ): Promise<MediaMetadata> {
-    const file = new File([blob], filename, { type: blob.type });
-    const mediaId = crypto.randomUUID();
-    const opfsPath = `content/${mediaId.slice(0, 2)}/${mediaId.slice(2, 4)}/${mediaId}/data`;
+  async importMediaBlob(blob: Blob, projectId: string, filename: string): Promise<MediaMetadata> {
+    const file = new File([blob], filename, { type: blob.type })
+    const mediaId = crypto.randomUUID()
+    const opfsPath = `content/${mediaId.slice(0, 2)}/${mediaId.slice(2, 4)}/${mediaId}/data`
 
     // Check quota before writing
-    const quota = await opfsService.checkQuota(blob.size);
+    const quota = await opfsService.checkQuota(blob.size)
     if (!quota.canUpload) {
-      throw new Error(`Insufficient storage: ${quota.message}`);
+      throw new Error(`Insufficient storage: ${quota.message}`)
     }
 
     // Process metadata + thumbnail via worker
     const { metadata: workerMeta, thumbnail } = await mediaProcessorService.processMedia(
       file,
-      blob.type
-    );
+      blob.type,
+    )
 
     // Store in OPFS via streaming (avoids doubling memory for large videos)
-    await opfsService.saveUpload(file, opfsPath);
+    await opfsService.saveUpload(file, opfsPath)
 
     // Save thumbnail if available
-    let thumbnailId: string | undefined;
+    let thumbnailId: string | undefined
     if (thumbnail) {
       try {
-        thumbnailId = crypto.randomUUID();
+        thumbnailId = crypto.randomUUID()
         await saveThumbnailDB({
           id: thumbnailId,
           mediaId,
@@ -1091,15 +1087,15 @@ class MediaLibraryService {
           timestamp: 1,
           width: 320,
           height: 180,
-        });
+        })
       } catch (error) {
-        logger.warn('Failed to save thumbnail for imported blob:', error);
-        thumbnailId = undefined;
+        logger.warn('Failed to save thumbnail for imported blob:', error)
+        thumbnailId = undefined
       }
     }
 
     // Build metadata record
-    const now = Date.now();
+    const now = Date.now()
     const mediaMetadata: MediaMetadata = {
       id: mediaId,
       storageType: 'opfs',
@@ -1111,11 +1107,12 @@ class MediaLibraryService {
       width: 'width' in workerMeta ? workerMeta.width : 0,
       height: 'height' in workerMeta ? workerMeta.height : 0,
       fps: workerMeta.type === 'video' ? workerMeta.fps : 0,
-      codec: workerMeta.type === 'video'
-        ? workerMeta.codec
-        : workerMeta.type === 'audio'
-          ? (workerMeta.codec || 'unknown')
-          : 'unknown',
+      codec:
+        workerMeta.type === 'video'
+          ? workerMeta.codec
+          : workerMeta.type === 'audio'
+            ? workerMeta.codec || 'unknown'
+            : 'unknown',
       bitrate: 'bitrate' in workerMeta ? (workerMeta.bitrate ?? 0) : 0,
       audioCodec: workerMeta.type === 'video' ? workerMeta.audioCodec : undefined,
       audioCodecSupported: workerMeta.type === 'video' ? workerMeta.audioCodecSupported : undefined,
@@ -1123,23 +1120,23 @@ class MediaLibraryService {
       tags: [],
       createdAt: now,
       updatedAt: now,
-    };
+    }
 
     // Save to IndexedDB + associate with project
     try {
-      await createMediaDB(mediaMetadata);
-      await associateMediaWithProject(projectId, mediaId);
+      await createMediaDB(mediaMetadata)
+      await associateMediaWithProject(projectId, mediaId)
     } catch (error) {
       // Rollback: clean up OPFS if DB save failed
       try {
-        await opfsService.deleteFile(opfsPath);
+        await opfsService.deleteFile(opfsPath)
       } catch {
         /* best-effort cleanup */
       }
-      throw error;
+      throw error
     }
 
-    return mediaMetadata;
+    return mediaMetadata
   }
 
   /**

@@ -436,9 +436,8 @@ export const LoadedEditor = memo(function LoadedEditor({
         await loadTimeline(projectId, { allowProjectUpgrade: migration.requiresUpgrade })
 
         // Nodaro embedded: place any pending video import once the timeline is ready.
-        const { consumePendingEmbeddedImport } = await import(
-          '@/features/editor/services/embedded-import'
-        )
+        const { consumePendingEmbeddedImport } =
+          await import('@/features/editor/services/embedded-import')
         await consumePendingEmbeddedImport()
 
         if (cancelled || !migration.requiresUpgrade || hasRefreshedMigrationStateRef.current) {

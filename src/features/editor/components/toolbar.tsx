@@ -258,130 +258,130 @@ export const Toolbar = memo(function Toolbar({
         {!embedded && (
           <>
             {import.meta.env.DEV && import.meta.env.VITE_SHOW_DEBUG_PANEL !== 'false' && (
-          <DebugPopover projectId={projectId} />
-        )}
-        <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-          <a
-            href="/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-tooltip="User Guide"
-            data-tooltip-side="bottom"
-            aria-label="User Guide"
-          >
-            <HelpCircle className="h-4 w-4" />
-          </a>
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7 relative"
-          onClick={openWhatsNew}
-          data-tooltip={t('toolbar.whatsNew')}
-          data-tooltip-side="bottom"
-          aria-label={t('toolbar.whatsNewAria')}
-        >
-          <Sparkles className="h-4 w-4" />
-          {hasUnseenWhatsNew && (
-            <span
-              className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
-              aria-hidden="true"
-            />
-          )}
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => setShowSettingsDialog(true)}
-          data-tooltip={t('toolbar.settings')}
-          data-tooltip-side="bottom"
-          aria-label={t('toolbar.settings')}
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => setShowShortcutsDialog(true)}
-          data-tooltip={t('toolbar.keyboardShortcuts')}
-          data-tooltip-side="bottom"
-          aria-label={t('toolbar.keyboardShortcutsAria')}
-        >
-          <Keyboard className="h-4 w-4" />
-        </Button>
-        <LanguageSwitcher size="sm" align="end" side="bottom" />
-        <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-          <a
-            href="https://github.com/walterlow/freecut"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-tooltip={t('toolbar.viewOnGitHub')}
-            data-tooltip-side="bottom"
-            aria-label={t('toolbar.viewOnGitHub')}
-          >
-            <Github className="h-4 w-4" />
-          </a>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={handleSave}
-          aria-label={t('toolbar.saveAria')}
-        >
-          <div className="relative">
-            {isSaveAnimating ? (
-              <SaveAnimationIcon key={saveAnimationKey} className="h-5 w-5" />
-            ) : (
-              <Save className="h-4 w-4" />
+              <DebugPopover projectId={projectId} />
             )}
-            {isDirty && (
-              <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
-            )}
-          </div>
-          {t('toolbar.save')}
-        </Button>
-
-        {onOpenRenderQueue && (
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-7 w-7 relative"
-            onClick={onOpenRenderQueue}
-            data-tooltip={t('toolbar.renderQueue')}
-            data-tooltip-side="bottom"
-            aria-label={t('toolbar.renderQueueAria')}
-          >
-            <ListVideo className="h-4 w-4" />
-            {renderQueueCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground">
-                {renderQueueCount}
-              </span>
-            )}
-          </Button>
-        )}
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" className="gap-1.5 glow-primary-sm">
-              <Download className="h-4 w-4" />
-              {t('toolbar.export')}
-              <ChevronDown className="h-3 w-3" />
+            <Button variant="outline" size="icon" className="h-7 w-7" asChild>
+              <a
+                href="/docs"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-tooltip="User Guide"
+                data-tooltip-side="bottom"
+                aria-label="User Guide"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </a>
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onExport} className="gap-2">
-              <Video className="h-4 w-4" />
-              {t('toolbar.exportVideo')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onExportBundle} className="gap-2">
-              <FolderArchive className="h-4 w-4" />
-              {t('toolbar.downloadProjectZip')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7 relative"
+              onClick={openWhatsNew}
+              data-tooltip={t('toolbar.whatsNew')}
+              data-tooltip-side="bottom"
+              aria-label={t('toolbar.whatsNewAria')}
+            >
+              <Sparkles className="h-4 w-4" />
+              {hasUnseenWhatsNew && (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                  aria-hidden="true"
+                />
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setShowSettingsDialog(true)}
+              data-tooltip={t('toolbar.settings')}
+              data-tooltip-side="bottom"
+              aria-label={t('toolbar.settings')}
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setShowShortcutsDialog(true)}
+              data-tooltip={t('toolbar.keyboardShortcuts')}
+              data-tooltip-side="bottom"
+              aria-label={t('toolbar.keyboardShortcutsAria')}
+            >
+              <Keyboard className="h-4 w-4" />
+            </Button>
+            <LanguageSwitcher size="sm" align="end" side="bottom" />
+            <Button variant="outline" size="icon" className="h-7 w-7" asChild>
+              <a
+                href="https://github.com/walterlow/freecut"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-tooltip={t('toolbar.viewOnGitHub')}
+                data-tooltip-side="bottom"
+                aria-label={t('toolbar.viewOnGitHub')}
+              >
+                <Github className="h-4 w-4" />
+              </a>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleSave}
+              aria-label={t('toolbar.saveAria')}
+            >
+              <div className="relative">
+                {isSaveAnimating ? (
+                  <SaveAnimationIcon key={saveAnimationKey} className="h-5 w-5" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {isDirty && (
+                  <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
+                )}
+              </div>
+              {t('toolbar.save')}
+            </Button>
+
+            {onOpenRenderQueue && (
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7 relative"
+                onClick={onOpenRenderQueue}
+                data-tooltip={t('toolbar.renderQueue')}
+                data-tooltip-side="bottom"
+                aria-label={t('toolbar.renderQueueAria')}
+              >
+                <ListVideo className="h-4 w-4" />
+                {renderQueueCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground">
+                    {renderQueueCount}
+                  </span>
+                )}
+              </Button>
+            )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" className="gap-1.5 glow-primary-sm">
+                  <Download className="h-4 w-4" />
+                  {t('toolbar.export')}
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={onExport} className="gap-2">
+                  <Video className="h-4 w-4" />
+                  {t('toolbar.exportVideo')}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onExportBundle} className="gap-2">
+                  <FolderArchive className="h-4 w-4" />
+                  {t('toolbar.downloadProjectZip')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         )}
 

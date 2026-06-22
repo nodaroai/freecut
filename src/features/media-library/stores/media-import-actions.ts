@@ -425,16 +425,25 @@ export function createImportActions(
 
       // In embedded mode, delegate file picking to the parent window.
       // Inline check avoids importing from embedded feature (circular dep risk).
-      const embedded = (() => { try { return window.self !== window.top; } catch { return true; } })();
+      const embedded = (() => {
+        try {
+          return window.self !== window.top
+        } catch {
+          return true
+        }
+      })()
       if (embedded) {
-        window.parent.postMessage({
-          type: 'FREECUT_REQUEST_IMPORT',
-          payload: {
-            accept: 'video/*,audio/*,image/*',
-            multiple: true,
+        window.parent.postMessage(
+          {
+            type: 'FREECUT_REQUEST_IMPORT',
+            payload: {
+              accept: 'video/*,audio/*,image/*',
+              multiple: true,
+            },
           },
-        }, '*');
-        return [];
+          '*',
+        )
+        return []
       }
 
       // Check if File System Access API is supported
