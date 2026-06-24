@@ -13,6 +13,7 @@ interface EmbeddedState {
   parentOrigin: string | null
   inputMetadata: InputMetadata | null
   pendingVideoImport: { mediaId: string } | null
+  pendingTimelineImport: { mediaIds: string[] } | null
   sendBackStatus: 'idle' | 'exporting' | 'sent' | 'error'
   exportProgress: number
 }
@@ -22,6 +23,7 @@ interface EmbeddedActions {
   setParentOrigin: (origin: string) => void
   setInputMetadata: (meta: InputMetadata) => void
   setPendingVideoImport: (pending: { mediaId: string } | null) => void
+  setPendingTimelineImport: (pending: { mediaIds: string[] } | null) => void
   setSendBackStatus: (status: EmbeddedState['sendBackStatus']) => void
   setExportProgress: (progress: number) => void
 }
@@ -40,6 +42,7 @@ export const useEmbeddedStore = create<EmbeddedState & EmbeddedActions>((set) =>
   parentOrigin: null,
   inputMetadata: null,
   pendingVideoImport: null,
+  pendingTimelineImport: null,
   sendBackStatus: 'idle',
   exportProgress: 0,
 
@@ -47,6 +50,7 @@ export const useEmbeddedStore = create<EmbeddedState & EmbeddedActions>((set) =>
   setParentOrigin: (parentOrigin) => set({ parentOrigin }),
   setInputMetadata: (inputMetadata) => set({ inputMetadata }),
   setPendingVideoImport: (pendingVideoImport) => set({ pendingVideoImport }),
+  setPendingTimelineImport: (pendingTimelineImport) => set({ pendingTimelineImport }),
   setSendBackStatus: (sendBackStatus) => set({ sendBackStatus }),
   setExportProgress: (exportProgress) => set({ exportProgress }),
 }))
