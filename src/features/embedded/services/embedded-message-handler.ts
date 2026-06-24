@@ -186,6 +186,125 @@ async function handleLoadVideo(event: MessageEvent) {
   }
 }
 
+// Fetch one clip, import it into the media library, and lazily create the
+// project from the first clip's dimensions/fps. Kept separate so the dispatch
+// loop in handleLoadTimeline stays flat. Throws on fetch failure.
+async function importTimelineClip(
+  clipUrl: string,
+  index: number,
+  total: number,
+  projectId: string,
+): Promise<{ projectId: string; mediaId: string }> {
+  log.info(`Fetching clip ${index + 1}/${total}:`, clipUrl)
+  const response = await fetch(clipUrl)
+  if (!response.ok) {
+    throw new Error(`Fetch failed for clip ${index + 1}/${total}: ${response.status}`)
+  }
+  const blob = await response.blob()
+
+  const fileName = `nodaro-clip-${index + 1}.mp4`
+  const file = new File([blob], fileName, { type: blob.type || 'video/mp4' })
+  const { metadata: workerMeta } = await mediaProcessorService.processMedia(file, file.type)
+
+  // Create the project once, from the FIRST clip's dimensions/fps.
+  let ensuredProjectId = projectId
+  if (!ensuredProjectId) {
+    const width = 'width' in workerMeta ? workerMeta.width : 1920
+    const height = 'height' in workerMeta ? workerMeta.height : 1080
+
+    const project = await useProjectStore.getState().createProject({
+      name: 'Nodaro Edit',
+      width,
+      height,
+      fps: roundToNearestAllowedFps(workerMeta.type === 'video' ? workerMeta.fps : 30),
+      backgroundColor: '#000000',
+    })
+    ensuredProjectId = project.id
+
+    useEmbeddedStore.getState().setInputMetadata({
+      codec: workerMeta.type === 'video' ? workerMeta.codec : '',
+      width,
+      height,
+      fps: workerMeta.type === 'video' ? workerMeta.fps : 30,
+    })
+  }
+
+  const media = await mediaLibraryService.importMediaBlob(blob, ensuredProjectId, fileName)
+  return { projectId: ensuredProjectId, mediaId: media.id }
+}
+
+// Validate the NODARO_LOAD_TIMELINE payload into an ordered list of non-empty
+// clip URLs. Throws when no usable clips remain; logs (without failing) when
+// some entries are dropped.
+function parseClipUrls(event: MessageEvent): string[] {
+  const clips: unknown = event.data.payload?.clips
+  if (!Array.isArray(clips) || clips.length === 0) {
+    throw new Error('Missing or empty clips[] in NODARO_LOAD_TIMELINE payload')
+  }
+  const urls = clips.filter((clip): clip is string => typeof clip === 'string' && clip.length > 0)
+  if (urls.length !== clips.length) {
+    log.warn(`Skipped ${clips.length - urls.length} invalid clip url(s) in NODARO_LOAD_TIMELINE`)
+  }
+  return urls
+}
+
+async function handleLoadTimeline(event: MessageEvent) {
+  const store = useEmbeddedStore.getState()
+
+  // Guard: already importing
+  if (store.isImporting) {
+    log.warn('Import already in progress, ignoring duplicate NODARO_LOAD_TIMELINE')
+    return
+  }
+
+  store.setIsImporting(true)
+
+  try {
+    // Embedded has no folder picker — mount OPFS as the workspace root before any storage op.
+    await ensureEmbeddedWorkspaceMounted()
+
+    // Store parent origin for outbound messages
+    store.setParentOrigin(event.origin)
+
+    const clipUrls = parseClipUrls(event)
+
+    // Import every clip IN ORDER. The project canvas is derived from the first
+    // clip; each imported media id is queued so the editor lays them end-to-end
+    // once the timeline mounts.
+    let projectId = ''
+    const mediaIds: string[] = []
+
+    for (const [index, clipUrl] of clipUrls.entries()) {
+      const result = await importTimelineClip(clipUrl, index, clipUrls.length, projectId)
+      projectId = result.projectId
+      mediaIds.push(result.mediaId)
+    }
+
+    if (!projectId || mediaIds.length === 0) {
+      throw new Error('No valid clips could be imported from NODARO_LOAD_TIMELINE')
+    }
+
+    // Queue the ordered clips; the editor lays them end-to-end after the timeline mounts.
+    store.setPendingTimelineImport({ mediaIds })
+
+    router.navigate({
+      to: '/editor/$projectId',
+      params: { projectId },
+    })
+
+    log.info('Timeline import complete, navigating to editor', {
+      projectId,
+      clipCount: mediaIds.length,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown import error'
+    log.error('Failed to handle NODARO_LOAD_TIMELINE:', error)
+    postToParent({ type: 'FREECUT_ERROR', payload: { phase: 'import', message } })
+  } finally {
+    useEmbeddedStore.getState().setIsImporting(false)
+  }
+}
+
 function handleResetProject() {
   const store = useEmbeddedStore.getState()
 
@@ -234,6 +353,14 @@ function handleMessage(event: MessageEvent) {
       return
     }
     handleLoadVideo(event)
+  }
+
+  if (event.data?.type === 'NODARO_LOAD_TIMELINE') {
+    if (!isAllowedOrigin(event.origin)) {
+      log.warn('Rejected NODARO_LOAD_TIMELINE from disallowed origin:', event.origin)
+      return
+    }
+    handleLoadTimeline(event)
   }
 
   if (event.data?.type === 'NODARO_RESET_PROJECT') {
