@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -7,26 +7,76 @@ import { formatTimecodeCompact } from '@/shared/utils/time-utils'
 import { useTimelineStore } from '../stores/timeline-store'
 import { useTimelineZoomContext } from '../contexts/timeline-zoom-context'
 import { pixelsToFrameNow } from '../utils/zoom-conversions'
-import { previewScrubberSuppressRef } from './preview-scrubber-suppress'
 
 // Matches the ruler's top IO lane height in timeline-markers.tsx.
 const IO_LANE_HEIGHT = 12
-const GRIP_WIDTH = 8
-const GRIP_GAP = 3
-const GRIP_HIT_WIDTH = 16
+const FLAG_WIDTH = 15
+const FLAG_HIT_WIDTH = 24
+const FLAG_HIT_HEIGHT_EXTRA = 6
+
+// Block the compatibility mousedown so the ruler's mouse-driven seek doesn't
+// also fire when a flag is grabbed (same guard the shared IO markers use).
+function blockMouseDown(e: { preventDefault: () => void; stopPropagation: () => void }) {
+  e.preventDefault()
+  e.stopPropagation()
+}
 
 interface PlayheadRangeGripsProps {
   maxFrame?: number
-  rulerRef: RefObject<HTMLDivElement | null>
+  rulerRef: React.RefObject<HTMLDivElement | null>
+}
+
+interface RangeFlagProps {
+  side: 'in' | 'out'
+  title: string
+  onDragStart: (e: React.PointerEvent) => void
+  onClear: () => void
+}
+
+/** One chunky Camtasia-style flag: green hugs the point from the left, red from the right. */
+function RangeFlag({ side, title, onDragStart, onClear }: RangeFlagProps) {
+  const color = side === 'in' ? 'var(--color-timeline-in)' : 'var(--color-timeline-out)'
+  return (
+    <div
+      title={title}
+      className="absolute pointer-events-auto"
+      style={{
+        top: 0,
+        left: side === 'in' ? -FLAG_HIT_WIDTH + (FLAG_HIT_WIDTH - FLAG_WIDTH) / 2 : 0,
+        width: FLAG_HIT_WIDTH,
+        height: IO_LANE_HEIGHT + FLAG_HIT_HEIGHT_EXTRA,
+        cursor: 'col-resize',
+        zIndex: side === 'in' ? 2 : 1,
+      }}
+      onPointerDown={onDragStart}
+      onMouseDown={blockMouseDown}
+      onDoubleClick={onClear}
+    >
+      <div
+        aria-hidden="true"
+        className="absolute"
+        style={{
+          top: 0,
+          [side === 'in' ? 'right' : 'left']: (FLAG_HIT_WIDTH - FLAG_WIDTH) / 2,
+          width: FLAG_WIDTH,
+          height: IO_LANE_HEIGHT,
+          borderRadius: side === 'in' ? '5px 1px 1px 5px' : '1px 5px 5px 1px',
+          background: `linear-gradient(to bottom, color-mix(in oklch, ${color} 92%, white), color-mix(in oklch, ${color} 72%, black))`,
+          boxShadow: `inset 0 1px 0 color-mix(in oklch, white 35%, transparent), 0 0 3px color-mix(in oklch, ${color} 60%, transparent)`,
+        }}
+      />
+    </div>
+  )
 }
 
 /**
- * Camtasia-style range grips riding on the playhead: a green grip on its left
- * and a red one on its right, living in the ruler's IO lane (the playhead flag
- * sits below the lane, so nothing overlaps). Dragging either grip marks an
- * in/out range anchored at the playhead — no keyboard or toolbar needed. Once
- * a range exists the grips step aside and the regular in/out markers (which
- * are draggable themselves) own the lane; clearing the range brings them back.
+ * Camtasia-style range flags: a big green flag and a big red flag that ARE the
+ * in/out points. With no range marked they ride the playhead as its two-colored
+ * head; dragging one pulls that side away while the other stays anchored — the
+ * preview ghost line travels with the dragged flag so you see the frame you are
+ * extending over. Once a range exists the flags sit on its edges and each can
+ * be re-dragged; double-click a flag (or the toolbar X) clears the range and
+ * docks them back on the playhead.
  */
 export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   maxFrame,
@@ -35,35 +85,28 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   const { t } = useTranslation()
   const inPoint = useTimelineStore((s) => s.inPoint)
   const outPoint = useTimelineStore((s) => s.outPoint)
-  const setInPoint = useTimelineStore((s) => s.setInPoint)
-  const setOutPoint = useTimelineStore((s) => s.setOutPoint)
-  const fps = useTimelineStore((s) => s.fps)
   const { frameToPixels } = useTimelineZoomContext()
 
-  const wrapperRef = useRef<HTMLDivElement>(null)
+  const dockedWrapperRef = useRef<HTMLDivElement>(null)
   const frameToPixelsRef = useRef(frameToPixels)
-  const setInPointRef = useRef(setInPoint)
-  const setOutPointRef = useRef(setOutPoint)
   const maxFrameRef = useRef(maxFrame)
-  const fpsRef = useRef(fps)
   frameToPixelsRef.current = frameToPixels
-  setInPointRef.current = setInPoint
-  setOutPointRef.current = setOutPoint
   maxFrameRef.current = maxFrame
-  fpsRef.current = fps
 
   const dragCleanupRef = useRef<(() => void) | null>(null)
-  const hasRange = inPoint !== null || outPoint !== null
+  const isDocked = inPoint === null && outPoint === null
 
-  // Follow the playhead without re-rendering (same pattern as TimelinePlayhead).
+  // Docked mode follows the playhead without re-rendering (same pattern as
+  // TimelinePlayhead). With a range marked the flags are laid out from the
+  // store values instead and this subscription stays off.
   useEffect(() => {
-    if (hasRange) return
+    if (!isDocked) return
 
     const updatePosition = (frame: number) => {
-      if (!wrapperRef.current) return
+      if (!dockedWrapperRef.current) return
       const transform = `translate3d(${Math.round(frameToPixelsRef.current(frame))}px, 0, 0)`
-      if (wrapperRef.current.style.transform !== transform) {
-        wrapperRef.current.style.transform = transform
+      if (dockedWrapperRef.current.style.transform !== transform) {
+        dockedWrapperRef.current.style.transform = transform
       }
     }
 
@@ -71,22 +114,26 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
     return usePlaybackStore.subscribe((state) => {
       updatePosition(state.previewFrame ?? state.currentFrame)
     })
-  }, [hasRange])
+  }, [isDocked])
 
-  // Reposition when zoom changes.
   useLayoutEffect(() => {
-    if (hasRange || !wrapperRef.current) return
+    if (!isDocked || !dockedWrapperRef.current) return
     const frame = usePlaybackStore.getState().currentFrame
-    wrapperRef.current.style.transform = `translate3d(${Math.round(frameToPixels(frame))}px, 0, 0)`
-  }, [frameToPixels, hasRange])
+    dockedWrapperRef.current.style.transform = `translate3d(${Math.round(frameToPixels(frame))}px, 0, 0)`
+  }, [frameToPixels, isDocked])
 
   const startDrag = useCallback(
-    (event: React.PointerEvent) => {
+    (side: 'in' | 'out') => (event: React.PointerEvent) => {
       const ruler = rulerRef.current
       if (!ruler) return
 
-      const anchorFrame = Math.max(0, usePlaybackStore.getState().currentFrame)
-      const prevCursor = document.body.style.cursor
+      const timeline = useTimelineStore.getState()
+      const playheadFrame = Math.max(0, usePlaybackStore.getState().currentFrame)
+      // The opposite side stays anchored: at its marked point, or at the
+      // playhead when starting from the docked state.
+      const anchorFrame =
+        side === 'in' ? (timeline.outPoint ?? playheadFrame) : (timeline.inPoint ?? playheadFrame)
+
       const cleanup = beginIoPointerDrag(
         event,
         (clientX) => {
@@ -95,26 +142,25 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
           if (maxFrameRef.current !== undefined) {
             frame = Math.min(frame, maxFrameRef.current)
           }
-          // A press without movement marks nothing — the range appears once the
-          // pointer actually leaves the anchor frame. Out is set first so the
-          // in <= out sanitizer never has to intervene mid-drag.
+          // Out first so the in <= out sanitizer never has to intervene.
           if (frame !== anchorFrame) {
-            setOutPointRef.current(Math.max(frame, anchorFrame))
-            setInPointRef.current(Math.min(frame, anchorFrame))
+            const store = useTimelineStore.getState()
+            store.setOutPoint(Math.max(frame, anchorFrame))
+            store.setInPoint(Math.min(frame, anchorFrame))
           }
+          // The preview ghost line travels with the dragged flag (deliberately
+          // not suppressed) — Camtasia's "the flag moves with the time".
           usePlaybackStore.getState().setPreviewFrame(frame)
-          return formatTimecodeCompact(frame, fpsRef.current)
+          return formatTimecodeCompact(frame, useTimelineStore.getState().fps)
         },
         () => {
-          document.body.style.cursor = prevCursor
-          previewScrubberSuppressRef.current = false
+          document.body.style.cursor = ''
           usePlaybackStore.getState().setPreviewFrame(null)
           dragCleanupRef.current = null
         },
       )
       if (!cleanup) return
       document.body.style.cursor = 'col-resize'
-      previewScrubberSuppressRef.current = true
       dragCleanupRef.current = cleanup
     },
     [rulerRef],
@@ -127,72 +173,67 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
     [],
   )
 
-  if (hasRange) {
-    return null
+  const handleInDragStart = useCallback((e: React.PointerEvent) => startDrag('in')(e), [startDrag])
+  const handleOutDragStart = useCallback(
+    (e: React.PointerEvent) => startDrag('out')(e),
+    [startDrag],
+  )
+
+  const handleClear = useCallback(() => {
+    useTimelineStore.getState().clearInOutPoints()
+  }, [])
+
+  const inFlag = (
+    <RangeFlag
+      side="in"
+      title={t('timeline.header.setInPointTooltip')}
+      onDragStart={handleInDragStart}
+      onClear={handleClear}
+    />
+  )
+  const outFlag = (
+    <RangeFlag
+      side="out"
+      title={t('timeline.header.setOutPointTooltip')}
+      onDragStart={handleOutDragStart}
+      onClear={handleClear}
+    />
+  )
+
+  if (isDocked) {
+    return (
+      <div
+        ref={dockedWrapperRef}
+        className="absolute top-0"
+        style={{ height: IO_LANE_HEIGHT, pointerEvents: 'none', zIndex: 9998 }}
+      >
+        {inFlag}
+        {outFlag}
+      </div>
+    )
   }
+
+  // Partial states (only I or only O pressed) collapse both flags onto the
+  // point that exists, ready to be pulled apart.
+  const inFrame = inPoint ?? outPoint ?? 0
+  const outFrame = outPoint ?? inPoint ?? 0
 
   return (
     <div
-      ref={wrapperRef}
       className="absolute top-0"
       style={{ height: IO_LANE_HEIGHT, pointerEvents: 'none', zIndex: 9998 }}
     >
-      {/* Green in-grip on the playhead's left. */}
       <div
-        title={t('timeline.header.setInPointTooltip')}
-        className="absolute pointer-events-auto"
-        style={{
-          top: 0,
-          left: -(GRIP_GAP + GRIP_HIT_WIDTH),
-          width: GRIP_HIT_WIDTH,
-          height: IO_LANE_HEIGHT + 4,
-          cursor: 'col-resize',
-        }}
-        onPointerDown={startDrag}
+        className="absolute top-0"
+        style={{ left: Math.round(frameToPixels(inFrame)), height: IO_LANE_HEIGHT }}
       >
-        <div
-          aria-hidden="true"
-          className="absolute"
-          style={{
-            top: 1,
-            right: 0,
-            width: GRIP_WIDTH,
-            height: IO_LANE_HEIGHT - 2,
-            borderRadius: '5px 1px 1px 5px',
-            background:
-              'linear-gradient(to bottom, color-mix(in oklch, var(--color-timeline-in) 95%, white), color-mix(in oklch, var(--color-timeline-in) 75%, black))',
-            boxShadow: '0 0 2px color-mix(in oklch, var(--color-timeline-in) 55%, transparent)',
-          }}
-        />
+        {inFlag}
       </div>
-
-      {/* Red out-grip on the playhead's right. */}
       <div
-        title={t('timeline.header.setOutPointTooltip')}
-        className="absolute pointer-events-auto"
-        style={{
-          top: 0,
-          left: GRIP_GAP,
-          width: GRIP_HIT_WIDTH,
-          height: IO_LANE_HEIGHT + 4,
-          cursor: 'col-resize',
-        }}
-        onPointerDown={startDrag}
+        className="absolute top-0"
+        style={{ left: Math.round(frameToPixels(outFrame)), height: IO_LANE_HEIGHT }}
       >
-        <div
-          aria-hidden="true"
-          className="absolute"
-          style={{
-            top: 1,
-            left: 0,
-            width: GRIP_WIDTH,
-            height: IO_LANE_HEIGHT - 2,
-            borderRadius: '1px 5px 5px 1px',
-            background:
-              'linear-gradient(to bottom, color-mix(in oklch, var(--color-timeline-out) 95%, white), color-mix(in oklch, var(--color-timeline-out) 75%, black))',
-            boxShadow: '0 0 2px color-mix(in oklch, var(--color-timeline-out) 55%, transparent)',
-          }}
-        />
+        {outFlag}
       </div>
     </div>
   )
