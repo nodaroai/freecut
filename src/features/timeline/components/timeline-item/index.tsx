@@ -10,6 +10,10 @@ import { useEditPreviewShifts } from './use-edit-preview-shifts'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useEditorStore } from '@/shared/state/editor'
 import { usePlaybackStore } from '@/shared/state/playback'
+import {
+  canSeparateVideoAudio,
+  separateVideoAudio,
+} from '../../stores/actions/separate-audio-actions'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
 import { useTransitionDragStore } from '@/shared/state/transition-drag'
 import { TRANSITION_CONFIGS } from '@/types/transition'
@@ -878,6 +882,8 @@ export const TimelineItem = memo(function TimelineItem({
           canReverse: item.type === 'video' || item.type === 'audio',
           isReversed: reverseMenuShowsUnreverse,
           onReverse: handleReverseSelected,
+          canSeparateAudio: item.type === 'video' && !isBroken && canSeparateVideoAudio(item),
+          onSeparateAudio: () => separateVideoAudio(item.id),
           isVideoItem: item.type === 'video',
           playheadInBounds: (() => {
             const frame = usePlaybackStore.getState().currentFrame

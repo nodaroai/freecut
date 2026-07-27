@@ -368,6 +368,7 @@ async function regenerateProjectThumbnails(
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation()
   const snapEnabled = useSettingsStore((s) => s.snapEnabled)
+  const stopPlaybackAtOutPoint = useSettingsStore((s) => s.stopPlaybackAtOutPoint)
   const showWaveforms = useSettingsStore((s) => s.showWaveforms)
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips)
   const enableFilmstripExtraction = useSettingsStore((s) => s.enableFilmstripExtraction)
@@ -894,6 +895,20 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                           <Switch
                             checked={snapEnabled}
                             onCheckedChange={(v) => setSetting('snapEnabled', v)}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label className="text-sm">
+                              {t('settings.timeline.stopAtOutPoint')}
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              {t('settings.timeline.stopAtOutPointDescription')}
+                            </p>
+                          </div>
+                          <Switch
+                            checked={stopPlaybackAtOutPoint}
+                            onCheckedChange={(v) => setSetting('stopPlaybackAtOutPoint', v)}
                           />
                         </div>
                         <div className="flex items-center justify-between">

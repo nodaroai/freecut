@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "Aimantation par défaut",
       "snapByDefaultDescription": "Définit l'état initial de l'aimantation à l'ouverture d'un projet.",
+      "stopAtOutPoint": "Arrêter la lecture au point de sortie",
+      "stopAtOutPointDescription": "Met en pause lorsque la tête de lecture atteint le point de sortie marqué. Désactivez pour retrouver la lecture continue.",
       "showWaveforms": "Afficher les formes d'onde",
       "showFilmstrips": "Afficher les vignettes vidéo",
       "enableFilmstripExtraction": "Extraire les bandes d’images",

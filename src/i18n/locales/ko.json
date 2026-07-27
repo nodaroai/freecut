@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "기본적으로 스냅",
       "snapByDefaultDescription": "프로젝트를 열 때의 초기 스냅 상태를 설정합니다.",
+      "stopAtOutPoint": "아웃 포인트에서 재생 정지",
+      "stopAtOutPointDescription": "재생 헤드가 표시된 아웃 포인트에 도달하면 일시 정지합니다. 끄면 연속 재생으로 돌아갑니다.",
       "showWaveforms": "파형 표시",
       "showFilmstrips": "동영상 썸네일 표시",
       "enableFilmstripExtraction": "필름스트립 추출",

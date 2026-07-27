@@ -33,6 +33,7 @@ import { Separator } from '@/components/ui/separator'
 import { formatHotkeyBinding } from '@/config/hotkeys'
 import { useTimelineZoom } from '../hooks/use-timeline-zoom'
 import { useTimelineStore } from '../stores/timeline-store'
+import { cutInOutRange } from '../stores/actions/edit/cut-range-actions'
 import { useTimelineCommandStore } from '../stores/timeline-command-store'
 import { useZoomStore } from '../stores/zoom-store'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -594,6 +595,18 @@ export const TimelineHeader = memo(function TimelineHeader({
               data-tooltip={t('timeline.header.clearInOutPointsTooltip')}
             >
               <X className="w-3.5 h-3.5" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              style={btnSize}
+              onClick={() => cutInOutRange()}
+              disabled={inPoint === null || outPoint === null}
+              aria-label={t('timeline.header.cutRange')}
+              data-tooltip={t('timeline.header.cutRangeTooltip')}
+            >
+              <Scissors className="w-3.5 h-3.5" style={{ color: 'var(--color-timeline-out)' }} />
             </Button>
           </div>
 

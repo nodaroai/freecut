@@ -24,6 +24,8 @@ import { CAPTION_STYLE_PRESETS } from '@/shared/typography/caption-style-presets
 interface AppSettings {
   // Timeline defaults
   snapEnabled: boolean
+  // Pause playback when the playhead reaches the marked out point.
+  stopPlaybackAtOutPoint: boolean
   // Vertical position (px) of the A/V section divider. Null = centered default.
   // A viewport layout preference, persisted globally (not per project).
   timelineSectionDividerPosition: number | null
@@ -138,6 +140,7 @@ function areHotkeyOverridesEqual(left: HotkeyOverrideMap, right: HotkeyOverrideM
 const DEFAULT_SETTINGS: AppSettings = {
   // Timeline defaults
   snapEnabled: true,
+  stopPlaybackAtOutPoint: true,
   timelineSectionDividerPosition: null,
   canvasSnapEnabled: true,
   showWaveforms: true,

@@ -31,7 +31,10 @@ import {
   useTimelineShortcuts,
   useTransitionBreakageNotifications,
 } from '@/features/editor/deps/timeline-hooks'
-import { initTransitionChainSubscription } from '@/features/editor/deps/timeline-subscriptions'
+import {
+  initStopAtOutPointSubscription,
+  initTransitionChainSubscription,
+} from '@/features/editor/deps/timeline-subscriptions'
 import { useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { importBundleExportDialog } from '@/features/editor/deps/project-bundle'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
@@ -429,6 +432,10 @@ export const LoadedEditor = memo(function LoadedEditor({
       unsubscribe?.()
     }
   }, [])
+
+  // Camtasia-style transport: pause when the playhead crosses the marked out
+  // point (Settings → Timeline toggles it).
+  useEffect(() => initStopAtOutPointSubscription(), [])
 
   // Preload export dialogs during idle time so they open instantly.
   useEffect(() => {
