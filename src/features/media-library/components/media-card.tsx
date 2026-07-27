@@ -18,6 +18,8 @@ import {
   Trash2,
   Loader2,
   Link2Off,
+  ListEnd,
+  ListPlus,
   RefreshCw,
   Zap,
   FileText,
@@ -75,6 +77,7 @@ import {
   isTranscriptionOutOfMemoryError,
   TRANSCRIPTION_OOM_HINT,
 } from '@/shared/utils/transcription-cancellation'
+import { addMediaItemsToTimeline, type AddMediaToTimelinePosition } from '../deps/timeline-contract'
 import { TranscribeDialog, type TranscribeDialogValues } from './transcribe-dialog'
 import { useSubtitleScanProgressStore } from '../stores/subtitle-scan-progress-store'
 import { audioScrubPreview, getAudioScrubTime } from '../utils/audio-scrub-preview'
@@ -96,6 +99,8 @@ interface MediaCardInternalProps extends MediaCardProps {
 interface MediaCardActionMenuProps {
   isBroken: boolean
   onRelink?: () => void
+  canAddToTimeline: boolean
+  onAddToTimeline: (position: AddMediaToTimelinePosition) => void
   canGenerateProxy: boolean
   hasProxy: boolean
   proxyStatus?: 'generating' | 'ready' | 'error'
@@ -129,6 +134,10 @@ type MediaCardMenuGroupProps = {
 
 type BrokenMediaActionsProps = MediaCardMenuGroupProps & {
   onRelink: () => void
+}
+
+type TimelineActionsProps = MediaCardMenuGroupProps & {
+  onAddToTimeline: (position: AddMediaToTimelinePosition) => void
 }
 
 type ProxyActionsProps = MediaCardMenuGroupProps & {
@@ -300,13 +309,14 @@ function resolveTranscriptGroupVisibility(props: MediaCardActionMenuProps) {
 
 /**
  * Which context-menu groups this media item gets. Kept out of the component so the render
- * body stays a flat list of `if (show) push(...)` rather than a thicket of boolean chains.
+ * body stays a flat declarative group list rather than a thicket of boolean chains.
  */
 function resolveMenuVisibility(props: MediaCardActionMenuProps) {
   return {
     ...resolveProxyGroupVisibility(props),
     ...resolveTranscriptGroupVisibility(props),
     showBrokenGroup: props.isBroken && Boolean(props.onRelink),
+    showTimelineGroup: props.canAddToTimeline && !props.isBroken,
     showInterpolationGroup: props.canInterpolate && !props.isBroken,
     showUpscaleGroup: props.canUpscale && !props.isBroken,
     showEmbeddedSubtitleGroup: props.canExtractEmbeddedSubtitles && !props.isBroken,
@@ -317,6 +327,7 @@ function resolveMenuVisibility(props: MediaCardActionMenuProps) {
 function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
   const {
     onRelink,
+    onAddToTimeline,
     hasProxy,
     isInterpolating,
     onInterpolate,
@@ -342,92 +353,102 @@ function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
     canShowDeleteTranscript,
     showTranscriptGroup,
     showBrokenGroup,
+    showTimelineGroup,
     showInterpolationGroup,
     showUpscaleGroup,
     showEmbeddedSubtitleGroup,
     showAiGroup,
   } = resolveMenuVisibility(props)
 
-  const groups: ReactNode[] = []
+  const groups: Array<{ show: boolean; node: ReactNode }> = [
+    {
+      show: showBrokenGroup,
+      node: onRelink ? <BrokenMediaActions key="broken" t={t} onRelink={onRelink} /> : null,
+    },
+    {
+      show: showTimelineGroup,
+      node: <TimelineActions key="timeline" t={t} onAddToTimeline={onAddToTimeline} />,
+    },
+    {
+      show: showProxyGroup,
+      node: (
+        <ProxyActions
+          key="proxy"
+          t={t}
+          canShowGenerateProxy={canShowGenerateProxy}
+          hasProxy={hasProxy}
+          onGenerateProxy={onGenerateProxy}
+          onDeleteProxy={onDeleteProxy}
+        />
+      ),
+    },
+    {
+      show: showInterpolationGroup,
+      node: (
+        <InterpolationActions
+          key="interpolation"
+          t={t}
+          isInterpolating={isInterpolating}
+          onInterpolate={onInterpolate}
+          onCancelInterpolation={onCancelInterpolation}
+        />
+      ),
+    },
+    {
+      show: showUpscaleGroup,
+      node: (
+        <UpscaleActions
+          key="upscale"
+          t={t}
+          isUpscaling={isUpscaling}
+          onUpscale={onUpscale}
+          onCancelUpscale={onCancelUpscale}
+        />
+      ),
+    },
+    {
+      show: showTranscriptGroup,
+      node: (
+        <TranscriptActions
+          key="transcript"
+          t={t}
+          canShowGenerateTranscript={canShowGenerateTranscript}
+          canShowDeleteTranscript={canShowDeleteTranscript}
+          hasTranscript={hasTranscript}
+          onGenerateTranscript={onGenerateTranscript}
+          onDeleteTranscript={onDeleteTranscript}
+        />
+      ),
+    },
+    {
+      show: showEmbeddedSubtitleGroup,
+      node: (
+        <EmbeddedSubtitleActions
+          key="embedded-subtitles"
+          t={t}
+          isExtractingEmbeddedSubtitles={isExtractingEmbeddedSubtitles}
+          onExtractEmbeddedSubtitles={onExtractEmbeddedSubtitles}
+        />
+      ),
+    },
+    {
+      show: showAiGroup,
+      node: <AiActions key="ai" t={t} onAnalyzeWithAI={onAnalyzeWithAI} />,
+    },
+    {
+      show: true,
+      node: <DeleteMediaAction key="destructive" t={t} onDelete={onDelete} />,
+    },
+  ]
 
-  if (showBrokenGroup && onRelink) {
-    groups.push(<BrokenMediaActions key="broken" t={t} onRelink={onRelink} />)
-  }
-
-  if (showProxyGroup) {
-    groups.push(
-      <ProxyActions
-        key="proxy"
-        t={t}
-        canShowGenerateProxy={canShowGenerateProxy}
-        hasProxy={hasProxy}
-        onGenerateProxy={onGenerateProxy}
-        onDeleteProxy={onDeleteProxy}
-      />,
-    )
-  }
-
-  if (showInterpolationGroup) {
-    groups.push(
-      <InterpolationActions
-        key="interpolation"
-        t={t}
-        isInterpolating={isInterpolating}
-        onInterpolate={onInterpolate}
-        onCancelInterpolation={onCancelInterpolation}
-      />,
-    )
-  }
-
-  if (showUpscaleGroup) {
-    groups.push(
-      <UpscaleActions
-        key="upscale"
-        t={t}
-        isUpscaling={isUpscaling}
-        onUpscale={onUpscale}
-        onCancelUpscale={onCancelUpscale}
-      />,
-    )
-  }
-
-  if (showTranscriptGroup) {
-    groups.push(
-      <TranscriptActions
-        key="transcript"
-        t={t}
-        canShowGenerateTranscript={canShowGenerateTranscript}
-        canShowDeleteTranscript={canShowDeleteTranscript}
-        hasTranscript={hasTranscript}
-        onGenerateTranscript={onGenerateTranscript}
-        onDeleteTranscript={onDeleteTranscript}
-      />,
-    )
-  }
-
-  if (showEmbeddedSubtitleGroup) {
-    groups.push(
-      <EmbeddedSubtitleActions
-        key="embedded-subtitles"
-        t={t}
-        isExtractingEmbeddedSubtitles={isExtractingEmbeddedSubtitles}
-        onExtractEmbeddedSubtitles={onExtractEmbeddedSubtitles}
-      />,
-    )
-  }
-
-  if (showAiGroup) {
-    groups.push(<AiActions key="ai" t={t} onAnalyzeWithAI={onAnalyzeWithAI} />)
-  }
-
-  groups.push(<DeleteMediaAction key="destructive" t={t} onDelete={onDelete} />)
+  const visibleGroups = groups.filter((group) => group.show && group.node !== null)
 
   return (
     <>
-      {groups.map((group, index) => (
+      {visibleGroups.map((group, index) => (
         <Fragment key={index}>
           {index > 0 && <ContextMenuSeparator />}
-          {group}
+          {group.node}
         </Fragment>
       ))}
     </>
@@ -447,6 +468,32 @@ function BrokenMediaActions({ t, onRelink }: BrokenMediaActionsProps) {
       >
         <RefreshCw className="w-3 h-3 mr-2" />
         {t('media.card.relinkFile')}
+      </ContextMenuItem>
+    </>
+  )
+}
+
+function TimelineActions({ t, onAddToTimeline }: TimelineActionsProps) {
+  return (
+    <>
+      <ContextMenuLabel>{t('media.card.menuTimeline')}</ContextMenuLabel>
+      <ContextMenuItem
+        onClick={(event) => {
+          event.stopPropagation()
+          onAddToTimeline('playhead')
+        }}
+      >
+        <ListPlus className="w-3 h-3 mr-2" />
+        {t('media.card.addToTimelineAtPlayhead')}
+      </ContextMenuItem>
+      <ContextMenuItem
+        onClick={(event) => {
+          event.stopPropagation()
+          onAddToTimeline('end')
+        }}
+      >
+        <ListEnd className="w-3 h-3 mr-2" />
+        {t('media.card.addToTimelineAtEnd')}
       </ContextMenuItem>
     </>
   )
@@ -718,6 +765,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
     !isBroken &&
     !isPreparingMedia &&
     upscaleService.canUpscaleMedia(media.mimeType, media.width, media.height)
+  const canAddToTimeline = mediaType !== 'unknown' && !isBroken && !isPreparingMedia
   const hasTranscript = transcriptStatus === 'ready'
   const isTranscribing = transcriptStatus === 'transcribing' || transcriptStatus === 'queued'
   const isTagging = useMediaLibraryStore((s) => s.taggingMediaIds.has(media.id))
@@ -782,6 +830,17 @@ const MediaCardInternal = memo(function MediaCardInternal({
     const targets = getTargetMediaItems()
     onDelete?.(targets.map((m) => m.id))
   }
+
+  const handleAddToTimeline = useCallback(
+    (position: AddMediaToTimelinePosition) => {
+      const store = useMediaLibraryStore.getState()
+      const targets = getTargetMediaItems().filter(
+        (m) => !store.brokenMediaIds?.includes(m.id) && !store.importingIds?.includes(m.id),
+      )
+      void addMediaItemsToTimeline(targets, position)
+    },
+    [getTargetMediaItems],
+  )
 
   const handleGenerateProxy = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -1540,6 +1599,8 @@ const MediaCardInternal = memo(function MediaCardInternal({
     <MediaCardActionMenuItems
       isBroken={isBroken}
       onRelink={onRelink}
+      canAddToTimeline={canAddToTimeline}
+      onAddToTimeline={handleAddToTimeline}
       canGenerateProxy={canGenerateProxy}
       hasProxy={hasProxy}
       proxyStatus={proxyStatus}

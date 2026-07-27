@@ -1,6 +1,8 @@
 {
   "media": {
     "card": {
+      "addToTimelineAtEnd": "Sona ekle",
+      "addToTimelineAtPlayhead": "Oynatma kafasına ekle",
       "aiCaptionsCount": "YZ altyazı sayısı",
       "analyzeWithAI": "YZ ile analiz et",
       "analyzingWithAI": "YZ ile analiz ediliyor",
@@ -20,6 +22,7 @@
       "menuFile": "Dosya",
       "menuInterpolation": "Kare Enterpolasyonu",
       "menuProxy": "Proxy",
+      "menuTimeline": "Zaman çizelgesi",
       "menuTranscript": "Transkripsiyon",
       "playAudio": "Sesi oynat",
       "refreshTranscript": "Transkripti yenile",

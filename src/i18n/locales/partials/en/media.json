@@ -1,6 +1,8 @@
 {
   "media": {
     "card": {
+      "addToTimelineAtEnd": "Add to End",
+      "addToTimelineAtPlayhead": "Add at Playhead",
       "aiCaptionsCount": "AI Captions Count",
       "analyzeWithAI": "Analyze with AI",
       "analyzingWithAI": "Analyzing with AI",
@@ -20,6 +22,7 @@
       "menuFile": "File",
       "menuInterpolation": "Frame Interpolation",
       "menuProxy": "Proxy",
+      "menuTimeline": "Timeline",
       "menuTranscript": "Transcript",
       "playAudio": "Play Audio",
       "refreshTranscript": "Refresh Transcript",
