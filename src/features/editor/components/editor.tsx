@@ -436,15 +436,14 @@ export const LoadedEditor = memo(function LoadedEditor({
         await loadTimeline(projectId, { allowProjectUpgrade: migration.requiresUpgrade })
 
         // Nodaro embedded: place any pending video import once the timeline is ready.
-        // Isolated in its own try/catch so a failure here can never skip the
-        // migration-state refresh below.
-        try {
-          const { consumePendingEmbeddedImport } =
-            await import('@/features/editor/services/embedded-import')
-          await consumePendingEmbeddedImport()
-        } catch (error) {
-          logger.error('Embedded import failed:', error)
-        }
+        // Fire-and-forget — the module graph is heavy (pulls the export pipeline),
+        // so awaiting it here can delay or, under jsdom, skip the migration-state
+        // refresh below. Nothing downstream depends on it: embedded imports always
+        // target fresh projects (never requiresUpgrade), and legacy projects never
+        // have a pending embedded import.
+        void import('@/features/editor/services/embedded-import')
+          .then(({ consumePendingEmbeddedImport }) => consumePendingEmbeddedImport())
+          .catch((error) => logger.error('Embedded import failed:', error))
 
         if (cancelled || !migration.requiresUpgrade || hasRefreshedMigrationStateRef.current) {
           return
