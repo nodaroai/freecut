@@ -18,6 +18,8 @@ import {
   Trash2,
   Loader2,
   Link2Off,
+  ListEnd,
+  ListPlus,
   RefreshCw,
   Zap,
   FileText,
@@ -75,6 +77,7 @@ import {
   isTranscriptionOutOfMemoryError,
   TRANSCRIPTION_OOM_HINT,
 } from '@/shared/utils/transcription-cancellation'
+import { addMediaItemsToTimeline, type AddMediaToTimelinePosition } from '../deps/timeline-contract'
 import { TranscribeDialog, type TranscribeDialogValues } from './transcribe-dialog'
 import { useSubtitleScanProgressStore } from '../stores/subtitle-scan-progress-store'
 import { audioScrubPreview, getAudioScrubTime } from '../utils/audio-scrub-preview'
@@ -96,6 +99,8 @@ interface MediaCardInternalProps extends MediaCardProps {
 interface MediaCardActionMenuProps {
   isBroken: boolean
   onRelink?: () => void
+  canAddToTimeline: boolean
+  onAddToTimeline: (position: AddMediaToTimelinePosition) => void
   canGenerateProxy: boolean
   hasProxy: boolean
   proxyStatus?: 'generating' | 'ready' | 'error'
@@ -129,6 +134,10 @@ type MediaCardMenuGroupProps = {
 
 type BrokenMediaActionsProps = MediaCardMenuGroupProps & {
   onRelink: () => void
+}
+
+type TimelineActionsProps = MediaCardMenuGroupProps & {
+  onAddToTimeline: (position: AddMediaToTimelinePosition) => void
 }
 
 type ProxyActionsProps = MediaCardMenuGroupProps & {
@@ -307,6 +316,7 @@ function resolveMenuVisibility(props: MediaCardActionMenuProps) {
     ...resolveProxyGroupVisibility(props),
     ...resolveTranscriptGroupVisibility(props),
     showBrokenGroup: props.isBroken && Boolean(props.onRelink),
+    showTimelineGroup: props.canAddToTimeline && !props.isBroken,
     showInterpolationGroup: props.canInterpolate && !props.isBroken,
     showUpscaleGroup: props.canUpscale && !props.isBroken,
     showEmbeddedSubtitleGroup: props.canExtractEmbeddedSubtitles && !props.isBroken,
@@ -317,6 +327,7 @@ function resolveMenuVisibility(props: MediaCardActionMenuProps) {
 function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
   const {
     onRelink,
+    onAddToTimeline,
     hasProxy,
     isInterpolating,
     onInterpolate,
@@ -342,6 +353,7 @@ function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
     canShowDeleteTranscript,
     showTranscriptGroup,
     showBrokenGroup,
+    showTimelineGroup,
     showInterpolationGroup,
     showUpscaleGroup,
     showEmbeddedSubtitleGroup,
@@ -352,6 +364,10 @@ function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
 
   if (showBrokenGroup && onRelink) {
     groups.push(<BrokenMediaActions key="broken" t={t} onRelink={onRelink} />)
+  }
+
+  if (showTimelineGroup) {
+    groups.push(<TimelineActions key="timeline" t={t} onAddToTimeline={onAddToTimeline} />)
   }
 
   if (showProxyGroup) {
@@ -447,6 +463,32 @@ function BrokenMediaActions({ t, onRelink }: BrokenMediaActionsProps) {
       >
         <RefreshCw className="w-3 h-3 mr-2" />
         {t('media.card.relinkFile')}
+      </ContextMenuItem>
+    </>
+  )
+}
+
+function TimelineActions({ t, onAddToTimeline }: TimelineActionsProps) {
+  return (
+    <>
+      <ContextMenuLabel>{t('media.card.menuTimeline')}</ContextMenuLabel>
+      <ContextMenuItem
+        onClick={(event) => {
+          event.stopPropagation()
+          onAddToTimeline('playhead')
+        }}
+      >
+        <ListPlus className="w-3 h-3 mr-2" />
+        {t('media.card.addToTimelineAtPlayhead')}
+      </ContextMenuItem>
+      <ContextMenuItem
+        onClick={(event) => {
+          event.stopPropagation()
+          onAddToTimeline('end')
+        }}
+      >
+        <ListEnd className="w-3 h-3 mr-2" />
+        {t('media.card.addToTimelineAtEnd')}
       </ContextMenuItem>
     </>
   )
@@ -718,6 +760,7 @@ const MediaCardInternal = memo(function MediaCardInternal({
     !isBroken &&
     !isPreparingMedia &&
     upscaleService.canUpscaleMedia(media.mimeType, media.width, media.height)
+  const canAddToTimeline = mediaType !== 'unknown' && !isBroken && !isPreparingMedia
   const hasTranscript = transcriptStatus === 'ready'
   const isTranscribing = transcriptStatus === 'transcribing' || transcriptStatus === 'queued'
   const isTagging = useMediaLibraryStore((s) => s.taggingMediaIds.has(media.id))
@@ -782,6 +825,17 @@ const MediaCardInternal = memo(function MediaCardInternal({
     const targets = getTargetMediaItems()
     onDelete?.(targets.map((m) => m.id))
   }
+
+  const handleAddToTimeline = useCallback(
+    (position: AddMediaToTimelinePosition) => {
+      const store = useMediaLibraryStore.getState()
+      const targets = getTargetMediaItems().filter(
+        (m) => !store.brokenMediaIds?.includes(m.id) && !store.importingIds?.includes(m.id),
+      )
+      void addMediaItemsToTimeline(targets, position)
+    },
+    [getTargetMediaItems],
+  )
 
   const handleGenerateProxy = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -1540,6 +1594,8 @@ const MediaCardInternal = memo(function MediaCardInternal({
     <MediaCardActionMenuItems
       isBroken={isBroken}
       onRelink={onRelink}
+      canAddToTimeline={canAddToTimeline}
+      onAddToTimeline={handleAddToTimeline}
       canGenerateProxy={canGenerateProxy}
       hasProxy={hasProxy}
       proxyStatus={proxyStatus}

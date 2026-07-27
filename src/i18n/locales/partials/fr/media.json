@@ -1,6 +1,8 @@
 {
   "media": {
     "card": {
+      "addToTimelineAtEnd": "Ajouter à la fin",
+      "addToTimelineAtPlayhead": "Ajouter à la tête de lecture",
       "aiCaptionsCount": "{{count}} sous-titres IA",
       "analyzeWithAI": "Analyser avec l'IA",
       "analyzingWithAI": "Analyse avec l'IA",
@@ -20,6 +22,7 @@
       "menuFile": "Fichier",
       "menuInterpolation": "Interpolation d'images",
       "menuProxy": "Proxy",
+      "menuTimeline": "Timeline",
       "menuTranscript": "Transcription",
       "playAudio": "Lire l'audio",
       "refreshTranscript": "Actualiser la transcription",

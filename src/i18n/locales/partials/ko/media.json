@@ -1,6 +1,8 @@
 {
   "media": {
     "card": {
+      "addToTimelineAtEnd": "끝에 추가",
+      "addToTimelineAtPlayhead": "재생 헤드 위치에 추가",
       "aiCaptionsCount": "AI 자막 {{count}}개",
       "analyzeWithAI": "AI로 분석",
       "analyzingWithAI": "AI로 분석 중",
@@ -20,6 +22,7 @@
       "menuFile": "파일",
       "menuInterpolation": "프레임 보간",
       "menuProxy": "프록시",
+      "menuTimeline": "타임라인",
       "menuTranscript": "전사",
       "playAudio": "오디오 재생",
       "refreshTranscript": "전사 새로 고침",

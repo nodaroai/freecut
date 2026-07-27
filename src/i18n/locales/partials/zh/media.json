@@ -1,6 +1,8 @@
 {
   "media": {
     "card": {
+      "addToTimelineAtEnd": "添加到末尾",
+      "addToTimelineAtPlayhead": "添加到播放头位置",
       "aiCaptionsCount": "AI 字幕数",
       "analyzeWithAI": "用 AI 分析",
       "analyzingWithAI": "正在用 AI 分析",
@@ -20,6 +22,7 @@
       "menuFile": "文件",
       "menuInterpolation": "插帧",
       "menuProxy": "代理",
+      "menuTimeline": "时间轴",
       "menuTranscript": "字幕",
       "playAudio": "播放音频",
       "refreshTranscript": "刷新转录",

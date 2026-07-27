@@ -1,6 +1,8 @@
 {
   "media": {
     "card": {
+      "addToTimelineAtEnd": "Adicionar ao final",
+      "addToTimelineAtPlayhead": "Adicionar no cursor de reprodução",
       "aiCaptionsCount": "Contagem de legendas de IA",
       "analyzeWithAI": "Analisar com IA",
       "analyzingWithAI": "Analisando com IA",
@@ -20,6 +22,7 @@
       "menuFile": "Arquivo",
       "menuInterpolation": "Interpolação de quadros",
       "menuProxy": "Proxy",
+      "menuTimeline": "Linha do tempo",
       "menuTranscript": "Transcrição",
       "playAudio": "Reproduzir audio",
       "refreshTranscript": "Atualizar transcricao",

@@ -1,6 +1,8 @@
 {
   "media": {
     "card": {
+      "addToTimelineAtEnd": "末尾に追加",
+      "addToTimelineAtPlayhead": "再生ヘッド位置に追加",
       "aiCaptionsCount": "{{count}} 件のAI字幕",
       "analyzeWithAI": "AIで解析",
       "analyzingWithAI": "AIで解析中",
@@ -20,6 +22,7 @@
       "menuFile": "ファイル",
       "menuInterpolation": "フレーム補間",
       "menuProxy": "プロキシ",
+      "menuTimeline": "タイムライン",
       "menuTranscript": "文字起こし",
       "playAudio": "オーディオを再生",
       "refreshTranscript": "文字起こしを更新",
