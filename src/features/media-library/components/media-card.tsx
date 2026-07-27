@@ -309,7 +309,7 @@ function resolveTranscriptGroupVisibility(props: MediaCardActionMenuProps) {
 
 /**
  * Which context-menu groups this media item gets. Kept out of the component so the render
- * body stays a flat list of `if (show) push(...)` rather than a thicket of boolean chains.
+ * body stays a flat declarative group list rather than a thicket of boolean chains.
  */
 function resolveMenuVisibility(props: MediaCardActionMenuProps) {
   return {
@@ -360,90 +360,95 @@ function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
     showAiGroup,
   } = resolveMenuVisibility(props)
 
-  const groups: ReactNode[] = []
+  const groups: Array<{ show: boolean; node: ReactNode }> = [
+    {
+      show: showBrokenGroup,
+      node: onRelink ? <BrokenMediaActions key="broken" t={t} onRelink={onRelink} /> : null,
+    },
+    {
+      show: showTimelineGroup,
+      node: <TimelineActions key="timeline" t={t} onAddToTimeline={onAddToTimeline} />,
+    },
+    {
+      show: showProxyGroup,
+      node: (
+        <ProxyActions
+          key="proxy"
+          t={t}
+          canShowGenerateProxy={canShowGenerateProxy}
+          hasProxy={hasProxy}
+          onGenerateProxy={onGenerateProxy}
+          onDeleteProxy={onDeleteProxy}
+        />
+      ),
+    },
+    {
+      show: showInterpolationGroup,
+      node: (
+        <InterpolationActions
+          key="interpolation"
+          t={t}
+          isInterpolating={isInterpolating}
+          onInterpolate={onInterpolate}
+          onCancelInterpolation={onCancelInterpolation}
+        />
+      ),
+    },
+    {
+      show: showUpscaleGroup,
+      node: (
+        <UpscaleActions
+          key="upscale"
+          t={t}
+          isUpscaling={isUpscaling}
+          onUpscale={onUpscale}
+          onCancelUpscale={onCancelUpscale}
+        />
+      ),
+    },
+    {
+      show: showTranscriptGroup,
+      node: (
+        <TranscriptActions
+          key="transcript"
+          t={t}
+          canShowGenerateTranscript={canShowGenerateTranscript}
+          canShowDeleteTranscript={canShowDeleteTranscript}
+          hasTranscript={hasTranscript}
+          onGenerateTranscript={onGenerateTranscript}
+          onDeleteTranscript={onDeleteTranscript}
+        />
+      ),
+    },
+    {
+      show: showEmbeddedSubtitleGroup,
+      node: (
+        <EmbeddedSubtitleActions
+          key="embedded-subtitles"
+          t={t}
+          isExtractingEmbeddedSubtitles={isExtractingEmbeddedSubtitles}
+          onExtractEmbeddedSubtitles={onExtractEmbeddedSubtitles}
+        />
+      ),
+    },
+    {
+      show: showAiGroup,
+      node: <AiActions key="ai" t={t} onAnalyzeWithAI={onAnalyzeWithAI} />,
+    },
+    {
+      show: true,
+      node: <DeleteMediaAction key="destructive" t={t} onDelete={onDelete} />,
+    },
+  ]
 
-  if (showBrokenGroup && onRelink) {
-    groups.push(<BrokenMediaActions key="broken" t={t} onRelink={onRelink} />)
-  }
-
-  if (showTimelineGroup) {
-    groups.push(<TimelineActions key="timeline" t={t} onAddToTimeline={onAddToTimeline} />)
-  }
-
-  if (showProxyGroup) {
-    groups.push(
-      <ProxyActions
-        key="proxy"
-        t={t}
-        canShowGenerateProxy={canShowGenerateProxy}
-        hasProxy={hasProxy}
-        onGenerateProxy={onGenerateProxy}
-        onDeleteProxy={onDeleteProxy}
-      />,
-    )
-  }
-
-  if (showInterpolationGroup) {
-    groups.push(
-      <InterpolationActions
-        key="interpolation"
-        t={t}
-        isInterpolating={isInterpolating}
-        onInterpolate={onInterpolate}
-        onCancelInterpolation={onCancelInterpolation}
-      />,
-    )
-  }
-
-  if (showUpscaleGroup) {
-    groups.push(
-      <UpscaleActions
-        key="upscale"
-        t={t}
-        isUpscaling={isUpscaling}
-        onUpscale={onUpscale}
-        onCancelUpscale={onCancelUpscale}
-      />,
-    )
-  }
-
-  if (showTranscriptGroup) {
-    groups.push(
-      <TranscriptActions
-        key="transcript"
-        t={t}
-        canShowGenerateTranscript={canShowGenerateTranscript}
-        canShowDeleteTranscript={canShowDeleteTranscript}
-        hasTranscript={hasTranscript}
-        onGenerateTranscript={onGenerateTranscript}
-        onDeleteTranscript={onDeleteTranscript}
-      />,
-    )
-  }
-
-  if (showEmbeddedSubtitleGroup) {
-    groups.push(
-      <EmbeddedSubtitleActions
-        key="embedded-subtitles"
-        t={t}
-        isExtractingEmbeddedSubtitles={isExtractingEmbeddedSubtitles}
-        onExtractEmbeddedSubtitles={onExtractEmbeddedSubtitles}
-      />,
-    )
-  }
-
-  if (showAiGroup) {
-    groups.push(<AiActions key="ai" t={t} onAnalyzeWithAI={onAnalyzeWithAI} />)
-  }
-
-  groups.push(<DeleteMediaAction key="destructive" t={t} onDelete={onDelete} />)
+  const visibleGroups = groups.filter((group) => group.show && group.node !== null)
 
   return (
     <>
-      {groups.map((group, index) => (
+      {visibleGroups.map((group, index) => (
         <Fragment key={index}>
           {index > 0 && <ContextMenuSeparator />}
-          {group}
+          {group.node}
         </Fragment>
       ))}
     </>
