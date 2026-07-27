@@ -53,6 +53,7 @@ function RangeFlag({ side, title, active, onDragStart }: RangeFlagProps) {
   return (
     <div
       title={title}
+      data-range-flag={side}
       className="absolute pointer-events-auto"
       style={{
         top: 0,
@@ -117,10 +118,6 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   maxFrameRef.current = maxFrame
 
   const dragCleanupRef = useRef<(() => void) | null>(null)
-  // Timestamp of the last clean tap (press without drag) on either flag — two
-  // within the window make a double-click, which clears the range. Real drags
-  // reset it, so quick successive drags can never wipe the selection.
-  const lastTapAtRef = useRef(0)
   const isDocked = inPoint === null && outPoint === null
 
   // Docked mode follows the playhead without re-rendering (same pattern as
@@ -148,6 +145,40 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
     const frame = usePlaybackStore.getState().currentFrame
     dockedWrapperRef.current.style.transform = `translate3d(${Math.round(frameToPixels(frame))}px, 0, 0)`
   }, [frameToPixels, isDocked])
+
+  // Camtasia gesture: double-click anywhere in the timeline OUTSIDE the marked
+  // range clears it and docks the flags back on the playhead. Clicks inside
+  // the range or on the flags themselves are left alone.
+  useEffect(() => {
+    const container = rulerRef.current?.closest('.timeline-container')
+    if (!container) return
+
+    const handleDoubleClick = (event: Event) => {
+      const { clientX, target } = event as MouseEvent
+      if (target instanceof Element && target.closest('[data-range-flag]')) return
+
+      const timeline = useTimelineStore.getState()
+      if (timeline.inPoint === null && timeline.outPoint === null) return
+      const ruler = rulerRef.current
+      if (!ruler) return
+
+      const frame = Math.round(pixelsToFrameNow(clientX - ruler.getBoundingClientRect().left))
+      const rangeStart = Math.min(
+        timeline.inPoint ?? timeline.outPoint ?? 0,
+        timeline.outPoint ?? timeline.inPoint ?? 0,
+      )
+      const rangeEnd = Math.max(
+        timeline.inPoint ?? timeline.outPoint ?? 0,
+        timeline.outPoint ?? timeline.inPoint ?? 0,
+      )
+      if (frame < rangeStart || frame > rangeEnd) {
+        timeline.clearInOutPoints()
+      }
+    }
+
+    container.addEventListener('dblclick', handleDoubleClick)
+    return () => container.removeEventListener('dblclick', handleDoubleClick)
+  }, [rulerRef])
 
   const startDrag = useCallback(
     (side: 'in' | 'out') => (event: React.PointerEvent) => {
@@ -196,15 +227,6 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
           document.body.style.cursor = ''
           if (moved) {
             usePlaybackStore.getState().finishScrub(lastFrame)
-            lastTapAtRef.current = 0
-          } else {
-            const now = performance.now()
-            if (now - lastTapAtRef.current < 400) {
-              lastTapAtRef.current = 0
-              useTimelineStore.getState().clearInOutPoints()
-            } else {
-              lastTapAtRef.current = now
-            }
           }
           setDraggingSide(null)
           dragCleanupRef.current = null
