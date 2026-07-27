@@ -167,20 +167,14 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
       if (target instanceof Element && target.closest('[data-range-flag]')) return
 
       const timeline = useTimelineStore.getState()
-      if (timeline.inPoint === null && timeline.outPoint === null) return
+      const points = [timeline.inPoint, timeline.outPoint].filter(
+        (point): point is number => point !== null,
+      )
       const ruler = rulerRef.current
-      if (!ruler) return
+      if (points.length === 0 || !ruler) return
 
       const frame = Math.round(pixelsToFrameNow(clientX - ruler.getBoundingClientRect().left))
-      const rangeStart = Math.min(
-        timeline.inPoint ?? timeline.outPoint ?? 0,
-        timeline.outPoint ?? timeline.inPoint ?? 0,
-      )
-      const rangeEnd = Math.max(
-        timeline.inPoint ?? timeline.outPoint ?? 0,
-        timeline.outPoint ?? timeline.inPoint ?? 0,
-      )
-      if (frame < rangeStart || frame > rangeEnd) {
+      if (frame < Math.min(...points) || frame > Math.max(...points)) {
         timeline.clearInOutPoints()
       }
     }
