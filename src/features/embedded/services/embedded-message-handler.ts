@@ -32,6 +32,12 @@ function postToParent(message: unknown) {
   }
 }
 
+// Primary clip's file/display name in the media bin — parents that name their
+// clips (e.g. Studio's "Shot 1.mp4") pass payload.videoName; absent keeps the legacy name.
+export function resolvePrimaryVideoName(videoName: unknown): string {
+  return typeof videoName === 'string' && videoName.trim() ? videoName.trim() : 'nodaro-edit.mp4'
+}
+
 async function handleLoadVideo(event: MessageEvent) {
   const store = useEmbeddedStore.getState()
 
@@ -50,10 +56,12 @@ async function handleLoadVideo(event: MessageEvent) {
     // Store parent origin for outbound messages
     store.setParentOrigin(event.origin)
 
-    const { videoUrl, videoBuffer } = event.data.payload
+    const { videoUrl, videoBuffer, videoName } = event.data.payload
     if (!videoUrl && !videoBuffer) {
       throw new Error('Missing videoUrl or videoBuffer in NODARO_LOAD_VIDEO payload')
     }
+
+    const primaryName = resolvePrimaryVideoName(videoName)
 
     // Use pre-fetched buffer if provided (avoids CORS), otherwise fetch URL
     let blob: Blob
@@ -68,7 +76,7 @@ async function handleLoadVideo(event: MessageEvent) {
     }
 
     // Extract metadata via worker
-    const file = new File([blob], 'nodaro-edit.mp4', { type: blob.type || 'video/mp4' })
+    const file = new File([blob], primaryName, { type: blob.type || 'video/mp4' })
     const { metadata: workerMeta } = await mediaProcessorService.processMedia(file, file.type)
 
     const fps = roundToNearestAllowedFps(workerMeta.type === 'video' ? workerMeta.fps : 30)
@@ -91,7 +99,7 @@ async function handleLoadVideo(event: MessageEvent) {
       backgroundColor: '#000000',
     })
 
-    const media = await mediaLibraryService.importMediaBlob(blob, project.id, 'nodaro-edit.mp4')
+    const media = await mediaLibraryService.importMediaBlob(blob, project.id, primaryName)
 
     // If we have a saved project snapshot, restore the timeline onto the fresh project
     let timelineRestored = false

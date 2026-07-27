@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isAllowedOrigin } from './embedded-message-handler'
+import { isAllowedOrigin, resolvePrimaryVideoName } from './embedded-message-handler'
 
 describe('isAllowedOrigin', () => {
   it('allows studio.nodaro.ai, app/next, localhost and railway; rejects others', () => {
@@ -8,5 +8,16 @@ describe('isAllowedOrigin', () => {
     expect(isAllowedOrigin('http://localhost:5173')).toBe(true)
     expect(isAllowedOrigin('https://foo.up.railway.app')).toBe(true)
     expect(isAllowedOrigin('https://evil.example.com')).toBe(false)
+  })
+})
+
+describe('resolvePrimaryVideoName', () => {
+  it('uses payload.videoName when present, legacy nodaro-edit.mp4 otherwise', () => {
+    expect(resolvePrimaryVideoName('Shot 1.mp4')).toBe('Shot 1.mp4')
+    expect(resolvePrimaryVideoName('  Shot 1.mp4  ')).toBe('Shot 1.mp4')
+    expect(resolvePrimaryVideoName(undefined)).toBe('nodaro-edit.mp4')
+    expect(resolvePrimaryVideoName('')).toBe('nodaro-edit.mp4')
+    expect(resolvePrimaryVideoName('   ')).toBe('nodaro-edit.mp4')
+    expect(resolvePrimaryVideoName(42)).toBe('nodaro-edit.mp4')
   })
 })
