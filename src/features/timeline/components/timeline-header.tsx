@@ -15,6 +15,7 @@ import {
   Maximize2,
   Magnet,
   Scissors,
+  SquareSplitHorizontal,
   Gauge,
   ArrowRightLeft,
   BetweenHorizontalEnd,
@@ -443,7 +444,7 @@ export const TimelineHeader = memo(function TimelineHeader({
               aria-label={t('timeline.header.razorTool')}
               data-tooltip={t('timeline.header.razorToolTooltip')}
             >
-              <Scissors className="w-3.5 h-3.5 -rotate-90" />
+              <SquareSplitHorizontal className="w-3.5 h-3.5" />
             </Button>
 
             <Button
