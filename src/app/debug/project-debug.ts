@@ -16,6 +16,7 @@ import type {
   FixtureOptions,
   FixtureResult,
 } from '@/features/project-bundle/services/test-fixtures'
+import type { GpuEffectInstance } from '@/infrastructure/gpu-effects'
 import {
   exportProjectJson,
   exportProjectJsonString,
@@ -127,6 +128,29 @@ interface ProjectDebugAPI {
     totalMs: number
   }>
   perfClear: () => void
+
+  /**
+   * Micro-benchmark a single GPU effect's shader cost in isolation. Runs the
+   * effect over a fixed off-screen texture `iterations` times, timing actual
+   * GPU completion via `onSubmittedWorkDone` — no decode / rAF / React / encode
+   * noise, so it's deterministic and the right tool to validate a shader change.
+   * Pass param overrides to A/B settings (e.g. `{ grainMixer: 0.5 }` vs the
+   * default `0`). Call `benchmarkEffect('list')` for the available effect ids.
+   */
+  benchmarkEffect: (
+    effectType: string,
+    params?: Record<string, unknown>,
+    opts?: {
+      width?: number
+      height?: number
+      iterations?: number
+      warmup?: number
+      batchSize?: number
+      source?: 'texture' | 'canvas' | 'video' | 'video-canvas'
+      readback?: boolean
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ) => Promise<any>
 
   // Render pipeline diagnostics — delegates to existing ad-hoc window globals
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -561,6 +585,209 @@ function createDebugAPI(): ProjectDebugAPI {
     perfClear: () => {
       if (typeof performance !== 'undefined' && typeof performance.clearMeasures === 'function') {
         performance.clearMeasures()
+      }
+    },
+
+    benchmarkEffect: async (effectType, paramOverrides, opts) => {
+      const { EffectsPipeline, getGpuEffect, getGpuEffectDefaultParams, GPU_EFFECT_REGISTRY } =
+        await import('@/infrastructure/gpu-effects')
+
+      if (effectType === 'list') {
+        return { effects: [...GPU_EFFECT_REGISTRY.keys()] }
+      }
+
+      const definition = getGpuEffect(effectType)
+      if (!definition) {
+        return {
+          error: `Unknown effect "${effectType}". Run __DEBUG__.benchmarkEffect('list') for ids.`,
+        }
+      }
+
+      // Coerce options to finite positive numbers — a stray NaN/0/negative from
+      // the console must not become an Infinity loop bound or an invalid texture
+      // size. width/height need >= 2 (the pipeline rejects < 2); warmup may be 0.
+      const toCount = (value: number | undefined, fallback: number, min: number) => {
+        const n = Math.floor(Number(value))
+        return Number.isFinite(n) && n >= min ? n : fallback
+      }
+      const width = toCount(opts?.width, 1920, 2)
+      const height = toCount(opts?.height, 1080, 2)
+      const iterations = toCount(opts?.iterations, 200, 1)
+      const warmup = toCount(opts?.warmup, 30, 0)
+
+      const pipeline = await EffectsPipeline.create()
+      if (!pipeline) return { error: 'WebGPU unavailable — could not create EffectsPipeline.' }
+
+      const device = pipeline.getDevice()
+      const usage =
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.RENDER_ATTACHMENT |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.COPY_SRC
+      const sourceTexture = device.createTexture({
+        size: { width, height },
+        format: 'rgba8unorm',
+        usage,
+      })
+      const outputTexture = device.createTexture({
+        size: { width, height },
+        format: 'rgba8unorm',
+        usage,
+      })
+
+      // Shared cleanup for every exit path. The pipeline + textures are allocated
+      // before the no-ready-video early return below, so that path must release
+      // them too — not just the success path's finally — or each call leaks a full
+      // EffectsPipeline (device, ping/pong textures, buffers) until GC.
+      const releaseGpuResources = () => {
+        sourceTexture.destroy()
+        outputTexture.destroy()
+        pipeline.destroy()
+      }
+
+      // Non-uniform source content so texture sampling isn't degenerately cheap.
+      const pixels = new Uint8Array(width * height * 4)
+      for (let i = 0; i < pixels.length; i += 4) {
+        pixels[i] = (i * 7) & 0xff
+        pixels[i + 1] = (i * 13) & 0xff
+        pixels[i + 2] = (i * 29) & 0xff
+        pixels[i + 3] = 255
+      }
+      device.queue.writeTexture(
+        { texture: sourceTexture },
+        pixels,
+        { bytesPerRow: width * 4, rowsPerImage: height },
+        { width, height },
+      )
+
+      // paramOverrides is intentionally loose (Record<string, unknown>) for ad-hoc
+      // debugging; cast back to the instance param shape for the pipeline call.
+      const params = {
+        ...getGpuEffectDefaultParams(effectType),
+        ...(paramOverrides ?? {}),
+      } as GpuEffectInstance['params']
+      const effects: GpuEffectInstance[] = [
+        { id: 'bench', type: effectType, name: effectType, enabled: true, params },
+      ]
+
+      // `source` selects which real entry point to time, isolating cost layers:
+      //  - 'texture' (default): passes only (texture -> texture). Pure shader ALU.
+      //  - 'canvas': copyExternalImageToTexture upload + passes + blit to a
+      //    WebGPU output canvas. Upper bound on the live video fast path's
+      //    per-frame GPU cost (the video path imports zero-copy instead of
+      //    uploading, but pays the same passes + blit).
+      // `readback: true` additionally drawImage()s the result onto a 2D canvas
+      // each frame — the compositing cost the preview pays after the effect.
+      const sourceMode = opts?.source ?? 'texture'
+      const readback = opts?.readback === true
+      let sourceCanvas: OffscreenCanvas | null = null
+      let readbackCtx: OffscreenCanvasRenderingContext2D | null = null
+      if (sourceMode === 'canvas') {
+        sourceCanvas = new OffscreenCanvas(width, height)
+        const sctx = sourceCanvas.getContext('2d')
+        if (sctx) {
+          const grad = sctx.createLinearGradient(0, 0, width, height)
+          grad.addColorStop(0, '#1b3a5f')
+          grad.addColorStop(1, '#c25e3a')
+          sctx.fillStyle = grad
+          sctx.fillRect(0, 0, width, height)
+        }
+      }
+      if (readback) {
+        readbackCtx = new OffscreenCanvas(width, height).getContext('2d')
+      }
+
+      // Video modes compare the two preview paths on the real zero-copy import:
+      //  - 'video': prototype — applyEffectsToVideoTexture (GPU-native, fed to
+      //    the GPU compositor; no per-item drawImage readback).
+      //  - 'video-canvas': current path — applyEffectsToVideo (OffscreenCanvas)
+      //    + drawImage onto a 2D canvas (the readback we want to kill).
+      // Both need a ready <video> in the DOM (seek onto a video clip first).
+      let benchVideo: HTMLVideoElement | null = null
+      if (sourceMode === 'video' || sourceMode === 'video-canvas') {
+        benchVideo =
+          [...document.querySelectorAll('video')].find(
+            (v) => v.readyState >= 2 && v.videoWidth > 1,
+          ) ?? null
+        if (!benchVideo) {
+          releaseGpuResources()
+          return { error: 'No ready <video> in DOM — seek the playhead onto a video clip first.' }
+        }
+      }
+      const fullRect = { x: 0, y: 0, width, height }
+
+      const runOnce = () => {
+        if (sourceMode === 'video' && benchVideo) {
+          return pipeline.applyEffectsToVideoTexture(
+            benchVideo,
+            effects,
+            fullRect,
+            width,
+            height,
+            outputTexture,
+          )
+        }
+        if (sourceMode === 'video-canvas' && benchVideo) {
+          const out = pipeline.applyEffectsToVideo(benchVideo, effects, fullRect, width, height)
+          if (out && readbackCtx) readbackCtx.drawImage(out, 0, 0)
+          return out !== null
+        }
+        if (sourceMode === 'canvas' && sourceCanvas) {
+          const out = pipeline.applyEffectsToCanvas(sourceCanvas, effects)
+          if (out && readbackCtx) readbackCtx.drawImage(out, 0, 0)
+          return out !== null
+        }
+        return pipeline.applyTextureEffectsToTexture(
+          sourceTexture,
+          effects,
+          outputTexture,
+          width,
+          height,
+        )
+      }
+
+      try {
+        if (!runOnce()) {
+          return { error: 'applyTextureEffectsToTexture returned false (size/param mismatch).' }
+        }
+        for (let i = 0; i < warmup; i++) runOnce()
+        await pipeline.waitForSubmittedWork()
+
+        // Amortized throughput: a single 1080p pass is GPU-trivial (<1ms), so
+        // awaiting onSubmittedWorkDone per submit is dominated by the ~3ms fence
+        // latency and can't resolve shader cost. Instead submit a batch of
+        // `batchSize` passes, fence once, and divide — the fence is then a few
+        // percent of the batch, not 100% of one pass. Each sample is a batch's
+        // mean per-pass GPU time; the distribution comes from many batches.
+        const batchSize = toCount(opts?.batchSize, 50, 1)
+        const batches = Math.max(1, Math.round(iterations / batchSize))
+        const samples: number[] = []
+        for (let b = 0; b < batches; b++) {
+          const t0 = performance.now()
+          for (let i = 0; i < batchSize; i++) runOnce()
+          await pipeline.waitForSubmittedWork()
+          samples.push((performance.now() - t0) / batchSize)
+        }
+
+        samples.sort((a, b) => a - b)
+        const sum = samples.reduce((a, b) => a + b, 0)
+        const pct = (p: number) =>
+          samples[Math.min(samples.length - 1, Math.floor(samples.length * p))] ?? 0
+        const mean = sum / samples.length
+        return {
+          effectType,
+          resolution: `${width}x${height}`,
+          iterations,
+          minMs: Number((samples[0] ?? 0).toFixed(3)),
+          medMs: Number(pct(0.5).toFixed(3)),
+          meanMs: Number(mean.toFixed(3)),
+          p95Ms: Number(pct(0.95).toFixed(3)),
+          maxMs: Number((samples[samples.length - 1] ?? 0).toFixed(3)),
+          estStandaloneFps: Number((1000 / mean).toFixed(1)),
+          params,
+        }
+      } finally {
+        releaseGpuResources()
       }
     },
 

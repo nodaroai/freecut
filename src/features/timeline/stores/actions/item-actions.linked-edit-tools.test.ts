@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import type {
   AudioItem,
@@ -172,6 +174,58 @@ describe('linked edit tools', () => {
     })
   })
 
+  it('clamps a linked end trim to the closest neighbor on every companion track', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem(),
+      makeAudioItem(),
+      makeVideoItem({ id: 'video-next', linkedGroupId: undefined, from: 100 }),
+      makeAudioItem({ id: 'audio-next', linkedGroupId: undefined, from: 70 }),
+    ])
+
+    trimItemEnd('video-1', 30)
+
+    expect(useItemsStore.getState().itemById['video-1']).toMatchObject({
+      durationInFrames: 70,
+      sourceEnd: 70,
+    })
+    expect(useItemsStore.getState().itemById['audio-1']).toMatchObject({
+      durationInFrames: 70,
+      sourceEnd: 70,
+    })
+  })
+
+  it('clamps a linked start trim to the closest neighbor on every companion track', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({ from: 60, sourceStart: 60, sourceEnd: 120 }),
+      makeAudioItem({ from: 60, sourceStart: 60, sourceEnd: 120 }),
+      makeVideoItem({
+        id: 'video-previous',
+        linkedGroupId: undefined,
+        from: 0,
+        durationInFrames: 40,
+      }),
+      makeAudioItem({
+        id: 'audio-previous',
+        linkedGroupId: undefined,
+        from: 20,
+        durationInFrames: 30,
+      }),
+    ])
+
+    trimItemStart('video-1', -30)
+
+    expect(useItemsStore.getState().itemById['video-1']).toMatchObject({
+      from: 50,
+      durationInFrames: 70,
+      sourceStart: 50,
+    })
+    expect(useItemsStore.getState().itemById['audio-1']).toMatchObject({
+      from: 50,
+      durationInFrames: 70,
+      sourceStart: 50,
+    })
+  })
+
   it('clips and removes attached captions when a regular start trim shortens the clip', () => {
     useItemsStore
       .getState()
@@ -208,6 +262,34 @@ describe('linked edit tools', () => {
     expect(itemById['caption-inside']).toMatchObject({ from: 20, durationInFrames: 10 })
     expect(itemById['caption-overlap']).toMatchObject({ from: 45, durationInFrames: 5 })
     expect(itemById['caption-after']).toBeUndefined()
+  })
+
+  it('parks keyframes beyond a shortened clip instead of deleting them', () => {
+    useItemsStore.getState().setItems([makeVideoItem(), makeAudioItem()])
+    useKeyframesStore.getState().setKeyframes([
+      {
+        itemId: 'video-1',
+        properties: [
+          {
+            property: 'opacity',
+            keyframes: [
+              { id: 'visible', frame: 10, value: 0, easing: 'linear' },
+              { id: 'parked', frame: 55, value: 1, easing: 'linear' },
+            ],
+          },
+        ],
+      },
+    ])
+
+    trimItemEnd('video-1', -10)
+
+    expect(useItemsStore.getState().itemById['video-1']?.durationInFrames).toBe(50)
+    expect(
+      useKeyframesStore
+        .getState()
+        .getAllKeyframesForProperty('video-1', 'opacity')
+        .map((keyframe) => keyframe.frame),
+    ).toEqual([10, 55])
   })
 
   it('trims only the targeted clip when linked selection is off', () => {
@@ -261,10 +343,13 @@ describe('linked edit tools', () => {
     expect(itemById['audio-1']).toMatchObject({ from: 0, durationInFrames: 120, speed: 0.5 })
   })
 
-  it('slips synchronized compound wrappers together', () => {
+  it.each([
+    ['visual', 'comp-1'],
+    ['audio', 'comp-audio-1'],
+  ])('slips synchronized compound wrappers together from the %s wrapper', (_side, itemId) => {
     setCompoundWrapperItems()
 
-    slipItem('comp-1', 12)
+    slipItem(itemId, 12)
 
     const itemById = useItemsStore.getState().itemById
     expect(itemById['comp-1']).toMatchObject({
@@ -348,6 +433,72 @@ describe('linked edit tools', () => {
     expect(useTransitionsStore.getState().transitions).toHaveLength(1)
   })
 
+  it('clamps rolling before it can invalidate a transition on the opposite edge', () => {
+    useEditorStore.setState({ linkedSelectionEnabled: false })
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-a',
+        durationInFrames: 100,
+        sourceEnd: 100,
+        sourceDuration: 300,
+        linkedGroupId: undefined,
+      }),
+      makeVideoItem({
+        id: 'video-b',
+        from: 100,
+        durationInFrames: 40,
+        sourceStart: 100,
+        sourceEnd: 140,
+        sourceDuration: 300,
+        linkedGroupId: undefined,
+      }),
+      makeVideoItem({
+        id: 'video-c',
+        from: 140,
+        durationInFrames: 100,
+        sourceStart: 100,
+        sourceEnd: 200,
+        sourceDuration: 300,
+        linkedGroupId: undefined,
+      }),
+    ])
+    useTransitionsStore.getState().setTransitions([
+      {
+        id: 'incoming',
+        leftClipId: 'video-a',
+        rightClipId: 'video-b',
+        trackId: 'video-track',
+        type: 'crossfade',
+        durationInFrames: 5,
+        presentation: 'fade',
+        timing: 'linear',
+        alignment: 0.5,
+      },
+      {
+        id: 'clock-wipe',
+        leftClipId: 'video-b',
+        rightClipId: 'video-c',
+        trackId: 'video-track',
+        type: 'crossfade',
+        durationInFrames: 30,
+        presentation: 'clockWipe',
+        timing: 'linear',
+        alignment: 0.5,
+      },
+    ])
+
+    rollingTrimItems('video-a', 'video-b', 20)
+
+    expect(useItemsStore.getState().itemById['video-b']).toMatchObject({
+      from: 109,
+      durationInFrames: 31,
+    })
+    expect(useTransitionsStore.getState().transitions.map((item) => item.id)).toEqual([
+      'incoming',
+      'clock-wipe',
+    ])
+  })
+
   it('ripple trims linked companions and shifts downstream linked pairs across tracks', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({ id: 'video-1', linkedGroupId: 'group-1' }),
@@ -375,6 +526,73 @@ describe('linked edit tools', () => {
     expect(itemById['audio-1']).toMatchObject({ from: 0, durationInFrames: 50, sourceStart: 10 })
     expect(itemById['video-2']).toMatchObject({ from: 80 })
     expect(itemById['audio-2']).toMatchObject({ from: 80 })
+  })
+
+  it('clamps ripple before it can invalidate a transition on the opposite edge', () => {
+    useEditorStore.setState({ linkedSelectionEnabled: false })
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-a',
+        durationInFrames: 100,
+        sourceEnd: 100,
+        sourceDuration: 300,
+        linkedGroupId: undefined,
+      }),
+      makeVideoItem({
+        id: 'video-b',
+        from: 100,
+        durationInFrames: 40,
+        sourceStart: 100,
+        sourceEnd: 140,
+        sourceDuration: 300,
+        linkedGroupId: undefined,
+      }),
+      makeVideoItem({
+        id: 'video-c',
+        from: 140,
+        durationInFrames: 100,
+        sourceStart: 100,
+        sourceEnd: 200,
+        sourceDuration: 300,
+        linkedGroupId: undefined,
+      }),
+    ])
+    useTransitionsStore.getState().setTransitions([
+      {
+        id: 'incoming',
+        leftClipId: 'video-a',
+        rightClipId: 'video-b',
+        trackId: 'video-track',
+        type: 'crossfade',
+        durationInFrames: 5,
+        presentation: 'fade',
+        timing: 'linear',
+        alignment: 0.5,
+      },
+      {
+        id: 'clock-wipe',
+        leftClipId: 'video-b',
+        rightClipId: 'video-c',
+        trackId: 'video-track',
+        type: 'crossfade',
+        durationInFrames: 30,
+        presentation: 'clockWipe',
+        timing: 'linear',
+        alignment: 0.5,
+      },
+    ])
+
+    rippleTrimItem('video-b', 'start', 20)
+
+    expect(useItemsStore.getState().itemById['video-b']).toMatchObject({
+      from: 100,
+      durationInFrames: 31,
+    })
+    expect(useItemsStore.getState().itemById['video-c']).toMatchObject({ from: 131 })
+    expect(useTransitionsStore.getState().transitions.map((item) => item.id)).toEqual([
+      'incoming',
+      'clock-wipe',
+    ])
   })
 
   it('ripple trim auto-blades a sync-locked continuous clip on another track', () => {
@@ -590,7 +808,7 @@ describe('linked edit tools', () => {
     ])
   })
 
-  it('slips a linked audio edit back onto video and repairs transition duration', () => {
+  it('clamps a linked audio slip before it consumes the video transition handle', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({
         id: 'video-1',
@@ -628,10 +846,10 @@ describe('linked edit tools', () => {
     slipItem('audio-2', -4)
 
     const itemById = useItemsStore.getState().itemById
-    expect(itemById['audio-2']).toMatchObject({ sourceStart: 2, sourceEnd: 62 })
-    expect(itemById['video-2']).toMatchObject({ sourceStart: 2, sourceEnd: 62 })
+    expect(itemById['audio-2']).toMatchObject({ sourceStart: 6, sourceEnd: 66 })
+    expect(itemById['video-2']).toMatchObject({ sourceStart: 6, sourceEnd: 66 })
     expect(useTransitionsStore.getState().transitions).toEqual([
-      expect.objectContaining({ durationInFrames: 5 }),
+      expect.objectContaining({ durationInFrames: 12 }),
     ])
   })
 
@@ -792,6 +1010,144 @@ describe('linked edit tools', () => {
         rightClipId: 'video-middle',
         durationInFrames: 12,
       }),
+    ])
+  })
+
+  it.each([
+    {
+      side: 'visual',
+      itemId: 'visual-middle',
+      leftId: 'visual-left',
+      rightId: 'visual-right',
+    },
+    {
+      side: 'audio',
+      itemId: 'audio-middle',
+      leftId: 'audio-left',
+      rightId: 'audio-right',
+    },
+  ])(
+    'slides split compound wrappers with source continuity from the $side wrapper',
+    ({ itemId, leftId, rightId }) => {
+      const visual = (id: string, from: number, sourceStart: number, sourceEnd: number) =>
+        makeCompositionItem({
+          id: `visual-${id}`,
+          from,
+          durationInFrames: 30,
+          compositionId: 'nested-composition',
+          linkedGroupId: `group-${id}`,
+          originId: 'visual-split-origin',
+          sourceStart,
+          sourceEnd,
+          sourceDuration: 600,
+          sourceFps: 60,
+          speed: 2,
+        })
+      const audio = (id: string, from: number, sourceStart: number, sourceEnd: number) =>
+        makeAudioItem({
+          id: `audio-${id}`,
+          from,
+          durationInFrames: 30,
+          mediaId: undefined,
+          src: '',
+          compositionId: 'nested-composition',
+          linkedGroupId: `group-${id}`,
+          originId: 'audio-split-origin',
+          sourceStart,
+          sourceEnd,
+          sourceDuration: 600,
+          sourceFps: 60,
+          speed: 2,
+        })
+
+      useItemsStore
+        .getState()
+        .setItems([
+          visual('left', 0, 0, 120),
+          audio('left', 0, 0, 120),
+          visual('middle', 30, 120, 240),
+          audio('middle', 30, 120, 240),
+          visual('right', 60, 240, 360),
+          audio('right', 60, 240, 360),
+        ])
+
+      slideItem(itemId, 5, leftId, rightId)
+
+      const itemById = useItemsStore.getState().itemById
+      expect(itemById['visual-middle']).toMatchObject({
+        from: 35,
+        sourceStart: 140,
+        sourceEnd: 260,
+      })
+      expect(itemById['audio-middle']).toMatchObject({
+        from: 35,
+        sourceStart: 140,
+        sourceEnd: 260,
+      })
+    },
+  )
+
+  it('clamps an audio-initiated linked slide against the video transition handle', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-left',
+        sourceStart: 0,
+        sourceEnd: 60,
+        sourceDuration: 66,
+        linkedGroupId: 'group-left',
+      }),
+      makeAudioItem({
+        id: 'audio-left',
+        sourceStart: 0,
+        sourceEnd: 60,
+        sourceDuration: 66,
+        linkedGroupId: 'group-left',
+      }),
+      makeVideoItem({
+        id: 'video-middle',
+        from: 60,
+        sourceStart: 60,
+        sourceEnd: 120,
+        sourceDuration: 240,
+        linkedGroupId: 'group-middle',
+        mediaId: 'media-2',
+      }),
+      makeAudioItem({
+        id: 'audio-middle',
+        from: 60,
+        sourceStart: 60,
+        sourceEnd: 120,
+        sourceDuration: 240,
+        linkedGroupId: 'group-middle',
+        mediaId: 'media-2',
+      }),
+      makeVideoItem({
+        id: 'video-right',
+        from: 120,
+        sourceStart: 120,
+        sourceEnd: 180,
+        sourceDuration: 300,
+        linkedGroupId: 'group-right',
+        mediaId: 'media-3',
+      }),
+      makeAudioItem({
+        id: 'audio-right',
+        from: 120,
+        sourceStart: 120,
+        sourceEnd: 180,
+        sourceDuration: 300,
+        linkedGroupId: 'group-right',
+        mediaId: 'media-3',
+      }),
+    ])
+    expect(addTransition('video-left', 'video-middle', 'crossfade', 12)).toBe(true)
+
+    slideItem('audio-middle', 5, 'audio-left', 'audio-right')
+
+    expect(useItemsStore.getState().itemById['audio-middle']).toMatchObject({ from: 60 })
+    expect(useItemsStore.getState().itemById['video-middle']).toMatchObject({ from: 60 })
+    expect(useTransitionsStore.getState().transitions).toEqual([
+      expect.objectContaining({ durationInFrames: 12 }),
     ])
   })
 

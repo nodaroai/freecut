@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Dialog,
@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -48,6 +49,7 @@ import type {
   ExportMode,
   ExtendedExportSettings,
   CompositionInputProps,
+  SubtitleExportMode,
 } from '@/types/export'
 import { useClientRender } from '../hooks/use-client-render'
 import {
@@ -57,22 +59,29 @@ import {
   rangesFromMarkers,
 } from '../utils/build-render-job'
 import { useRenderQueueStore, type RenderJob } from '../stores/render-queue-store'
-import { useProjectStore } from '@/features/export/deps/projects'
-import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
-import { useTimelineStore } from '@/features/export/deps/timeline'
+import {
+  getActiveExportSequenceId,
+  getExportableSequence,
+  listExportableSequences,
+  type ExportableSequence,
+} from '@/features/export/deps/timeline-compositions'
 import { formatTimecode, framesToSeconds } from '@/shared/utils/time-utils'
 import type { ExportPreflightResult } from '../utils/export-preflight'
 import { assessExportPreflight, summarizePreflightSeverity } from '../utils/export-preflight'
 import {
   getCompatibleVideoCodecs,
   getDefaultVideoCodec,
+  estimateFileSize,
+  mapToClientSettings,
   mapExportCodecToClientCodec,
   type ClientCodec,
   type ClientVideoContainer,
   type ClientAudioContainer,
 } from '../utils/client-renderer'
 import { ExportPreviewPlayer } from './export-preview-player'
-import { useBrokenMediaIds } from '../deps/media-library'
+import { useBrokenMediaIds, useMediaMetadataById } from '../deps/media-library'
+import { assessSmartCopyEligibility } from '../utils/smart-copy'
+import { resolveVideoBitrate } from '../utils/video-bitrate'
 
 export interface ExportDialogProps {
   open: boolean
@@ -121,6 +130,7 @@ function formatTime(seconds: number): string {
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
@@ -167,7 +177,7 @@ const EXPORT_PRESETS: ExportPreset[] = [
     labelKey: 'export.settings.presetRecommended',
     container: 'mp4',
     codec: 'h264',
-    quality: 'high',
+    quality: 'medium',
     scale: 1,
   },
   {
@@ -254,9 +264,11 @@ function ExportPreflightPanel({ preflight }: { preflight: ExportPreflightResult 
           <span className="text-sm font-medium">{t('export.preflight.title')}</span>
         </div>
         <span className="text-xs text-muted-foreground">
-          {preflight.predictedRenderPath === 'worker'
-            ? t('export.preflight.workerPath')
-            : t('export.preflight.fallback')}
+          {preflight.predictedRenderPath === 'smart-copy'
+            ? t('export.preflight.smartCopyPath')
+            : preflight.predictedRenderPath === 'worker'
+              ? t('export.preflight.workerPath')
+              : t('export.preflight.fallback')}
         </span>
       </div>
       <div className="space-y-1.5">
@@ -291,28 +303,48 @@ function ExportPreflightPanel({ preflight }: { preflight: ExportPreflightResult 
 
 export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogProps) {
   const { t } = useTranslation()
-  const projectWidth = useProjectStore(
-    (s) => s.currentProject?.metadata.width ?? DEFAULT_PROJECT_WIDTH,
+  // Which sequence to export (Main or a standalone tab). Snapshotted when the
+  // dialog opens (reset to the active tab) and re-read when the picker changes.
+  // Sourced read-only so the editor view is never disturbed; the timeline isn't
+  // edited while the modal is up, so a snapshot on open is sufficient.
+  const [selectedSequenceId, setSelectedSequenceId] = useState<string | null>(null)
+  const [sequenceOptions, setSequenceOptions] = useState<
+    Array<{ id: string | null; name: string }>
+  >([])
+  const [exportable, setExportable] = useState<ExportableSequence>(() =>
+    getExportableSequence(null),
   )
-  const projectHeight = useProjectStore(
-    (s) => s.currentProject?.metadata.height ?? DEFAULT_PROJECT_HEIGHT,
-  )
-  // Timeline state for in/out points and duration calculation
-  const fps = useTimelineStore((s) => s.fps)
-  const tracks = useTimelineStore((s) => s.tracks ?? [])
-  const items = useTimelineStore((s) => s.items)
-  const transitions = useTimelineStore((s) => s.transitions ?? [])
-  const keyframes = useTimelineStore((s) => s.keyframes ?? [])
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
-  const markers = useTimelineStore((s) => s.markers ?? [])
+  useEffect(() => {
+    if (!open) return
+    const id = getActiveExportSequenceId()
+    setSelectedSequenceId(id)
+    setSequenceOptions(listExportableSequences())
+    setExportable(getExportableSequence(id))
+  }, [open])
+  const handleSelectSequence = useCallback((id: string | null) => {
+    setSelectedSequenceId(id)
+    setExportable(getExportableSequence(id))
+  }, [])
+
+  // Resolution + timeline data all follow the selected sequence.
+  const projectWidth = exportable.width
+  const projectHeight = exportable.height
+  const fps = exportable.fps
+  const tracks = exportable.tracks
+  const items = exportable.items
+  const transitions = exportable.transitions
+  const keyframes = exportable.keyframes
+  const inPoint = exportable.inPoint
+  const outPoint = exportable.outPoint
   const brokenMediaIds = useBrokenMediaIds()
   const enqueueJobs = useRenderQueueStore((s) => s.enqueueJobs)
 
   const [settings, setSettings] = useState<ExportSettings>({
     codec: getDefaultCodecForFormat('mp4'),
-    quality: 'high',
+    quality: 'medium',
     resolution: { width: projectWidth, height: projectHeight },
+    rateControl: 'auto',
+    smartCopy: true,
   })
 
   const [exportMode, setExportMode] = useState<ExportMode>('video')
@@ -321,7 +353,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
   const [view, setView] = useState<DialogView>('settings')
   const [startTime, setStartTime] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [embedSubtitles, setEmbedSubtitles] = useState(true)
+  const [subtitleMode, setSubtitleMode] = useState<SubtitleExportMode>('burn')
   const [renderWholeProject, setRenderWholeProject] = useState(false)
   const wasOpenRef = useRef(false)
 
@@ -331,21 +363,66 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     return Math.max(...items.map((item) => item.from + item.durationInFrames))
   }, [items])
 
+  const dominantVideoMediaId = useMemo(() => {
+    let mediaId: string | undefined
+    let longestDuration = -1
+    for (const item of items) {
+      if (item.type !== 'video' || !item.mediaId) continue
+      if (item.durationInFrames > longestDuration) {
+        mediaId = item.mediaId
+        longestDuration = item.durationInFrames
+      }
+    }
+    return mediaId
+  }, [items])
+  const sourceMedia = useMediaMetadataById(dominantVideoMediaId)
+  const sourceVideo = useMemo(
+    () =>
+      sourceMedia && sourceMedia.bitrate > 0
+        ? {
+            bitrate: sourceMedia.bitrate,
+            fps: sourceMedia.fps,
+            codec: sourceMedia.codec,
+          }
+        : undefined,
+    [sourceMedia],
+  )
+
   // Check if in/out points are set
   const hasInOutPoints = inPoint !== null && outPoint !== null && outPoint > inPoint
-  const hasTranscriptSubtitles = useMemo(
+  const hasTranscriptSubtitles = useMemo(() => {
+    const reversedClipIds = new Set(
+      items
+        .filter(
+          (item) =>
+            (item.type === 'video' || item.type === 'audio') && item.isReversed === true,
+        )
+        .map((item) => item.id),
+    )
+    return items.some(
+      (item) =>
+        (item.type === 'subtitle' &&
+          item.source.type === 'transcript' &&
+          !reversedClipIds.has(item.source.clipId)) ||
+        ((item.type === 'video' || item.type === 'audio') &&
+          item.isReversed !== true &&
+          item.transcriptCaptions?.enabled === true &&
+          item.transcriptCaptions.type === 'transcript'),
+    )
+  }, [items])
+  // Soft (toggleable) subtitle tracks only work for Matroska (WebM/MKV). MP4/MOV
+  // can't — mediabunny's WebVTT-in-ISOBMFF muxing is broken and players barely
+  // support it anyway — so the "Embedded track" option is hidden there.
+  const containerSupportsSoftSubtitles = videoContainer === 'webm' || videoContainer === 'mkv'
+  const subtitleModeOptions = useMemo<SubtitleExportMode[]>(
     () =>
-      items.some(
-        (item) =>
-          (item.type === 'subtitle' && item.source.type === 'transcript') ||
-          ((item.type === 'video' || item.type === 'audio') &&
-            item.transcriptCaptions?.enabled === true &&
-            item.transcriptCaptions.type === 'transcript'),
-      ),
-    [items],
+      containerSupportsSoftSubtitles
+        ? ['off', 'burn', 'embedded', 'sidecar']
+        : ['off', 'burn', 'sidecar'],
+    [containerSupportsSoftSubtitles],
   )
-  const containerSupportsEmbeddedSubtitles =
-    videoContainer === 'mp4' || videoContainer === 'webm' || videoContainer === 'mkv'
+  // Coerce away a now-unavailable mode (e.g. "embedded" after switching to MP4).
+  const effectiveSubtitleMode = subtitleModeOptions.includes(subtitleMode) ? subtitleMode : 'burn'
 
   // Calculate export range
   const exportRange = useMemo(() => {
@@ -354,6 +431,77 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     }
     return { start: inPoint, end: outPoint, duration: outPoint - inPoint }
   }, [hasInOutPoints, inPoint, outPoint, renderWholeProject, timelineDurationFrames])
+
+  const resolvedVideoBitrate = useMemo(
+    () =>
+      resolveVideoBitrate({
+        codec: settings.codec,
+        quality: settings.quality,
+        width: settings.resolution.width,
+        height: settings.resolution.height,
+        fps,
+        rateControl: settings.rateControl,
+        customBitrate: settings.videoBitrate,
+        sourceVideo,
+      }),
+    [
+      fps,
+      settings.codec,
+      settings.quality,
+      settings.rateControl,
+      settings.resolution.height,
+      settings.resolution.width,
+      settings.videoBitrate,
+      sourceVideo,
+    ],
+  )
+
+  const previewClientSettings = useMemo(() => {
+    const mapped = mapToClientSettings({ ...settings, sourceVideo }, fps)
+    mapped.container = videoContainer
+    return mapped
+  }, [fps, settings, sourceVideo, videoContainer])
+
+  const smartCopyAssessment = useMemo(
+    () =>
+      assessSmartCopyEligibility({
+        settings: previewClientSettings,
+        tracks,
+        items,
+        transitions,
+        keyframes,
+        fps,
+        width: projectWidth,
+        height: projectHeight,
+        inPoint: renderWholeProject || !hasInOutPoints ? null : inPoint,
+        outPoint: renderWholeProject || !hasInOutPoints ? null : outPoint,
+        source: sourceMedia,
+      }),
+    [
+      fps,
+      hasInOutPoints,
+      inPoint,
+      items,
+      keyframes,
+      outPoint,
+      previewClientSettings,
+      projectHeight,
+      projectWidth,
+      renderWholeProject,
+      sourceMedia,
+      tracks,
+      transitions,
+    ],
+  )
+
+  const smartCopyWillRun = settings.smartCopy !== false && smartCopyAssessment.eligible
+  const estimatedFileSizeBytes = useMemo(
+    () =>
+      smartCopyWillRun && sourceMedia
+        ? sourceMedia.fileSize
+        : estimateFileSize(previewClientSettings, framesToSeconds(exportRange.duration, fps)),
+    [exportRange.duration, fps, previewClientSettings, smartCopyWillRun, sourceMedia],
+  )
 
   const preflightComposition = useMemo<CompositionInputProps>(
     () => ({
@@ -381,6 +529,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
         videoContainer === preset.container &&
         settings.codec === preset.codec &&
         settings.quality === preset.quality &&
+        (settings.rateControl ?? 'auto') === 'auto' &&
         settings.resolution.width === res.width &&
         settings.resolution.height === res.height
       )
@@ -390,6 +539,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     videoContainer,
     settings.codec,
     settings.quality,
+    settings.rateControl,
     settings.resolution.width,
     settings.resolution.height,
     projectWidth,
@@ -402,6 +552,9 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
       ...prev,
       codec: preset.codec,
       quality: preset.quality,
+      rateControl: 'auto',
+      videoBitrate: undefined,
+      smartCopy: true,
       resolution: scaledResolution(projectWidth, projectHeight, preset.scale),
     }))
   }
@@ -419,6 +572,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
 
   const {
     progress,
+    progressMessage,
     renderedFrames,
     totalFrames,
     status,
@@ -479,13 +633,11 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
   // state. Shared by "Export now" and the "Add to queue" actions.
   const buildExtendedSettings = (): ExtendedExportSettings => ({
     ...settings,
+    sourceVideo,
     mode: exportMode,
     videoContainer: exportMode === 'video' ? videoContainer : undefined,
     audioContainer: exportMode === 'audio' ? audioContainer : undefined,
-    embedSubtitles:
-      exportMode === 'video' && hasTranscriptSubtitles && containerSupportsEmbeddedSubtitles
-        ? embedSubtitles
-        : false,
+    subtitleMode: exportMode === 'video' ? effectiveSubtitleMode : undefined,
     renderWholeProject,
   })
 
@@ -495,17 +647,22 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     await startExport(buildExtendedSettings())
   }
 
-  // The active render range (whole project unless in/out points are set).
-  const queueRange = (): { inPoint: number | null; outPoint: number | null } =>
-    renderWholeProject || !hasInOutPoints
+  // The active render range for a sequence (whole timeline unless in/out set).
+  const queueRange = (
+    seq: ExportableSequence,
+  ): { inPoint: number | null; outPoint: number | null } =>
+    renderWholeProject ||
+    seq.inPoint === null ||
+    seq.outPoint === null ||
+    seq.outPoint <= seq.inPoint
       ? { inPoint: null, outPoint: null }
-      : { inPoint, outPoint }
+      : { inPoint: seq.inPoint, outPoint: seq.outPoint }
 
   // The frame window segment generators split over: the active range, or the
   // whole timeline when no in/out points are set.
-  const segmentWindow = (): { start: number; end: number } => {
-    const range = queueRange()
-    return { start: range.inPoint ?? 0, end: range.outPoint ?? timelineDurationFrames }
+  const segmentWindow = (seq: ExportableSequence): { start: number; end: number } => {
+    const range = queueRange(seq)
+    return { start: range.inPoint ?? 0, end: range.outPoint ?? seq.durationFrames }
   }
 
   // Close the export dialog and open the queue panel. Called BEFORE building
@@ -533,31 +690,51 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     }
   }
 
+  // Re-read the selected sequence at click time so a queued export always
+  // reflects the current timeline, not a snapshot that went stale while the
+  // dialog stayed open.
+  const captureSelection = () => getExportableSequence(selectedSequenceId)
+
   const handleAddCurrentRange = () => {
-    void enqueueAndReveal(async (settings) => [await buildRenderJob({ settings, ...queueRange() })])
+    const seq = captureSelection()
+    void enqueueAndReveal(async (settings) => [
+      await buildRenderJob({ settings, ...queueRange(seq), sequence: seq }),
+    ])
   }
 
   const handleAddMarkerSegments = () => {
-    const { start, end } = segmentWindow()
-    const ranges = rangesFromMarkers(markers, start, end)
+    const seq = captureSelection()
+    const { start, end } = segmentWindow(seq)
+    const ranges = rangesFromMarkers(seq.markers, start, end)
     if (ranges.length <= 1) {
       toast.info(t('export.renderQueue.noMarkers'))
       return
     }
     void enqueueAndReveal((settings) =>
-      buildSegmentJobs(settings, ranges, (i) => t('export.renderQueue.partLabel', { n: i + 1 })),
+      buildSegmentJobs(
+        settings,
+        ranges,
+        (i) => t('export.renderQueue.partLabel', { n: i + 1 }),
+        seq,
+      ),
     )
   }
 
   const handleSplitChunks = (seconds: number) => {
-    const { start, end } = segmentWindow()
-    const ranges = rangesFromFixedDuration(start, end, Math.max(1, Math.round(seconds * fps)))
+    const seq = captureSelection()
+    const { start, end } = segmentWindow(seq)
+    const ranges = rangesFromFixedDuration(start, end, Math.max(1, Math.round(seconds * seq.fps)))
     if (ranges.length === 0) {
       toast.info(t('export.renderQueue.nothingToRender'))
       return
     }
     void enqueueAndReveal((settings) =>
-      buildSegmentJobs(settings, ranges, (i) => t('export.renderQueue.partLabel', { n: i + 1 })),
+      buildSegmentJobs(
+        settings,
+        ranges,
+        (i) => t('export.renderQueue.partLabel', { n: i + 1 }),
+        seq,
+      ),
     )
   }
 
@@ -568,12 +745,14 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
       setExportMode('video')
       setVideoContainer('mp4')
       setAudioContainer('mp3')
-      setEmbedSubtitles(true)
+      setSubtitleMode('burn')
       setRenderWholeProject(false)
       setSettings({
         codec: getDefaultCodecForFormat('mp4'),
-        quality: 'high',
+        quality: 'medium',
         resolution: { width: projectWidth, height: projectHeight },
+        rateControl: 'auto',
+        smartCopy: true,
       })
       resetState()
       setPreflight(null)
@@ -608,7 +787,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
 
     void getSupportedCodecs({
       resolution: settings.resolution,
-      quality: settings.quality,
+      bitrate: resolvedVideoBitrate,
     })
       .then((codecs) => {
         if (cancelled) return
@@ -628,7 +807,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     return () => {
       cancelled = true
     }
-  }, [exportMode, getSupportedCodecs, open, settings.resolution, settings.quality, view, t])
+  }, [exportMode, getSupportedCodecs, open, resolvedVideoBitrate, settings.resolution, view, t])
 
   const videoContainerOptions = useMemo<VideoContainerOption[]>(() => {
     const allContainers: ClientVideoContainer[] = ['mp4', 'mov', 'webm', 'mkv']
@@ -676,6 +855,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
   }, [exportMode, hasCapabilityData, videoContainer, videoContainerOptions])
 
   useEffect(() => {
+    if (smartCopyWillRun) return
     const validCodecs = codecOptions
       .filter((option) => option.supported)
       .map((option) => option.value)
@@ -685,7 +865,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
       if (!fallbackCodec) return
       setSettings((prev) => ({ ...prev, codec: fallbackCodec as ExportSettings['codec'] }))
     }
-  }, [codecOptions, settings.codec])
+  }, [codecOptions, settings.codec, smartCopyWillRun])
 
   useEffect(() => {
     if (!open || view !== 'settings') {
@@ -701,13 +881,11 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     let cancelled = false
     const settingsForPreflight: ExtendedExportSettings = {
       ...settings,
+      sourceVideo,
       mode: exportMode,
       videoContainer: exportMode === 'video' ? videoContainer : undefined,
       audioContainer: exportMode === 'audio' ? audioContainer : undefined,
-      embedSubtitles:
-        exportMode === 'video' && hasTranscriptSubtitles && containerSupportsEmbeddedSubtitles
-          ? embedSubtitles
-          : false,
+      subtitleMode: exportMode === 'video' ? effectiveSubtitleMode : undefined,
       renderWholeProject,
     }
 
@@ -718,6 +896,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
       durationFrames: exportRange.duration,
       supportedVideoCodecs: supportedVideoCodecs ?? [],
       brokenMediaIds,
+      smartCopyAssessment,
     }).then((result) => {
       if (!cancelled) setPreflight(result)
     })
@@ -728,16 +907,17 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
   }, [
     audioContainer,
     brokenMediaIds,
-    embedSubtitles,
+    effectiveSubtitleMode,
     exportMode,
     exportRange.duration,
     fps,
     hasTranscriptSubtitles,
-    containerSupportsEmbeddedSubtitles,
     open,
     preflightComposition,
     renderWholeProject,
     settings,
+    smartCopyAssessment,
+    sourceVideo,
     supportedVideoCodecs,
     videoContainer,
     videoSupportError,
@@ -747,7 +927,9 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
   const preflightBlocksExport =
     preflight?.checks.some((check) => check.severity === 'error') ?? false
   const exportActionsDisabled =
-    (exportMode === 'video' && (!hasSupportedVideoPath || isCheckingVideoSupport)) ||
+    (exportMode === 'video' &&
+      !smartCopyWillRun &&
+      (!hasSupportedVideoPath || isCheckingVideoSupport)) ||
     preflightBlocksExport
 
   const preventClose = view === 'progress' || view === 'complete'
@@ -844,6 +1026,32 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
           <div className="py-4">
             <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
               <div className="space-y-4">
+                {/* Sequence picker — only when there's more than the Main timeline */}
+                {sequenceOptions.length > 1 && (
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="sequence" className="text-sm font-medium">
+                      {t('export.settings.sequence')}
+                    </Label>
+                    <Select
+                      value={selectedSequenceId ?? '__main__'}
+                      onValueChange={(value) =>
+                        handleSelectSequence(value === '__main__' ? null : value)
+                      }
+                    >
+                      <SelectTrigger id="sequence" className="w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sequenceOptions.map((option) => (
+                          <SelectItem key={option.id ?? '__main__'} value={option.id ?? '__main__'}>
+                            {option.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 {/* Export Mode: Video or Audio Toggle Group */}
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-medium">{t('export.settings.exportType')}</Label>
@@ -1093,41 +1301,159 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
                         </div>
                       </div>
 
-                      <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/20 p-3">
-                        <div className="space-y-1">
-                          <Label htmlFor="embed-subtitles" className="text-sm font-medium">
-                            {t('export.settings.embedSubtitles')}
-                          </Label>
-                          <p className="text-xs text-muted-foreground">
-                            {t('export.settings.embedSubtitlesDescription')}
-                          </p>
-                          {hasTranscriptSubtitles && !containerSupportsEmbeddedSubtitles && (
+                      <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="rate-control">{t('export.settings.rateControl')}</Label>
+                            <Select
+                              value={settings.rateControl ?? 'auto'}
+                              onValueChange={(value) =>
+                                setSettings((previous) => ({
+                                  ...previous,
+                                  rateControl: value as NonNullable<ExportSettings['rateControl']>,
+                                  videoBitrate:
+                                    value === 'auto'
+                                      ? undefined
+                                      : (previous.videoBitrate ?? resolvedVideoBitrate),
+                                }))
+                              }
+                            >
+                              <SelectTrigger id="rate-control">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="auto">
+                                  {t('export.settings.rateControlAuto')}
+                                </SelectItem>
+                                <SelectItem value="variable">
+                                  {t('export.settings.rateControlVbr')}
+                                </SelectItem>
+                                <SelectItem value="constant">
+                                  {t('export.settings.rateControlCbr')}
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <Label htmlFor="target-bitrate">
+                                {t('export.settings.targetBitrate')}
+                              </Label>
+                              {sourceVideo && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs"
+                                  onClick={() =>
+                                    setSettings((previous) => ({
+                                      ...previous,
+                                      rateControl: 'variable',
+                                      videoBitrate: sourceVideo.bitrate,
+                                    }))
+                                  }
+                                >
+                                  {t('export.settings.useSourceBitrate')}
+                                </Button>
+                              )}
+                            </div>
+                            <div className="relative">
+                              <Input
+                                id="target-bitrate"
+                                type="number"
+                                min="0.1"
+                                max="500"
+                                step="0.1"
+                                disabled={(settings.rateControl ?? 'auto') === 'auto'}
+                                value={(
+                                  (settings.videoBitrate ?? resolvedVideoBitrate) / 1_000_000
+                                ).toFixed(2)}
+                                onChange={(event) => {
+                                  const mbps = Number(event.target.value)
+                                  if (!Number.isFinite(mbps) || mbps <= 0) return
+                                  setSettings((previous) => ({
+                                    ...previous,
+                                    videoBitrate: Math.round(mbps * 1_000_000),
+                                  }))
+                                }}
+                                className="pr-14"
+                              />
+                              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                Mbps
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-start justify-between gap-4 border-t border-border pt-3">
+                          <div className="space-y-1">
+                            <Label htmlFor="smart-copy" className="text-sm font-medium">
+                              {t('export.settings.smartCopy')}
+                            </Label>
                             <p className="text-xs text-muted-foreground">
-                              {t('export.settings.embedSubtitlesUnsupported', {
-                                container: videoContainer.toUpperCase(),
+                              {t(`export.settings.smartCopyStatus.${smartCopyAssessment.reason}`)}
+                            </p>
+                          </div>
+                          <Switch
+                            id="smart-copy"
+                            checked={settings.smartCopy !== false}
+                            onCheckedChange={(checked) =>
+                              setSettings((previous) => ({ ...previous, smartCopy: checked }))
+                            }
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-background/60 px-3 py-2 text-xs">
+                          <span className="font-medium text-foreground">
+                            {smartCopyWillRun
+                              ? t('export.settings.smartCopyPath')
+                              : `${(resolvedVideoBitrate / 1_000_000).toFixed(2)} Mbps ${
+                                  (settings.rateControl ?? 'auto') === 'constant' ? 'CBR' : 'VBR'
+                                }`}
+                          </span>
+                          <span className="text-muted-foreground">
+                            {t('export.settings.estimatedSize', {
+                              size: formatFileSize(estimatedFileSizeBytes),
+                            })}
+                          </span>
+                          {sourceVideo && (
+                            <span className="text-muted-foreground">
+                              {t('export.settings.sourceBitrate', {
+                                bitrate: (sourceVideo.bitrate / 1_000_000).toFixed(2),
                               })}
-                            </p>
-                          )}
-                          {embedSubtitles &&
-                            hasTranscriptSubtitles &&
-                            containerSupportsEmbeddedSubtitles &&
-                            videoContainer === 'mp4' && (
-                              <p className="text-xs text-muted-foreground">
-                                {t('export.settings.embedSubtitlesMp4Note')}
-                              </p>
-                            )}
-                          {!hasTranscriptSubtitles && (
-                            <p className="text-xs text-muted-foreground">
-                              {t('export.settings.noTranscriptSegments')}
-                            </p>
+                            </span>
                           )}
                         </div>
-                        <Switch
-                          id="embed-subtitles"
-                          checked={embedSubtitles && containerSupportsEmbeddedSubtitles}
-                          disabled={!hasTranscriptSubtitles || !containerSupportsEmbeddedSubtitles}
-                          onCheckedChange={setEmbedSubtitles}
-                        />
+                      </div>
+
+                      <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label htmlFor="subtitle-mode" className="text-sm font-medium">
+                            {t('export.settings.subtitles', { defaultValue: 'Subtitles' })}
+                          </Label>
+                          <Select
+                            value={effectiveSubtitleMode}
+                            onValueChange={(value) => setSubtitleMode(value as SubtitleExportMode)}
+                            disabled={!hasTranscriptSubtitles}
+                          >
+                            <SelectTrigger id="subtitle-mode" className="w-[160px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {subtitleModeOptions.map((mode) => (
+                                <SelectItem key={mode} value={mode}>
+                                  {t(`export.settings.subtitleMode.${mode}`)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {hasTranscriptSubtitles
+                            ? t(`export.settings.subtitleMode.${effectiveSubtitleMode}Description`)
+                            : t('export.settings.noTranscriptSegments')}
+                        </p>
                       </div>
                     </div>
                   </>
@@ -1248,7 +1574,8 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
                 </div>
                 <div className="flex items-center justify-between text-sm gap-2">
                   <span className="text-muted-foreground truncate">
-                    {status === 'preparing' && t('export.progress.preparing')}
+                    {status === 'preparing' &&
+                      (progressMessage ?? t('export.progress.preparing'))}
                     {status === 'rendering' && t('export.progress.rendering')}
                     {status === 'encoding' && t('export.progress.encoding')}
                     {status === 'finalizing' && t('export.progress.finalizing')}

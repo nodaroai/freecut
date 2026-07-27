@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "편집기 도구 모음",
     "workspaces": {
+      "motion": "Motion",
       "label": "작업 영역",
       "edit": "편집",
       "color": "컬러",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "키보드 단축키",
     "keyboardShortcutsAria": "키보드 단축키",
     "viewOnGitHub": "GitHub에서 보기",
+    "joinDiscord": "Discord 참여",
     "debugPanel": "디버그 패널",
     "debugPanelAria": "디버그 패널",
     "save": "저장",
@@ -80,7 +82,11 @@
       "autoSave": "자동 저장",
       "interval": "간격",
       "intervalMinutes": "{{count}}분",
-      "undoHistoryDepth": "실행 취소 기록 깊이"
+      "undoHistoryDepth": "실행 취소 기록 깊이",
+      "uiSounds": "인터페이스 사운드",
+      "uiSoundVolume": "사운드 볼륨",
+      "uiSoundVoice": "사운드 테마",
+      "uiSoundPreview": "미리듣기"
     },
     "ai": {
       "captionSampleInterval": "자막 샘플링 간격",

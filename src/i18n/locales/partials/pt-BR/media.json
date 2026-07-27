@@ -4,6 +4,7 @@
       "aiCaptionsCount": "Contagem de legendas de IA",
       "analyzeWithAI": "Analisar com IA",
       "analyzingWithAI": "Analisando com IA",
+      "cancelInterpolation": "Cancelar interpolação",
       "chooseMkvOrWebm": "Escolha MKV ou WebM",
       "deleteProxy": "Excluir proxy",
       "deleteTranscript": "Excluir transcricao",
@@ -11,10 +12,13 @@
       "generateProxy": "Gerar proxy",
       "generateTranscript": "Gerar transcricao",
       "importing": "Importando",
+      "interpolateFactor": "{{factor}}x quadros",
+      "interpolateFrames": "Interpolar quadros",
       "preparing": "Preparando",
       "menuAi": "Menu IA",
       "menuCaptions": "Legendas incorporadas",
       "menuFile": "Arquivo",
+      "menuInterpolation": "Interpolação de quadros",
       "menuProxy": "Proxy",
       "menuTranscript": "Transcrição",
       "playAudio": "Reproduzir audio",
@@ -37,17 +41,32 @@
       "transcriptReadyFor": "Transcricao pronta para \"{{name}}\"",
       "transcriptionFailedFor": "Falha na transcricao de \"{{name}}\"",
       "transcriptsDeleted": "Transcricoes excluidas",
-      "transcriptsReady": "Transcricoes prontas"
+      "transcriptsReady": "Transcricoes prontas",
+      "menuUpscale": "Ampliar",
+      "upscaleVideo": "Ampliar 2x",
+      "cancelUpscale": "Cancelar ampliação",
+      "upscaleVariant": {
+        "liveAction": "Ação ao vivo",
+        "animation": "Anime",
+        "threeD": "Renderização 3D"
+      }
     },
     "compositions": {
-      "deleteBody": "Excluir o clipe composto \"{{name}}\"? Esta ação não pode ser desfeita.",
+      "compositionsGroup": "Composições",
+      "compoundClipsGroup": "Clipes compostos",
+      "deleteBody": "Excluir o clipe composto “{{name}}”? Esta ação não pode ser desfeita.",
       "deleteInstancesDetail": "{{count}} instâncias da linha do tempo que usam este clipe composto também serão removidas.",
       "deleteInstancesTitle": "As instâncias vinculadas serão removidas",
+      "deleteSequenceBody": "Excluir a sequência “{{name}}”? Esta ação não pode ser desfeita.",
+      "deleteSequenceInstancesDetail": "{{count}} instâncias da linha do tempo que usam esta sequência também serão removidas.",
+      "deleteSequenceTitle": "Excluir sequência",
       "deleteTitle": "Excluir clipe composto",
       "enter": "Entrar",
       "itemCount": "{{count}} itens",
+      "openAsTab": "Abrir como aba",
       "rename": "Renomear",
-      "sectionTitle": "Clipes compostos"
+      "sectionTitle": "Composições",
+      "sequencesGroup": "Sequências"
     },
     "deleteDialog": {
       "bodyMultiple": "Isso removerá permanentemente {{count}} itens de mídia deste projeto. Esta ação não pode ser desfeita.",
@@ -87,7 +106,7 @@
       "codec": "Codificador",
       "dimensions": "Dimensoes",
       "duration": "Duracao",
-      "fpsValue": "Valor de FPS",
+      "fpsValue": "{{value}} fps",
       "frameRate": "Taxa de quadros",
       "loadingTranscript": "Carregando transcricao",
       "mediaInfo": "Informacoes da midia",
@@ -123,14 +142,19 @@
       "dragDropUnsupported": "Arrastar e soltar nao suportado",
       "dropFilesHere": "Solte os arquivos aqui",
       "filesRejected": "Arquivos rejeitados",
+      "downloadingInterpolationModel": "Baixando modelo de interpolação",
       "generateProxiesForSelected": "Gerar proxies para {{count}} itens selecionados",
       "generatingProxies": "Gerando proxies",
       "generatingTranscripts": "Gerando transcricoes",
+      "interpolatingFrames": "Interpolando quadros",
+      "interpolationProgress": "Progresso da interpolação de quadros",
+      "timeRemaining": "{{time}} restante",
       "gridItemSize": "Tamanho dos itens da grade",
-      "groupAudio": "Agrupar audio",
-      "groupGifs": "Agrupar GIFs",
-      "groupImages": "Agrupar imagens",
-      "groupVideos": "Agrupar videos",
+      "groupAudio": "Audio",
+      "groupGifs": "GIFs",
+      "groupImages": "Imagens",
+      "groupLottie": "Lottie",
+      "groupVideos": "Videos",
       "import": "Importar",
       "importFromUrlDescription": "Importe um arquivo de mídia de uma URL direta.",
       "importFromUrlHint": "Cole um link direto para um arquivo de vídeo, áudio, imagem ou GIF.",
@@ -155,6 +179,9 @@
       "selectedAssetsCount": "{{count}} assets selecionados",
       "selectedAssetsCount_one": "{{count}} asset selecionado",
       "selectedAssetsCount_other": "{{count}} assets selecionados",
+      "sequencesCount": "{{count}} sequências",
+      "sequencesCount_one": "{{count}} sequência",
+      "sequencesCount_other": "{{count}} sequências",
       "showMediaLibrary": "Mostrar biblioteca de midia",
       "sortDate": "Ordenar por data",
       "sortName": "Ordenar por nome",
@@ -168,7 +195,8 @@
       "typeShort": {
         "video": "VIDEO",
         "audio": "AUDIO",
-        "image": "IMAGEM"
+        "image": "IMAGEM",
+        "lottie": "LOTTIE"
       },
       "sortShort": {
         "name": "NOME",
@@ -194,7 +222,9 @@
         "waveform": "Forma de onda"
       },
       "importFailed_one": "Falha ao importar {{count}} arquivo. Verifique o arquivo e tente novamente.",
-      "importFailed_other": "Falha ao importar {{count}} arquivos. Verifique os arquivos e tente novamente."
+      "importFailed_other": "Falha ao importar {{count}} arquivos. Verifique os arquivos e tente novamente.",
+      "upscalingVideo": "Ampliando vídeo",
+      "upscaleProgress": "Progresso da ampliação"
     },
     "missingMedia": {
       "title": "Mídia ausente",
@@ -247,16 +277,20 @@
       "language": "Idioma",
       "model": "Modelo",
       "noLanguages": "Nenhum idioma",
+      "parakeetAutoDetects": "Detecta automaticamente {{count}} idiomas europeus.",
+      "parakeetChooseWhisper": "Para chinês, japonês, coreano e outros idiomas, escolha um modelo Whisper.",
       "progressAria": "Progresso",
       "quantization": "Quantizacao",
       "refreshTitle": "Atualizar transcrição",
       "searchLanguages": "Pesquisar idiomas",
       "start": "Iniciar",
-      "stop": "Parar"
+      "stop": "Parar",
+      "whisperLanguageHint": "Escolha o idioma falado para melhorar a precisão ou use a detecção automática."
     },
     "type": {
       "audio": "Audio",
       "image": "Imagem",
+      "lottie": "Lottie",
       "video": "Video"
     },
     "unsupportedCodec": {

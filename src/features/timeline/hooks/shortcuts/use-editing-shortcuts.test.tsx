@@ -89,6 +89,8 @@ describe('useEditingShortcuts delete ownership', () => {
       selectedMarkerId: null,
       selectedTransitionId: null,
       selectionType: null,
+      editKeyframePanelOpen: false,
+      expandedKeyframeLanes: new Set(),
     })
     useKeyframeSelectionStore.setState({
       selectedKeyframes: [],
@@ -96,7 +98,6 @@ describe('useEditingShortcuts delete ownership', () => {
       isCut: false,
     })
     useEditorStore.setState({
-      keyframeEditorOpen: false,
       keyframeEditorShortcutScopeActive: false,
       transcriptEditorShortcutScopeActive: false,
     })
@@ -122,14 +123,13 @@ describe('useEditingShortcuts delete ownership', () => {
     useSelectionStore.setState({
       selectedItemIds: ['clip-1'],
       selectionType: 'item',
+      editKeyframePanelOpen: true,
+      expandedKeyframeLanes: new Set(['clip-1']),
     })
     useKeyframeSelectionStore.setState({
       selectedKeyframes: [{ itemId: 'clip-1', property: 'x', keyframeId: 'kf-1' }],
     })
-    useEditorStore.setState({
-      keyframeEditorOpen: true,
-      keyframeEditorShortcutScopeActive: false,
-    })
+    useEditorStore.setState({ keyframeEditorShortcutScopeActive: false })
 
     render(<ShortcutHarness />)
 
@@ -168,9 +168,9 @@ describe('useEditingShortcuts delete ownership', () => {
     useSelectionStore.setState({
       selectedItemIds: ['clip-1'],
       selectionType: 'item',
+      editKeyframePanelOpen: false,
     })
     useEditorStore.setState({
-      keyframeEditorOpen: true,
       keyframeEditorShortcutScopeActive: true,
     })
 
@@ -203,6 +203,8 @@ describe('useEditingShortcuts delete ownership', () => {
     useSelectionStore.setState({
       selectedItemIds: ['clip-1'],
       selectionType: 'item',
+      editKeyframePanelOpen: false,
+      expandedKeyframeLanes: new Set(),
     })
     useEditorStore.setState({
       transcriptEditorShortcutScopeActive: true,
@@ -242,7 +244,6 @@ describe('useEditingShortcuts delete ownership', () => {
       selectedKeyframes: [{ itemId: 'clip-1', property: 'x', keyframeId: 'kf-1' }],
     })
     useEditorStore.setState({
-      keyframeEditorOpen: false,
       keyframeEditorShortcutScopeActive: false,
     })
 
@@ -261,30 +262,7 @@ describe('useEditingShortcuts delete ownership', () => {
     expect(deleteEvent.stopPropagation).not.toHaveBeenCalled()
   })
 
-  it('Ctrl+K splits all items at playhead', () => {
-    useTimelineStore.setState({
-      tracks: [TRACK, TRACK_2],
-      items: [
-        { ...ITEM, from: 20, durationInFrames: 40 },
-        { ...ITEM, id: 'clip-2', trackId: 'track-2', from: 40, durationInFrames: 30 },
-      ],
-    })
-    usePlaybackStore.setState({ currentFrame: 50, previewFrame: null, previewItemId: null })
-
-    render(<ShortcutHarness />)
-
-    const [, splitCallback] = getHotkeyRegistration(HOTKEYS.SPLIT_AT_PLAYHEAD)
-    const splitEvent = createHotkeyEvent()
-
-    act(() => {
-      splitCallback(splitEvent)
-    })
-
-    expect(useTimelineStore.getState().items).toHaveLength(4)
-    expect(splitEvent.preventDefault).toHaveBeenCalled()
-  })
-
-  it('registers Alt+C as an alternate split-at-playhead shortcut and undoes in one step', () => {
+  it('registers Alt+C as the split-at-playhead shortcut and undoes in one step', () => {
     const clip1 = {
       ...ITEM,
       from: 20,

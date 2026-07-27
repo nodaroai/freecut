@@ -12,8 +12,9 @@
  * 5. Finalize and return the video blob
  */
 
-import type { ExportSettings, ExtendedExportSettings } from '@/types/export'
+import type { ExportSettings, ExtendedExportSettings, SubtitleExportMode } from '@/types/export'
 import { DEFAULT_PROJECT_HEIGHT } from '@/shared/projects/defaults'
+import { resolveVideoBitrate } from './video-bitrate'
 
 // Codec mapping for mediabunny
 type ClientVideoCodec = 'avc' | 'hevc' | 'vp8' | 'vp9' | 'av1'
@@ -41,8 +42,10 @@ export interface ClientExportSettings {
   fps: number
   audioBitrate?: number
   videoBitrate?: number
+  bitrateMode?: 'constant' | 'variable'
+  smartCopy?: boolean
   sampleRate?: number // For audio exports (default: 48000)
-  embedSubtitles?: boolean
+  subtitleMode?: SubtitleExportMode
 }
 
 export interface RenderProgress {
@@ -58,6 +61,10 @@ export interface ClientRenderResult {
   mimeType: string
   duration: number
   fileSize: number
+  /** OPFS scratch backing for large streamed outputs; remove when no longer used. */
+  temporaryOutput?: import('./export-output-target').TemporaryExportOutput
+  /** Separate subtitle file to download alongside the video (sidecar mode). */
+  subtitleSidecar?: { filename: string; content: string }
 }
 
 export interface CodecSupportCheckOptions {
@@ -163,11 +170,10 @@ export function mapToClientSettings(
 ): ClientExportSettings {
   const codec = mapExportCodecToClientCodec(settings.codec)
   const container = getPreferredContainerForCodec(codec)
-  // `embedSubtitles` only lives on the extended settings — a base
-  // ExportSettings caller leaves it undefined which downstream code reads
-  // as "do not embed".
-  const embedSubtitles =
-    'embedSubtitles' in settings ? (settings as ExtendedExportSettings).embedSubtitles : undefined
+  // `subtitleMode` only lives on the extended settings — a base ExportSettings
+  // caller leaves it undefined which downstream code reads as the default.
+  const subtitleMode =
+    'subtitleMode' in settings ? (settings as ExtendedExportSettings).subtitleMode : undefined
 
   return {
     mode: 'video',
@@ -176,9 +182,20 @@ export function mapToClientSettings(
     quality: settings.quality,
     resolution: settings.resolution,
     fps,
-    videoBitrate: getVideoBitrateForQuality(settings.quality),
+    videoBitrate: resolveVideoBitrate({
+      codec: settings.codec,
+      quality: settings.quality,
+      width: settings.resolution.width,
+      height: settings.resolution.height,
+      fps,
+      rateControl: settings.rateControl,
+      customBitrate: settings.videoBitrate,
+      sourceVideo: settings.sourceVideo,
+    }),
+    bitrateMode: settings.rateControl === 'constant' ? 'constant' : 'variable',
+    smartCopy: settings.smartCopy ?? true,
     audioBitrate: 192_000, // 192 kbps
-    embedSubtitles,
+    subtitleMode,
   }
 }
 
@@ -398,14 +415,13 @@ export function getAudioBitrateForQuality(quality: ClientExportSettings['quality
 }
 
 export function getVideoBitrateForQuality(quality: ExportSettings['quality']): number {
-  const bitrateMap: Record<ExportSettings['quality'], number> = {
-    low: 2_000_000, // 2 Mbps
-    medium: 5_000_000, // 5 Mbps
-    high: 10_000_000, // 10 Mbps
-    ultra: 20_000_000, // 20 Mbps
-  }
-
-  return bitrateMap[quality]
+  return resolveVideoBitrate({
+    codec: 'h264',
+    quality,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+  })
 }
 
 // Re-export formatBytes from central location

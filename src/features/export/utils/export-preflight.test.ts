@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { ExtendedExportSettings, CompositionInputProps } from '@/types/export'
 import type { TimelineItem, TimelineTrack } from '@/types/timeline'
@@ -166,6 +168,7 @@ describe('assessExportPreflight', () => {
       supportedVideoCodecs: ['avc'],
       workerAvailable: true,
       offlineAudioContextAvailable: false,
+      audioEncoderSupported: true,
     })
 
     expect(result.canExport).toBe(true)
@@ -174,6 +177,49 @@ describe('assessExportPreflight', () => {
       expect.objectContaining({
         id: 'worker-audio-context-fallback',
         severity: 'info',
+      }),
+    )
+  })
+
+  it('blocks an audible video export when its audio codec cannot be encoded', async () => {
+    const result = await assessExportPreflight({
+      settings: baseSettings,
+      fps: 30,
+      composition: composition([audioItem()]),
+      durationFrames: 300,
+      supportedVideoCodecs: ['avc'],
+      workerAvailable: true,
+      offlineAudioContextAvailable: true,
+      audioEncoderSupported: false,
+    })
+
+    expect(result.canExport).toBe(false)
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        id: 'audio-codec-unavailable',
+        severity: 'error',
+        detailParams: { codec: 'AAC', container: 'MP4' },
+      }),
+    )
+  })
+
+  it('reports supported audio for audible video exports', async () => {
+    const result = await assessExportPreflight({
+      settings: baseSettings,
+      fps: 30,
+      composition: composition([audioItem()]),
+      durationFrames: 300,
+      supportedVideoCodecs: ['avc'],
+      workerAvailable: true,
+      offlineAudioContextAvailable: true,
+      audioEncoderSupported: true,
+    })
+
+    expect(result.canExport).toBe(true)
+    expect(result.checks).toContainEqual(
+      expect.objectContaining({
+        id: 'audio-codec-supported',
+        severity: 'ok',
       }),
     )
   })
@@ -209,6 +255,7 @@ describe('assessExportPreflight', () => {
       supportedVideoCodecs: ['avc'],
       workerAvailable: true,
       offlineAudioContextAvailable: true,
+      audioEncoderSupported: true,
       brokenMediaIds: ['missing-media', 'unused-media'],
     })
 
@@ -231,6 +278,7 @@ describe('assessExportPreflight', () => {
       supportedVideoCodecs: ['avc'],
       workerAvailable: true,
       offlineAudioContextAvailable: true,
+      audioEncoderSupported: true,
     })
 
     expect(result.estimatedFileSizeBytes).toBeGreaterThan(2 * 1024 * 1024 * 1024)
@@ -252,6 +300,7 @@ describe('assessExportPreflight', () => {
       supportedVideoCodecs: ['avc'],
       workerAvailable: true,
       offlineAudioContextAvailable: true,
+      audioEncoderSupported: true,
     })
 
     expect(result.canExport).toBe(true)

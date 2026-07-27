@@ -1,12 +1,15 @@
 // React and external libraries
-import { useState, useCallback, useEffect, useRef, memo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react'
+import { useTranslation } from 'react-i18next'
 
 // Stores and selectors
 import { useTimelineStore } from '../stores/timeline-store'
 import { useSelectionStore } from '@/shared/state/selection'
 
 // Utilities and hooks
-import { useTimelineZoomContext } from '../contexts/timeline-zoom-context'
+import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-context'
+import { resolveMarkerNames } from '@/shared/timeline/marker-names'
+import { pixelsToFrameNow } from '../utils/zoom-conversions'
 
 // Types
 import type { ProjectMarker } from '@/types/timeline'
@@ -18,27 +21,32 @@ import type { ProjectMarker } from '@/types/timeline'
  * - Triangle handles pointing down (like playhead diamond but inverted)
  * - Vertical line across the ruler
  * - Draggable for repositioning
- * - Shows label tooltip on hover
+ * - Shows the marker's label on hover
  */
 export const TimelineProjectMarkers = memo(function TimelineProjectMarkers() {
+  const { t } = useTranslation()
   const markers = useTimelineStore((s) => s.markers)
   const updateMarker = useTimelineStore((s) => s.updateMarker)
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId)
   const selectMarker = useSelectionStore((s) => s.selectMarker)
-  const { frameToPixels, pixelsToFrame } = useTimelineZoomContext()
+  const { frameToPixels } = useTimelineCommittedZoomContext()
 
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  const markerNames = useMemo(
+    () => resolveMarkerNames(markers, (index) => t('timeline.markerName', { index })),
+    [markers, t],
+  )
+
   // Use refs to avoid stale closures
-  const pixelsToFrameRef = useRef(pixelsToFrame)
+  const pixelsToFrameRef = useRef(pixelsToFrameNow)
   const updateMarkerRef = useRef(updateMarker)
 
   // Update refs when functions change
   useEffect(() => {
-    pixelsToFrameRef.current = pixelsToFrame
     updateMarkerRef.current = updateMarker
-  }, [pixelsToFrame, updateMarker])
+  }, [updateMarker])
 
   // Handle drag start and selection
   const handleMouseDown = useCallback(
@@ -93,6 +101,7 @@ export const TimelineProjectMarkers = memo(function TimelineProjectMarkers() {
           key={marker.id}
           marker={marker}
           markerId={marker.id}
+          name={markerNames.get(marker.id) ?? ''}
           leftPosition={frameToPixels(marker.frame)}
           isDragging={draggingId === marker.id}
           isSelected={selectedMarkerId === marker.id}
@@ -106,6 +115,8 @@ export const TimelineProjectMarkers = memo(function TimelineProjectMarkers() {
 interface MarkerIndicatorProps {
   marker: ProjectMarker
   markerId: string
+  /** The marker's label, or its "Marker N" fallback. */
+  name: string
   leftPosition: number
   isDragging: boolean
   isSelected: boolean
@@ -115,6 +126,7 @@ interface MarkerIndicatorProps {
 const MarkerIndicator = memo(function MarkerIndicator({
   marker,
   markerId,
+  name,
   leftPosition,
   isDragging,
   isSelected,
@@ -139,7 +151,8 @@ const MarkerIndicator = memo(function MarkerIndicator({
         zIndex: isSelected ? 20 : 15,
       }}
       onMouseDown={handleMouseDown}
-      title={marker.label || `Marker at frame ${marker.frame}`}
+      data-tooltip={name}
+      data-tooltip-side="bottom"
     >
       {/* Invisible larger hit area */}
       <div

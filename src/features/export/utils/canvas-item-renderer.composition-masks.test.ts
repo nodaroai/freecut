@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vite-plus/test'
+import { LottieExportProvider } from '@/infrastructure/lottie/lottie-frame-provider'
 import type { CompositionItem, ImageItem, ShapeItem } from '@/types/timeline'
+import type { ItemKeyframes } from '@/types/keyframe'
 import type { ItemRenderContext, ItemTransform, SubCompRenderData } from './canvas-item-renderer'
 
 const mockFns = vi.hoisted(() => ({
@@ -8,6 +10,7 @@ const mockFns = vi.hoisted(() => ({
     path: {} as Path2D,
     inverted: mask.maskInvert ?? false,
     feather: mask.maskType === 'alpha' ? (mask.maskFeather ?? 0) : 0,
+    opacity: (mask.maskOpacity ?? 100) / 100,
     maskType: mask.maskType ?? 'clip',
     trackOrder: 0,
   })),
@@ -86,6 +89,7 @@ function createCompositionMaskRenderHarness(params: {
     mediabunnyFailureCountByItem: new Map(),
     imageElements: params.imageElements ?? new Map(),
     gifFramesMap: new Map(),
+    lottieProvider: new LottieExportProvider(),
     keyframesMap: new Map(),
     adjustmentLayers: [],
     subCompRenderData: new Map([[params.compositionItem.compositionId, params.subData]]),
@@ -117,6 +121,108 @@ describe('canvas-item-renderer composition masks', () => {
     mockFns.renderShapeMock.mockReset()
     mockFns.getShapePathMock.mockClear()
     mockFns.rotatePathMock.mockClear()
+  })
+
+  it('crops the flattened composition output in wrapper space', async () => {
+    const compositionItem: CompositionItem = {
+      id: 'cropped-comp-item',
+      type: 'composition',
+      compositionId: 'cropped-sub-comp',
+      trackId: 'track-parent',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Cropped composition',
+      compositionWidth: 640,
+      compositionHeight: 360,
+    }
+    const subData: SubCompRenderData = {
+      fps: 30,
+      durationInFrames: 60,
+      sortedTracks: [],
+      keyframesMap: new Map(),
+    }
+    const { rootCtx, rctx, transform } = createCompositionMaskRenderHarness({
+      compositionItem,
+      subData,
+    })
+    rctx.keyframesMap.set(compositionItem.id, {
+      itemId: compositionItem.id,
+      properties: [
+        {
+          property: 'cropLeft',
+          keyframes: [
+            { id: 'crop-start', frame: 0, value: 0, easing: 'linear' },
+            { id: 'crop-end', frame: 30, value: 320, easing: 'linear' },
+          ],
+        },
+      ],
+    })
+
+    await renderItem(rootCtx, compositionItem, transform, 15, rctx)
+
+    expect(rootCtx.rect).toHaveBeenCalledWith(480, 180, 480, 360)
+    expect(rootCtx.drawImage).toHaveBeenCalledWith(expect.anything(), 320, 180, 640, 360)
+  })
+
+  it('resolves nested shape properties from the sub-composition keyframes', async () => {
+    const subContentItem: ShapeItem = {
+      id: 'animated-sub-shape',
+      type: 'shape',
+      trackId: 'sub-content-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Animated path',
+      shapeType: 'path',
+      fillColor: '#00000000',
+      strokeColor: '#ffffff',
+      strokeWidth: 4,
+      trimPathEnd: 40,
+      trimPathOffset: 0,
+      transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, opacity: 1 },
+    }
+    const compositionItem: CompositionItem = {
+      id: 'comp-item',
+      type: 'composition',
+      compositionId: 'sub-comp-1',
+      trackId: 'track-parent',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Composition',
+      compositionWidth: 640,
+      compositionHeight: 360,
+    }
+    const nestedKeyframes: ItemKeyframes = {
+      itemId: subContentItem.id,
+      properties: [
+        {
+          property: 'trimPathOffset',
+          keyframes: [
+            { id: 'offset-start', frame: 0, value: 0, easing: 'linear' },
+            { id: 'offset-end', frame: 30, value: 180, easing: 'linear' },
+          ],
+        },
+      ],
+    }
+    const subData: SubCompRenderData = {
+      fps: 30,
+      durationInFrames: 60,
+      sortedTracks: [{ order: 0, visible: true, items: [subContentItem] }],
+      keyframesMap: new Map([[subContentItem.id, nestedKeyframes]]),
+    }
+    const { rootCtx, rctx, transform } = createCompositionMaskRenderHarness({
+      compositionItem,
+      subData,
+    })
+    rctx.getCurrentKeyframes = vi.fn(() => undefined)
+
+    await renderItem(rootCtx, compositionItem, transform, 15, rctx)
+
+    expect(mockFns.renderShapeMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ trimPathOffset: 90 }),
+      expect.anything(),
+      expect.anything(),
+    )
   })
 
   it('applies active sub-comp masks only to lower tracks and does not render mask shapes as regular content', async () => {

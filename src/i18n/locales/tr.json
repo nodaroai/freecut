@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "Editör araç çubuğu",
     "workspaces": {
+      "motion": "Motion",
       "label": "Çalışma alanları",
       "edit": "Kurgu",
       "color": "Renk",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "Klavye Kısayolları",
     "keyboardShortcutsAria": "Klavye kısayolları",
     "viewOnGitHub": "GitHub'da Görüntüle",
+    "joinDiscord": "Discord'a Katıl",
     "debugPanel": "Hata Ayıklama Paneli",
     "debugPanelAria": "Hata ayıklama paneli",
     "save": "Kaydet",
@@ -80,7 +82,11 @@
       "autoSave": "Otomatik kaydet",
       "interval": "Aralık",
       "intervalMinutes": "{{count}} dk",
-      "undoHistoryDepth": "Geri Alma Geçmişi Derinliği"
+      "undoHistoryDepth": "Geri Alma Geçmişi Derinliği",
+      "uiSounds": "Arayüz sesleri",
+      "uiSoundVolume": "Ses düzeyi",
+      "uiSoundVoice": "Ses teması",
+      "uiSoundPreview": "Önizleme"
     },
     "ai": {
       "captionSampleInterval": "Altyazı örnekleme aralığı",

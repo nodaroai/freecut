@@ -10,15 +10,16 @@ import {
   useSyncExternalStore,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import {
   useTimelineStore,
   useItemsStore,
   useCompositionsStore,
   useTimelineCommandStore,
   captureSnapshot,
-  importWaveformCache,
 } from '@/features/editor/deps/timeline-store'
-import { useGizmoStore } from '@/features/editor/deps/preview'
+import { importWaveformCache } from '@/features/editor/deps/timeline-cache'
+import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
 import { importMediaLibraryService } from '@/features/editor/deps/media-library'
 import { getResolvedPlaybackFrame, usePlaybackStore } from '@/shared/state/playback'
 import {
@@ -208,13 +209,37 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   const transitions = useTimelineStore((s) => s.transitions)
   const fps = useTimelineStore((s) => s.fps)
   const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
-  const itemsByTrackId = useItemsStore((s) => s.itemsByTrackId)
+  // Purely visual layers cannot contribute audio. Keep them out of this
+  // subscription so moving text/shapes does not rebuild the complete mixer
+  // graph on gizmo release.
+  const audioGraphItems = useItemsStore(
+    useShallow((state) =>
+      state.items.filter(
+        (item) =>
+          item.type === 'audio' || item.type === 'video' || item.type === 'composition',
+      ),
+    ),
+  )
+  const itemsByTrackId = useMemo(() => {
+    const grouped: Record<string, typeof audioGraphItems> = {}
+    for (const item of audioGraphItems) {
+      ;(grouped[item.trackId] ??= []).push(item)
+    }
+    return grouped
+  }, [audioGraphItems])
   const compositions = useCompositionsStore((s) => s.compositions)
 
-  const currentFrame = usePlaybackStore((s) => s.currentFrame)
-  const displayedFrame = usePreviewBridgeStore((s) => s.displayedFrame)
-  const previewFrame = usePlaybackStore((s) => s.previewFrame)
   const isPlaying = usePlaybackStore((s) => s.isPlaying)
+  // The meter's visible bars animate via rAF + CSS variables (see runMeterAnimation),
+  // so it doesn't need a 30/60Hz React re-render per playback frame — that was ~6%
+  // of main-thread time during playback. Throttle the frame inputs to ~15Hz while
+  // playing (the rAF animation smooths between target updates); keep immediate
+  // updates when paused/scrubbing. displayedFrame is ignored while playing
+  // (getResolvedPlaybackFrame returns currentFrame), so don't subscribe to its
+  // per-frame churn then — return a stable value to avoid the re-render.
+  const currentFrame = useThrottledFrame({ updateDuringPlayback: true, throttleMs: 66 })
+  const displayedFrame = usePreviewBridgeStore((s) => (isPlaying ? null : s.displayedFrame))
+  const previewFrame = usePlaybackStore((s) => s.previewFrame)
   const masterBusDb = usePlaybackStore((s) => s.masterBusDb)
   const setMasterBusDb = usePlaybackStore((s) => s.setMasterBusDb)
   // Monitor (per-device) values — used only to post-multiply meter readings

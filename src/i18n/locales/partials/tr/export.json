@@ -84,6 +84,18 @@
       "selectFormat": "Biçim seçin",
       "selectQuality": "Kalite seçin",
       "selectResolution": "Çözünürlük seçin",
+      "sequence": "Sekans",
+      "subtitleMode": {
+        "off": "Kapalı",
+        "burn": "Göm",
+        "sidecar": ".srt dosyası",
+        "embedded": "Gömülü parça",
+        "offDescription": "Dışa aktarılan videoda altyazı yok.",
+        "burnDescription": "Altyazılar videoya işlenir — her oynatıcıda görünür.",
+        "sidecarDescription": "Temiz video ve ayrı bir .srt altyazı dosyası.",
+        "embeddedDescription": "Açılıp kapatılabilir altyazı parçası (WebM/MKV)."
+      },
+      "subtitles": "Altyazılar",
       "video": "Video"
     },
     "videoContainer": {
@@ -126,6 +138,15 @@
         "video-codec-supported": {
           "title": "Video kodeği destekleniyor",
           "detail": "{{codec}} bu tarayıcıda {{container}} olarak kodlanabilir."
+        },
+        "audio-codec-supported": {
+          "title": "Ses kodeği destekleniyor",
+          "detail": "{{codec}} ses bu tarayıcıda {{container}} içinde kodlanabilir."
+        },
+        "audio-codec-unavailable": {
+          "title": "Ses kodeği kullanılamıyor",
+          "detail": "Bu tarayıcı {{container}} için {{codec}} ses kodlayamıyor.",
+          "fix": "Opus ses için WebM veya MKV seçin ya da desteklenen bir tarayıcıya güncelleyin."
         },
         "worker-unavailable-fallback": {
           "title": "Worker ile dışa aktarma kullanılamıyor",

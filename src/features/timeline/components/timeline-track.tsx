@@ -9,7 +9,6 @@ import type {
   TimelineItem as TimelineItemType,
 } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
-import { TimelineItem } from './timeline-item'
 import { TransitionItem } from './transition-item'
 import { useTimelineStore } from '../stores/timeline-store'
 import {
@@ -96,6 +95,7 @@ import {
   TimelineDropGhostPreviews,
   type TimelineDropGhostPreviewsHandle,
 } from './timeline-drop-ghost-previews'
+import { TimelineTrackItems } from './timeline-track-items'
 
 /**
  * Lightweight on-demand context menu for track gaps.
@@ -210,37 +210,6 @@ function areTrackPropsEqual(prev: TimelineTrackProps, next: TimelineTrackProps):
 }
 
 /**
- * Memoized item list — prevents the items `.map()` from running when the parent
- * TimelineTrack re-renders for drag-preview or state changes that don't affect items.
- * Without this, every track re-render recreates JSX for all items, and even though
- * individual TimelineItem components are memo'd, the parent reconciliation cost
- * (prop diffing × items) adds up across frequent drag-over events.
- */
-const TimelineTrackItems = memo(function TimelineTrackItems({
-  trackItems,
-  trackLocked,
-  trackHidden,
-}: {
-  trackItems: ReadonlyArray<TimelineItemType>
-  trackLocked: boolean
-  trackHidden: boolean
-}) {
-  return (
-    <>
-      {trackItems.map((item) => (
-        <TimelineItem
-          key={item.id}
-          item={item}
-          timelineDuration={30}
-          trackLocked={trackLocked}
-          trackHidden={trackHidden}
-        />
-      ))}
-    </>
-  )
-})
-
-/**
  * Timeline Track Component
  *
  * Renders a single timeline track with:
@@ -315,7 +284,6 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   })
   const isDropDisabled = isTrackLocked
   const trackKind = getTrackKind(track)
-
   // Virtualized items/transitions — only those overlapping the visible viewport + buffer
   const { visibleItems: trackItems, visibleTransitions: trackTransitions } = useVisibleItems(
     track.id,
@@ -935,7 +903,11 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     (e: React.MouseEvent) => {
       // Check if clicking on a clip (has data-item-id ancestor)
       const target = e.target as HTMLElement
-      if (target.closest('[data-item-id], [data-item-context-anchor]')) {
+      if (
+        target.closest(
+          '[data-item-id], [data-item-context-anchor]',
+        )
+      ) {
         // Let the clip's context menu handle it
         return
       }
@@ -1263,33 +1235,35 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         onDrop={handleDrop}
         onContextMenu={handleContextMenu}
       >
-        {!isDropDisabled && <TrackDropGhostOverlay trackId={track.id} />}
+        <div className="relative" style={{ height: `${track.height}px` }}>
+          {!isDropDisabled && <TrackDropGhostOverlay trackId={track.id} />}
 
-        {/* Render all items for this track - dimmed when the track is disabled */}
-        <TimelineTrackItems
-          trackItems={trackItems}
-          trackLocked={isTrackLocked}
-          trackHidden={isTrackDisabled}
-        />
+          {/* Render all items for this track - dimmed when the track is disabled */}
+          <TimelineTrackItems
+            trackItems={trackItems}
+            trackLocked={isTrackLocked}
+            trackHidden={isTrackDisabled}
+          />
 
-        {/* Render transitions for this track */}
-        {trackKind !== 'audio' &&
-          trackTransitions.map((transition) => (
-            <TransitionItem
-              key={transition.id}
-              transition={transition}
-              trackHidden={isTrackDisabled}
-            />
-          ))}
+          {/* Render transitions for this track */}
+          {trackKind !== 'audio' &&
+            trackTransitions.map((transition) => (
+              <TransitionItem
+                key={transition.id}
+                transition={transition}
+                trackHidden={isTrackDisabled}
+              />
+            ))}
 
-        {/* Locked track overlay indicator */}
-        {isTrackLocked && (
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="text-xs text-muted-foreground font-mono">
-              {t('timeline.track.locked')}
+          {/* Locked track overlay indicator */}
+          {isTrackLocked && (
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="text-xs text-muted-foreground font-mono">
+                {t('timeline.track.locked')}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       {/* Lazy ContextMenu: only mount Radix tree when the menu is triggered on a gap */}
       {hasAnyItems && gapContextMenuRequest !== null && (

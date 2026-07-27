@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -19,6 +21,25 @@ describe('zoom-anchor', () => {
       anchorScreenX: 180,
       anchorTimeSeconds: 2.2,
     })
+  })
+
+  it('keeps the timeline time under the mouse at the same screen position', () => {
+    const cursorAnchor = getCursorZoomAnchor({
+      currentZoomLevel: 1,
+      cursorScreenX: 180,
+      maxDurationSeconds: 10,
+      scrollLeft: 40,
+    })
+    const nextZoomLevel = 2
+    const nextScrollLeft = getAnchoredZoomScrollLeft({
+      anchor: cursorAnchor,
+      maxDurationSeconds: 10,
+      nextZoomLevel,
+    })
+
+    const anchorScreenXAfterZoom =
+      cursorAnchor.anchorTimeSeconds * nextZoomLevel * 100 - nextScrollLeft
+    expect(anchorScreenXAfterZoom).toBe(180)
   })
 
   it('derives a playhead anchor from the current playhead frame', () => {

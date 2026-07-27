@@ -15,6 +15,7 @@ import type { ItemEffect } from '@/types/effects'
 import type { ResolvedTransform } from '@/types/transform'
 import type { ScrubbingCache } from '@/features/export/deps/preview'
 import type { CachedGifFrames } from '@/features/export/deps/timeline-gif-cache'
+import type { LottieExportProvider } from '@/infrastructure/lottie/lottie-frame-provider'
 import type { CanvasPool, TextMeasurementCache } from '../canvas-pool'
 import type { VideoFrameSource } from '../shared-video-extractor'
 import type { ReverseVideoFrameCache } from '../reverse-video-frame-cache'
@@ -32,6 +33,10 @@ import type { MaskCombinePipeline } from '@/infrastructure/gpu-masks'
 import type { AdjustmentLayerWithTrackOrder, EffectSourceMask } from '../canvas-effects'
 import type { RenderTimelineSpan } from '../render-span'
 import type { calculateMediaCropLayout } from '@/shared/utils/media-crop'
+import type {
+  CompositionControlOverrides,
+  CompositionControlSchema,
+} from '@/types/composition-controls'
 
 // Re-exported helper-type used internally by shared transforms.
 export type { ResolvedTransform }
@@ -43,6 +48,11 @@ export interface CanvasSettings {
   width: number
   height: number
   fps: number
+  /** Same-composition sources for deterministic scalar property expressions. */
+  getExpressionItem?: (itemId: string) => TimelineItem | undefined
+  getExpressionKeyframes?: (itemId: string) => ItemKeyframes | undefined
+  /** Live transform overrides used by the interactive preview renderer. */
+  getPreviewTransform?: (itemId: string) => Partial<ResolvedTransform> | undefined
 }
 
 /**
@@ -92,6 +102,21 @@ export interface ItemRenderContext {
   renderMode: 'export' | 'preview'
   renderItem: RenderItemDelegate
   scrubbingCache?: ScrubbingCache | null
+  /** Skip the expensive full-resolution per-video ImageBitmap copy on isolated seeks. */
+  captureDecodedVideoFrames?: boolean
+  /** Maximum wait for an existing worker decode; undefined uses the short opportunistic wait. */
+  workerPredecodeWaitMs?: number
+  /**
+   * Reverse shuttle must never serialize the transport behind a main-thread
+   * video seek. Prefer a nearby decoded frame within this source-time window
+   * and keep the exact worker request progressing independently.
+   */
+  nonBlockingVideoFrameToleranceSeconds?: number
+  getResolvedVideoSource?: (
+    item: VideoItem,
+    sourceTime?: number,
+    toleranceSeconds?: number,
+  ) => string | null
   getCurrentItemSnapshot?: <TItem extends TimelineItem>(item: TItem) => TItem
   getLiveItemSnapshotById?: (itemId: string) => TimelineItem | undefined
   getCurrentKeyframes?: (itemId: string) => ItemKeyframes | undefined
@@ -104,8 +129,15 @@ export interface ItemRenderContext {
   useMediabunny: Set<string>
   mediabunnyDisabledItems: Set<string>
   mediabunnyFailureCountByItem: Map<string, number>
-  ensureVideoItemReady?: (itemId: string) => Promise<boolean>
+  ensureVideoItemReady?: (itemId: string, item?: VideoItem) => Promise<boolean>
+  /** Permit isolated comparison renders to consume exact worker-predecoded frames. */
+  allowPredecodedVideoFrames?: boolean
   getCachedPredecodedBitmap?: (
+    src: string,
+    timestamp: number,
+    toleranceSeconds?: number,
+  ) => ImageBitmap | null
+  getCachedActivePreviewFallbackBitmap?: (
     src: string,
     timestamp: number,
     toleranceSeconds?: number,
@@ -116,11 +148,31 @@ export interface ItemRenderContext {
     toleranceSeconds?: number,
     maxWaitMs?: number,
   ) => Promise<ImageBitmap | null>
+  isActivePreviewTargetSuperseded?: (
+    src: string,
+    timestamp: number,
+    toleranceSeconds?: number,
+  ) => boolean
+  isActivePreviewFrameSuperseded?: (frame: number) => boolean
+  isActivePreviewFrameCurrent?: (frame: number) => boolean
+  isActivePreviewFrameDecodeReady?: (frame: number) => boolean
+  isActivePreviewSourceTarget?: (
+    src: string,
+    timestamp: number,
+    toleranceSeconds?: number,
+  ) => boolean
+  markActivePreviewFramePending?: () => void
+  markActivePreviewFallbackUsed?: () => void
+  previewRootTimelineFrame?: number
   reverseVideoFrameCache?: ReverseVideoFrameCache
 
   // Image / GIF state
   imageElements: Map<string, WorkerLoadedImage>
   gifFramesMap: Map<string, CachedGifFrames>
+  ensureImageItemReady?: (item: ImageItem) => Promise<void>
+  /** Preloaded Lottie renderers keyed by item id; renders a frame on demand. */
+  lottieProvider: LottieExportProvider
+  ensureLottieItemReady?: (item: import('@/types/timeline').LottieItem) => Promise<void>
 
   // Keyframes & adjustment layers
   keyframesMap: Map<string, ItemKeyframes>
@@ -130,6 +182,15 @@ export interface ItemRenderContext {
 
   // Pre-computed sub-composition render data (built once during preload)
   subCompRenderData: Map<string, SubCompRenderData>
+  /** Per-wrapper resolved sub-composition data for reusable control overrides. */
+  instanceSubCompRenderDataCache?: Map<
+    string,
+    {
+      source: SubCompRenderData
+      overrides: CompositionControlOverrides
+      resolved: SubCompRenderData
+    }
+  >
 
   // GPU effects pipeline (lazily initialized)
   gpuPipeline?: import('@/infrastructure/gpu-effects').EffectsPipeline | null
@@ -194,6 +255,7 @@ export interface ItemRenderContext {
 export interface SubCompRenderData {
   fps: number
   durationInFrames: number
+  compositionControls?: CompositionControlSchema
   /** Tracks sorted bottom-to-top (highest order first), with items pre-assigned */
   sortedTracks: Array<{
     order: number
@@ -202,6 +264,8 @@ export interface SubCompRenderData {
   }>
   /** O(1) keyframe lookup by item ID */
   keyframesMap: Map<string, ItemKeyframes>
+  /** O(1) expression-source lookup inside this composition. */
+  itemsById?: Map<string, TimelineItem>
   /** Adjustment layers from visible tracks, with their track orders */
   adjustmentLayers?: AdjustmentLayerWithTrackOrder[]
 }
@@ -264,8 +328,10 @@ export type ResolvedGpuMediaParticipantSource =
       sourceWidth: number
       sourceHeight: number
       fillColor: [number, number, number, number]
+      gradientEndColor?: [number, number, number, number]
+      gradientAngleRad?: number
       strokeColor?: [number, number, number, number]
-      pathVertices?: Array<[number, number]>
+      pathVertices?: Array<[number, number, number?]>
       close?: () => void
     }
   | {

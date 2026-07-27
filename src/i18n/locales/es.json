@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "Barra de herramientas del editor",
     "workspaces": {
+      "motion": "Motion",
       "label": "Espacios de trabajo",
       "edit": "Edición",
       "color": "Color",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "Atajos de teclado",
     "keyboardShortcutsAria": "Atajos de teclado",
     "viewOnGitHub": "Ver en GitHub",
+    "joinDiscord": "Unirse a Discord",
     "debugPanel": "Panel de depuración",
     "debugPanelAria": "Panel de depuración",
     "save": "Guardar",
@@ -80,7 +82,11 @@
       "autoSave": "Guardado automático",
       "interval": "Intervalo",
       "intervalMinutes": "{{count}} min",
-      "undoHistoryDepth": "Profundidad del historial de deshacer"
+      "undoHistoryDepth": "Profundidad del historial de deshacer",
+      "uiSounds": "Sonidos de interfaz",
+      "uiSoundVolume": "Volumen del sonido",
+      "uiSoundVoice": "Tema de sonido",
+      "uiSoundPreview": "Vista previa"
     },
     "ai": {
       "captionSampleInterval": "Intervalo de muestreo de subtítulos",

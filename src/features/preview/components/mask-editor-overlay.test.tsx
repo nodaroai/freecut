@@ -220,6 +220,7 @@ describe('MaskEditorOverlay shape pen flow', () => {
     const shape = items[0] as ShapeItem
     expect(shape?.type).toBe('shape')
     expect(shape?.shapeType).toBe('path')
+    expect(shape?.pathClosed).toBe(true)
     expect(shape?.label).toBe('Path')
     expect(shape?.fillColor).toBe('#3b82f6')
     expect(shape?.isMask).toBe(false)
@@ -506,14 +507,13 @@ describe('MaskEditorOverlay shape pen flow', () => {
     expect(firstVertex?.outHandle).toEqual([0, 0])
   })
 
-  it('auto-closes the shape when the preview pen toolbar requests finish', async () => {
+  it('finishes the pen path as an open, stroke-first shape from the preview toolbar', async () => {
     useMaskEditorStore.getState().startShapePenMode()
 
     const { canvas } = renderMaskEditorOverlay()
 
     clickCanvasPoint(canvas, 20, 20, 1)
     clickCanvasPoint(canvas, 120, 20, 2)
-    clickCanvasPoint(canvas, 120, 80, 3)
 
     act(() => {
       useMaskEditorStore.getState().requestFinishPenMode()
@@ -527,6 +527,11 @@ describe('MaskEditorOverlay shape pen flow', () => {
     expect(shape?.type).toBe('shape')
     expect(shape?.shapeType).toBe('path')
     expect(shape?.isMask).toBe(false)
+    expect(shape?.pathClosed).toBe(false)
+    expect(shape?.fillEnabled).toBe(false)
+    expect(shape?.strokeEnabled).toBe(true)
+    expect(shape?.strokeLineCap).toBe('round')
+    expect(shape?.strokeLineJoin).toBe('round')
   })
 
   it('renders the closing segment while dragging the final bezier', async () => {
@@ -884,10 +889,10 @@ describe('MaskEditorOverlay edit mode', () => {
     expect(movedItem?.transform?.x).toBeCloseTo(20)
     expect(movedItem?.transform?.y).toBeCloseTo(15)
     expect(movedItem?.pathVertices).toEqual([
-      { position: [0, 0], inHandle: [0, 0], outHandle: [0, 0] },
-      { position: [1, 0], inHandle: [0, 0], outHandle: [0, 0] },
-      { position: [1, 1], inHandle: [0, 0], outHandle: [0, 0] },
-      { position: [0, 1], inHandle: [0, 0], outHandle: [0, 0] },
+      { position: [0, 0], inHandle: [0, 0], outHandle: [0, 0], tangentMode: 'corner' },
+      { position: [1, 0], inHandle: [0, 0], outHandle: [0, 0], tangentMode: 'corner' },
+      { position: [1, 1], inHandle: [0, 0], outHandle: [0, 0], tangentMode: 'corner' },
+      { position: [0, 1], inHandle: [0, 0], outHandle: [0, 0], tangentMode: 'corner' },
     ])
     expect(useMaskEditorStore.getState().selectedVertexIndices).toEqual([0, 1, 2, 3])
   })
@@ -1310,5 +1315,74 @@ describe('MaskEditorOverlay edit mode', () => {
       rafSpy.mockRestore()
       cancelRafSpy.mockRestore()
     }
+  })
+
+  it('does not let deferred cleanup from one vertex drag end the next drag', () => {
+    const queuedRafCallbacks: FrameRequestCallback[] = []
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      queuedRafCallbacks.push(callback)
+      return queuedRafCallbacks.length
+    })
+    const cancelRafSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      const index = Number(id) - 1
+      if (index >= 0 && index < queuedRafCallbacks.length) {
+        queuedRafCallbacks[index] = () => 0
+      }
+    })
+
+    try {
+      seedEditablePath()
+      const { canvas } = renderMaskEditorOverlay(PATH_ITEM_TRANSFORM)
+      Object.defineProperty(canvas, 'setPointerCapture', { value: vi.fn(), configurable: true })
+      Object.defineProperty(canvas, 'releasePointerCapture', { value: vi.fn(), configurable: true })
+
+      fireEvent.pointerDown(canvas, { clientX: 150, clientY: 30, pointerId: 1 })
+      fireEvent.pointerUp(canvas, { clientX: 150, clientY: 30, pointerId: 1 })
+
+      fireEvent.pointerDown(canvas, { clientX: 150, clientY: 30, pointerId: 2 })
+      fireEvent.pointerMove(canvas, { clientX: 165, clientY: 38, pointerId: 2 })
+
+      const livePreview = useMaskEditorStore.getState().previewVertices
+      expect(useMaskEditorStore.getState().draggingVertexIndex).not.toBeNull()
+      expect(livePreview).not.toBeNull()
+
+      act(() => {
+        let callbackIndex = 0
+        while (callbackIndex < queuedRafCallbacks.length) {
+          queuedRafCallbacks[callbackIndex++]!(0)
+        }
+      })
+
+      expect(useMaskEditorStore.getState().draggingVertexIndex).not.toBeNull()
+      expect(useMaskEditorStore.getState().previewVertices).toBe(livePreview)
+    } finally {
+      rafSpy.mockRestore()
+      cancelRafSpy.mockRestore()
+    }
+  })
+
+  it('does not clear a newer same-item gizmo interaction when the mask editor unmounts', () => {
+    seedEditablePath()
+    const { canvas, unmount } = renderMaskEditorOverlay(PATH_ITEM_TRANSFORM)
+    Object.defineProperty(canvas, 'setPointerCapture', { value: vi.fn(), configurable: true })
+    Object.defineProperty(canvas, 'releasePointerCapture', { value: vi.fn(), configurable: true })
+
+    fireEvent.pointerDown(canvas, { clientX: 100, clientY: 60, pointerId: 1 })
+    const maskInteractionId = useGizmoStore.getState().activeGizmo?.interactionId
+    expect(maskInteractionId).toBeDefined()
+
+    const newerInteractionId = useGizmoStore
+      .getState()
+      .startTranslate(
+        'path-1',
+        { x: 20, y: 20 },
+        PATH_ITEM_TRANSFORM,
+        undefined,
+        'shape',
+      )
+
+    unmount()
+
+    expect(useGizmoStore.getState().activeGizmo?.interactionId).toBe(newerInteractionId)
   })
 })

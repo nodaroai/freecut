@@ -1,4 +1,3 @@
-import { renderAudioOnly, renderComposition } from '../utils/canvas-render-orchestrator'
 import { isGifUrl, isWebpUrl } from '@/shared/utils/media-utils'
 import { createLogger } from '@/shared/logging/logger'
 import type { ImageItem } from '@/types/timeline'
@@ -21,7 +20,31 @@ if (typeof workerGlobal.window === 'undefined') {
 
 const log = createLogger('ExportRenderWorker')
 
+// Capture floating rejections / uncaught errors with their stack. Bare
+// mediabunny asserts surface only "Assertion failed"; without the stack the
+// failing call site is invisible, so log it explicitly here.
+self.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason
+  log.error('Export worker unhandled rejection', {
+    error: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  })
+})
+self.addEventListener('error', (event) => {
+  log.error('Export worker uncaught error', {
+    error: event.message,
+    stack: event.error instanceof Error ? event.error.stack : undefined,
+    filename: event.filename,
+    lineno: event.lineno,
+  })
+})
+
 const activeRequests = new Map<string, AbortController>()
+
+// Keep the heavy render graph behind a dynamic import. Static ESM imports are
+// evaluated before this worker's body, which meant browser-only dependencies
+// (including React Refresh during development) ran before the `window` shim.
+const loadRenderers = () => import('../utils/canvas-render-orchestrator')
 
 function compositionHasAnimatedImage(
   tracks: Array<{ items: Array<{ type: string; src?: string; label?: string }> }>,
@@ -89,6 +112,8 @@ self.onmessage = async (event: MessageEvent<ExportRenderWorkerRequest>) => {
       throw new Error('WORKER_REQUIRES_MAIN_THREAD:audio-context')
     }
 
+    const { renderAudioOnly, renderComposition } = await loadRenderers()
+
     const onProgress = (progress: RenderProgress) => {
       const response: ExportRenderWorkerResponse = {
         type: 'progress',
@@ -130,11 +155,23 @@ self.onmessage = async (event: MessageEvent<ExportRenderWorkerRequest>) => {
     }
 
     const messageText = error instanceof Error ? error.message : String(error)
-    log.error('Export worker failed', { requestId, error: messageText })
+    const stack = error instanceof Error ? error.stack : undefined
+    // Surface the stack: bare mediabunny asserts report only "Assertion failed",
+    // so without the stack the failing call site is invisible on the main thread.
+    log.error('Export worker failed', { requestId, error: messageText, stack })
+    // A DOM global reaching worker code is a bug in that code, not something the
+    // user can act on — and it used to fail the whole export. Report it as a
+    // main-thread fallback instead: the render still completes, and the reason
+    // (with the original message) lands in the export's wide event so the
+    // offending call site stays visible rather than being silently absorbed.
+    const isDomDependency =
+      error instanceof ReferenceError && /\b(document|navigator|HTML\w*Element)\b/.test(messageText)
     const failure: ExportRenderWorkerResponse = {
       type: 'error',
       requestId,
-      error: messageText,
+      error: isDomDependency
+        ? `WORKER_REQUIRES_MAIN_THREAD:dom-dependency:${messageText}`
+        : messageText,
     }
     self.postMessage(failure)
   } finally {

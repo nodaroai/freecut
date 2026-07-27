@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it, beforeEach, vi, type Mock } from 'vite-plus/test'
 import { resolveMediaUrl, resolveMediaUrls, cleanupBlobUrls } from './media-resolver'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
@@ -5,6 +7,7 @@ import { FileAccessError } from '@/features/preview/deps/media-library'
 import type { TimelineTrack, VideoItem } from '@/types/timeline'
 
 const mockMarkMediaBroken = vi.fn()
+const mockMarkMediaHealthy = vi.fn()
 const mediaLibraryService = vi.hoisted(() => ({
   getMedia: vi.fn(),
   getMediaFile: vi.fn(),
@@ -36,6 +39,7 @@ vi.mock('@/features/media-library/stores/media-library-store', () => ({
   useMediaLibraryStore: {
     getState: () => ({
       markMediaBroken: mockMarkMediaBroken,
+      markMediaHealthy: mockMarkMediaHealthy,
       mediaById: {},
     }),
   },
@@ -125,7 +129,7 @@ describe('resolveMediaUrl', () => {
     expect(url).toBe('')
   })
 
-  it('returns empty string when blob is null', async () => {
+  it('returns empty string and marks media broken when blob is null', async () => {
     ;(mediaLibraryService.getMedia as Mock).mockResolvedValue({
       id: 'media-1',
       fileName: 'video.mp4',
@@ -135,6 +139,14 @@ describe('resolveMediaUrl', () => {
     const url = await resolveMediaUrl('media-1')
 
     expect(url).toBe('')
+    // Unresolvable source (no valid storage path) must surface as broken so the
+    // clip shows a relink state instead of failing silently.
+    expect(mockMarkMediaBroken).toHaveBeenCalledWith('media-1', {
+      mediaId: 'media-1',
+      fileName: 'video.mp4',
+      errorType: 'file_missing',
+    })
+    expect(mockMarkMediaHealthy).not.toHaveBeenCalled()
   })
 
   it('marks media broken when handle-backed reads report a missing file', async () => {
@@ -297,6 +309,46 @@ describe('resolveMediaUrls', () => {
     expect((resolved[0]!.items[0]! as VideoItem).audioSrc).toMatch(/^blob:test-/)
     // Text item should be unchanged (no mediaId)
     expect('src' in resolved[0]!.items[1]!).toBe(false)
+  })
+
+  it('resolves src for lottie items (fixes stale blob URL after reload)', async () => {
+    ;(mediaLibraryService.getMedia as Mock).mockResolvedValue({
+      id: 'media-lottie',
+      fileName: 'spinner.lottie',
+    })
+    ;(mediaLibraryService.getMediaFile as Mock).mockResolvedValue(new Blob(['data']))
+
+    const tracks: TimelineTrack[] = [
+      {
+        id: 'track-1',
+        name: 'Track 1',
+        height: 40,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [
+          {
+            id: 'item-1',
+            type: 'lottie',
+            trackId: 'track-1',
+            from: 0,
+            durationInFrames: 90,
+            mediaId: 'media-lottie',
+            // A dead blob URL from a previous session, as loaded from disk.
+            src: 'blob:stale-url',
+            frameRate: 30,
+            totalFrames: 90,
+            label: 'spinner.lottie',
+          },
+        ],
+      },
+    ]
+
+    const resolved = await resolveMediaUrls(tracks, { useProxy: false })
+    const lottie = resolved[0]!.items[0]!
+    expect('src' in lottie && lottie.src).toMatch(/^blob:test-/)
   })
 
   it('keeps video audio on the original source when proxy playback is enabled', async () => {

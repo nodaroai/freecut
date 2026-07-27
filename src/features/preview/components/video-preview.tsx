@@ -1,17 +1,29 @@
-import { useMemo, useCallback, memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useMemo,
+  useCallback,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
+import { useRafDeferredValue } from '@/shared/hooks/use-raf-deferred-value'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { usePlaybackStore } from '@/shared/state/playback'
 import type { ItemEffect } from '@/types/effects'
+import type { TimelineItem } from '@/types/timeline'
 import { GizmoOverlay } from './gizmo-overlay'
 import { MaskEditorContainer } from './mask-editor-container'
 import { CornerPinContainer } from './corner-pin-container'
 import { PowerWindowOverlayContainer } from './power-window-overlay'
+import { SpatialEffectPointOverlayContainer } from './spatial-effect-point-overlay'
 import { PreviewPerfPanel } from './preview-perf-panel'
 import { PreviewStage } from './preview-stage'
 import { RollingEditOverlay } from './rolling-edit-overlay'
 import { RippleEditOverlay } from './ripple-edit-overlay'
 import { SlipEditOverlay } from './slip-edit-overlay'
 import { SlideEditOverlay } from './slide-edit-overlay'
+import { useSelectedComparisonCompositionPrewarm } from './use-selected-comparison-composition-prewarm'
 import { useGpuEffectsOverlay } from '../hooks/use-gpu-effects-overlay'
 import {
   usePreviewCompositionBaseModel,
@@ -30,10 +42,21 @@ import { usePreviewRendererController } from '../hooks/use-preview-renderer-cont
 import { usePreviewRuntimeRefs } from '../hooks/use-preview-runtime-refs'
 import { usePreviewSourceWarm } from '../hooks/use-preview-source-warm'
 import { usePreviewTransitionModel } from '../hooks/use-preview-transition-model'
+import { useTransformStableItemsSnapshot } from '../hooks/use-transform-stable-items-snapshot'
 import { usePreviewViewModel } from '../hooks/use-preview-view-model'
 import { usePreviewTransitionSessionController } from '../hooks/use-preview-transition-session-controller'
 import { useGizmoStore } from '../stores/gizmo-store'
+import { useCornerPinStore } from '../stores/corner-pin-store'
+import { useMaskEditorStore } from '../stores/mask-editor-store'
+import { usePowerWindowEditorStore } from '../stores/power-window-editor-store'
+import { useSpatialEffectEditorStore } from '../stores/spatial-effect-editor-store'
 import { FAST_SCRUB_RENDERER_ENABLED } from '../utils/preview-constants'
+import {
+  drawSourceToPreviewDisplayCanvas,
+  getPreviewDisplayCanvasBackingSize,
+} from '../utils/preview-display-canvas'
+import { buildDomTextScrubOverlayPlan } from '../utils/dom-text-scrub-overlay'
+import { shouldPreferDomPlayerForGizmo } from '../utils/gizmo-preview-presentation'
 import { importCompositionRenderer, type CompositionRendererInstance } from '../deps/export'
 
 interface VideoPreviewProps {
@@ -47,9 +70,15 @@ interface VideoPreviewProps {
     height: number
   }
   suspendOverlay?: boolean
+  chrome?: PreviewOverlayChrome
 }
 
 type PreviewOverlayChrome = 'edit' | 'color'
+
+interface PreviewItemsSnapshot {
+  items: TimelineItem[]
+  itemsByTrackId: Record<string, TimelineItem[]>
+}
 
 /**
  * Video Preview Component
@@ -68,14 +97,37 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   containerSize,
   suspendOverlay = false,
   overlayChrome,
-}: VideoPreviewProps & { overlayChrome: PreviewOverlayChrome }) {
+  itemsSnapshot,
+}: VideoPreviewProps & {
+  overlayChrome: PreviewOverlayChrome
+  itemsSnapshot: PreviewItemsSnapshot
+}) {
   const previewRuntimeRefs = usePreviewRuntimeRefs()
   const colorGradeComparisonMode = useGizmoStore((s) => s.colorGradeComparisonMode)
   const colorGradeSplitPosition = useGizmoStore((s) => s.colorGradeSplitPosition)
   const setColorGradeSplitPosition = useGizmoStore((s) => s.setColorGradeSplitPosition)
-  const currentFrame = usePlaybackStore((s) => s.currentFrame)
-  const previewFrame = usePlaybackStore((s) => s.previewFrame)
-  const displayedFrame = usePreviewBridgeStore((s) => s.displayedFrame)
+  // Frame values are only consumed by the color-grade comparison branch near
+  // the bottom of this component. Returning a stable sentinel while comparison
+  // is off keeps ordinary playback/scrubbing from re-rendering this large tree.
+  const comparisonEnabled = colorGradeComparisonMode !== 'off'
+  const comparisonCurrentFrame = usePlaybackStore((s) =>
+    comparisonEnabled ? s.currentFrame : null,
+  )
+  const comparisonPreviewFrame = usePlaybackStore((s) =>
+    comparisonEnabled ? s.previewFrame : null,
+  )
+  // Capture the playhead once at mount so a workspace-driven remount (switching
+  // to/from Color swaps VideoPreview<->ColorVideoPreview, remounting the Player)
+  // starts the fresh clock at the current frame. Without this the new Player
+  // fires an initial onFrameChange(0) that, while playing, overwrites the
+  // playhead back to 0.
+  const initialPlayheadFrameRef = useRef<number | null>(null)
+  if (initialPlayheadFrameRef.current === null) {
+    initialPlayheadFrameRef.current = usePlaybackStore.getState().currentFrame
+  }
+  const comparisonDisplayedFrame = usePreviewBridgeStore((s) =>
+    comparisonEnabled ? s.displayedFrame : null,
+  )
   const livePreviewEdits = useGizmoStore((s) => s.preview)
   const [playerDisplayedFrame, setPlayerDisplayedFrame] = useState<number | null>(null)
   const latestPlayerDisplayedFrameRef = useRef<number | null>(null)
@@ -115,9 +167,6 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     hasRipple2Up,
     hasSlip4Up,
     hasSlide4Up,
-    activeGizmoItemType,
-    isGizmoInteracting,
-    isPlaying,
     zoom,
     useProxy,
     busAudioEq,
@@ -134,6 +183,13 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     project,
     containerSize,
     suspendOverlay,
+    itemsSnapshot,
+  })
+  useSelectedComparisonCompositionPrewarm({
+    fps,
+    items,
+    useProxyMedia: useProxy,
+    blobUrlVersion,
   })
   const showGpuEffectsOverlay = useGpuEffectsOverlay(
     gpuEffectsCanvasRef,
@@ -141,16 +197,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     scrubOffscreenCanvasRef,
     scrubFrameDirtyRef,
   )
-  const shouldPreferPlayerForPreview = useCallback(
-    (previewFrame: number | null) => {
-      return (
-        previewRuntimeRefs.preferPlayerForTextGizmoRef.current ||
-        (preferPlayerForStyledTextScrubRef.current && previewFrame !== null)
-      )
-    },
-    [preferPlayerForStyledTextScrubRef, previewRuntimeRefs.preferPlayerForTextGizmoRef],
-  )
-
+  const isMaskEditing = useMaskEditorStore((s) => s.isEditing)
+  const isCornerPinEditing = useCornerPinStore((s) => s.isEditing)
+  const isPowerWindowEditing = usePowerWindowEditorStore((s) => s.isEditing)
+  const isSpatialEffectEditing = useSpatialEffectEditorStore((s) => s.isEditing)
   const setCaptureFrame = usePreviewBridgeStore((s) => s.setCaptureFrame)
   const setCaptureFrameImageData = usePreviewBridgeStore((s) => s.setCaptureFrameImageData)
   const setDisplayedFrame = usePreviewBridgeStore((s) => s.setDisplayedFrame)
@@ -274,6 +324,22 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     blobUrlVersion,
     project,
   })
+  const domTextScrubOverlayPlan = useMemo(
+    () => buildDomTextScrubOverlayPlan(fastScrubScaledTracks, fastScrubScaledKeyframes),
+    [fastScrubScaledKeyframes, fastScrubScaledTracks],
+  )
+  const domTextScrubInputProps = useMemo(
+    () =>
+      domTextScrubOverlayPlan.enabled
+        ? {
+            ...inputProps,
+            tracks: domTextScrubOverlayPlan.textTracks,
+            backgroundColor: 'transparent',
+            keyframes: domTextScrubOverlayPlan.textKeyframes,
+          }
+        : undefined,
+    [domTextScrubOverlayPlan, inputProps],
+  )
 
   usePreviewSourceWarm({
     resolvedUrlCount: resolvedUrls.size,
@@ -322,10 +388,12 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
         project.height,
         project.backgroundColor ?? '',
         fastScrubTracksTopologyFingerprint,
+        domTextScrubOverlayPlan.enabled ? 'dom-text-overlay' : 'composited-text',
         playbackTransitionFingerprint,
       ].join('::'),
     [
       fastScrubTracksTopologyFingerprint,
+      domTextScrubOverlayPlan.enabled,
       fps,
       playbackTransitionFingerprint,
       project.backgroundColor,
@@ -362,9 +430,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   useLayoutEffect(() => {
     const canvas = gpuEffectsCanvasRef.current
     if (!canvas) return
-    if (canvas.width !== playerRenderSize.width) canvas.width = playerRenderSize.width
-    if (canvas.height !== playerRenderSize.height) canvas.height = playerRenderSize.height
-  }, [gpuEffectsCanvasRef, playerRenderSize.height, playerRenderSize.width])
+    const backingSize = getPreviewDisplayCanvasBackingSize(playerSize, playerRenderSize)
+    if (canvas.width !== backingSize.width) canvas.width = backingSize.width
+    if (canvas.height !== backingSize.height) canvas.height = backingSize.height
+  }, [gpuEffectsCanvasRef, playerRenderSize, playerSize])
 
   const ensureSplitAfterRenderer =
     useCallback(async (): Promise<CompositionRendererInstance | null> => {
@@ -389,13 +458,14 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
           const { createCompositionRenderer } = await importCompositionRenderer()
           const renderer = await createCompositionRenderer(fastScrubInputProps, canvas, ctx, {
             mode: 'preview',
-            useProxyMedia: useProxy,
+            useProxyMedia: true,
             getPreviewTransformOverride,
             getPreviewEffectsOverride: getPreviewEffectsOverrideWithGradeApplied,
             getPreviewCornerPinOverride,
             getPreviewPathVerticesOverride,
             getLiveItemSnapshot,
             getLiveKeyframes,
+            renderText: !domTextScrubOverlayPlan.enabled,
           })
 
           splitAfterCanvasRef.current = canvas
@@ -420,6 +490,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       disposeSplitAfterRenderer,
       fastScrubInputProps,
       fastScrubRendererStructureKey,
+      domTextScrubOverlayPlan.enabled,
       getLiveItemSnapshot,
       getLiveKeyframes,
       getPreviewCornerPinOverride,
@@ -429,22 +500,42 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       isResolving,
       renderSize.height,
       renderSize.width,
-      useProxy,
     ])
 
-  const forceFastScrubOverlay = showGpuEffectsOverlay
+  // Enter the composited path in the same render that activates the editor.
+  // Waiting for the timeline-wide effect scan adds a reactive round trip that
+  // makes the first neutral-EV drag look stuck until another parameter changes.
+  const forceFastScrubOverlay =
+    showGpuEffectsOverlay || isPowerWindowEditing || isSpatialEffectEditing
+
+  // The split comparison is the only render-time branch that needs playback
+  // state. Keep the selected value stable for the normal (non-split) preview
+  // so pressing Play does not invalidate the entire VideoPreview tree.
+  const isPlayingForSplitComparison = usePlaybackStore(
+    (state) => colorGradeComparisonMode === 'split' && state.isPlaying,
+  )
 
   // While the GPU overlay owns the preview during playback, the DOM composition
   // tree is occluded — freeze its per-item visual recomputation so it stops
   // re-deriving transforms/masks/text on every frame behind the overlay. The
   // overlay composites the real frames; mount/visibility and video sync stay live.
   useEffect(() => {
-    const frozen = forceFastScrubOverlay && isPlaying
-    usePlaybackStore.getState().setCompositionVisualFrozen(frozen)
+    const applyFrozenState = (isPlaying: boolean) => {
+      usePlaybackStore.getState().setCompositionVisualFrozen(forceFastScrubOverlay && isPlaying)
+    }
+
+    applyFrozenState(usePlaybackStore.getState().isPlaying)
+    const unsubscribe = usePlaybackStore.subscribe((state, previousState) => {
+      if (state.isPlaying !== previousState.isPlaying) {
+        applyFrozenState(state.isPlaying)
+      }
+    })
+
     return () => {
+      unsubscribe()
       usePlaybackStore.getState().setCompositionVisualFrozen(false)
     }
-  }, [forceFastScrubOverlay, isPlaying])
+  }, [forceFastScrubOverlay])
 
   const {
     clearTransitionPlaybackSession,
@@ -470,17 +561,37 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     pushTransitionTrace,
     ...previewRuntimeRefs.transitionSessionControllerRefs,
   })
+  const shouldPreferPlayerForPreview = useCallback(
+    (previewFrame: number | null) => {
+      const playbackState = usePlaybackStore.getState()
+      const requiresRenderedPresentation =
+        forceFastScrubOverlay ||
+        isPausedTransitionOverlayActive(playbackState.currentFrame, playbackState)
+      if (requiresRenderedPresentation) return false
+
+      const activeGizmoItemType = useGizmoStore.getState().activeGizmo?.itemType ?? null
+      return (
+        shouldPreferDomPlayerForGizmo(false, activeGizmoItemType) ||
+        previewRuntimeRefs.preferPlayerForDomGizmoRef.current ||
+        (preferPlayerForStyledTextScrubRef.current && previewFrame !== null)
+      )
+    },
+    [
+      forceFastScrubOverlay,
+      isPausedTransitionOverlayActive,
+      preferPlayerForStyledTextScrubRef,
+      previewRuntimeRefs.preferPlayerForDomGizmoRef,
+    ],
+  )
   const { handleFrameChange, handlePlayStateChange } = usePreviewPlaybackController({
     fps,
     combinedTracks,
     keyframes,
-    activeGizmoItemType,
-    isGizmoInteracting,
-    isPlaying,
     forceFastScrubOverlay,
+    domTextScrubOverlayEnabled: domTextScrubOverlayPlan.enabled,
     previewPerfRef,
     isGizmoInteractingRef,
-    preferPlayerForTextGizmoRef: previewRuntimeRefs.preferPlayerForTextGizmoRef,
+    preferPlayerForDomGizmoRef: previewRuntimeRefs.preferPlayerForDomGizmoRef,
     preferPlayerForStyledTextScrubRef,
     adaptiveQualityStateRef,
     adaptiveFrameSampleRef: previewRuntimeRefs.adaptiveFrameSampleRef,
@@ -513,7 +624,9 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       fps,
       isResolving,
       forceFastScrubOverlay,
+      domTextScrubOverlayEnabled: domTextScrubOverlayPlan.enabled,
       items,
+      playerSize,
       playerRenderSize,
       renderSize,
       fastScrubInputProps,
@@ -541,7 +654,10 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   usePreviewRenderPump({
     fps,
     forceFastScrubOverlay,
-    combinedTracks,
+    // Scrub decoding must use the same proxy/source URLs as the renderer.
+    // Feeding unresolved project tracks here silently made the worker decode
+    // full-resolution originals while the composition rendered proxies.
+    combinedTracks: fastScrubScaledTracks,
     fastScrubBoundaryFrames,
     fastScrubBoundarySources,
     playbackTransitionOverlayWindows,
@@ -619,6 +735,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     <>
       {overlayChrome === 'edit' && (
         <GizmoOverlay
+          itemsSnapshot={itemsSnapshot.items}
           containerRect={playerContainerRect}
           playerSize={playerSize}
           projectSize={{ width: project.width, height: project.height }}
@@ -626,46 +743,73 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
           hitAreaRef={backgroundRef as React.RefObject<HTMLDivElement>}
         />
       )}
-      <MaskEditorContainer
-        containerRect={playerContainerRect}
-        playerSize={playerSize}
-        projectSize={{ width: project.width, height: project.height }}
-        zoom={zoom}
-      />
-      <CornerPinContainer
-        containerRect={playerContainerRect}
-        playerSize={playerSize}
-        projectSize={{ width: project.width, height: project.height }}
-        zoom={zoom}
-      />
-      <PowerWindowOverlayContainer
-        containerRect={playerContainerRect}
-        playerSize={playerSize}
-        projectSize={{ width: project.width, height: project.height }}
-        zoom={zoom}
-      />
+      {isMaskEditing && (
+        <MaskEditorContainer
+          containerRect={playerContainerRect}
+          playerSize={playerSize}
+          projectSize={{ width: project.width, height: project.height }}
+          zoom={zoom}
+        />
+      )}
+      {isCornerPinEditing && (
+        <CornerPinContainer
+          containerRect={playerContainerRect}
+          playerSize={playerSize}
+          projectSize={{ width: project.width, height: project.height }}
+          zoom={zoom}
+        />
+      )}
+      {isPowerWindowEditing && (
+        <PowerWindowOverlayContainer
+          containerRect={playerContainerRect}
+          playerSize={playerSize}
+          projectSize={{ width: project.width, height: project.height }}
+          zoom={zoom}
+        />
+      )}
+      {isSpatialEffectEditing && (
+        <SpatialEffectPointOverlayContainer
+          containerRect={playerContainerRect}
+          playerSize={playerSize}
+          projectSize={{ width: project.width, height: project.height }}
+          zoom={zoom}
+        />
+      )}
     </>
   ) : null
-  const shouldShowAfterDuringSplitPlayback = isPlaying && colorGradeComparisonMode === 'split'
+  const shouldShowAfterDuringSplitPlayback = isPlayingForSplitComparison
   const stageColorGradeComparisonMode = shouldShowAfterDuringSplitPlayback
     ? 'off'
     : colorGradeComparisonMode
-  const baseComparisonTargetFrame = Math.max(0, Math.round(previewFrame ?? currentFrame))
+  const baseComparisonTargetFrame = Math.max(
+    0,
+    Math.round(comparisonPreviewFrame ?? comparisonCurrentFrame ?? 0),
+  )
   const comparisonTargetFrame =
-    stageColorGradeComparisonMode === 'split' && displayedFrame !== null
-      ? displayedFrame
+    stageColorGradeComparisonMode === 'split' && comparisonDisplayedFrame !== null
+      ? comparisonDisplayedFrame
       : baseComparisonTargetFrame
 
+  // Leaving split comparison clears the rendered after-frame. Kept as its own
+  // effect keyed only on the mode so the per-frame `comparisonTargetFrame`
+  // churn doesn't re-run the heavier split render effect on every frame.
   useEffect(() => {
-    if (stageColorGradeComparisonMode !== 'split') {
-      splitAfterPendingFrameRef.current = null
-      setSplitAfterRenderedFrame(null)
-      return
-    }
+    if (stageColorGradeComparisonMode === 'split') return
+    splitAfterPendingFrameRef.current = null
+    setSplitAfterRenderedFrame((frame) => (frame === null ? frame : null))
+  }, [stageColorGradeComparisonMode])
+
+  useEffect(() => {
+    if (stageColorGradeComparisonMode !== 'split') return
 
     let cancelled = false
     splitAfterPendingFrameRef.current = comparisonTargetFrame
-    setSplitAfterRenderedFrame((frame) => (frame === comparisonTargetFrame ? frame : null))
+    // Intentionally NOT resetting `splitAfterRenderedFrame` here: the readiness
+    // check (`splitAfterRenderedFrame === comparisonTargetFrame`) already gates
+    // the overlay, so a stale frame stays hidden until the async render catches
+    // up. The previous synchronous reset fed a render cascade
+    // (displayedFrame → comparisonTargetFrame → setState → displayedFrame …)
+    // that tripped React's "maximum update depth".
 
     const renderPendingSplitAfter = async () => {
       if (splitAfterRenderInFlightRef.current) return
@@ -691,8 +835,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
 
           const displayCtx = displayCanvas.getContext('2d')
           if (!displayCtx) return
-          displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height)
-          displayCtx.drawImage(offscreen, 0, 0, displayCanvas.width, displayCanvas.height)
+          drawSourceToPreviewDisplayCanvas(displayCtx, displayCanvas, offscreen)
           setSplitAfterRenderedFrame(targetFrame)
         }
       } finally {
@@ -727,7 +870,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   const isColorGradeComparisonActive = stageColorGradeComparisonMode !== 'off'
   const isSplitGradeComparison = stageColorGradeComparisonMode === 'split'
   const isColorGradeComparisonFrameReady =
-    displayedFrame === comparisonTargetFrame &&
+    comparisonDisplayedFrame === comparisonTargetFrame &&
     (isSplitGradeComparison
       ? splitAfterRenderedFrame === comparisonTargetFrame
       : stageColorGradeComparisonMode === 'before' ||
@@ -748,6 +891,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       playerRenderSize={playerRenderSize}
       totalFrames={totalFrames}
       fps={fps}
+      initialFrame={initialPlayheadFrameRef.current ?? 0}
       isResolving={isResolving}
       isRenderedOverlayVisible={stageRenderedOverlayVisible}
       isSplitGradeAfterVisible={isSplitAfterVisible}
@@ -755,6 +899,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
       colorGradeSplitPosition={colorGradeSplitPosition}
       onColorGradeSplitPositionChange={setColorGradeSplitPosition}
       inputProps={inputProps}
+      domTextScrubInputProps={domTextScrubInputProps}
       onBackgroundClick={handleBackgroundClick}
       onFrameChange={handleStageFrameChange}
       onPlayStateChange={handlePlayStateChange}
@@ -767,9 +912,33 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
 })
 
 export const VideoPreview = memo(function VideoPreview(props: VideoPreviewProps) {
-  return <VideoPreviewBase {...props} overlayChrome="edit" />
+  const { chrome = 'edit', ...previewProps } = props
+  const itemsSnapshot = useTransformStableItemsSnapshot()
+  return (
+    <DeferredVideoPreview
+      {...previewProps}
+      overlayChrome={chrome}
+      itemsSnapshot={itemsSnapshot}
+    />
+  )
+})
+
+const DeferredVideoPreview = memo(function DeferredVideoPreview({
+  itemsSnapshot,
+  ...props
+}: VideoPreviewProps & {
+  overlayChrome: PreviewOverlayChrome
+  itemsSnapshot: PreviewItemsSnapshot
+}) {
+  const deferredItemsSnapshot = useRafDeferredValue(itemsSnapshot)
+  return (
+    <VideoPreviewBase
+      {...props}
+      itemsSnapshot={deferredItemsSnapshot}
+    />
+  )
 })
 
 export const ColorVideoPreview = memo(function ColorVideoPreview(props: VideoPreviewProps) {
-  return <VideoPreviewBase {...props} overlayChrome="color" />
+  return <VideoPreview {...props} chrome="color" />
 })

@@ -3,13 +3,13 @@ import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
+  BookOpen,
   Bug,
   Check,
   ChevronDown,
   Download,
   FolderArchive,
   Github,
-  HelpCircle,
   Keyboard,
   ListVideo,
   Loader2,
@@ -20,6 +20,8 @@ import {
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DiscordIcon } from '@/components/brand/discord-icon'
+import { DISCORD_INVITE_URL } from '@/config/community'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,12 +42,18 @@ import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 import { cn } from '@/shared/ui/cn'
 import { LanguageSwitcher } from '@/shared/ui/language-switcher'
 import { useDebugStore } from '@/features/editor/stores/debug-store'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
-import { buildProjectMetadataSummary } from '@/features/editor/utils/project-metadata-summary'
 import { useEmbeddedMode, useSendBack } from '@/features/editor/deps/embedded-contract'
 
 const SAVE_ANIMATION_MIN_MS = 1800
+
+const SaveDirtyIndicator = memo(function SaveDirtyIndicator() {
+  const isDirty = useTimelineStore((state) => state.isDirty)
+  return isDirty ? (
+    <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
+  ) : null
+})
 
 function formatProjectDuration(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s`
@@ -63,7 +71,6 @@ interface ToolbarProps {
     height: number
     fps: number
   }
-  isDirty?: boolean
   onSave?: () => Promise<void>
   onExport?: () => void
   onExportBundle?: () => void
@@ -109,7 +116,6 @@ function SendBackButton() {
 export const Toolbar = memo(function Toolbar({
   projectId,
   project,
-  isDirty = false,
   onSave,
   onExport,
   onExportBundle,
@@ -127,17 +133,19 @@ export const Toolbar = memo(function Toolbar({
   const [isSaveAnimating, setIsSaveAnimating] = useState(false)
   const [saveAnimationKey, setSaveAnimationKey] = useState(0)
   const saveAnimationTimeoutRef = useRef<number | undefined>(undefined)
-  const timelineItems = useTimelineStore((state) => state.items)
+  const itemCount = useItemsStore((state) => state.items.length)
+  const maxItemEndFrame = useItemsStore((state) => state.maxItemEndFrame)
+  const mediaDependencyIds = useItemsStore((state) => state.mediaDependencyIds)
   const brokenMediaIds = useMediaLibraryStore((state) => state.brokenMediaIds)
-  const projectSummary = useMemo(
-    () =>
-      buildProjectMetadataSummary({
-        fps: project.fps,
-        items: timelineItems,
-        brokenMediaIds,
-      }),
-    [brokenMediaIds, project.fps, timelineItems],
-  )
+  const projectSummary = useMemo(() => {
+    const projectMediaIds = new Set(mediaDependencyIds)
+    return {
+      durationSeconds: project.fps > 0 ? maxItemEndFrame / project.fps : 0,
+      clipCount: itemCount,
+      mediaCount: mediaDependencyIds.length,
+      brokenMediaCount: brokenMediaIds.filter((mediaId) => projectMediaIds.has(mediaId)).length,
+    }
+  }, [brokenMediaIds, itemCount, maxItemEndFrame, mediaDependencyIds, project.fps])
 
   useEffect(() => {
     setHasUnseenWhatsNew(hasUnseenChangelog())
@@ -157,7 +165,7 @@ export const Toolbar = memo(function Toolbar({
   }
 
   const handleBackClick = () => {
-    if (isDirty) {
+    if (useTimelineStore.getState().isDirty) {
       setShowUnsavedDialog(true)
     } else {
       navigate({ to: '/projects' })
@@ -260,6 +268,36 @@ export const Toolbar = memo(function Toolbar({
             {import.meta.env.DEV && import.meta.env.VITE_SHOW_DEBUG_PANEL !== 'false' && (
               <DebugPopover projectId={projectId} />
             )}
+
+            {/* Socials */}
+            <Button variant="outline" size="icon" className="h-7 w-7" asChild>
+              <a
+                href="https://github.com/walterlow/freecut"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-tooltip={t('toolbar.viewOnGitHub')}
+                data-tooltip-side="bottom"
+                aria-label={t('toolbar.viewOnGitHub')}
+              >
+                <Github className="h-4 w-4" />
+              </a>
+            </Button>
+            <Button variant="outline" size="icon" className="h-7 w-7" asChild>
+              <a
+                href={DISCORD_INVITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-tooltip={t('toolbar.joinDiscord')}
+                data-tooltip-side="bottom"
+                aria-label={t('toolbar.joinDiscord')}
+              >
+                <DiscordIcon className="h-4 w-4" />
+              </a>
+            </Button>
+
+            <Separator orientation="vertical" className="h-5" />
+
+            {/* Utility */}
             <Button variant="outline" size="icon" className="h-7 w-7" asChild>
               <a
                 href="/docs"
@@ -269,7 +307,7 @@ export const Toolbar = memo(function Toolbar({
                 data-tooltip-side="bottom"
                 aria-label="User Guide"
               >
-                <HelpCircle className="h-4 w-4" />
+                <BookOpen className="h-4 w-4" />
               </a>
             </Button>
             <Button
@@ -312,18 +350,10 @@ export const Toolbar = memo(function Toolbar({
               <Keyboard className="h-4 w-4" />
             </Button>
             <LanguageSwitcher size="sm" align="end" side="bottom" />
-            <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-              <a
-                href="https://github.com/walterlow/freecut"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-tooltip={t('toolbar.viewOnGitHub')}
-                data-tooltip-side="bottom"
-                aria-label={t('toolbar.viewOnGitHub')}
-              >
-                <Github className="h-4 w-4" />
-              </a>
-            </Button>
+
+            <Separator orientation="vertical" className="h-5" />
+
+            {/* Actions */}
             <Button
               variant="outline"
               size="sm"
@@ -337,9 +367,7 @@ export const Toolbar = memo(function Toolbar({
                 ) : (
                   <Save className="h-4 w-4" />
                 )}
-                {isDirty && (
-                  <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
-                )}
+                <SaveDirtyIndicator />
               </div>
               {t('toolbar.save')}
             </Button>

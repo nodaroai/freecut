@@ -4,6 +4,7 @@
       "aiCaptionsCount": "{{count}} KI-Untertitel",
       "analyzeWithAI": "Mit KI analysieren",
       "analyzingWithAI": "Mit KI wird analysiert",
+      "cancelInterpolation": "Interpolation abbrechen",
       "chooseMkvOrWebm": "MKV oder WebM wählen",
       "deleteProxy": "Proxy löschen",
       "deleteTranscript": "Transkript löschen",
@@ -11,10 +12,13 @@
       "generateProxy": "Proxy erstellen",
       "generateTranscript": "Transkript erstellen",
       "importing": "Wird importiert",
+      "interpolateFactor": "{{factor}}x Frames",
+      "interpolateFrames": "Frames interpolieren",
       "preparing": "Wird vorbereitet",
       "menuAi": "KI",
       "menuCaptions": "Eingebettete Untertitel",
       "menuFile": "Datei",
+      "menuInterpolation": "Frame-Interpolation",
       "menuProxy": "Proxy",
       "menuTranscript": "Transkript",
       "playAudio": "Audio abspielen",
@@ -37,17 +41,32 @@
       "transcriptReadyFor": "Transkript für „{{name}}\" ist bereit",
       "transcriptionFailedFor": "Transkription für „{{name}}\" fehlgeschlagen",
       "transcriptsDeleted": "Transkripte gelöscht",
-      "transcriptsReady": "Transkripte bereit"
+      "transcriptsReady": "Transkripte bereit",
+      "menuUpscale": "Hochskalieren",
+      "upscaleVideo": "2x hochskalieren",
+      "cancelUpscale": "Hochskalieren abbrechen",
+      "upscaleVariant": {
+        "liveAction": "Realfilm",
+        "animation": "Anime",
+        "threeD": "3D-Rendering"
+      }
     },
     "compositions": {
+      "compositionsGroup": "Kompositionen",
+      "compoundClipsGroup": "Zusammengesetzte Clips",
       "deleteBody": "Zusammengesetzten Clip \"{{name}}\" löschen? Dies kann nicht rückgängig gemacht werden.",
       "deleteInstancesDetail": "{{count}} Timeline-Instanzen, die diesen zusammengesetzten Clip verwenden, werden ebenfalls entfernt.",
       "deleteInstancesTitle": "Verknüpfte Instanzen werden entfernt",
+      "deleteSequenceBody": "Sequenz \"{{name}}\" löschen? Dies kann nicht rückgängig gemacht werden.",
+      "deleteSequenceInstancesDetail": "{{count}} Timeline-Instanzen, die diese Sequenz verwenden, werden ebenfalls entfernt.",
+      "deleteSequenceTitle": "Sequenz löschen",
       "deleteTitle": "Zusammengesetzten Clip löschen",
       "enter": "Öffnen",
       "itemCount": "{{count}} Elemente",
+      "openAsTab": "Als Tab öffnen",
       "rename": "Umbenennen",
-      "sectionTitle": "Zusammengesetzte Clips"
+      "sectionTitle": "Kompositionen",
+      "sequencesGroup": "Sequenzen"
     },
     "deleteDialog": {
       "bodyMultiple": "Dadurch werden {{count}} Medienelemente dauerhaft aus diesem Projekt entfernt. Diese Aktion kann nicht rückgängig gemacht werden.",
@@ -123,14 +142,19 @@
       "dragDropUnsupported": "Drag-and-drop wird hier nicht unterstützt.",
       "dropFilesHere": "Dateien hier ablegen",
       "filesRejected": "Einige Dateien konnten nicht hinzugefügt werden.",
+      "downloadingInterpolationModel": "Interpolationsmodell wird heruntergeladen",
       "generateProxiesForSelected": "Proxys für {{count}} ausgewählte Elemente erzeugen",
       "generatingProxies": "Proxys werden erstellt…",
       "generatingTranscripts": "Transkripte werden erstellt…",
+      "interpolatingFrames": "Frames werden interpoliert…",
+      "interpolationProgress": "Frame-Interpolation-Fortschritt",
+      "timeRemaining": "noch {{time}}",
       "gridItemSize": "Vorschaugröße",
-      "groupAudio": "Audio gruppieren",
-      "groupGifs": "GIFs gruppieren",
-      "groupImages": "Bilder gruppieren",
-      "groupVideos": "Videos gruppieren",
+      "groupAudio": "Audio",
+      "groupGifs": "GIFs",
+      "groupImages": "Bilder",
+      "groupLottie": "Lottie",
+      "groupVideos": "Videos",
       "import": "Importieren",
       "importFromUrlDescription": "Importiere eine Mediendatei über eine direkte URL.",
       "importFromUrlHint": "Füge einen direkten Link zu einer Video-, Audio-, Bild- oder GIF-Datei ein.",
@@ -155,6 +179,9 @@
       "selectedAssetsCount": "{{count}} ausgewählte Assets",
       "selectedAssetsCount_one": "{{count}} ausgewähltes Asset",
       "selectedAssetsCount_other": "{{count}} ausgewählte Assets",
+      "sequencesCount": "{{count}} Sequenzen",
+      "sequencesCount_one": "{{count}} Sequenz",
+      "sequencesCount_other": "{{count}} Sequenzen",
       "showMediaLibrary": "Medienbibliothek anzeigen",
       "sortDate": "Nach Datum sortieren",
       "sortName": "Nach Name sortieren",
@@ -168,7 +195,8 @@
       "typeShort": {
         "video": "VIDEO",
         "audio": "AUDIO",
-        "image": "BILD"
+        "image": "BILD",
+        "lottie": "LOTTIE"
       },
       "sortShort": {
         "name": "NAME",
@@ -194,7 +222,9 @@
         "waveform": "Wellenform"
       },
       "importFailed_one": "{{count}} Datei konnte nicht importiert werden. Prüfe die Datei und versuche es erneut.",
-      "importFailed_other": "{{count}} Dateien konnten nicht importiert werden. Prüfe die Dateien und versuche es erneut."
+      "importFailed_other": "{{count}} Dateien konnten nicht importiert werden. Prüfe die Dateien und versuche es erneut.",
+      "upscalingVideo": "Video wird hochskaliert",
+      "upscaleProgress": "Fortschritt beim Hochskalieren"
     },
     "missingMedia": {
       "title": "Fehlende Medien",
@@ -247,16 +277,20 @@
       "language": "Sprache",
       "model": "Modell",
       "noLanguages": "Keine Sprachen verfügbar.",
+      "parakeetAutoDetects": "Erkennt {{count}} europäische Sprachen automatisch.",
+      "parakeetChooseWhisper": "Wähle für Chinesisch, Japanisch, Koreanisch und andere Sprachen ein Whisper-Modell.",
       "progressAria": "Transkriptionsfortschritt",
       "quantization": "Quantisierung",
       "refreshTitle": "Transkript aktualisieren",
       "searchLanguages": "Sprachen suchen",
       "start": "Starten",
-      "stop": "Stoppen"
+      "stop": "Stoppen",
+      "whisperLanguageHint": "Wähle für bessere Genauigkeit die gesprochene Sprache oder nutze die automatische Erkennung."
     },
     "type": {
       "audio": "Audio",
       "image": "Bild",
+      "lottie": "Lottie",
       "video": "Video"
     },
     "unsupportedCodec": {

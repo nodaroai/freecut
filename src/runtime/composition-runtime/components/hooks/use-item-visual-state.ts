@@ -1,7 +1,8 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useContext } from 'react'
 import { useVideoConfig } from '../../hooks/use-player-compat'
 import { interpolate, useSequenceContext } from '@/runtime/composition-runtime/deps/player'
 import {
+  useGizmoStore,
   useItemGizmoPreview,
   type ItemPropertiesPreview,
 } from '@/runtime/composition-runtime/deps/stores'
@@ -13,11 +14,13 @@ import { getShapePath, rotatePath } from '../../utils/shape-path'
 import { hasCornerPin } from '../../utils/corner-pin'
 import { useCompositionSpace } from '../../contexts/composition-space-context'
 import { useRuntimeItemKeyframes } from './use-runtime-item-keyframes'
+import { KeyframesContext } from '../../contexts/keyframes-context-core'
 import { useVisualFreezeFrame } from './use-visual-freeze-frame'
 import type { MaskInfo } from '../item'
 import type React from 'react'
 import {
   applyTransformOverride,
+  resolveItemTransformAtFrame,
   resolveItemTransformAtRelativeFrame,
 } from '../../utils/frame-scene'
 import { applyPreviewPathVerticesToShape } from '../../utils/preview-path-override'
@@ -26,6 +29,11 @@ import {
   resolveAnimatedCrop,
   resolveAnimatedTextItem,
 } from '@/runtime/composition-runtime/deps/keyframes'
+import { worldToLocalTransform } from '@/shared/utils/transform-parenting'
+import {
+  type ItemTransformDependencyPlan,
+  useLiveTransformDependencySignature,
+} from '../../contexts/live-item-transform-context'
 
 /**
  * Consolidated visual state for an item.
@@ -60,6 +68,8 @@ interface ItemVisualState {
   maskInvert: boolean
   /** Mask feather amount */
   maskFeather: number
+  /** Mask/matte strength, normalized to 0-1. */
+  maskOpacity: number
   /** SVG mask ID (for SVG mask reference) */
   svgMaskId: string | null
   /** SVG mask paths with stroke info (for SVG mask definition) */
@@ -83,6 +93,7 @@ interface ItemVisualState {
 export function useItemVisualState(
   item: TimelineItem & { _sequenceFrameOffset?: number },
   masks: MaskInfo[] = [],
+  options: { transformDependencyPlan?: ItemTransformDependencyPlan } = {},
 ): ItemVisualState {
   const { width: renderWidth, height: renderHeight, fps } = useVideoConfig()
   const compositionSpace = useCompositionSpace()
@@ -117,9 +128,89 @@ export function useItemVisualState(
 
   // === GRANULAR SELECTORS ===
   // Using individual selectors to avoid creating new object references
-  const { activeGizmo, previewTransform, itemPreview } = useItemGizmoPreview(item.id)
+  const { activeGizmo, previewTransform, itemPreview } = useItemGizmoPreview(item.id, {
+    imperativeTranslate: true,
+  })
+  const transformParentId = item.transformParent?.parentItemId
+  const exactDependencyPreviewItemId = useGizmoStore((state) => {
+    const active = state.activeGizmo
+    if (!active || active.mode !== 'translate' || !state.previewTransform) return null
+    const plan = options.transformDependencyPlan
+    if (!plan) return active.itemId === transformParentId ? active.itemId : null
+    if (plan.linearTranslateSourceItemIds.has(active.itemId)) return null
+    return plan.hasExpressionDependencies || plan.sourceItemIds.has(active.itemId)
+      ? active.itemId
+      : null
+  })
+  const exactDependencyWorldPreview = useGizmoStore((state) =>
+    exactDependencyPreviewItemId !== null &&
+    state.activeGizmo?.itemId === exactDependencyPreviewItemId &&
+    state.activeGizmo.mode === 'translate'
+      ? state.previewTransform
+      : null,
+  )
+  const allItemPreviews = useGizmoStore((state) => state.preview)
 
   const itemKeyframes = useRuntimeItemKeyframes(item.id)
+  const keyframesContext = useContext(KeyframesContext)
+  const liveTransformDependencySignature = useLiveTransformDependencySignature(
+    item,
+    keyframesContext?.getItemKeyframes,
+  )
+  const exactDependencyLocalPreview = useMemo(() => {
+    if (
+      exactDependencyPreviewItemId === null ||
+      !exactDependencyWorldPreview ||
+      !keyframesContext
+    ) {
+      return null
+    }
+
+    const sourceItem = keyframesContext.getItem(exactDependencyPreviewItemId)
+    if (!sourceItem) return null
+    const worldPreview: ResolvedTransform = {
+      x: exactDependencyWorldPreview.x,
+      y: exactDependencyWorldPreview.y,
+      width: exactDependencyWorldPreview.width,
+      height: exactDependencyWorldPreview.height,
+      anchorX:
+        exactDependencyWorldPreview.anchorX ??
+        exactDependencyWorldPreview.width / 2,
+      anchorY:
+        exactDependencyWorldPreview.anchorY ??
+        exactDependencyWorldPreview.height / 2,
+      rotation: exactDependencyWorldPreview.rotation,
+      opacity: exactDependencyWorldPreview.opacity,
+      cornerRadius: exactDependencyWorldPreview.cornerRadius ?? 0,
+    }
+    const parentId = sourceItem.transformParent?.parentItemId
+    const parent = parentId ? keyframesContext.getItem(parentId) : undefined
+    const parentWorld = parent
+      ? resolveItemTransformAtFrame(parent, {
+          canvas: logicalCanvas,
+          frame: item.from + visualFrame,
+          keyframes: keyframesContext.getItemKeyframes(parent.id),
+          getItem: keyframesContext.getItem,
+          getKeyframes: keyframesContext.getItemKeyframes,
+          getPreviewTransform: (candidateId) =>
+            allItemPreviews?.[candidateId]?.transform,
+        })
+      : undefined
+
+    return worldToLocalTransform(
+      worldPreview,
+      sourceItem.transformParent,
+      parentWorld,
+    )
+  }, [
+    allItemPreviews,
+    exactDependencyPreviewItemId,
+    exactDependencyWorldPreview,
+    item.from,
+    keyframesContext,
+    logicalCanvas,
+    visualFrame,
+  ])
   const maskIds = useMemo(() => new Set(masks.map((mask) => mask.shape.id)), [masks])
   const previewMaskEditingItemId = useMaskEditorStore(
     useCallback(
@@ -146,6 +237,7 @@ export function useItemVisualState(
 
   // === TRANSFORM COMPUTATION ===
   const { transform, transformStyle, fadeOpacity, finalOpacity, animatedCrop } = useMemo(() => {
+    void liveTransformDependencySignature
     // Check if this item has an active single-item gizmo preview
     const isGizmoPreviewActive = activeGizmo?.itemId === item.id && previewTransform !== null
 
@@ -160,18 +252,43 @@ export function useItemVisualState(
       ? resolveAnimatedCrop(item.crop, itemKeyframes ?? undefined, visualFrame, sourceDimensions)
       : item.crop
 
-    const animatedResolved = resolveItemTransformAtRelativeFrame(item, {
-      canvas: logicalCanvas,
-      relativeFrame: visualFrame,
-      keyframes: itemKeyframes,
-    })
-
     // Priority: Unified preview (group/properties) > Single gizmo preview > Keyframe animation > Base
-    let resolved = animatedResolved
-    if (isUnifiedPreviewActive && unifiedPreviewTransform) {
-      resolved = applyTransformOverride(animatedResolved, unifiedPreviewTransform)
-    } else if (isGizmoPreviewActive && previewTransform) {
-      resolved = applyTransformOverride(animatedResolved, previewTransform)
+    const rootPreviewTransform = isUnifiedPreviewActive
+      ? unifiedPreviewTransform
+      : isGizmoPreviewActive
+        ? (previewTransform ?? undefined)
+        : undefined
+    const getPreviewTransform = (itemId: string) =>
+      activeGizmo?.itemId === itemId && previewTransform
+        ? previewTransform
+        : exactDependencyPreviewItemId === itemId && exactDependencyLocalPreview
+          ? exactDependencyLocalPreview
+          : allItemPreviews?.[itemId]?.transform
+    let resolved = keyframesContext
+      ? resolveItemTransformAtFrame(item, {
+          canvas: logicalCanvas,
+          frame: item.from + visualFrame,
+          keyframes: itemKeyframes,
+          previewTransform: rootPreviewTransform,
+          getItem: keyframesContext.getItem,
+          getKeyframes: keyframesContext.getItemKeyframes,
+          getPreviewTransform,
+        })
+      : resolveItemTransformAtRelativeFrame(item, {
+          canvas: logicalCanvas,
+          relativeFrame: visualFrame,
+          keyframes: itemKeyframes,
+          previewTransform: rootPreviewTransform,
+        })
+
+    if (isGizmoPreviewActive && previewTransform) {
+      // Gizmo interactions operate on the fully resolved world transform.
+      // A parented item has already inherited its parent's delta at this
+      // point, so reapplying that preview as local input inside the hierarchy
+      // can leave the content behind (or move it twice) until mouseup converts
+      // the committed value back to local space. Let the live world preview
+      // win after hierarchy resolution so content and gizmo stay together.
+      resolved = applyTransformOverride(resolved, previewTransform)
     }
 
     if (item.type === 'text' && !hasCornerPin(item.cornerPin)) {
@@ -262,11 +379,16 @@ export function useItemVisualState(
   }, [
     activeGizmo,
     previewTransform,
+    exactDependencyLocalPreview,
+    exactDependencyPreviewItemId,
     itemPreview,
+    allItemPreviews,
     item,
     logicalCanvas,
     renderCanvas,
     itemKeyframes,
+    keyframesContext,
+    liveTransformDependencySignature,
     visualFrame,
     fps,
     scaleX,
@@ -293,6 +415,7 @@ export function useItemVisualState(
         maskType: null as 'clip' | 'alpha' | 'svg-mask' | null,
         maskInvert: false,
         maskFeather: 0,
+        maskOpacity: 1,
         svgMaskId: null,
         svgMaskPaths: null,
       }
@@ -300,11 +423,19 @@ export function useItemVisualState(
 
     // All masks use the first mask's type settings
     const firstMask = masks[0]!
-    const maskType = firstMask.shape.maskType ?? 'clip'
+    const firstMaskShape = {
+      ...firstMask.shape,
+      ...allItemPreviews?.[firstMask.shape.id]?.properties,
+    }
+    const maskType = firstMaskShape.maskType ?? 'clip'
     // Feather only applies to alpha masks. Clip masks stay hard-edged even if
     // older item data still carries a persisted maskFeather value.
-    const maskFeather = maskType === 'alpha' ? (firstMask.shape.maskFeather ?? 0) * uniformScale : 0
-    const maskInvert = firstMask.shape.maskInvert ?? false
+    const maskFeather = maskType === 'alpha' ? (firstMaskShape.maskFeather ?? 0) * uniformScale : 0
+    const maskOpacity =
+      Math.max(0, Math.min(100, firstMaskShape.maskOpacity ?? 100)) /
+      100 *
+      Math.max(0, Math.min(1, firstMask.transform.opacity ?? 1))
+    const maskInvert = firstMaskShape.maskInvert ?? false
     const getPreviewPathVertices = (shapeId: string) =>
       previewMaskEditingItemId === shapeId ? (previewMaskVertices ?? undefined) : undefined
 
@@ -339,7 +470,10 @@ export function useItemVisualState(
         width: resolvedMaskTransform.width * scaleX,
         height: resolvedMaskTransform.height * scaleY,
       }
-      const effectiveShape = applyPreviewPathVerticesToShape(shape, getPreviewPathVertices)
+      const effectiveShape = applyPreviewPathVerticesToShape(
+        { ...shape, ...allItemPreviews?.[shape.id]?.properties },
+        getPreviewPathVertices,
+      )
 
       let path = getShapePath(effectiveShape, scaledMaskTransform, {
         canvasWidth: renderWidth,
@@ -369,25 +503,33 @@ export function useItemVisualState(
     // Determine rendering mode
     // Simple clip mode uses CSS clip-path directly (faster)
     // SVG mask needed for: inverted clip with stroke, alpha mask, feathering, or stroke
-    if (maskType === 'clip' && !maskInvert && maskFeather === 0 && !hasStroke) {
+    if (
+      maskType === 'clip' &&
+      !maskInvert &&
+      maskFeather === 0 &&
+      maskOpacity === 1 &&
+      !hasStroke
+    ) {
       return {
         maskClipPath: `path('${combinedPath}')`,
         maskType: 'clip' as const,
         maskInvert: false,
         maskFeather: 0,
+        maskOpacity: 1,
         svgMaskId: null,
         svgMaskPaths: maskPathsWithStroke,
       }
     }
 
     // For inverted clip without stroke, use CSS clip-path with evenodd
-    if (maskType === 'clip' && maskInvert && !hasStroke) {
+    if (maskType === 'clip' && maskInvert && maskOpacity === 1 && !hasStroke) {
       const invertedPath = `M 0 0 L ${renderWidth} 0 L ${renderWidth} ${renderHeight} L 0 ${renderHeight} Z ${combinedPath}`
       return {
         maskClipPath: `path(evenodd, '${invertedPath}')`,
         maskType: 'clip' as const,
         maskInvert: true,
         maskFeather: 0,
+        maskOpacity: 1,
         svgMaskId: null,
         svgMaskPaths: maskPathsWithStroke,
       }
@@ -401,6 +543,7 @@ export function useItemVisualState(
       maskType: 'svg-mask' as const,
       maskInvert,
       maskFeather,
+      maskOpacity,
       svgMaskId,
       svgMaskPaths: maskPathsWithStroke,
     }
@@ -415,6 +558,7 @@ export function useItemVisualState(
     scaleX,
     scaleY,
     uniformScale,
+    allItemPreviews,
     previewMaskEditingItemId,
     previewMaskVertices,
   ])

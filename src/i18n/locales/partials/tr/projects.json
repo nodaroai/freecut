@@ -461,7 +461,6 @@
           "zoomTo100": "%100 yakınlaştır",
           "toggleSnap": "Yakalamayı aç/kapat",
           "toggleCanvasSnap": "Tuval (gizmo) yakalamayı aç/kapat",
-          "toggleKeyframeEditorPanel": "Ana kare düzenleyici panelini aç/kapat",
           "editWorkspace": "Kurgu çalışma alanına geç",
           "colorWorkspace": "Renk çalışma alanına geç",
           "copy": "Seçili öğeleri veya ana kareleri kopyala",
@@ -474,6 +473,12 @@
           "clearKeyframes": "Seçili öğelerdeki tüm ana kareleri temizle",
           "keyframeEditorGraph": "Ana kare düzenleyiciyi grafik görünümüne geçir",
           "keyframeEditorDopesheet": "Ana kare düzenleyiciyi zaman çizelgesi görünümüne geçir",
+          "keyframeEditorSplit": "Ana kare düzenleyiciyi bölünmüş görünüme geçir",
+          "editKeyframeAdd": "Seçili Düzenleme katmanına oynatma kafasında ana kare ekle",
+          "keyframePrevious": "Önceki özellik ana karesine git",
+          "keyframeNext": "Sonraki özellik ana karesine git",
+          "keyframeToggleAuto": "Etkin özellik için otomatik anahtarı aç/kapat",
+          "keyframeFit": "Seçili ana kareleri görünüme sığdır",
           "markIn": "Giriş noktası işaretle",
           "markOut": "Çıkış noktası işaretle",
           "clearInOut": "Giriş/Çıkış noktalarını temizle",
@@ -481,7 +486,8 @@
           "overwriteEdit": "Üzerine yazma düzenlemesi",
           "saveProject": "Projeyi kaydet",
           "exportVideo": "Videoyu dışa aktar",
-          "openSceneBrowser": "Sahne Tarayıcısını aç (YZ altyazılarında ara)"
+          "openSceneBrowser": "Sahne Tarayıcısını aç (YZ altyazılarında ara)",
+          "animateWorkspace": "Animasyon çalışma alanına geç"
         },
         "searchPlaceholder": "Komutları veya kısayolları ara",
         "searchResults": "Kısayol arama sonuçları",
@@ -491,7 +497,35 @@
         "resetAllConfirmAction": "Tümünü sıfırla",
         "resetAllToast": "Kısayollar varsayılanlara sıfırlandı",
         "searchResultCount_one": "{{count}} sonuç",
-        "searchResultCount_other": "{{count}} sonuç"
+        "searchResultCount_other": "{{count}} sonuç",
+        "filters": {
+          "custom": "Özel",
+          "conflicts": "Çakışmalar",
+          "unassigned": "Atanmamış"
+        },
+        "scopes": {
+          "keyframes": "Anahtar kare düzenleyici odaktayken etkin",
+          "sourceMonitor": "Kaynak monitörü odaktayken etkin"
+        },
+        "scopedBadge": "Bağlamsal",
+        "addAlternate": "Alternatif ekle",
+        "removeBinding": "Kısayolu kaldır",
+        "keyboardLabel": "Ekran klavyesi",
+        "keyNoCommand": "{{key}} tuşu, kısayol yok",
+        "layoutFallbackNote": "ABD klavye düzeni gösteriliyor; tuşlarınız farklı olabilir.",
+        "undo": "Geri al",
+        "reassignedToast": "Kısayol yeniden atandı",
+        "importNoChanges": "Bu hazır ayar mevcut kısayollarınızla eşleşiyor.",
+        "importReviewTitle": "Kısayol içe aktarımını incele",
+        "importReviewDescription": "Bu hazır ayarı uygulamak mevcut özel kısayollarınızı değiştirir.",
+        "importApply": "Hazır ayarı uygula",
+        "importChangeCount_one": "{{count}} kısayol değişecek",
+        "importChangeCount_other": "{{count}} kısayol değişecek",
+        "importReplaceCount_one": "{{count}} özel kısayolun yerini alır",
+        "importReplaceCount_other": "{{count}} özel kısayolun yerini alır",
+        "announceRecording": "{{command}} için kısayol kaydediliyor. Bir tuş kombinasyonuna basın.",
+        "announceCaptured": "{{binding}} yakalandı",
+        "announceConflict": "{{binding}}, {{action}} ile çakışıyor"
       }
     }
   },
@@ -503,6 +537,20 @@
       "unexpectedError": "Beklenmeyen bir hata oluştu",
       "tryAgain": "Tekrar Dene",
       "reloadPage": "Sayfayı Yeniden Yükle"
+    },
+    "routeError": {
+      "title": "Bir şeyler ters gitti",
+      "description": "FreeCut bu sayfayı yüklemeyi tamamlayamadı.",
+      "projectNotFoundTitle": "Bu projeyi bulamadık",
+      "projectNotFoundDescription": "Proje taşınmış, silinmiş veya eski bir bağlantıdan açılmış olabilir. Diğer projeleriniz çalışma alanınızda kullanılmaya devam edebilir.",
+      "backToProjects": "Projelere dön",
+      "supportHint": "Yardıma ihtiyacınız varsa hata ayrıntılarını kopyalayıp bir geliştiriciye gönderin.",
+      "copyDetails": "Hata ayrıntılarını kopyala",
+      "detailsCopied": "Hata ayrıntıları kopyalandı",
+      "copyFailed": "Ayrıntılar kopyalanamadı",
+      "causePermission": "FreeCut artık çalışma klasörünüzü kullanma iznine sahip değil. Yeniden bağlayın veya başka bir klasör seçin.",
+      "causeMissing": "Çalışma klasörünüz bulunamadı. Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.",
+      "causeUnsupported": "Çalışma klasörünüz, FreeCut'ın ihtiyaç duyduğu her şeyi desteklemeyen bir sürücüde. Buluta eşitlenen klasörler ve ağ klasörleri genellikle böyle davranır. Yerel bir diskteki klasörü seçmek sorunu genellikle çözer."
     }
   }
 }

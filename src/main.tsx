@@ -15,7 +15,6 @@ const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000
 const ACCEPTED_APP_UPDATE_SIGNATURE_KEY = 'freecut-accepted-app-update-signature'
 
 let updateToastVisible = false
-let currentBuildAssetSignature: string | null = null
 
 // Debug utilities are editor-heavy; keep them out of the production startup graph.
 if (import.meta.env.DEV) {
@@ -103,23 +102,38 @@ async function showUpdateAvailableToast(
 }
 
 function getBuildAssetSignature(documentToInspect: Document): string {
-  const assetUrls = [
-    ...Array.from(
-      documentToInspect.querySelectorAll<HTMLScriptElement>('script[type="module"][src]'),
-    ).map((element) => element.src),
-    ...Array.from(
-      documentToInspect.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href]'),
-    ).map((element) => element.href),
-  ]
+  // Build identity is the entry module script (e.g. /assets/main-[hash].js); its content
+  // hash changes on every deploy. We deliberately IGNORE <link rel="stylesheet"> tags:
+  // route/feature CSS is code-split and injected into the live DOM at runtime, so an
+  // editor session accumulates stylesheet links that the pristine server HTML never has.
+  // Comparing those made checkForAppShellUpdate fire a false "new version" toast on every
+  // editor load. Dynamic import()s inject <link rel="modulepreload">, never <script>, so
+  // the module-script set stays stable for a given build.
+  const scriptPaths = Array.from(
+    documentToInspect.querySelectorAll<HTMLScriptElement>('script[type="module"][src]'),
+  ).map((element) => new URL(element.src, window.location.href).pathname)
 
-  return JSON.stringify(
-    assetUrls.map((assetUrl) => new URL(assetUrl, window.location.href).pathname).sort(),
-  )
+  return JSON.stringify(scriptPaths.sort())
 }
 
-async function checkForAppShellUpdate() {
-  currentBuildAssetSignature ??= getBuildAssetSignature(document)
+// Snapshot the entry-script signature at startup, before React mounts or the router
+// injects anything, so it matches the pristine HTML that checkForAppShellUpdate re-fetches.
+const currentBuildAssetSignature = getBuildAssetSignature(document)
 
+let appShellUpdateCheckInFlight = false
+let appShellUpdateRecheckQueued = false
+async function checkForAppShellUpdate() {
+  // Coalesce overlapping checks — the interval, visibilitychange, and a burst of
+  // vite:preloadError events would otherwise fire several concurrent fetches of `/`.
+  // Rather than drop the extras (which would lose the signal if the in-flight fetch
+  // transiently fails or gets a stale `/`), queue a single trailing re-check so a real
+  // deploy is still caught after the current fetch settles instead of only at the next
+  // interval/visibility event.
+  if (appShellUpdateCheckInFlight) {
+    appShellUpdateRecheckQueued = true
+    return
+  }
+  appShellUpdateCheckInFlight = true
   try {
     const response = await fetch(`/?__freecut_update_check=${Date.now()}`, {
       cache: 'no-store',
@@ -149,6 +163,13 @@ async function checkForAppShellUpdate() {
     }
   } catch (error) {
     log.warn('App update check failed:', error)
+  } finally {
+    appShellUpdateCheckInFlight = false
+  }
+
+  if (appShellUpdateRecheckQueued) {
+    appShellUpdateRecheckQueued = false
+    await checkForAppShellUpdate()
   }
 }
 
@@ -201,11 +222,17 @@ window.addEventListener('error', (event) => {
   log.error('Uncaught error:', event.error)
 })
 
-// Handle stale asset errors after new deployments.
-// When Vercel deploys a new version, old chunk hashes become 404s.
-// Prompt the user to save before reloading so they don't lose work.
+// A failed lazy-chunk load has two very different causes:
+//   (a) a new deployment removed the old chunk hash — a real stale version, worth
+//       prompting the user to save + reload, or
+//   (b) a transient network blip while fetching an otherwise-present chunk.
+// Blindly toasting treated every blip as a version change, so a flaky connection while
+// opening a workspace or panel popped a scary "new version available". Instead, verify
+// against the server: checkForAppShellUpdate re-fetches the app shell and only surfaces
+// the toast when the live entry-script hash actually differs from ours. A transient
+// failure leaves the signature unchanged, so it stays silent and the user can retry.
 window.addEventListener('vite:preloadError', () => {
-  void showUpdateAvailableToast()
+  void checkForAppShellUpdate()
 })
 
 // IMPORTANT: Intentionally do not dispose filmstrip cache on beforeunload.

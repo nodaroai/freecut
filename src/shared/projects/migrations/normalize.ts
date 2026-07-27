@@ -20,6 +20,7 @@ import type { Project, ProjectTimeline } from '@/types/project'
 import { DEFAULT_TRACK_HEIGHT, DEFAULT_FPS } from '@/shared/timeline/defaults'
 import { normalizeAudioEqSettings } from '@/shared/utils/audio-eq'
 import { applyOptionalClamps } from '@/shared/timeline/item-clamps'
+import { sanitizeTextMotion } from './sanitize-text-motion'
 
 /**
  * Normalize a track to ensure all fields have valid values.
@@ -32,7 +33,9 @@ function normalizeTrack(
   const normalizedKind = track.kind === 'video' || track.kind === 'audio' ? track.kind : undefined
   return {
     ...track,
-    // Always use current default — no user-facing track resize exists yet
+    // Track height is a local view preference, persisted to localStorage and
+    // re-derived by items-store.setTracks() on load. The field is kept at the
+    // default so project files stay stable; its stored value is never read.
     height: DEFAULT_TRACK_HEIGHT,
     // Ensure boolean fields have defaults
     locked: track.locked ?? false,
@@ -61,6 +64,11 @@ function normalizeItem(item: ProjectTimeline['items'][number]): ProjectTimeline[
   // Frame/audio/EQ optional-field clamps — shared with the runtime items-store
   // normalizer so adding a new clamped field only needs registering once.
   applyOptionalClamps(normalized as Record<string, unknown>)
+
+  // Motion-text spec: drop malformed slots and clamp numerics on every load.
+  if (normalized.textMotion !== undefined) {
+    normalized.textMotion = sanitizeTextMotion(normalized.textMotion)
+  }
 
   // Ensure speed is valid (default 1.0, range 0.1-10.0)
   if (normalized.speed !== undefined) {
@@ -232,8 +240,20 @@ function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
   const normalizedItems = timeline.items.map(normalizeItem)
   const normalizedTransitions = timeline.transitions?.map(normalizeTransition)
 
+  // Drop tab ids that don't resolve to a composition (and any duplicates), so
+  // standalone-timeline tabs never dangle after a composition is deleted.
+  const validSequenceIds = new Set(
+    (timeline.compositions ?? [])
+      .filter((comp) => comp.editorKind !== 'composite-2d')
+      .map((comp) => comp.id),
+  )
+  const normalizedTopLevelSequenceIds = timeline.topLevelSequenceIds
+    ? [...new Set(timeline.topLevelSequenceIds.filter((id) => validSequenceIds.has(id)))]
+    : undefined
+
   return {
     ...timeline,
+    topLevelSequenceIds: normalizedTopLevelSequenceIds,
     // Normalize tracks
     tracks: normalizedTracks,
     busAudioEq: normalizeAudioEqSettings(timeline.busAudioEq),
@@ -247,6 +267,7 @@ function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
       const compTransitions = comp.transitions?.map(normalizeTransition)
       return {
         ...comp,
+        editorKind: comp.editorKind === 'composite-2d' ? 'composite-2d' : 'sequence',
         tracks: flattenTrackGroups(comp.tracks.map((track, index) => normalizeTrack(track, index))),
         busAudioEq: normalizeAudioEqSettings(comp.busAudioEq),
         items: repairOverlappingItems(compItems, compTransitions),

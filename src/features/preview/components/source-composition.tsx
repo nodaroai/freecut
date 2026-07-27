@@ -7,6 +7,7 @@ import {
   usePlayer,
   useVideoConfig,
 } from '@/features/preview/deps/player-context'
+import { getBrowserMediaPlaybackRate } from '@/shared/state/playback/shuttle'
 import { getGlobalVideoSourcePool } from '@/features/preview/deps/player-pool'
 import { SharedVideoExtractorPool, type VideoFrameSource } from '@/features/preview/deps/export'
 import { resolveProxyUrl } from '../utils/media-resolver'
@@ -21,11 +22,12 @@ import { useSourcePlayerStore } from '@/shared/state/source-player'
 import { useMediaLibraryStore } from '@/features/preview/deps/media-library'
 import { shouldSeekPlayingMedia } from '../utils/source-media-sync'
 import { SourceAudioWaveform } from './source-audio-waveform'
+import { LottieRenderer } from '@/infrastructure/lottie/lottie-frame-provider'
 
 interface SourceCompositionProps {
   mediaId?: string
   src: string
-  mediaType: 'video' | 'audio' | 'image'
+  mediaType: 'video' | 'audio' | 'image' | 'lottie'
   pausedFrameSource?: 'clock' | 'source-player'
   forceFastScrub?: boolean
 }
@@ -91,7 +93,51 @@ export function SourceComposition({
   if (mediaType === 'image') {
     return <ImageSource src={src} />
   }
+  if (mediaType === 'lottie') {
+    return <LottieSource src={src} />
+  }
   return <AudioSource mediaId={mediaId} src={src} />
+}
+
+function LottieSource({ src }: { src: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const clock = useClock()
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !src) return
+    const renderer = new LottieRenderer({ canvas, src, autoResize: true })
+    let raf = 0
+    let lastFrame = -1
+    let loaded = false
+    renderer.ready.then(() => {
+      loaded = renderer.isLoaded
+    })
+    // Drive frames from the source clock imperatively (no per-frame React render).
+    const tick = () => {
+      if (loaded) {
+        const total = renderer.totalFrames
+        const frame =
+          total > 0 ? Math.max(0, Math.min(Math.round(clock.currentFrame), total - 1)) : 0
+        if (frame !== lastFrame) {
+          renderer.renderFrame(frame)
+          lastFrame = frame
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      renderer.destroy()
+    }
+  }, [src, clock])
+
+  return (
+    <AbsoluteFill>
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+    </AbsoluteFill>
+  )
 }
 
 function VideoSource({
@@ -109,6 +155,8 @@ function VideoSource({
   const clock = useClock()
   const playing = useClockIsPlaying()
   const playbackRate = useClockPlaybackRate()
+  const isReverseShuttle = playbackRate < 0
+  const mediaPlaybackRate = getBrowserMediaPlaybackRate(1, playbackRate)
   const followSourcePlayerFrames = pausedFrameSource === 'source-player'
   const sourcePlayerPreviewScrubbing = useSourcePlayerStore(
     (s) => followSourcePlayerFrames && s.previewSourceFrame !== null,
@@ -708,8 +756,8 @@ function VideoSource({
     const video = videoRef.current
     if (!video || !activeSrc) return
 
-    if (playing) {
-      video.playbackRate = playbackRate
+    if (playing && !isReverseShuttle) {
+      video.playbackRate = mediaPlaybackRate
       if (video.readyState >= 1) {
         try {
           video.currentTime = latestTargetTimeRef.current
@@ -721,14 +769,14 @@ function VideoSource({
     } else {
       video.pause()
     }
-  }, [activeSrc, playbackRate, playing])
+  }, [activeSrc, isReverseShuttle, mediaPlaybackRate, playing])
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !src) return
 
-    if (playing) {
-      audio.playbackRate = playbackRate
+    if (playing && !isReverseShuttle) {
+      audio.playbackRate = mediaPlaybackRate
       if (audio.readyState >= 1) {
         try {
           audio.currentTime = latestTargetTimeRef.current
@@ -740,7 +788,7 @@ function VideoSource({
     } else {
       audio.pause()
     }
-  }, [playbackRate, playing, src])
+  }, [isReverseShuttle, mediaPlaybackRate, playing, src])
 
   const showDecodedCanvas =
     !playing &&
@@ -791,6 +839,8 @@ function AudioSource({ mediaId, src }: { mediaId?: string; src: string }) {
   const clock = useClock()
   const playing = useClockIsPlaying()
   const playbackRate = useClockPlaybackRate()
+  const isReverseShuttle = playbackRate < 0
+  const mediaPlaybackRate = getBrowserMediaPlaybackRate(1, playbackRate)
   const { fps, durationInFrames } = useVideoConfig()
   const player = usePlayer(durationInFrames)
   const lastFrameRef = useRef(clock.currentFrame)
@@ -837,8 +887,8 @@ function AudioSource({ mediaId, src }: { mediaId?: string; src: string }) {
     const audio = audioRef.current
     if (!audio || !src) return
 
-    if (playing) {
-      audio.playbackRate = playbackRate
+    if (playing && !isReverseShuttle) {
+      audio.playbackRate = mediaPlaybackRate
       if (audio.readyState >= 1) {
         try {
           audio.currentTime = lastFrameRef.current / fps
@@ -850,7 +900,7 @@ function AudioSource({ mediaId, src }: { mediaId?: string; src: string }) {
     } else {
       audio.pause()
     }
-  }, [playing, playbackRate, src, fps])
+  }, [playing, isReverseShuttle, mediaPlaybackRate, src, fps])
 
   const handleSeekSeconds = useCallback(
     (timeSeconds: number) => {

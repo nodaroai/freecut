@@ -12,6 +12,7 @@ import type {
   KeyframeRef,
 } from '@/types/keyframe'
 import type { BlockedFrameRange } from '../../utils/transition-region'
+import type { ProceduralPreviewInput } from '@/features/keyframes/utils/procedural-preview'
 import { EmbeddedValueGraphEditor } from '../value-graph-editor'
 import { PROPERTY_COLUMN_WIDTH, RULER_HEIGHT } from './dopesheet-constants'
 import { DopesheetEmptyState } from './dopesheet-empty-state'
@@ -21,6 +22,7 @@ interface DopesheetGraphPaneProps {
   hasRows: boolean
   emptyStateMessage: string
   showEmptyGuidance: boolean
+  proceduralHint?: string
   propertyColumnElements: ReactNode
   propertyColumnWidth?: number
   graphPaneRef: React.RefObject<HTMLDivElement | null>
@@ -58,6 +60,7 @@ interface DopesheetGraphPaneProps {
   onRemoveKeyframes?: (refs: KeyframeRef[]) => void
   onNavigateToKeyframe?: (frame: number) => void
   transitionBlockedRanges?: BlockedFrameRange[]
+  proceduralPreview?: ProceduralPreviewInput
   snapEnabled: boolean
   graphHandleVisibility: 'selected' | 'all'
   graphRulerUnit: 'frames' | 'seconds'
@@ -65,6 +68,10 @@ interface DopesheetGraphPaneProps {
   graphVerticalZoomValue: number
   /** Hide the graph's own playhead line (the dopesheet draws a shared one). */
   hidePlayhead?: boolean
+  /** Reserve space for the editor's external ruler. */
+  subtractRulerHeight?: boolean
+  /** Purpose-built graph canvas for non-scalar semantics such as vector speed. */
+  customGraphContent?: ReactNode
 }
 
 const panelStyle: CSSProperties = { height: `calc(100% - ${RULER_HEIGHT}px)` }
@@ -73,6 +80,7 @@ export function DopesheetGraphPane({
   hasRows,
   emptyStateMessage,
   showEmptyGuidance,
+  proceduralHint,
   propertyColumnElements,
   propertyColumnWidth = PROPERTY_COLUMN_WIDTH,
   graphPaneRef,
@@ -108,24 +116,33 @@ export function DopesheetGraphPane({
   onRemoveKeyframes,
   onNavigateToKeyframe,
   transitionBlockedRanges,
+  proceduralPreview,
   snapEnabled,
   graphHandleVisibility,
   graphRulerUnit,
   autoZoomGraphHeight,
   graphVerticalZoomValue,
   hidePlayhead,
+  subtractRulerHeight = true,
+  customGraphContent,
 }: DopesheetGraphPaneProps) {
   if (!hasRows) {
     return (
-      <DopesheetEmptyState showGuidance={showEmptyGuidance} fallbackMessage={emptyStateMessage} />
+      <DopesheetEmptyState
+        showGuidance={showEmptyGuidance}
+        fallbackMessage={emptyStateMessage}
+        proceduralHint={proceduralHint}
+      />
     )
   }
 
   return (
-    <div className="flex min-h-0" style={panelStyle}>
-      <div className="flex-shrink-0 overflow-auto" style={{ width: propertyColumnWidth }}>
-        {propertyColumnElements}
-      </div>
+    <div className="flex min-h-0" style={subtractRulerHeight ? panelStyle : { height: '100%' }}>
+      {propertyColumnWidth > 0 ? (
+        <div className="flex-shrink-0 overflow-auto" style={{ width: propertyColumnWidth }}>
+          {propertyColumnElements}
+        </div>
+      ) : null}
       <div
         ref={graphPaneRef}
         data-testid="dopesheet-graph-pane"
@@ -135,45 +152,47 @@ export function DopesheetGraphPane({
         onPointerDownCapture={focusGraphPane}
         onKeyDown={handleGraphPaneKeyDown}
       >
-        {graphPaneSize.width > 0 && graphPaneSize.height > 0 && graphVisiblePropertiesSize > 0 ? (
-          <EmbeddedValueGraphEditor
-            frameViewport={viewport}
-            onFrameViewportChange={updateViewport}
-            itemId={itemId}
-            keyframesByProperty={keyframesByProperty}
-            selectedProperty={graphDisplayProperty}
-            overlayProperties={graphVisibleProperties}
-            selectedKeyframeIds={selectedKeyframeIds}
-            currentFrame={currentFrame}
-            itemFrom={itemFrom}
-            totalFrames={totalFrames}
-            fps={fps}
-            width={graphPaneSize.width}
-            height={graphPaneSize.height}
-            onKeyframeMove={onKeyframeMove}
-            previewFramesById={timingStripPreviewFrames}
-            constrainFrameDelta={constrainGraphFrameDelta}
-            onBezierHandleMove={onBezierHandleMove}
-            onSelectionChange={onSelectionChange}
-            onPropertyChange={onPropertyChange}
-            onScrub={onScrub}
-            onScrubStart={onScrubStart}
-            onScrubEnd={onScrubEnd}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            onAddKeyframe={onAddKeyframe}
-            onRemoveKeyframes={onRemoveKeyframes}
-            onNavigateToKeyframe={onNavigateToKeyframe}
-            transitionBlockedRanges={transitionBlockedRanges}
-            snapEnabled={snapEnabled}
-            handleVisibility={graphHandleVisibility}
-            rulerUnit={graphRulerUnit}
-            autoZoomGraphHeight={autoZoomGraphHeight}
-            externalValueZoomLevel={graphVerticalZoomValue}
-            disabled={disabled || graphDisplayPropertyLocked}
-            hidePlayhead={hidePlayhead}
-          />
-        ) : null}
+        {customGraphContent ??
+          (graphPaneSize.width > 0 && graphPaneSize.height > 0 && graphVisiblePropertiesSize > 0 ? (
+            <EmbeddedValueGraphEditor
+              frameViewport={viewport}
+              onFrameViewportChange={updateViewport}
+              itemId={itemId}
+              keyframesByProperty={keyframesByProperty}
+              selectedProperty={graphDisplayProperty}
+              overlayProperties={graphVisibleProperties}
+              selectedKeyframeIds={selectedKeyframeIds}
+              currentFrame={currentFrame}
+              itemFrom={itemFrom}
+              totalFrames={totalFrames}
+              fps={fps}
+              width={graphPaneSize.width}
+              height={graphPaneSize.height}
+              onKeyframeMove={onKeyframeMove}
+              previewFramesById={timingStripPreviewFrames}
+              constrainFrameDelta={constrainGraphFrameDelta}
+              onBezierHandleMove={onBezierHandleMove}
+              onSelectionChange={onSelectionChange}
+              onPropertyChange={onPropertyChange}
+              onScrub={onScrub}
+              onScrubStart={onScrubStart}
+              onScrubEnd={onScrubEnd}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onAddKeyframe={onAddKeyframe}
+              onRemoveKeyframes={onRemoveKeyframes}
+              onNavigateToKeyframe={onNavigateToKeyframe}
+              transitionBlockedRanges={transitionBlockedRanges}
+              proceduralPreview={proceduralPreview}
+              snapEnabled={snapEnabled}
+              handleVisibility={graphHandleVisibility}
+              rulerUnit={graphRulerUnit}
+              autoZoomGraphHeight={autoZoomGraphHeight}
+              externalValueZoomLevel={graphVerticalZoomValue}
+              disabled={disabled || graphDisplayPropertyLocked}
+              hidePlayhead={hidePlayhead}
+            />
+          ) : null)}
       </div>
     </div>
   )

@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "Editor toolbar",
     "workspaces": {
+      "motion": "Motion",
       "label": "Workspaces",
       "edit": "Edit",
       "color": "Color",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "Keyboard Shortcuts",
     "keyboardShortcutsAria": "Keyboard shortcuts",
     "viewOnGitHub": "View on GitHub",
+    "joinDiscord": "Join Discord",
     "debugPanel": "Debug Panel",
     "debugPanelAria": "Debug panel",
     "save": "Save",
@@ -80,7 +82,11 @@
       "autoSave": "Auto-save",
       "interval": "Interval",
       "intervalMinutes": "{{count}}m",
-      "undoHistoryDepth": "Undo History Depth"
+      "undoHistoryDepth": "Undo History Depth",
+      "uiSounds": "Interface sounds",
+      "uiSoundVolume": "Sound volume",
+      "uiSoundVoice": "Sound theme",
+      "uiSoundPreview": "Preview"
     },
     "ai": {
       "captionSampleInterval": "Caption sample interval",

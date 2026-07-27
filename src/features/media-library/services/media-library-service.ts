@@ -1,5 +1,6 @@
-import type { MediaMetadata, ThumbnailData } from '@/types/storage'
+import type { MediaAttribution, MediaMetadata, ThumbnailData } from '@/types/storage'
 import { createLogger } from '@/shared/logging/logger'
+import { mapWithConcurrency } from '@/shared/utils/async-utils'
 
 const logger = createLogger('MediaLibraryService')
 
@@ -45,6 +46,7 @@ import {
   deleteMedia as deleteMediaDB,
   saveThumbnail as saveThumbnailDB,
   getThumbnailByMediaId,
+  getThumbnailsByMediaIds,
   deleteThumbnailsByMediaId,
   // v3: Content-addressable storage
   incrementContentRef,
@@ -76,12 +78,12 @@ import { proxyService } from './proxy-service'
 import { ensureFileHandlePermission, FileAccessError } from './file-access'
 import { enqueueBackgroundMediaWork } from './background-media-work'
 import {
-  buildGeneratedMediaOpfsPath,
   getGeneratedImageDimensions,
   getThumbnailDimensions,
   persistGeneratedMediaAsset,
 } from './media-asset-helpers'
-import { validateMediaFile, getMimeType } from '../utils/validation'
+import { validateMediaFileContent, getMimeType, isLottieMime } from '../utils/validation'
+import { parseLottieFileBytes } from '@/infrastructure/lottie/lottie-metadata'
 import { getSharedProxyKey } from '../utils/proxy-key'
 import { mediaProcessorService } from './media-processor-service'
 import { generateThumbnail } from '../utils/thumbnail-generator'
@@ -210,6 +212,21 @@ function parseMediaImportUrl(input: string): URL {
 }
 
 /**
+ * Turn a provider-supplied animation title into a safe base file name.
+ * Strips filesystem-hostile characters, collapses whitespace, and caps the
+ * length so metadata stays tidy. Falls back to a generic name when empty.
+ */
+function sanitizeLottieFileName(rawName: string | undefined): string {
+  const cleaned = (rawName ?? '')
+    .trim()
+    .replace(/[/\\?%*:|"<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80)
+    .trim()
+  return cleaned.length > 0 ? cleaned : 'lottie-animation'
+}
+
+/**
  * Media Library Service - Coordinates handle/OPFS media access with
  * workspace-backed metadata, thumbnails, and derived caches.
  *
@@ -218,9 +235,96 @@ function parseMediaImportUrl(input: string): URL {
  * Provides atomic operations for media management while keeping origin-scoped
  * sources and the workspace folder in sync.
  */
+
+/**
+ * Decode an audio blob to read its exact duration in seconds. Falls back to the
+ * provided value when Web Audio is unavailable or decoding fails.
+ */
+async function decodeAudioDurationSeconds(blob: Blob, fallbackSeconds: number): Promise<number> {
+  const safeFallback = Math.max(0, fallbackSeconds)
+  const Ctor =
+    typeof window !== 'undefined'
+      ? (window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+      : undefined
+  if (!Ctor) return safeFallback
+
+  const ctx = new Ctor()
+  try {
+    const buffer = await blob.arrayBuffer()
+    const audio = await ctx.decodeAudioData(buffer)
+    return audio.duration > 0 ? audio.duration : safeFallback
+  } catch (error) {
+    logger.warn('decodeAudioData failed; using recorder timer duration', error)
+    return safeFallback
+  } finally {
+    void ctx.close().catch(() => {})
+  }
+}
+
+type ProbedVideoMetadata = Extract<
+  Awaited<ReturnType<typeof mediaProcessorService.processMedia>>['metadata'],
+  { type: 'video' }
+>
+
+function resolveGeneratedThumbnailSize(
+  thumbnail: Blob | undefined,
+  dimensions: { width: number; height: number },
+): { width: number; height: number } | undefined {
+  if (!thumbnail) return undefined
+  return getThumbnailDimensions(
+    Math.max(1, dimensions.width || 1),
+    Math.max(1, dimensions.height || 1),
+    320,
+  )
+}
+
+/**
+ * `options.fps` wins over the probed rate: the caller (frame interpolation) computes the
+ * output rate exactly, which beats estimating it back off the encoded packet timestamps.
+ */
+function buildGeneratedVideoMetadata(
+  file: File,
+  mimeType: string,
+  metadata: ProbedVideoMetadata,
+  options?: { fps?: number; tags?: string[] },
+): MediaMetadata {
+  const requestedFps = options?.fps
+  const fps =
+    Number.isFinite(requestedFps) && (requestedFps ?? 0) > 0 ? requestedFps! : metadata.fps
+  const createdAt = Date.now()
+
+  return {
+    id: crypto.randomUUID(),
+    storageType: 'workspace',
+    fileName: file.name,
+    fileSize: file.size,
+    mimeType,
+    duration: metadata.duration,
+    width: metadata.width,
+    height: metadata.height,
+    fps,
+    codec: metadata.codec,
+    bitrate: metadata.bitrate ?? 0,
+    audioCodec: metadata.audioCodec,
+    audioCodecSupported: metadata.audioCodecSupported,
+    videoCodecSupported: metadata.videoCodecSupported,
+    keyframeTimestamps: metadata.keyframeTimestamps,
+    gopInterval: metadata.gopInterval,
+    tags: options?.tags ?? [],
+    createdAt,
+    updatedAt: createdAt,
+  }
+}
+
 class MediaLibraryService {
-  /** In-memory cache for thumbnail blob URLs to prevent flicker on re-renders */
-  private thumbnailUrlCache = new Map<string, string>()
+  /**
+   * In-memory cache for thumbnail blob URLs to prevent flicker on re-renders.
+   * `marker` is the media's `thumbnailId` change-token at the time the URL was
+   * created; a changed marker invalidates the entry so regenerated thumbnails
+   * are re-read from disk instead of served stale.
+   */
+  private thumbnailUrlCache = new Map<string, { url: string; marker: string | undefined }>()
   private preparationPromises = new Map<string, Set<Promise<void>>>()
 
   async waitForMediaPreparation(mediaIds: string[]): Promise<void> {
@@ -229,6 +333,61 @@ class MediaLibraryService {
     ])
     if (promises.length === 0) return
     await Promise.allSettled(promises)
+  }
+
+  /**
+   * Parse a Lottie JSON file into the intrinsic fields needed to populate a
+   * `MediaMetadata` record. Lottie can't go through the metadata worker's
+   * `createImageBitmap` path (it's JSON, not a rasterizable image), so this
+   * runs on the main thread — mirroring the SVG main-thread thumbnail fallback.
+   *
+   * Uses the WASM-free `lottie-metadata` module (fflate unzip for `.lottie`),
+   * so no dotlottie-web WASM is pulled into the import path.
+   */
+  private async parseLottieFile(
+    file: File,
+  ): Promise<{ width: number; height: number; fps: number; duration: number }> {
+    // Read raw bytes so we can handle both `.json` Lottie and `.lottie`
+    // (dotLottie ZIP archive) — `parseLottieFileBytes` auto-detects the format.
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const meta = parseLottieFileBytes(bytes)
+    if (!meta) {
+      throw new Error(`Not a valid Lottie animation: ${file.name}`)
+    }
+
+    return {
+      width: meta.width,
+      height: meta.height,
+      fps: meta.frameRate,
+      duration: meta.durationSeconds,
+    }
+  }
+
+  /**
+   * Render a representative frame of a Lottie to a thumbnail blob (fit within
+   * 320px, preserving aspect). Lazily imports the dotlottie-web renderer so the
+   * WASM isn't pulled into the import path unless a Lottie is actually imported.
+   */
+  private async generateLottieThumbnailBlob(
+    file: File,
+    width: number,
+    height: number,
+  ): Promise<{ blob: Blob; width: number; height: number } | undefined> {
+    try {
+      const dims = getThumbnailDimensions(Math.max(1, width), Math.max(1, height), 320)
+      const url = URL.createObjectURL(file)
+      try {
+        const { renderLottieThumbnail } =
+          await import('@/infrastructure/lottie/lottie-frame-provider')
+        const blob = await renderLottieThumbnail(url, dims.width, dims.height)
+        return blob ? { blob, width: dims.width, height: dims.height } : undefined
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      logger.warn('Failed to generate Lottie thumbnail:', error)
+      return undefined
+    }
   }
 
   private async deleteTranscriptSafely(mediaId: string): Promise<void> {
@@ -426,8 +585,9 @@ class MediaLibraryService {
   private async importMediaFileToOpfs(
     file: File,
     projectId: string,
+    options?: { attribution?: MediaAttribution },
   ): Promise<MediaMetadata & { isDuplicate?: boolean; hasUnsupportedCodec?: boolean }> {
-    const validationResult = validateMediaFile(file)
+    const validationResult = await validateMediaFileContent(file)
     if (!validationResult.valid) {
       throw new Error(validationResult.error)
     }
@@ -447,6 +607,42 @@ class MediaLibraryService {
     }
 
     const resolvedMimeType = getMimeType(file)
+
+    // Lottie is JSON/ZIP, not a rasterizable image — parse metadata and render a
+    // thumbnail on the main thread (mirrors the SVG fallback), skipping the worker.
+    if (isLottieMime(resolvedMimeType)) {
+      const lottie = await this.parseLottieFile(file)
+      const thumb = await this.generateLottieThumbnailBlob(file, lottie.width, lottie.height)
+      const mediaId = crypto.randomUUID()
+      const createdAt = Date.now()
+      const mediaMetadata: MediaMetadata = {
+        id: mediaId,
+        storageType: 'workspace',
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: resolvedMimeType,
+        duration: lottie.duration,
+        width: lottie.width,
+        height: lottie.height,
+        fps: lottie.fps,
+        codec: 'lottie',
+        bitrate: 0,
+        tags: [],
+        attribution: options?.attribution,
+        createdAt,
+        updatedAt: createdAt,
+      }
+
+      return persistGeneratedMediaAsset({
+        file,
+        projectId,
+        mediaMetadata,
+        thumbnailBlob: thumb?.blob,
+        thumbnailWidth: thumb?.width,
+        thumbnailHeight: thumb?.height,
+      })
+    }
+
     const { metadata, thumbnail } = await mediaProcessorService.processMedia(
       file,
       resolvedMimeType,
@@ -464,7 +660,6 @@ class MediaLibraryService {
 
     const mediaId = crypto.randomUUID()
     const createdAt = Date.now()
-    const opfsPath = buildGeneratedMediaOpfsPath(mediaId)
     const codecCheck = mediaProcessorService.hasUnsupportedAudioCodec(metadata)
     const previewAudioCodec =
       metadata.type === 'audio'
@@ -485,8 +680,7 @@ class MediaLibraryService {
 
     const mediaMetadata: MediaMetadata = {
       id: mediaId,
-      storageType: 'opfs',
-      opfsPath,
+      storageType: 'workspace',
       fileName: file.name,
       fileSize: file.size,
       mimeType: resolvedMimeType,
@@ -503,6 +697,7 @@ class MediaLibraryService {
       bitrate: 'bitrate' in metadata ? (metadata.bitrate ?? 0) : 0,
       audioCodec: metadata.type === 'video' ? metadata.audioCodec : undefined,
       audioCodecSupported: metadata.type === 'video' ? metadata.audioCodecSupported : true,
+      videoCodecSupported: metadata.type === 'video' ? metadata.videoCodecSupported : true,
       keyframeTimestamps: metadata.type === 'video' ? metadata.keyframeTimestamps : undefined,
       gopInterval: metadata.type === 'video' ? metadata.gopInterval : undefined,
       tags: [],
@@ -528,6 +723,102 @@ class MediaLibraryService {
       ...persistedMedia,
       hasUnsupportedCodec: codecCheck.unsupported,
     }
+  }
+
+  /**
+   * Import an in-memory microphone recording (webm/opus, ogg/opus, or mp4) into
+   * OPFS-backed storage for the timeline voiceover feature. Returns metadata
+   * whose `duration` is always finite and positive.
+   *
+   * Mirrors the audio branch of {@link importMediaFileToOpfs} but is resilient to
+   * headerless `MediaRecorder` output, whose container duration frequently probes
+   * as `0`/`Infinity` and would otherwise poison downstream waveform/trim math.
+   * Duration is resolved once, here, from the best available source:
+   * mediabunny probe → sample-accurate `decodeAudioData` → the recorder's wall
+   * clock (`fallbackDurationMs`). The caller then reuses the returned `duration`
+   * instead of decoding again.
+   */
+  async importRecordedAudio(
+    file: File,
+    projectId: string,
+    options: { fallbackDurationMs: number },
+  ): Promise<MediaMetadata> {
+    if (!projectId) {
+      throw new Error('No project selected')
+    }
+
+    // Strip codec parameters (MediaRecorder yields `audio/webm;codecs=opus`) and
+    // fall back to a WebM/Opus container so the media library classifies the
+    // take as audio rather than "unknown".
+    const rawMimeType = file.type || getMimeType(file)
+    const resolvedMimeType = (rawMimeType.split(';')[0]?.trim() || 'audio/webm').replace(
+      /^video\/webm$/,
+      'audio/webm',
+    )
+
+    let probedDuration = 0
+    let probedCodec = 'opus'
+    let probedBitrate = 0
+    let thumbnailBlob: Blob | undefined
+    try {
+      const { metadata, thumbnail } = await mediaProcessorService.processMedia(
+        file,
+        resolvedMimeType,
+        { fastMetadata: true },
+      )
+      probedDuration = 'duration' in metadata ? metadata.duration : 0
+      if (metadata.type === 'audio' && metadata.codec) {
+        probedCodec = metadata.codec
+      }
+      probedBitrate = 'bitrate' in metadata ? (metadata.bitrate ?? 0) : 0
+      thumbnailBlob = thumbnail
+    } catch (error) {
+      logger.warn('Failed to probe recorded audio; deriving duration by decoding', error)
+    }
+
+    let duration = Number.isFinite(probedDuration) && probedDuration > 0 ? probedDuration : 0
+    if (duration <= 0) {
+      // Probe was unusable (common for headerless WebM) — decode for an exact
+      // duration, then fall back to the recorder's wall-clock timer.
+      duration = await decodeAudioDurationSeconds(file, options.fallbackDurationMs / 1000)
+    }
+
+    const mediaId = crypto.randomUUID()
+    const createdAt = Date.now()
+
+    const mediaMetadata: MediaMetadata = {
+      id: mediaId,
+      storageType: 'workspace',
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: resolvedMimeType,
+      duration,
+      width: 0,
+      height: 0,
+      fps: 0,
+      codec: probedCodec,
+      bitrate: probedBitrate,
+      tags: ['voiceover'],
+      createdAt,
+      updatedAt: createdAt,
+    }
+
+    const persistedMedia = await persistGeneratedMediaAsset({
+      file,
+      projectId,
+      mediaMetadata,
+      thumbnailBlob,
+      thumbnailWidth: thumbnailBlob ? 320 : undefined,
+      thumbnailHeight: thumbnailBlob ? 180 : undefined,
+    })
+
+    // Schedules waveform decode so the clip renders its waveform like any audio.
+    this.schedulePostImportWork(file, persistedMedia, {
+      isVideo: false,
+      previewAudioCodec: probedCodec,
+    })
+
+    return persistedMedia
   }
 
   private async fetchMediaFromUrl(url: string): Promise<File> {
@@ -626,7 +917,7 @@ class MediaLibraryService {
     }
 
     // Stage 2: Validation
-    const validationResult = validateMediaFile(file)
+    const validationResult = await validateMediaFileContent(file)
     if (!validationResult.valid) {
       throw new Error(validationResult.error)
     }
@@ -722,6 +1013,61 @@ class MediaLibraryService {
 
     // Stage 4: Process media in worker (metadata + thumbnail in one pass, off main thread)
     const resolvedMimeType = getMimeType(file)
+
+    // Lottie is JSON/ZIP, not a rasterizable image — parse metadata and render a
+    // thumbnail on the main thread (mirrors the SVG fallback), skipping the worker.
+    if (isLottieMime(resolvedMimeType)) {
+      const lottie = await this.parseLottieFile(file)
+      const id = crypto.randomUUID()
+      const createdAt = Date.now()
+
+      const thumb = await this.generateLottieThumbnailBlob(file, lottie.width, lottie.height)
+      let thumbnailId: string | undefined
+      if (thumb) {
+        try {
+          thumbnailId = crypto.randomUUID()
+          const thumbnailData: ThumbnailData = {
+            id: thumbnailId,
+            mediaId: id,
+            blob: thumb.blob,
+            timestamp: 1,
+            width: thumb.width,
+            height: thumb.height,
+          }
+          await saveThumbnailDB(thumbnailData)
+        } catch (error) {
+          logger.warn('Failed to save Lottie thumbnail:', error)
+          thumbnailId = undefined
+        }
+      }
+
+      const mediaMetadata: MediaMetadata = {
+        id,
+        storageType: 'handle',
+        fileHandle: handle,
+        fileName: file.name,
+        fileSize: file.size,
+        fileLastModified: file.lastModified,
+        mimeType: resolvedMimeType,
+        duration: lottie.duration,
+        width: lottie.width,
+        height: lottie.height,
+        fps: lottie.fps,
+        codec: 'lottie',
+        bitrate: 0,
+        thumbnailId,
+        tags: [],
+        createdAt,
+        updatedAt: createdAt,
+      }
+
+      await createMediaDB(mediaMetadata)
+      mirrorSourceToWorkspaceInBackground(id, file, file.name)
+      await associateMediaWithProject(projectId, id)
+
+      return mediaMetadata
+    }
+
     const id = crypto.randomUUID()
     let thumbnailId: string | undefined
 
@@ -785,6 +1131,7 @@ class MediaLibraryService {
       bitrate: 'bitrate' in metadata ? (metadata.bitrate ?? 0) : 0,
       audioCodec: metadata.type === 'video' ? metadata.audioCodec : undefined,
       audioCodecSupported: metadata.type === 'video' ? metadata.audioCodecSupported : true,
+      videoCodecSupported: metadata.type === 'video' ? metadata.videoCodecSupported : true,
       keyframeTimestamps: metadata.type === 'video' ? metadata.keyframeTimestamps : undefined,
       gopInterval: metadata.type === 'video' ? metadata.gopInterval : undefined,
       thumbnailId,
@@ -881,6 +1228,50 @@ class MediaLibraryService {
   }
 
   /**
+   * Import a Lottie animation from a direct `.lottie`/`.json` URL into
+   * OPFS-backed storage. Unlike {@link importMediaFromUrl}, the file is named
+   * from `fileName` (so the library shows a human-readable title instead of a
+   * CDN hash) and `attribution` is persisted for licensing/credits.
+   *
+   * The provider CDN must allow cross-origin fetches (LottieFiles serves
+   * `Access-Control-Allow-Origin: *`).
+   */
+  async importLottieFromUrl(
+    url: string,
+    projectId: string,
+    options?: { fileName?: string; attribution?: MediaAttribution },
+  ): Promise<MediaMetadata & { isDuplicate?: boolean }> {
+    if (!projectId) {
+      throw new Error('No project selected')
+    }
+
+    let response: Response
+    try {
+      response = await fetch(url)
+    } catch (error) {
+      logger.warn(`Failed to fetch Lottie URL "${url}":`, error)
+      throw new Error('Could not download that animation. The source may be offline.')
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download animation (${response.status}${response.statusText ? ` ${response.statusText}` : ''}).`,
+      )
+    }
+
+    const blob = await response.blob()
+    if (blob.size === 0) {
+      throw new Error('The downloaded animation was empty.')
+    }
+
+    const isJson = url.split(/[?#]/)[0]?.toLowerCase().endsWith('.json') ?? false
+    const fileName = `${sanitizeLottieFileName(options?.fileName)}.${isJson ? 'json' : 'lottie'}`
+    const file = new File([blob], fileName, { type: 'application/lottie+json' })
+
+    return this.importMediaFileToOpfs(file, projectId, { attribution: options?.attribution })
+  }
+
+  /**
    * Save a generated still image into a project-backed media library entry.
    *
    * Used for editor-generated assets such as preview frame captures.
@@ -921,15 +1312,13 @@ class MediaLibraryService {
 
     const mediaId = crypto.randomUUID()
     const createdAt = Date.now()
-    const opfsPath = buildGeneratedMediaOpfsPath(mediaId)
     const codec = options?.codec ?? resolvedMimeType.split('/')[1] ?? 'unknown'
     const thumbnailMaxSize = options?.thumbnailMaxSize ?? 320
     const thumbnailQuality = options?.thumbnailQuality ?? 0.6
 
     const mediaMetadata: MediaMetadata = {
       id: mediaId,
-      storageType: 'opfs',
-      opfsPath,
+      storageType: 'workspace',
       fileName: file.name,
       fileSize: file.size,
       mimeType: resolvedMimeType,
@@ -965,6 +1354,52 @@ class MediaLibraryService {
       projectId,
       mediaMetadata,
       thumbnailBlob,
+      thumbnailWidth: thumbnailDimensions?.width,
+      thumbnailHeight: thumbnailDimensions?.height,
+    })
+  }
+
+  /**
+   * Save a generated video (e.g. a frame-interpolated render) into the project media library
+   * as an OPFS-backed asset.
+   *
+   * Unlike the regular import paths this probes with `fastMetadata: false`. The fast probe
+   * hard-codes `fps: 30`, which would silently mislabel a 120fps render as 30fps — the
+   * timeline reads `media.fps` as the source frame rate, so every interpolated frame would be
+   * skipped. `options.fps` overrides the probe outright when the caller already knows the
+   * exact rate, which is more reliable than estimating it back off the encoded packets.
+   */
+  async importGeneratedVideo(
+    file: File,
+    projectId: string,
+    options?: { fps?: number; tags?: string[] },
+  ): Promise<MediaMetadata> {
+    if (!projectId) {
+      throw new Error('No project selected')
+    }
+
+    const resolvedMimeType = file.type || getMimeType(file)
+    if (!resolvedMimeType.startsWith('video/')) {
+      throw new Error(`Generated file must be a video. Received "${resolvedMimeType}".`)
+    }
+
+    const { metadata, thumbnail } = await mediaProcessorService.processMedia(
+      file,
+      resolvedMimeType,
+      { thumbnailTimestamp: 1, fastMetadata: false },
+    )
+    if (metadata.type !== 'video') {
+      throw new Error(`Generated file did not probe as video (got "${metadata.type}").`)
+    }
+
+    const thumbnailDimensions = resolveGeneratedThumbnailSize(thumbnail, metadata)
+    const mediaMetadata = buildGeneratedVideoMetadata(file, resolvedMimeType, metadata, options)
+
+    return persistGeneratedMediaAsset({
+      file,
+      projectId,
+      mediaMetadata,
+      thumbnailBlob: thumbnail,
       thumbnailWidth: thumbnailDimensions?.width,
       thumbnailHeight: thumbnailDimensions?.height,
     })
@@ -1010,15 +1445,13 @@ class MediaLibraryService {
 
     const mediaId = crypto.randomUUID()
     const createdAt = Date.now()
-    const opfsPath = buildGeneratedMediaOpfsPath(mediaId)
     const codec = options?.codec ?? metadata.codec ?? resolvedMimeType.split('/')[1] ?? 'unknown'
     // Nominal height — audio waveform thumbnails don't have intrinsic dimensions,
     // so we use a 16:9 placeholder ratio for the DB record.
     const thumbnailHeight = Math.max(1, Math.round(thumbnailMaxSize * (9 / 16)))
     const mediaMetadata: MediaMetadata = {
       id: mediaId,
-      storageType: 'opfs',
-      opfsPath,
+      storageType: 'workspace',
       fileName: file.name,
       fileSize: file.size,
       mimeType: resolvedMimeType,
@@ -1360,6 +1793,15 @@ class MediaLibraryService {
     }
     const id = media.id
 
+    // Workspace-folder storage (durable, cross-origin source of truth).
+    // Source bytes live at `media/{id}/{filename}` in the user-picked folder.
+    if (media.storageType === 'workspace') {
+      const workspaceSource = await readMediaSourceSafe(id)
+      if (workspaceSource) return workspaceSource
+      logger.error('Media has no valid storage path:', id)
+      return null
+    }
+
     // Handle file handle storage (local-first, origin-scoped).
     if (media.storageType === 'handle' && media.fileHandle) {
       try {
@@ -1431,6 +1873,44 @@ class MediaLibraryService {
 
     logger.error('Media has no valid storage path:', id)
     return null
+  }
+
+  /**
+   * Repair sweep: mirror legacy OPFS-backed source media into the workspace
+   * folder so it becomes durable and visible across origins.
+   *
+   * Source media is now written to the workspace folder directly at import
+   * (`storageType: 'workspace'`), but records imported by older builds still
+   * live only in this origin's OPFS. OPFS is origin-scoped, so opening the same
+   * project on another origin (or after clearing site data) can't see them —
+   * the symptom is "Media has no valid storage path". This runs on load and
+   * copies any OPFS source that isn't already in the workspace folder into it.
+   *
+   * Best-effort and idempotent: a media already mirrored (or whose OPFS copy is
+   * gone on this origin) is skipped. Runs in the background; never throws.
+   */
+  async mirrorOpfsMediaToWorkspace(media: MediaMetadata[]): Promise<{ mirrored: number }> {
+    const candidates = media.filter((m) => m.storageType === 'opfs' && !!m.opfsPath)
+    if (candidates.length === 0) return { mirrored: 0 }
+
+    let mirrored = 0
+    await mapWithConcurrency(candidates, 4, async (m) => {
+      try {
+        if (await hasMediaSource(m.id)) return
+        const blob = await opfsService.getFileBlob(m.opfsPath!)
+        await writeMediaSource(m.id, blob, m.fileName, { strict: true })
+        mirrored++
+      } catch (error) {
+        // OPFS copy missing on this origin, or a workspace write failure — the
+        // record simply stays OPFS-only here. Nothing actionable; keep going.
+        logger.warn(`mirrorOpfsMediaToWorkspace(${m.id}) skipped:`, error)
+      }
+    })
+
+    if (mirrored > 0) {
+      logger.info(`Mirrored ${mirrored} OPFS media source(s) into the workspace folder`)
+    }
+    return { mirrored }
   }
 
   /**
@@ -1625,11 +2105,13 @@ class MediaLibraryService {
   /**
    * Get thumbnail as blob URL (cached in memory to prevent flicker)
    */
-  async getThumbnailBlobUrl(mediaId: string): Promise<string | null> {
-    // Check cache first
+  async getThumbnailBlobUrl(mediaId: string, thumbnailId?: string): Promise<string | null> {
+    // Serve from cache only when the change-marker still matches. A caller
+    // without a marker (undefined) accepts whatever is cached; a caller with a
+    // marker that differs falls through to a fresh read.
     const cached = this.thumbnailUrlCache.get(mediaId)
-    if (cached) {
-      return cached
+    if (cached && (thumbnailId === undefined || cached.marker === thumbnailId)) {
+      return cached.url
     }
 
     const thumbnail = await this.getThumbnail(mediaId)
@@ -1638,18 +2120,67 @@ class MediaLibraryService {
       return null
     }
 
-    const url = URL.createObjectURL(thumbnail.blob)
-    this.thumbnailUrlCache.set(mediaId, url)
+    // The prefetch batch (or another caller) may have populated the cache
+    // during the await above — reuse it when its marker matches rather than
+    // leaking a second URL.
+    const raced = this.thumbnailUrlCache.get(mediaId)
+    if (raced && (thumbnailId === undefined || raced.marker === thumbnailId)) {
+      return raced.url
+    }
+
+    return this.cacheThumbnailUrl(mediaId, thumbnail.blob, thumbnailId)
+  }
+
+  /**
+   * Store a thumbnail blob URL for `mediaId`, revoking any prior URL (e.g. a
+   * stale entry from a superseded `thumbnailId`) so it can't leak.
+   */
+  private cacheThumbnailUrl(mediaId: string, blob: Blob, marker: string | undefined): string {
+    const existing = this.thumbnailUrlCache.get(mediaId)
+    if (existing) {
+      URL.revokeObjectURL(existing.url)
+    }
+    const url = URL.createObjectURL(blob)
+    this.thumbnailUrlCache.set(mediaId, { url, marker })
     return url
+  }
+
+  /**
+   * Warm the in-memory thumbnail-URL cache for many media in one batched pass.
+   *
+   * Called on project load so each card's mount is a synchronous cache hit
+   * instead of an independent async FSA read. Only fetches ids not already
+   * cached with a matching change-marker, and reuses the shared `media/`
+   * directory handle for all reads.
+   */
+  async prefetchThumbnails(items: Array<{ id: string; thumbnailId?: string }>): Promise<void> {
+    const markerById = new Map(items.map((item) => [item.id, item.thumbnailId]))
+    const uncached = items
+      .filter((item) => {
+        const cached = this.thumbnailUrlCache.get(item.id)
+        return !cached || cached.marker !== item.thumbnailId
+      })
+      .map((item) => item.id)
+    if (uncached.length === 0) return
+
+    const blobs = await getThumbnailsByMediaIds(uncached)
+    for (const [mediaId, blob] of blobs) {
+      const marker = markerById.get(mediaId)
+      // A concurrent getThumbnailBlobUrl() may have already cached this id with
+      // the same marker while the batch was in flight — don't re-create it.
+      const cached = this.thumbnailUrlCache.get(mediaId)
+      if (cached && cached.marker === marker) continue
+      this.cacheThumbnailUrl(mediaId, blob, marker)
+    }
   }
 
   /**
    * Clear thumbnail URL from cache (call when media is deleted)
    */
   clearThumbnailCache(mediaId: string): void {
-    const url = this.thumbnailUrlCache.get(mediaId)
-    if (url) {
-      URL.revokeObjectURL(url)
+    const cached = this.thumbnailUrlCache.get(mediaId)
+    if (cached) {
+      URL.revokeObjectURL(cached.url)
       this.thumbnailUrlCache.delete(mediaId)
     }
   }

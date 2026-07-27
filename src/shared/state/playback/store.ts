@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { PlaybackState, PlaybackActions, PreviewQuality } from './types'
+import { getNextShuttleRate } from './shuttle'
 
 function normalizeFrame(frame: number): number {
   if (!Number.isFinite(frame)) return 0
@@ -14,6 +15,83 @@ function normalizePreviewQuality(quality: PreviewQuality): PreviewQuality {
   return 1
 }
 
+function enterPlayback(state: PlaybackState & PlaybackActions) {
+  if (state.isPlaying && state.previewFrame === null && state.previewItemId === null) {
+    return state
+  }
+  if (state.previewFrame === null && state.previewItemId === null) {
+    return { isPlaying: true }
+  }
+  const nextEpoch = state.frameUpdateEpoch + 1
+  return {
+    isPlaying: true,
+    previewFrame: null,
+    previewItemId: null,
+    previewFrameEpoch: nextEpoch,
+    frameUpdateEpoch: nextEpoch,
+  }
+}
+
+function enterNormalPlayback(state: PlaybackState & PlaybackActions) {
+  const playbackState = enterPlayback(state)
+  if (playbackState === state) {
+    return state.playbackRate === 1 && state.transportMode === 'normal'
+      ? state
+      : { playbackRate: 1, transportMode: 'normal' as const }
+  }
+  return {
+    ...playbackState,
+    playbackRate: 1,
+    transportMode: 'normal' as const,
+  }
+}
+
+function enterShuttlePlayback(
+  state: PlaybackState & PlaybackActions,
+  direction: -1 | 1,
+) {
+  const playbackState = enterPlayback(state)
+  return {
+    ...(playbackState === state ? {} : playbackState),
+    playbackRate: state.isPlaying
+      ? getNextShuttleRate(state.playbackRate, direction)
+      : direction,
+    transportMode: 'shuttle' as const,
+  }
+}
+
+function updatePausedScrubFrame(
+  state: PlaybackState & PlaybackActions,
+  frame: number,
+  itemId?: string | null,
+) {
+  const nextFrame = normalizeFrame(frame)
+  const nextItemId = itemId ?? null
+  if (
+    state.currentFrame === nextFrame &&
+    state.previewFrame === null &&
+    nextItemId === null
+  ) {
+    return state
+  }
+  if (
+    state.currentFrame === nextFrame &&
+    state.previewFrame === nextFrame &&
+    state.previewItemId === nextItemId
+  ) {
+    return state
+  }
+  const nextEpoch = state.frameUpdateEpoch + 1
+  return {
+    currentFrame: nextFrame,
+    currentFrameEpoch: nextEpoch,
+    previewFrame: nextFrame,
+    previewItemId: nextItemId,
+    previewFrameEpoch: nextEpoch,
+    frameUpdateEpoch: nextEpoch,
+  }
+}
+
 export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
   persist(
     (set) => ({
@@ -22,6 +100,7 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
       currentFrameEpoch: 0,
       isPlaying: false,
       playbackRate: 1,
+      transportMode: 'normal',
       loop: false,
       volume: 1,
       muted: false,
@@ -49,21 +128,15 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
           }
         }),
       setScrubFrame: (frame, itemId) =>
+        set((state) => (state.isPlaying ? state : updatePausedScrubFrame(state, frame, itemId))),
+      finishScrub: (frame) =>
         set((state) => {
           const nextFrame = normalizeFrame(frame)
-          const nextItemId = itemId ?? null
           if (
-            !state.isPlaying &&
             state.currentFrame === nextFrame &&
             state.previewFrame === null &&
-            nextItemId === null
-          ) {
-            return state
-          }
-          if (
-            state.currentFrame === nextFrame &&
-            state.previewFrame === nextFrame &&
-            state.previewItemId === nextItemId
+            state.previewItemId === null &&
+            !state.compositionVisualFrozen
           ) {
             return state
           }
@@ -71,25 +144,40 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
           return {
             currentFrame: nextFrame,
             currentFrameEpoch: nextEpoch,
-            previewFrame: nextFrame,
-            previewItemId: nextItemId,
+            previewFrame: null,
+            previewItemId: null,
             previewFrameEpoch: nextEpoch,
             frameUpdateEpoch: nextEpoch,
+            compositionVisualFrozen: false,
           }
         }),
-      play: () => set((state) => (state.isPlaying ? state : { isPlaying: true })),
-      pause: () => set((state) => (state.isPlaying ? { isPlaying: false } : state)),
-      togglePlayPause: () => set((state) => ({ isPlaying: !state.isPlaying })),
+      play: () => set(enterNormalPlayback),
+      pause: () =>
+        set((state) =>
+          state.isPlaying || state.playbackRate !== 1 || state.transportMode !== 'normal'
+            ? { isPlaying: false, playbackRate: 1, transportMode: 'normal' }
+            : state,
+        ),
+      togglePlayPause: () =>
+        set((state) =>
+          state.isPlaying
+            ? { isPlaying: false, playbackRate: 1, transportMode: 'normal' }
+            : enterNormalPlayback(state),
+        ),
+      shuttleForward: () => set((state) => enterShuttlePlayback(state, 1)),
+      shuttleReverse: () => set((state) => enterShuttlePlayback(state, -1)),
       setPlaybackRate: (rate) => set({ playbackRate: rate }),
       toggleLoop: () => set((state) => ({ loop: !state.loop })),
       setVolume: (volume) => set({ volume }),
       toggleMute: () => set((state) => ({ muted: !state.muted })),
+      setMuted: (muted) => set((state) => (state.muted === muted ? state : { muted })),
       setMasterBusDb: (masterBusDb) =>
         set({ masterBusDb: Math.max(-60, Math.min(12, masterBusDb)) }),
       setBusAudioEq: (busAudioEq) => set({ busAudioEq }),
       setZoom: (zoom) => set({ zoom }),
       setPreviewFrame: (frame, itemId) =>
         set((state) => {
+          if (state.isPlaying && frame !== null) return state
           const nextFrame = frame == null ? null : normalizeFrame(frame)
           const nextItemId = frame == null ? null : (itemId ?? null)
           if (state.previewFrame === nextFrame && state.previewItemId === nextItemId) {
@@ -121,10 +209,16 @@ export const usePlaybackStore = create<PlaybackState & PlaybackActions>()(
         zoom: state.zoom,
         volume: state.volume,
         muted: state.muted,
-        playbackRate: state.playbackRate,
         loop: state.loop,
         useProxy: state.useProxy,
         previewQuality: state.previewQuality,
+      }),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState as Partial<PlaybackState>),
+        isPlaying: false,
+        playbackRate: 1,
+        transportMode: 'normal',
       }),
     },
   ),

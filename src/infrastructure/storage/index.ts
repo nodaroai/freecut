@@ -32,6 +32,7 @@ export {
 export {
   saveThumbnail,
   getThumbnailByMediaId,
+  getThumbnailsByMediaIds,
   deleteThumbnailsByMediaId,
   saveProjectThumbnail,
   loadProjectThumbnail,
@@ -184,4 +185,5 @@ export {
   sanitizeAnimationPresets,
   type AnimationPreset,
   type AnimationPresetProperty,
+  type AnimationPresetVectorProperty,
 } from '@/infrastructure/storage/workspace-fs/animation-presets'

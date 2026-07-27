@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   LOCAL_MODEL_CACHE_DEFINITIONS,
@@ -137,12 +139,15 @@ describe('local-model-cache', () => {
   it('inspects configured local model caches without creating missing caches', async () => {
     const summaries = await inspectAllLocalModelCaches()
 
-    expect(summaries).toHaveLength(5)
+    expect(summaries).toHaveLength(8)
     expect(summaries.map((summary) => summary.id)).toEqual([
       'whisper',
       ...SCENE_VERIFICATION_MODEL_IDS,
       ...MUSICGEN_MODEL_IDS,
       'kokoro-tts',
+      'parakeet',
+      'supertonic-tts',
+      'rife',
     ])
 
     expect(summaries).toContainEqual(

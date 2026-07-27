@@ -1,16 +1,47 @@
 /**
  * Storage type for media files
- * - 'handle': Uses FileSystemFileHandle (instant import, reads from user's disk)
- * - 'opfs': Uses OPFS copy (for drag-drop without handle, or imported URLs)
+ * - 'handle':    Uses FileSystemFileHandle — references the user's original
+ *                file on disk (instant import, no copy). Origin-scoped.
+ * - 'workspace': Source bytes copied into the user-picked workspace folder
+ *                (`media/{id}/{filename}`). Durable and shared across every
+ *                origin that picks the same folder — the source of truth for
+ *                media with no user file handle (remote/generated/copied).
+ * - 'opfs':      Legacy: source copied into the Origin Private File System.
+ *                Origin-scoped, so NOT visible cross-origin. No longer written
+ *                for source media (use 'workspace'); still read for records
+ *                imported by older builds, and the repair sweep mirrors them
+ *                into the workspace folder. OPFS remains the store for
+ *                regenerable caches (proxies, waveforms, decoded audio).
  */
-export type MediaStorageType = 'handle' | 'opfs'
+export type MediaStorageType = 'handle' | 'workspace' | 'opfs'
+
+/**
+ * Provenance + usage terms for media imported from a third-party provider.
+ * All fields optional except `provider` so callers can record whatever the
+ * source exposes. Currently populated by the LottieFiles browser.
+ */
+export interface MediaAttribution {
+  /** Human-readable source, e.g. "LottieFiles". */
+  provider: string
+  /** Original creator's display name. */
+  author?: string
+  /** Link to the creator's profile or the source page. */
+  authorUrl?: string
+  /** Direct link back to the asset on the provider. */
+  sourceUrl?: string
+  /** Provider-native asset id, for dedupe/lookup. */
+  sourceId?: string
+  /** License the asset is distributed under, e.g. "Lottie Simple License". */
+  license?: string
+}
 
 export interface MediaMetadata {
   id: string
   /**
-   * How the media file is stored
-   * - 'handle': FileSystemFileHandle references user's original file (instant, no copy)
-   * - 'opfs': File copied to Origin Private File System (for drag-drop, URLs)
+   * How the media file is stored (see {@link MediaStorageType}).
+   * - 'handle':    references the user's original file on disk
+   * - 'workspace': source bytes copied into the workspace folder (durable, cross-origin)
+   * - 'opfs':      legacy Origin Private File System copy (origin-scoped)
    */
   storageType: MediaStorageType
   /**
@@ -53,6 +84,11 @@ export interface MediaMetadata {
    */
   audioCodecSupported?: boolean
   /**
+   * Whether the browser can decode the video track via WebCodecs.
+   * False for codecs like ProRes that require a transcoded proxy to be viewable.
+   */
+  videoCodecSupported?: boolean
+  /**
    * Conformed preview-audio asset path for custom-decoded codecs.
    * Kept under the legacy name for compatibility, but now points to the
    * workspace-backed persisted WAV path.
@@ -75,6 +111,12 @@ export interface MediaMetadata {
   gopInterval?: number
   thumbnailId?: string
   tags: string[]
+  /**
+   * Provenance for media pulled from a third-party provider (e.g. the
+   * in-app LottieFiles browser). Persisted so the editor can surface the
+   * required attribution/license for assets that carry usage terms.
+   */
+  attribution?: MediaAttribution
   /**
    * AI-generated timestamped captions from LFM vision-language model.
    * Mirrors the canonical `cache/ai/captions.json` payload for in-memory

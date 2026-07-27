@@ -104,6 +104,17 @@ interface CanvasRenderSettings {
   width: number
   height: number
   fps: number
+  getExpressionItem?: (itemId: string) => TimelineItem | undefined
+  getExpressionKeyframes?: (itemId: string) => ItemKeyframes | undefined
+  getPreviewTransform?: (itemId: string) => Partial<ResolvedTransform> | undefined
+}
+
+function isDefinedDimension(value: number | undefined): value is number {
+  return value !== undefined
+}
+
+function getFirstDefinedDimension(...values: Array<number | undefined>): number {
+  return Math.max(1, values.find(isDefinedDimension) ?? 1)
 }
 
 function getCropSourceDimensions(
@@ -112,8 +123,15 @@ function getCropSourceDimensions(
 ): { width: number; height: number } | null {
   if (item.type === 'video' || item.type === 'image') {
     return {
-      width: Math.max(1, item.sourceWidth ?? item.transform?.width ?? canvas.width),
-      height: Math.max(1, item.sourceHeight ?? item.transform?.height ?? canvas.height),
+      width: getFirstDefinedDimension(item.sourceWidth, item.transform?.width, canvas.width),
+      height: getFirstDefinedDimension(item.sourceHeight, item.transform?.height, canvas.height),
+    }
+  }
+
+  if (item.type === 'composition') {
+    return {
+      width: Math.max(1, item.compositionWidth),
+      height: Math.max(1, item.compositionHeight),
     }
   }
 
@@ -145,6 +163,9 @@ export function getAnimatedTransform(
     },
     frame,
     keyframes,
+    getItem: canvas.getExpressionItem,
+    getKeyframes: canvas.getExpressionKeyframes,
+    getPreviewTransform: canvas.getPreviewTransform,
   })
 
   const fadeOpacity = getVisualFadeOpacity(resolvedItem, frame, canvas.fps)

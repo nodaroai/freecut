@@ -1,6 +1,6 @@
 import type { TimelineItem } from '@/types/timeline'
 import { canJoinItems } from './clip-utils'
-import { timelineToSourceFrames } from './source-calculations'
+import { isMediaItem, timelineToSourceFrames } from './source-calculations'
 import { computeClampedSlipDelta } from './slip-utils'
 
 /**
@@ -9,7 +9,9 @@ import { computeClampedSlipDelta } from './slip-utils'
  * Returns 0 unless ALL conditions are true:
  * - Left + slid + right form a split-contiguous chain (joinable pairs).
  * - Slid item is media with explicit sourceEnd.
- * - Full source delta is available inside source bounds (no clamping required).
+ * The returned source delta is clamped continuously at source bounds. This
+ * avoids snapping the slid clip's source window back to its original position
+ * when a drag crosses the last available source frame.
  */
 export function computeSlideContinuitySourceDelta(
   slidItem: TimelineItem,
@@ -21,7 +23,7 @@ export function computeSlideContinuitySourceDelta(
   if (slideDelta === 0) return 0
   if (!leftNeighbor || !rightNeighbor) return 0
   if (!canJoinItems(leftNeighbor, slidItem) || !canJoinItems(slidItem, rightNeighbor)) return 0
-  if (slidItem.type !== 'video' && slidItem.type !== 'audio') return 0
+  if (!isMediaItem(slidItem)) return 0
   if (slidItem.sourceEnd === undefined) return 0
 
   const speed = slidItem.speed ?? 1
@@ -36,5 +38,5 @@ export function computeSlideContinuitySourceDelta(
     sourceDelta,
   )
 
-  return clamped === sourceDelta ? sourceDelta : 0
+  return clamped
 }

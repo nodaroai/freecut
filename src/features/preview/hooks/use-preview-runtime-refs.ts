@@ -3,6 +3,7 @@ import type { PlayerRef } from '@/features/preview/deps/player-core'
 import type { TimelineItem } from '@/types/timeline'
 import type { ResolvedTransitionWindow } from '@/shared/timeline/transitions/transition-planner'
 import { createAdaptivePreviewQualityState } from '../utils/adaptive-preview-quality'
+import type { CommittedPreviewSnapshotState } from '../utils/preview-display-canvas'
 import type { PreviewCompositionRenderer } from './use-preview-renderer-controller'
 import type {
   TransitionPreviewSessionTrace,
@@ -18,7 +19,7 @@ export function usePreviewRuntimeRefs() {
   const scrubFrameDirtyRef = useRef(false)
   const bypassPreviewSeekRef = useRef(false)
   const isGizmoInteractingRef = useRef(false)
-  const preferPlayerForTextGizmoRef = useRef(false)
+  const preferPlayerForDomGizmoRef = useRef(false)
   const preferPlayerForStyledTextScrubRef = useRef(false)
   const adaptiveQualityStateRef = useRef(createAdaptivePreviewQualityState(1))
   const adaptiveFrameSampleRef = useRef<{ frame: number; tsMs: number } | null>(null)
@@ -47,6 +48,12 @@ export function usePreviewRuntimeRefs() {
   const scrubPrewarmedSourceOrderRef = useRef<string[]>([])
   const scrubPrewarmedSourceTouchFrameRef = useRef<Map<string, number>>(new Map())
   const scrubOffscreenRenderedFrameRef = useRef<number | null>(null)
+  const committedPreviewSnapshotRef = useRef<CommittedPreviewSnapshotState>({
+    canvas: null,
+    frame: null,
+    guardFrame: null,
+    guardUntilMs: 0,
+  })
   const scrubDirectionRef = useRef<-1 | 0 | 1>(0)
   const suppressScrubBackgroundPrewarmRef = useRef(false)
   const fallbackToPlayerScrubRef = useRef(false)
@@ -137,6 +144,7 @@ export function usePreviewRuntimeRefs() {
       scrubPrewarmedSourceOrderRef,
       scrubPrewarmedSourceTouchFrameRef,
       scrubOffscreenRenderedFrameRef,
+      committedPreviewSnapshotRef,
       playbackTransitionPreparePromiseRef,
       playbackTransitionPreparingFrameRef,
       deferredPlaybackTransitionPrepareFrameRef,
@@ -174,6 +182,7 @@ export function usePreviewRuntimeRefs() {
       scrubPrewarmedSourceTouchFrameRef,
       scrubOffscreenCanvasRef,
       scrubOffscreenRenderedFrameRef,
+      committedPreviewSnapshotRef,
       bgTransitionRenderInFlightRef,
       resumeScrubLoopRef,
       lastBackwardScrubPreloadAtRef,
@@ -210,7 +219,7 @@ export function usePreviewRuntimeRefs() {
     scrubFrameDirtyRef,
     bypassPreviewSeekRef,
     isGizmoInteractingRef,
-    preferPlayerForTextGizmoRef,
+    preferPlayerForDomGizmoRef,
     preferPlayerForStyledTextScrubRef,
     adaptiveQualityStateRef,
     adaptiveFrameSampleRef,

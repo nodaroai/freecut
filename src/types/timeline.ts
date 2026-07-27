@@ -1,9 +1,12 @@
-import type { CropSettings, TransformProperties } from './transform'
+import type { CropSettings, TransformParentBinding, TransformProperties } from './transform'
 import type { ItemEffect } from './effects'
+import type { MotionAnimationLayer, MotionModifier } from './motion'
 import type { BlendMode } from './blend-modes'
 import type { AudioEqSettings } from './audio'
 import type { TextStylePresetId } from '@/shared/typography/text-style-preset-ids'
+import type { TextMotionSpec } from './text-motion'
 import type { TextLayoutDrafts, TextSpan, TextStyleFields } from './text'
+import type { CompositionControlOverrides } from './composition-controls'
 
 export interface TimelineItemCornerPin {
   topLeft: [number, number]
@@ -30,6 +33,10 @@ export interface TimelineTranscriptCaptions {
   mediaId: string
   enabled: boolean
   updatedAt: number
+  /** Version of the stored media transcript these cues were generated from. */
+  sourceTranscriptUpdatedAt?: number
+  /** Bump when transcript-to-caption phrase timing rules change. */
+  timingVersion?: number
   /** Source-relative transcript cues. Render/export trims them to the clip. */
   cues: TimelineTranscriptCaptionCue[]
   style?: TimelineTranscriptCaptionStyle
@@ -62,6 +69,9 @@ type BaseTimelineItem = {
   reverseConformPreviewPath?: string // OPFS/workspace cache path for the preview reversed media
   reverseConformPreviewKey?: string // Cache key describing the preview reversed source range
   reverseConformPreviewUsesProxy?: boolean // Whether the preview reversed media was generated from a proxy
+  reverseConformPreviewIsSourceLevel?: boolean // Preview conform contains the entire reversed source
+  reverseConformPreviewSourceDuration?: number // Source duration, in source-native frames, used by the conform
+  reverseConformPreviewFps?: number // Frame rate of the source-level preview conform
   reverseConformStatus?: 'pending' | 'ready' | 'error'
   // Timeline-frame offset into reverseConform{Src,PreviewSrc} where this clip starts
   // playing. Set on split halves so they share the parent's conform but read
@@ -69,6 +79,8 @@ type BaseTimelineItem = {
   reverseConformLocalStart?: number
   // Transform properties (optional - defaults computed at render time)
   transform?: TransformProperties
+  // Optional bind-space parent. Missing on legacy and unparented items.
+  transformParent?: TransformParentBinding
   // Source-relative media crop (normalized edge ratios)
   crop?: CropSettings
   // Audio properties (for video/audio items)
@@ -127,6 +139,12 @@ type BaseTimelineItem = {
   fadeOut?: number // Video fade out duration in seconds (default: 0)
   // Visual effects (GPU shader effects)
   effects?: ItemEffect[]
+  // Procedural motion modifiers — continuous drift/breath/shake evaluated at
+  // render time (no baked keyframes). See @/types/motion.
+  motionModifiers?: MotionModifier[]
+  // Named post-keyframe animation layers. Unlike Merge Keys, these remain
+  // independently removable and preserve the underlying editable animation.
+  motionLayers?: MotionAnimationLayer[]
   // Blend mode for layer compositing (default: 'normal')
   blendMode?: BlendMode
   // Corner pin transform (perspective warp)
@@ -181,6 +199,8 @@ export type TextItem = BaseTimelineItem &
     textLayoutDrafts?: TextLayoutDrafts
     textStylePresetId?: TextStylePresetId
     textStyleScale?: number
+    /** Per-character/word/line animation (see src/types/text-motion.ts). */
+    textMotion?: TextMotionSpec
     textRole?: 'caption'
     captionSource?: GeneratedCaptionSource
     color: string // Text color (hex or oklch)
@@ -195,6 +215,63 @@ export type ImageItem = BaseTimelineItem & {
   sourceHeight?: number
 }
 
+export type LottieItem = BaseTimelineItem & {
+  type: 'lottie'
+  src: string // blob URL to the Lottie JSON
+  thumbnailUrl?: string
+  // Source dimensions (intrinsic size from the animation's w/h)
+  sourceWidth?: number
+  sourceHeight?: number
+  // Animation timing (from the Lottie's fr / op-ip), for timeline<->lottie frame mapping
+  frameRate: number
+  totalFrames: number
+  // Loop the animation when the clip outlives one playthrough (default true)
+  loop?: boolean
+  // --- Editing controls (all optional; consumed by mapTimelineFrameToLottieFrame) ---
+  // `speed` and `isReversed` are inherited from BaseTimelineItem but note: Lottie
+  // uses a dedicated `reversed` flag so it never triggers video reverse-conform.
+  /** Play the animation backward. */
+  reversed?: boolean
+  /** How the animation repeats while looping (default 'loop'). */
+  loopMode?: 'loop' | 'pingpong'
+  /** First source frame of the animation to play (default 0). */
+  segmentStart?: number
+  /** Last source frame of the animation to play (default totalFrames - 1). */
+  segmentEnd?: number
+  /**
+   * Selected animation id for a multi-animation `.lottie` archive (default: the
+   * manifest's primary animation). Switching this re-derives the clip's
+   * timing/size from the chosen animation.
+   */
+  animationId?: string
+  /**
+   * Selected dotLottie theme id — a named rule set (from the `.lottie` manifest)
+   * recoloring/retexting the animation's slots, applied via `setThemeData`.
+   * Undefined renders the animation as authored.
+   */
+  themeId?: string
+  /**
+   * Per-layer text replacements for template Lotties, keyed by the text layer's
+   * stable key (see `extractLottieTextLayers`). Applied before render to both
+   * raw `.json` and `.lottie` archives (images inlined).
+   */
+  textOverrides?: Record<string, string>
+  /**
+   * Per-color solid fill/stroke replacements for template Lotties, keyed by the
+   * color's stable ordinal key (see `extractLottieColorLayers`) with `#rrggbb`
+   * hex values. Applied before render to both raw `.json` and `.lottie`
+   * archives. Animated colors freeze to the chosen color; gradients are
+   * recolored via themes/slots, not here.
+   */
+  colorOverrides?: Record<string, string>
+  /**
+   * Scalar/vector value-slot overrides keyed by slot id (see
+   * `extractLottieValueSlots`): a number for a scalar slot, `[x, y]` for a
+   * vector slot. Applied natively via dotlottie's slot setters after load.
+   */
+  slotOverrides?: Record<string, number | [number, number]>
+}
+
 export type ShapeType =
   | 'rectangle'
   | 'circle'
@@ -205,27 +282,61 @@ export type ShapeType =
   | 'heart'
   | 'path'
 
-export type ShapeItem = BaseTimelineItem & {
-  type: 'shape'
-  shapeType: ShapeType
+export interface ShapeStyleFields {
   // Fill
   fillColor: string
+  fillEnabled?: boolean
+  /** Solid remains the default for legacy projects. */
+  fillType?: 'solid' | 'linear'
+  /** First color of a two-stop linear fill. `fillColor` remains its legacy fallback. */
+  gradientStartColor?: string
+  /** Second color of a two-stop linear fill. */
+  gradientEndColor?: string
+  /** Linear fill direction in degrees. Zero runs left-to-right. */
+  gradientAngle?: number
   // Stroke
   strokeColor?: string
   strokeWidth?: number
-  // Shape-specific
-  cornerRadius?: number // Rect, Triangle, Star, Polygon
-  direction?: 'up' | 'down' | 'left' | 'right' // Triangle only
-  points?: number // Star (5 default), Polygon (6 default)
-  innerRadius?: number // Star only (ratio 0-1 of outer)
-  // Path shape (custom bezier path drawn with pen tool)
-  pathVertices?: import('@/types/masks').MaskVertex[] // Normalized 0-1 vertices for 'path' shapeType
-  // Mask properties
-  isMask?: boolean // When true, shape acts as mask for lower tracks
-  maskType?: 'clip' | 'alpha' // clip = hard edges, alpha = soft edges
-  maskFeather?: number // Feather amount for alpha masks (0-100px, default: 10)
-  maskInvert?: boolean // Invert mask (show outside, hide inside)
+  strokeEnabled?: boolean
+  strokeLineCap?: 'butt' | 'round' | 'square'
+  strokeLineJoin?: 'miter' | 'round' | 'bevel'
+  strokeMiterLimit?: number
+  /** Percentage of the outline at which the visible stroke begins (0-100). */
+  trimPathStart?: number
+  /** Percentage of the outline at which the visible stroke ends (0-100). */
+  trimPathEnd?: number
+  /** Rotates the trimmed stroke around the outline, in degrees. */
+  trimPathOffset?: number
+  /** Stroke width at the beginning of the visible path, as a percentage. */
+  taperStartWidth?: number
+  /** Stroke width at the end of the visible path, as a percentage. */
+  taperEndWidth?: number
+  /** Percentage of the visible path used to blend from the start width. */
+  taperStartLength?: number
+  /** Percentage of the visible path used to blend toward the end width. */
+  taperEndLength?: number
 }
+
+export type ShapeItem = BaseTimelineItem &
+  ShapeStyleFields & {
+    type: 'shape'
+    shapeType: ShapeType
+    // Shape-specific
+    cornerRadius?: number // Rect, Triangle, Star, Polygon
+    direction?: 'up' | 'down' | 'left' | 'right' // Triangle only
+    points?: number // Star (5 default), Polygon (6 default)
+    innerRadius?: number // Star only (ratio 0-1 of outer)
+    // Path shape (custom bezier path drawn with pen tool)
+    pathVertices?: import('@/types/masks').MaskVertex[] // Normalized 0-1 vertices for 'path' shapeType
+    /** Whether a custom path connects its final vertex back to its first. Legacy paths are closed. */
+    pathClosed?: boolean
+    // Mask properties
+    isMask?: boolean // When true, shape acts as mask for lower tracks
+    maskType?: 'clip' | 'alpha' // clip = hard edges, alpha = soft edges
+    maskFeather?: number // Feather amount for alpha masks (0-100px, default: 10)
+    maskOpacity?: number // Matte strength (0-100%, default: 100)
+    maskInvert?: boolean // Invert mask (show outside, hide inside)
+  }
 
 // Adjustment layer - applies effects to all items on tracks ABOVE this track
 export type AdjustmentItem = BaseTimelineItem & {
@@ -237,10 +348,19 @@ export type AdjustmentItem = BaseTimelineItem & {
   effectOpacity?: number // 0-1, defaults to 1
 }
 
+/** Invisible, animatable Null Object; `controller` remains the persisted legacy discriminator. */
+export type ControllerItem = BaseTimelineItem & {
+  type: 'controller'
+  controllerKind: 'null'
+  transform: TransformProperties
+}
+
 // Composition item - references a sub-composition (pre-comp)
 export type CompositionItem = BaseTimelineItem & {
   type: 'composition'
   compositionId: string // References a SubComposition in compositions-store
+  /** Values customized on this instance of the reusable composition. */
+  compositionControlOverrides?: CompositionControlOverrides
   // Dimensions of the sub-composition canvas
   compositionWidth: number
   compositionHeight: number
@@ -312,8 +432,10 @@ export type TimelineItem =
   | AudioItem
   | TextItem
   | ImageItem
+  | LottieItem
   | ShapeItem
   | AdjustmentItem
+  | ControllerItem
   | CompositionItem
   | SubtitleSegmentItem
 
@@ -333,8 +455,8 @@ export interface TimelineTrack {
   order: number
   items: TimelineItem[]
   // Track grouping (subsequences)
-  parentTrackId?: string // ID of the group track this track belongs to
-  isGroup?: boolean // true = container track (no items, only children)
+  parentTrackId?: string // ID of the Layer Group track this track belongs to
+  isGroup?: boolean // true = organizational Layer Group (no items, only children)
   isCollapsed?: boolean // Whether the group's children are collapsed
 }
 
@@ -342,6 +464,10 @@ export interface TimelineTrack {
 export interface ProjectMarker {
   id: string
   frame: number
+  /**
+   * Usually empty — every surface falls back to an ordinal name via
+   * `shared/timeline/marker-names`.
+   */
   label?: string
   color: string
 }

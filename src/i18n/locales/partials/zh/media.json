@@ -4,6 +4,7 @@
       "aiCaptionsCount": "AI 字幕数",
       "analyzeWithAI": "用 AI 分析",
       "analyzingWithAI": "正在用 AI 分析",
+      "cancelInterpolation": "取消插帧",
       "chooseMkvOrWebm": "选择 MKV 或 WebM",
       "deleteProxy": "删除代理",
       "deleteTranscript": "删除转录",
@@ -11,10 +12,13 @@
       "generateProxy": "生成代理",
       "generateTranscript": "生成转录",
       "importing": "正在导入",
+      "interpolateFactor": "{{factor}}倍帧",
+      "interpolateFrames": "开始插帧",
       "preparing": "正在准备",
       "menuAi": "AI",
       "menuCaptions": "嵌入字幕",
       "menuFile": "文件",
+      "menuInterpolation": "插帧",
       "menuProxy": "代理",
       "menuTranscript": "字幕",
       "playAudio": "播放音频",
@@ -37,17 +41,32 @@
       "transcriptReadyFor": "\"{{name}}\" 的字幕已准备好",
       "transcriptionFailedFor": "\"{{name}}\" 的字幕生成失败",
       "transcriptsDeleted": "转录已删除",
-      "transcriptsReady": "转录已准备就绪"
+      "transcriptsReady": "转录已准备就绪",
+      "menuUpscale": "超分辨率",
+      "upscaleVideo": "2x 超分辨率",
+      "cancelUpscale": "取消超分辨率",
+      "upscaleVariant": {
+        "liveAction": "实拍",
+        "animation": "动漫",
+        "threeD": "3D 渲染"
+      }
     },
     "compositions": {
+      "compositionsGroup": "合成",
+      "compoundClipsGroup": "复合剪辑",
       "deleteBody": "要删除复合剪辑“{{name}}”吗？此操作无法撤消。",
       "deleteInstancesDetail": "使用此复合剪辑的 {{count}} 个时间线实例也将被移除。",
       "deleteInstancesTitle": "已链接的实例将被移除",
+      "deleteSequenceBody": "要删除序列“{{name}}”吗？此操作无法撤消。",
+      "deleteSequenceInstancesDetail": "使用此序列的 {{count}} 个时间线实例也将被移除。",
+      "deleteSequenceTitle": "删除序列",
       "deleteTitle": "删除复合剪辑",
       "enter": "进入",
       "itemCount": "{{count}} 个项目",
+      "openAsTab": "作为标签页打开",
       "rename": "重命名",
-      "sectionTitle": "复合剪辑"
+      "sectionTitle": "合成",
+      "sequencesGroup": "序列"
     },
     "deleteDialog": {
       "bodyMultiple": "这会从此项目中永久移除 {{count}} 个媒体项。此操作无法撤消。",
@@ -123,14 +142,19 @@
       "dragDropUnsupported": "此处不支持拖放操作。",
       "dropFilesHere": "将文件拖到此处",
       "filesRejected": "部分文件无法添加。",
+      "downloadingInterpolationModel": "正在下载插帧模型",
       "generateProxiesForSelected": "为 {{count}} 个所选项生成代理",
       "generatingProxies": "正在生成代理…",
       "generatingTranscripts": "正在生成字幕…",
+      "interpolatingFrames": "正在插帧…",
+      "interpolationProgress": "插帧进度",
+      "timeRemaining": "剩余 {{time}}",
       "gridItemSize": "缩略图大小",
-      "groupAudio": "音频分组",
-      "groupGifs": "GIF 分组",
-      "groupImages": "图像分组",
-      "groupVideos": "视频分组",
+      "groupAudio": "音频",
+      "groupGifs": "GIF",
+      "groupImages": "图像",
+      "groupLottie": "Lottie",
+      "groupVideos": "视频",
       "import": "导入",
       "importFromUrlDescription": "从直接 URL 导入媒体文件。",
       "importFromUrlHint": "粘贴指向视频、音频、图片或 GIF 文件的直接链接。",
@@ -155,6 +179,9 @@
       "selectedAssetsCount": "{{count}} 个所选素材",
       "selectedAssetsCount_one": "{{count}} 个所选素材",
       "selectedAssetsCount_other": "{{count}} 个所选素材",
+      "sequencesCount": "{{count}} 个序列",
+      "sequencesCount_one": "{{count}} 个序列",
+      "sequencesCount_other": "{{count}} 个序列",
       "showMediaLibrary": "显示媒体库",
       "sortDate": "按日期排序",
       "sortName": "按名称排序",
@@ -168,7 +195,8 @@
       "typeShort": {
         "video": "视频",
         "audio": "音频",
-        "image": "图像"
+        "image": "图像",
+        "lottie": "LOTTIE"
       },
       "sortShort": {
         "name": "名称",
@@ -194,7 +222,9 @@
         "waveform": "波形"
       },
       "importFailed_one": "{{count}} 个文件导入失败。请检查文件后重试。",
-      "importFailed_other": "{{count}} 个文件导入失败。请检查文件后重试。"
+      "importFailed_other": "{{count}} 个文件导入失败。请检查文件后重试。",
+      "upscalingVideo": "正在超分辨率处理视频",
+      "upscaleProgress": "超分辨率进度"
     },
     "missingMedia": {
       "title": "缺失媒体",
@@ -247,16 +277,20 @@
       "language": "语言",
       "model": "模型",
       "noLanguages": "暂无可用语言。",
+      "parakeetAutoDetects": "自动检测 {{count}} 种欧洲语言。",
+      "parakeetChooseWhisper": "如需转录中文、日语、韩语或其他语言，请选择 Whisper 模型。",
       "progressAria": "字幕进度",
       "quantization": "量化",
       "refreshTitle": "刷新字幕",
       "searchLanguages": "搜索语言",
       "start": "开始",
-      "stop": "停止"
+      "stop": "停止",
+      "whisperLanguageHint": "选择实际语种可提高准确度，也可以使用自动检测。"
     },
     "type": {
       "audio": "音频",
       "image": "图像",
+      "lottie": "Lottie",
       "video": "视频"
     },
     "unsupportedCodec": {

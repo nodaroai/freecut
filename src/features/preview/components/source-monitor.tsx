@@ -36,10 +36,12 @@ import {
   ClockBridgeProvider,
   useClock,
   useClockIsPlaying,
+  useClockPlaybackRate,
   VideoConfigProvider,
   usePlayer,
 } from '@/features/preview/deps/player-context'
 import { SourceComposition } from './source-composition'
+import { ShuttleIndicator } from '@/shared/ui/shuttle-indicator'
 import { resolveMediaUrl } from '../utils/media-resolver'
 import {
   clampDraggedSourceInPoint,
@@ -54,10 +56,17 @@ import { useItemsStore } from '@/features/preview/deps/timeline-store'
 import { useSettingsStore } from '@/features/preview/deps/settings'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSourcePlayerStore } from '@/shared/state/source-player'
+import { getNextShuttleRate } from '@/shared/state/playback/shuttle'
 import { useSelectionStore } from '@/shared/state/selection'
 import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/config/editor-layout'
 import { createScrubThrottleState, shouldCommitScrubFrame } from '../deps/timeline-utils'
 import { cn } from '@/shared/ui/cn'
+import {
+  beginIoPointerDrag,
+  IoRangeHandles,
+  IoRangeStrip,
+  useMeasuredWidth,
+} from '@/shared/timeline/io-range'
 import { formatTimecodeCompact } from '@/shared/utils/time-utils'
 import { getPreviewPixelSnapSize } from '../utils/preview-pixel-snap'
 import type { TimelineTrack } from '@/types/timeline'
@@ -71,6 +80,9 @@ interface SourceMonitorProps {
 }
 
 const SOURCE_MONITOR_RESIZE_MIN_UPDATE_MS = 33
+
+// Height of the IO lane strip (matches the `h-2.5` container below).
+const SOURCE_IO_LANE_HEIGHT = 10
 
 function getDevicePixelRatio(): number {
   return typeof window === 'undefined' ? 1 : window.devicePixelRatio
@@ -119,7 +131,7 @@ function SourcePatchDestinationPicker({
           variant="ghost"
           size="sm"
           className={cn(
-            'h-6 min-w-[3.75rem] justify-between gap-1 px-1.5 font-mono text-[10px]',
+            'h-6 min-w-15 justify-between gap-1 px-1.5 font-mono text-[10px]',
             !selectedTrackId && 'text-muted-foreground',
           )}
           aria-label={`Choose ${kindLabel.toLowerCase()} source patch destination`}
@@ -277,7 +289,7 @@ const SourceMonitorContent = memo(function SourceMonitorContent({
 interface SourceMonitorInnerProps {
   mediaId: string
   src: string
-  mediaType: 'video' | 'audio' | 'image'
+  mediaType: 'video' | 'audio' | 'image' | 'lottie'
   hasAudio: boolean
   fileName: string
   mediaWidth: number
@@ -549,7 +561,7 @@ function SourcePlaybackControls({
 }: {
   durationInFrames: number
   fps: number
-  mediaType: 'video' | 'audio' | 'image'
+  mediaType: 'video' | 'audio' | 'image' | 'lottie'
   hasAudio: boolean
   interactive: boolean
   seekFrame: number | null
@@ -557,6 +569,8 @@ function SourcePlaybackControls({
   const clock = useClock()
   const player = usePlayer(durationInFrames)
   const playing = useClockIsPlaying()
+  const playbackRate = useClockPlaybackRate()
+  const shuttleActiveRef = useRef(false)
   const lastFrame = Math.max(0, durationInFrames - 1)
   const tracks = useItemsStore((s) => s.tracks)
   const activeTrackId = useSelectionStore((s) => s.activeTrackId)
@@ -628,14 +642,35 @@ function SourcePlaybackControls({
     const setPlayerMethods = useSourcePlayerStore.getState().setPlayerMethods
     setPlayerMethods({
       toggle: () => {
+        shuttleActiveRef.current = false
         const previewFrame = useSourcePlayerStore.getState().previewSourceFrame
         if (previewFrame !== null) {
           commitSourceSeek(previewFrame)
         }
-        player.toggle()
+        if (player.isPlaying()) {
+          player.pause()
+        } else {
+          player.setPlaybackRate(1)
+          player.play()
+        }
       },
       pause: () => {
+        shuttleActiveRef.current = false
         player.pause()
+        player.setPlaybackRate(1)
+      },
+      isPlaying: () => player.isPlaying(),
+      shuttleForward: () => {
+        shuttleActiveRef.current = true
+        const nextRate = player.isPlaying() ? getNextShuttleRate(player.getPlaybackRate(), 1) : 1
+        player.setPlaybackRate(nextRate)
+        player.play()
+      },
+      shuttleReverse: () => {
+        shuttleActiveRef.current = true
+        const nextRate = player.isPlaying() ? getNextShuttleRate(player.getPlaybackRate(), -1) : -1
+        player.setPlaybackRate(nextRate)
+        player.play()
       },
       seek: (frame) => {
         commitSourceSeek(frame)
@@ -687,7 +722,11 @@ function SourcePlaybackControls({
       store.setPendingSeekFrame(null)
       const shouldPlay = store.pendingPlay
       store.setPendingPlay(false)
-      if (shouldPlay) player.play()
+      if (shouldPlay) {
+        shuttleActiveRef.current = false
+        player.setPlaybackRate(1)
+        player.play()
+      }
     }
   }, [commitSourceSeek, interactive, pendingSeekFrame, player])
 
@@ -884,6 +923,11 @@ function SourcePlaybackControls({
 
   // Draggable I/O handles + range
   const ioStripRef = useRef<HTMLDivElement>(null)
+  // Strip pixel width — handles position via `%` but need the px span to stay
+  // collapse-safe (they'd otherwise overlap into a block on a short range). The
+  // strip mounts late (only once an in/out point exists), so measure via the
+  // callback ref to catch that mount.
+  const { width: ioStripWidth, measureRef: ioStripMeasureRef } = useMeasuredWidth(ioStripRef)
   const ioDragCleanupRef = useRef<(() => void) | null>(null)
 
   const pointFromStripX = useCallback(
@@ -898,75 +942,68 @@ function SourcePlaybackControls({
   )
 
   const handleIODragStart = useCallback(
-    (e: React.MouseEvent, type: 'in' | 'out') => {
-      e.preventDefault()
-      e.stopPropagation()
-      const originalCursor = document.body.style.cursor
-      document.body.style.cursor = 'col-resize'
-
+    (e: React.PointerEvent, type: 'in' | 'out') => {
       const store = useSourcePlayerStore.getState
-      const onMove = (ev: MouseEvent) => {
-        const point = pointFromStripX(ev.clientX)
-        if (type === 'in') {
-          const out = store().outPoint
-          const nextIn = clampDraggedSourceInPoint(point, out, lastFrame)
-          store().setInPoint(nextIn)
-          store().setPreviewSourceFrame(nextIn)
-        } else {
-          const inp = store().inPoint
-          const nextOut = clampDraggedSourceOutPoint(point, inp, durationInFrames)
+      const originalCursor = document.body.style.cursor
+      const cleanup = beginIoPointerDrag(
+        e,
+        (clientX) => {
+          const point = pointFromStripX(clientX)
+          if (type === 'in') {
+            const nextIn = clampDraggedSourceInPoint(point, store().outPoint, lastFrame)
+            store().setInPoint(nextIn)
+            store().setPreviewSourceFrame(nextIn)
+            return formatTime(nextIn)
+          }
+          const nextOut = clampDraggedSourceOutPoint(point, store().inPoint, durationInFrames)
           store().setOutPoint(nextOut)
           // Out is exclusive — skim to the last included frame (out - 1).
           store().setPreviewSourceFrame(Math.max(0, nextOut - 1))
-        }
-      }
-      const onUp = () => {
-        document.body.style.cursor = originalCursor
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        store().setPreviewSourceFrame(null)
-        ioDragCleanupRef.current = null
-      }
-      ioDragCleanupRef.current = onUp
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
+          return formatTime(nextOut)
+        },
+        () => {
+          document.body.style.cursor = originalCursor
+          store().setPreviewSourceFrame(null)
+          ioDragCleanupRef.current = null
+        },
+      )
+      if (!cleanup) return
+      document.body.style.cursor = 'col-resize'
+      ioDragCleanupRef.current = cleanup
     },
-    [durationInFrames, lastFrame, pointFromStripX],
+    [durationInFrames, lastFrame, pointFromStripX, formatTime],
   )
 
   const handleIORangeDragStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
+    (e: React.PointerEvent) => {
       const store = useSourcePlayerStore.getState
       const startIn = store().inPoint
       const startOut = store().outPoint
       if (startIn === null || startOut === null) return
       const startPoint = pointFromStripX(e.clientX)
       const originalCursor = document.body.style.cursor
+      const cleanup = beginIoPointerDrag(
+        e,
+        (clientX) => {
+          const delta = pointFromStripX(clientX) - startPoint
+          const nextRange = shiftSourceIoRange(startIn, startOut, delta, durationInFrames)
+          store().setInPoint(nextRange.inPoint)
+          store().setOutPoint(nextRange.outPoint)
+          // Skim the preview to the range's leading (in) edge as it slides.
+          store().setPreviewSourceFrame(nextRange.inPoint)
+          return `${formatTime(nextRange.inPoint)} → ${formatTime(nextRange.outPoint)}`
+        },
+        () => {
+          document.body.style.cursor = originalCursor
+          store().setPreviewSourceFrame(null)
+          ioDragCleanupRef.current = null
+        },
+      )
+      if (!cleanup) return
       document.body.style.cursor = 'grabbing'
-
-      const onMove = (ev: MouseEvent) => {
-        const nowPoint = pointFromStripX(ev.clientX)
-        const delta = nowPoint - startPoint
-        const nextRange = shiftSourceIoRange(startIn, startOut, delta, durationInFrames)
-        store().setInPoint(nextRange.inPoint)
-        store().setOutPoint(nextRange.outPoint)
-        // Skim the preview to the range's leading (in) edge as it slides.
-        store().setPreviewSourceFrame(nextRange.inPoint)
-      }
-      const onUp = () => {
-        document.body.style.cursor = originalCursor
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        store().setPreviewSourceFrame(null)
-        ioDragCleanupRef.current = null
-      }
-      ioDragCleanupRef.current = onUp
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
+      ioDragCleanupRef.current = cleanup
     },
-    [durationInFrames, pointFromStripX],
+    [durationInFrames, pointFromStripX, formatTime],
   )
 
   useEffect(() => {
@@ -1003,6 +1040,8 @@ function SourcePlaybackControls({
   const handleReplaySegment = useCallback(() => {
     const { inPoint: ip, outPoint: op } = useSourcePlayerStore.getState()
     if (ip === null && op === null) return
+    shuttleActiveRef.current = false
+    player.setPlaybackRate(1)
     replayingRef.current = true
     commitSourceSeek(ip ?? 0)
     player.play()
@@ -1018,11 +1057,18 @@ function SourcePlaybackControls({
   }, [clearPreviewSourceFrame, player])
 
   const handleTogglePlayback = useCallback(() => {
+    shuttleActiveRef.current = false
     const previewFrame = useSourcePlayerStore.getState().previewSourceFrame
     if (previewFrame !== null) {
       commitSourceSeek(previewFrame)
     }
-    player.toggle()
+    if (player.isPlaying()) {
+      player.pause()
+      player.setPlaybackRate(1)
+    } else {
+      player.setPlaybackRate(1)
+      player.play()
+    }
   }, [commitSourceSeek, player])
 
   const handleStepForward = useCallback(() => {
@@ -1175,87 +1221,28 @@ function SourcePlaybackControls({
     <div className="@container flex flex-col shrink-0">
       {/* Seek bar row with I/O region above and editing buttons */}
       <div className="border-t border-border panel-header flex items-center gap-2 px-4 h-7 shrink-0">
-        <div className="flex-1 flex flex-col justify-center gap-[2px] min-w-0">
+        <div className="flex-1 flex flex-col justify-center gap-0.5 min-w-0">
           {/* I/O region strip — styled like timeline I/O controls */}
           {interactive && (inPct !== null || outPct !== null) && (
-            <div ref={ioStripRef} className="w-full h-2.5 relative shrink-0">
-              {/* Draggable range strip */}
+            <div ref={ioStripMeasureRef} className="w-full h-2.5 relative shrink-0">
               {inPct !== null && outPct !== null && (
-                <div
-                  className="absolute inset-y-0 cursor-grab active:cursor-grabbing"
-                  style={{
-                    left: `${inPct}%`,
-                    width: `${Math.max(0.5, outPct - inPct)}%`,
-                    background:
-                      'linear-gradient(to bottom, var(--color-timeline-io-range-fill), color-mix(in oklch, var(--color-timeline-io-range-fill) 82%, black))',
-                    border: '1px solid var(--color-timeline-io-range-border)',
-                    borderRadius: '2px',
-                    boxShadow:
-                      'inset 0 1px 0 color-mix(in oklch, white 22%, transparent), 0 0 6px var(--color-timeline-io-range-glow)',
-                    zIndex: 10,
-                  }}
-                  onMouseDown={handleIORangeDragStart}
+                <IoRangeStrip
+                  left={`${inPct}%`}
+                  width={`${outPct - inPct}%`}
+                  height={SOURCE_IO_LANE_HEIGHT}
+                  onDragStart={handleIORangeDragStart}
                 />
               )}
-              {/* In handle — grip */}
-              {inPct !== null && (
-                <div
-                  className="absolute top-0 bottom-0"
-                  style={{
-                    left: `${inPct}%`,
-                    width: '5px',
-                    borderRadius: '2px',
-                    background: `linear-gradient(to bottom, var(--color-timeline-io-handle), color-mix(in oklch, var(--color-timeline-io-handle) 75%, black))`,
-                    boxShadow: `0 0 5px color-mix(in oklch, var(--color-timeline-io-handle) 55%, transparent)`,
-                    zIndex: 20,
-                    pointerEvents: 'none',
-                  }}
-                />
-              )}
-              {/* In handle hit area */}
-              {inPct !== null && (
-                <div
-                  className="absolute cursor-col-resize"
-                  style={{
-                    left: `calc(${inPct}% - 4px)`,
-                    top: 0,
-                    bottom: 0,
-                    width: '14px',
-                    zIndex: 21,
-                  }}
-                  onMouseDown={(e) => handleIODragStart(e, 'in')}
-                />
-              )}
-              {/* Out handle — grip */}
-              {outPct !== null && (
-                <div
-                  className="absolute top-0 bottom-0"
-                  style={{
-                    left: `${outPct}%`,
-                    width: '5px',
-                    transform: 'translateX(-100%)',
-                    borderRadius: '2px',
-                    background: `linear-gradient(to bottom, var(--color-timeline-io-handle), color-mix(in oklch, var(--color-timeline-io-handle) 75%, black))`,
-                    boxShadow: `0 0 5px color-mix(in oklch, var(--color-timeline-io-handle) 55%, transparent)`,
-                    zIndex: 20,
-                    pointerEvents: 'none',
-                  }}
-                />
-              )}
-              {/* Out handle hit area */}
-              {outPct !== null && (
-                <div
-                  className="absolute cursor-col-resize"
-                  style={{
-                    left: `calc(${outPct}% - 10px)`,
-                    top: 0,
-                    bottom: 0,
-                    width: '14px',
-                    zIndex: 21,
-                  }}
-                  onMouseDown={(e) => handleIODragStart(e, 'out')}
-                />
-              )}
+              <IoRangeHandles
+                inLeft={inPct !== null ? `${inPct}%` : null}
+                outLeft={outPct !== null ? `${outPct}%` : null}
+                spanPx={
+                  inPct !== null && outPct !== null ? ((outPct - inPct) / 100) * ioStripWidth : null
+                }
+                laneHeight={SOURCE_IO_LANE_HEIGHT}
+                onInDragStart={(e) => handleIODragStart(e, 'in')}
+                onOutDragStart={(e) => handleIODragStart(e, 'out')}
+              />
             </div>
           )}
           {/* Seek bar */}
@@ -1352,17 +1339,23 @@ function SourcePlaybackControls({
         className="border-t border-border panel-header flex items-center justify-between px-4 shrink-0"
         style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
       >
-        <button
-          type="button"
-          className="inline-flex items-center gap-1.5 bg-transparent p-0 font-mono text-[11px] tabular-nums text-left transition-colors select-none text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm shrink-0"
-          onClick={() => setShowFrames((prev) => !prev)}
-        >
-          <span ref={currentTimeRef} className="text-primary font-semibold">
-            {formatTime(clock.currentFrame)}
-          </span>
-          <span className="text-muted-foreground">/</span>
-          <span>{formatTime(lastFrame)}</span>
-        </button>
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 bg-transparent p-0 font-mono text-[11px] tabular-nums text-left transition-colors select-none text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm shrink-0"
+            onClick={() => setShowFrames((prev) => !prev)}
+          >
+            <span ref={currentTimeRef} className="text-primary font-semibold">
+              {formatTime(clock.currentFrame)}
+            </span>
+            <span className="text-muted-foreground">/</span>
+            <span>{formatTime(lastFrame)}</span>
+          </button>
+          <ShuttleIndicator
+            active={playing && shuttleActiveRef.current}
+            playbackRate={playbackRate}
+          />
+        </div>
         <span className="text-[11px] font-mono text-primary/70 shrink-0 hidden @min-[480px]:inline">
           {ioDuration ? `[${ioDuration}]` : ''}
         </span>

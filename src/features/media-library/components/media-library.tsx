@@ -37,6 +37,7 @@ import {
   Sparkles,
   FileText,
   ScanSearch,
+  FileJson,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { importSceneBrowserPanel, useSceneBrowserStore } from '../deps/scene-browser'
@@ -91,6 +92,8 @@ import {
 } from '@/features/media-library/deps/timeline-stores'
 import { useProjectStore } from '@/features/media-library/deps/projects'
 import { proxyService } from '../services/proxy-service'
+import { frameInterpolationService } from '../services/frame-interpolation-service'
+import { upscaleService } from '../services/upscale-service'
 import { importMediaLibraryService } from '../services/media-library-service-loader'
 import { cancelMediaTranscriptionJob } from '../services/media-transcription-runner'
 import { importMediaAnalysisService } from '../services/media-analysis-service-loader'
@@ -142,6 +145,7 @@ const GROUP_ICONS = {
   audio: FileAudio,
   image: ImageIcon,
   gif: Film,
+  lottie: FileJson,
 } as const
 
 interface MediaTypeGroupProps {
@@ -209,6 +213,25 @@ const MEDIA_HEADER_MAX_COMPACT_LEVEL = 4
 const MEDIA_HEADER_OVERFLOW_TOLERANCE_PX = 1
 const MEDIA_HEADER_RELAX_WIDTH_DELTA_PX = 8
 
+/**
+ * Per-item rows shown when a background-task progress bar is expanded. A single row carries no
+ * more information than the aggregate bar above it, so one row renders nothing.
+ */
+function renderTaskDetailRows(
+  rows: ReadonlyArray<{ id: string; name: string; percent: number }>,
+): React.ReactNode {
+  if (rows.length <= 1) return undefined
+  return rows.map((row) => (
+    <div
+      key={row.id}
+      className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
+    >
+      <span className="truncate">{row.name}</span>
+      <span className="tabular-nums flex-shrink-0">{row.percent}%</span>
+    </div>
+  ))
+}
+
 export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaLibraryProps) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -217,7 +240,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [headerCompactLevel, setHeaderCompactLevel] = useState(0)
   const [openGroups, setOpenGroups] = useState<Set<string>>(
-    () => new Set(['video', 'audio', 'image', 'gif']),
+    () => new Set(['video', 'audio', 'image', 'gif', 'lottie']),
   )
   const [showImportUrlDialog, setShowImportUrlDialog] = useState(false)
   const [importUrlValue, setImportUrlValue] = useState('')
@@ -265,13 +288,14 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     const groups: {
       key: string
       label: string
-      icon: 'video' | 'audio' | 'image' | 'gif'
+      icon: 'video' | 'audio' | 'image' | 'gif' | 'lottie'
       items: MediaMetadata[]
     }[] = []
     const videos: MediaMetadata[] = []
     const audio: MediaMetadata[] = []
     const gifs: MediaMetadata[] = []
     const images: MediaMetadata[] = []
+    const lotties: MediaMetadata[] = []
     for (const item of filteredMediaItems) {
       if (item.mimeType === 'image/gif') {
         gifs.push(item)
@@ -279,6 +303,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
         const t = getMediaType(item.mimeType)
         if (t === 'video') videos.push(item)
         else if (t === 'audio') audio.push(item)
+        else if (t === 'lottie') lotties.push(item)
         else images.push(item)
       }
     }
@@ -305,6 +330,13 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
       })
     if (gifs.length > 0)
       groups.push({ key: 'gif', label: t('media.library.groupGifs'), icon: 'gif', items: gifs })
+    if (lotties.length > 0)
+      groups.push({
+        key: 'lottie',
+        label: t('media.library.groupLottie'),
+        icon: 'lottie',
+        items: lotties,
+      })
     return groups
   }, [filteredMediaItems, t])
   const compositions = useCompositionsStore((s) => s.compositions)
@@ -429,9 +461,20 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     generatingCount,
     generatingAvgProgress,
     proxyItemRows,
+    interpolatingCount,
+    interpolatingAvgProgress,
+    interpolationItemRows,
+    interpolationEtaLabel,
+    isDownloadingInterpolationModel,
+    upscalingCount,
+    upscalingAvgProgress,
+    upscaleItemRows,
+    upscaleEtaLabel,
     transcribingCount,
     transcribingAvgProgress,
     singleTranscriptionStageLabel,
+    singleTranscriptionDetail,
+    singleTranscriptionIndeterminate,
     transcriptionItemRows,
     preparationItemRows,
     preparingCount,
@@ -476,6 +519,22 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
 
       const media = mediaById[mediaId]
       proxyService.cancelProxy(mediaId, media ? getSharedProxyKey(media) : undefined)
+    }
+  }
+
+  const handleCancelAllInterpolation = () => {
+    for (const [mediaId, status] of useMediaLibraryStore.getState().interpolationStatus.entries()) {
+      if (status === 'generating') {
+        frameInterpolationService.cancel(mediaId)
+      }
+    }
+  }
+
+  const handleCancelAllUpscales = () => {
+    for (const [mediaId, status] of useMediaLibraryStore.getState().upscaleStatus.entries()) {
+      if (status === 'generating') {
+        upscaleService.cancel(mediaId)
+      }
     }
   }
 
@@ -1014,6 +1073,13 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
                     <ImageIcon className="w-3 h-3 mr-2" />
                     {t('media.type.image')}
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setFilterByType('lottie')}
+                    className="text-xs hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <FileJson className="w-3 h-3 mr-2" />
+                    {t('media.type.lottie')}
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 
@@ -1279,9 +1345,15 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
       {transcribingCount > 0 && (
         <BackgroundTaskProgress
           icon={<FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />}
-          label={t('media.library.generatingTranscripts', { count: transcribingCount })}
+          // With one job the stage ("Downloading model") is far more useful than the generic
+          // title, and the panel is too narrow to show both without truncating each to noise.
+          label={
+            singleTranscriptionStageLabel ??
+            t('media.library.generatingTranscripts', { count: transcribingCount })
+          }
           progressAriaLabel={t('media.library.transcriptGenerationProgress')}
           progressPercent={transcribingAvgProgress * 100}
+          indeterminate={singleTranscriptionIndeterminate}
           detailsToggleAriaLabel={t('media.library.perItemProgress')}
           details={
             transcriptionItemRows.length > 1
@@ -1301,10 +1373,14 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           }
           meta={
             <>
-              {singleTranscriptionStageLabel && (
-                <span className="hidden sm:inline truncate">{singleTranscriptionStageLabel}</span>
+              {singleTranscriptionDetail && (
+                <span className="truncate tabular-nums">{singleTranscriptionDetail}</span>
               )}
-              <span className="tabular-nums">{Math.round(transcribingAvgProgress * 100)}%</span>
+              {/* The byte counter already says how far along the transfer is, and the fill bar
+                  shows it too; a percent as well only crowds out the counter in a narrow panel. */}
+              {!singleTranscriptionIndeterminate && !singleTranscriptionDetail && (
+                <span className="tabular-nums">{Math.round(transcribingAvgProgress * 100)}%</span>
+              )}
               <button
                 type="button"
                 onClick={handleCancelAllTranscriptions}
@@ -1326,19 +1402,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           progressAriaLabel={t('media.library.proxyGenerationProgress')}
           progressPercent={generatingAvgProgress * 100}
           detailsToggleAriaLabel={t('media.library.perItemProgress')}
-          details={
-            proxyItemRows.length > 1
-              ? proxyItemRows.map((row) => (
-                  <div
-                    key={row.id}
-                    className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
-                  >
-                    <span className="truncate">{row.name}</span>
-                    <span className="tabular-nums flex-shrink-0">{row.percent}%</span>
-                  </div>
-                ))
-              : undefined
-          }
+          details={renderTaskDetailRows(proxyItemRows)}
           meta={
             <>
               <span className="tabular-nums">{Math.round(generatingAvgProgress * 100)}%</span>
@@ -1352,6 +1416,64 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
             </>
           }
           fillClassName="bg-green-500"
+        />
+      )}
+
+      {interpolatingCount > 0 && (
+        <BackgroundTaskProgress
+          icon={<Loader2 className="w-3.5 h-3.5 text-sky-500 animate-spin flex-shrink-0" />}
+          label={
+            isDownloadingInterpolationModel
+              ? t('media.library.downloadingInterpolationModel')
+              : t('media.library.interpolatingFrames', { count: interpolatingCount })
+          }
+          progressAriaLabel={t('media.library.interpolationProgress')}
+          progressPercent={interpolatingAvgProgress * 100}
+          detailsToggleAriaLabel={t('media.library.perItemProgress')}
+          details={renderTaskDetailRows(interpolationItemRows)}
+          meta={
+            <>
+              <span className="tabular-nums">{Math.round(interpolatingAvgProgress * 100)}%</span>
+              {interpolationEtaLabel && !isDownloadingInterpolationModel && (
+                <span className="text-muted-foreground tabular-nums">{interpolationEtaLabel}</span>
+              )}
+              <button
+                type="button"
+                onClick={handleCancelAllInterpolation}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {t('media.library.cancelAll')}
+              </button>
+            </>
+          }
+          fillClassName="bg-sky-500"
+        />
+      )}
+
+      {upscalingCount > 0 && (
+        <BackgroundTaskProgress
+          icon={<Loader2 className="w-3.5 h-3.5 text-violet-500 animate-spin flex-shrink-0" />}
+          label={t('media.library.upscalingVideo', { count: upscalingCount })}
+          progressAriaLabel={t('media.library.upscaleProgress')}
+          progressPercent={upscalingAvgProgress * 100}
+          detailsToggleAriaLabel={t('media.library.perItemProgress')}
+          details={renderTaskDetailRows(upscaleItemRows)}
+          meta={
+            <>
+              <span className="tabular-nums">{Math.round(upscalingAvgProgress * 100)}%</span>
+              {upscaleEtaLabel && (
+                <span className="text-muted-foreground tabular-nums">{upscaleEtaLabel}</span>
+              )}
+              <button
+                type="button"
+                onClick={handleCancelAllUpscales}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {t('media.library.cancelAll')}
+              </button>
+            </>
+          }
+          fillClassName="bg-violet-500"
         />
       )}
 

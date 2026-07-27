@@ -12,7 +12,9 @@ import {
   Loader2,
 } from 'lucide-react'
 import { FreeCutLogo } from '@/components/brand/freecut-logo'
+import { DiscordIcon } from '@/components/brand/discord-icon'
 import { Button } from '@/components/ui/button'
+import { DISCORD_INVITE_URL } from '@/config/community'
 import {
   Accordion,
   AccordionContent,
@@ -196,6 +198,13 @@ function LandingPage() {
             </Button>
 
             <Button asChild variant="outline" size="lg" className="gap-2">
+              <a href={DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer">
+                <DiscordIcon className="h-4 w-4" />
+                Join Discord
+              </a>
+            </Button>
+
+            <Button asChild variant="outline" size="lg" className="gap-2">
               <a
                 href="https://github.com/walterlow/freecut"
                 target="_blank"
@@ -225,7 +234,7 @@ function LandingPage() {
             {showcaseItems.map((item) => (
               <div
                 key={item.id}
-                className={`group relative overflow-hidden rounded-xl border border-border bg-card transition-all hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 ${item.className}`}
+                className={`group relative overflow-hidden rounded-xl border border-border bg-card transition-[border-color,box-shadow] duration-150 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 ${item.className}`}
               >
                 {/* Media placeholder or actual media */}
                 <div className={`relative ${item.aspectClass} w-full overflow-hidden bg-muted`}>
@@ -355,6 +364,13 @@ function LandingPage() {
                 <BookOpen className="h-4 w-4" />
                 Docs
               </Link>
+            </Button>
+
+            <Button asChild variant="outline" size="lg" className="gap-2">
+              <a href={DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer">
+                <DiscordIcon className="h-4 w-4" />
+                Join Discord
+              </a>
             </Button>
 
             <Button asChild variant="outline" size="lg" className="gap-2">

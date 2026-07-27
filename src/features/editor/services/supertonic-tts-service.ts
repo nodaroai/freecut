@@ -5,6 +5,7 @@ import {
   useLocalInferenceStore,
 } from '@/shared/state/local-inference'
 import { validateTtsGenerateRequest } from './tts-generate-validation'
+import { fetchOnnxModelBytes, fetchOnnxModelJson } from '@/shared/utils/onnx-model-cache'
 
 const logger = createLogger('SupertonicTtsService')
 
@@ -514,11 +515,7 @@ function speedToDurationFactor(speed: number): number {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Failed to download ${url}: ${response.status} ${response.statusText}`)
-  }
-  return (await response.json()) as T
+  return fetchOnnxModelJson<T>(url)
 }
 
 class SupertonicTtsService {
@@ -622,20 +619,38 @@ class SupertonicTtsService {
       ['vectorEstimator', 'Vector estimator', 'vector_estimator.onnx'],
       ['vocoder', 'Vocoder', 'vocoder.onnx'],
     ] as const
-    const loaded = {} as Partial<SupertonicTtsModels>
     let completed = 0
 
-    await Promise.all(
+    // Settle every load before deciding success/failure. With a plain
+    // Promise.all, a single rejection (which triggers the WebGPU→WASM retry in
+    // ensureRuntime) would leave the other sessions that DID load orphaned —
+    // their GPU/WASM resources never released. Collect them and release the
+    // successful ones before propagating the error so the retry starts clean.
+    const results = await Promise.allSettled(
       modelFiles.map(async ([key, label, fileName]) => {
-        const session = await ort.InferenceSession.create(
-          `${ONNX_BASE_URL}/${fileName}`,
-          sessionOptions,
-        )
+        const bytes = await fetchOnnxModelBytes(`${ONNX_BASE_URL}/${fileName}`)
+        const session = await ort.InferenceSession.create(bytes, sessionOptions)
         completed += 1
         onProgress?.(`Loading Supertonic ${backend.toUpperCase()} (${completed}/4): ${label}...`)
-        loaded[key] = session
+        return [key, session] as const
       }),
     )
+
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failure) {
+      await Promise.allSettled(
+        results.map((r) => (r.status === 'fulfilled' ? r.value[1].release?.() : undefined)),
+      )
+      throw failure.reason
+    }
+
+    const loaded = {} as Partial<SupertonicTtsModels>
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const [key, session] = result.value
+        loaded[key] = session
+      }
+    }
 
     return {
       durationPredictor: loaded.durationPredictor,
