@@ -5,7 +5,10 @@ import { usePlaybackStore } from '@/shared/state/playback'
 import { beginIoPointerDrag } from '@/shared/timeline/io-range'
 import { formatTimecodeCompact } from '@/shared/utils/time-utils'
 import { useTimelineStore } from '../stores/timeline-store'
-import { useTimelineZoomContext } from '../contexts/timeline-zoom-context'
+import {
+  useTimelineCommittedZoomContext,
+  useTimelineZoomContext,
+} from '../contexts/timeline-zoom-context'
 import { pixelsToFrameNow } from '../utils/zoom-conversions'
 
 // Matches the ruler's top IO lane height in timeline-markers.tsx.
@@ -109,6 +112,9 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   const inPoint = useTimelineStore((s) => s.inPoint)
   const outPoint = useTimelineStore((s) => s.outPoint)
   const { frameToPixels } = useTimelineZoomContext()
+  // Range-mode layout uses the committed zoom, matching the ruler's range
+  // strip and the tracks highlight so all three always agree on pixels.
+  const { frameToPixels: committedFrameToPixels } = useTimelineCommittedZoomContext()
   const [draggingSide, setDraggingSide] = useState<'in' | 'out' | null>(null)
 
   const dockedWrapperRef = useRef<HTMLDivElement>(null)
@@ -277,7 +283,7 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
     return (
       <div
         ref={dockedWrapperRef}
-        className="absolute top-0"
+        className="absolute top-0 left-0"
         style={{ height: IO_LANE_HEIGHT, pointerEvents: 'none', zIndex: 9998 }}
       >
         {inFlag}
@@ -293,18 +299,18 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
 
   return (
     <div
-      className="absolute top-0"
+      className="absolute top-0 left-0"
       style={{ height: IO_LANE_HEIGHT, pointerEvents: 'none', zIndex: 9998 }}
     >
       <div
         className="absolute top-0"
-        style={{ left: Math.round(frameToPixels(inFrame)), height: IO_LANE_HEIGHT }}
+        style={{ left: Math.round(committedFrameToPixels(inFrame)), height: IO_LANE_HEIGHT }}
       >
         {inFlag}
       </div>
       <div
         className="absolute top-0"
-        style={{ left: Math.round(frameToPixels(outFrame)), height: IO_LANE_HEIGHT }}
+        style={{ left: Math.round(committedFrameToPixels(outFrame)), height: IO_LANE_HEIGHT }}
       >
         {outFlag}
       </div>
