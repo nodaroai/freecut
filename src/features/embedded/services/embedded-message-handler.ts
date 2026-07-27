@@ -38,6 +38,127 @@ export function resolvePrimaryVideoName(videoName: unknown): string {
   return typeof videoName === 'string' && videoName.trim() ? videoName.trim() : 'nodaro-edit.mp4'
 }
 
+// Use pre-fetched buffer if provided (avoids CORS), otherwise fetch URL
+async function fetchPrimaryBlob(
+  videoUrl: string,
+  videoBuffer: ArrayBuffer | undefined,
+): Promise<Blob> {
+  if (videoBuffer) {
+    log.info('Using pre-fetched video buffer', { size: videoBuffer.byteLength })
+    return new Blob([videoBuffer], { type: 'video/mp4' })
+  }
+  log.info('Fetching video from:', videoUrl)
+  const response = await fetch(videoUrl)
+  if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
+  return response.blob()
+}
+
+// Extract metadata via worker; canvas dimensions fall back to 1080p
+async function probeInputMetadata(blob: Blob, fileName: string) {
+  const file = new File([blob], fileName, { type: blob.type || 'video/mp4' })
+  const { metadata: workerMeta } = await mediaProcessorService.processMedia(file, file.type)
+
+  const width = 'width' in workerMeta ? workerMeta.width : 1920
+  const height = 'height' in workerMeta ? workerMeta.height : 1080
+  const sourceFps = workerMeta.type === 'video' ? workerMeta.fps : 30
+
+  return {
+    width,
+    height,
+    fps: roundToNearestAllowedFps(sourceFps),
+    inputMeta: {
+      codec: workerMeta.type === 'video' ? workerMeta.codec : '',
+      width,
+      height,
+      fps: sourceFps,
+    },
+  }
+}
+
+// Remap old media ids in saved timeline items onto the newly imported media id.
+function remapTimelineItems(
+  items: ReadonlyArray<Record<string, unknown>>,
+  mediaId: string,
+): { items: Array<Record<string, unknown>>; remappedCount: number } {
+  // Collect all old media IDs referenced in saved timeline
+  const oldMediaIds = new Set<string>()
+  for (const item of items) {
+    if (item.mediaId) oldMediaIds.add(item.mediaId as string)
+  }
+
+  const remapped = items.map((item) => {
+    if (item.mediaId && oldMediaIds.has(item.mediaId as string)) {
+      return { ...item, mediaId, src: undefined, thumbnailUrl: undefined }
+    }
+    return item
+  })
+  return { items: remapped, remappedCount: oldMediaIds.size }
+}
+
+// Restore a saved project snapshot's timeline onto the fresh project, remapping
+// old media ids to the newly imported media. Returns true when restored.
+async function restoreTimelineSnapshot(
+  event: MessageEvent,
+  projectId: string,
+  mediaId: string,
+): Promise<boolean> {
+  const { projectJson } = event.data.payload
+  if (!projectJson) return false
+
+  try {
+    const snapshot = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson
+    const savedTimeline = snapshot.project?.timeline
+    if (!savedTimeline?.items) return false
+
+    const { items, remappedCount } = remapTimelineItems(savedTimeline.items, mediaId)
+    const restoredTimeline = { ...savedTimeline, items }
+
+    // Update the fresh project with restored timeline in both DB and Zustand store
+    await updateProjectDB(projectId, { timeline: restoredTimeline, updatedAt: Date.now() })
+    const updatedProject = await getProjectDB(projectId)
+    if (updatedProject) {
+      useProjectStore.setState({
+        currentProject: updatedProject,
+        projects: useProjectStore
+          .getState()
+          .projects.map((p) => (p.id === projectId ? updatedProject : p)),
+      })
+    }
+    log.info('Timeline restored from snapshot', {
+      projectId,
+      remappedMediaIds: remappedCount,
+    })
+    return true
+  } catch (e) {
+    log.warn('Failed to restore timeline from snapshot, using fresh project', { error: e })
+    return false
+  }
+}
+
+// Import additional connected assets into the media library (e.g. manual-edit multi-input)
+async function importAdditionalAssets(event: MessageEvent, projectId: string) {
+  const { additionalFiles } = event.data.payload
+  if (!additionalFiles?.length) return
+
+  for (const file of additionalFiles) {
+    try {
+      const fileBlob = new Blob([file.buffer], { type: file.type })
+      await mediaLibraryService.importMediaBlob(fileBlob, projectId, file.name)
+    } catch (e) {
+      log.warn(`Failed to import additional asset ${file.name}:`, e)
+    }
+  }
+  log.info('Additional assets imported', { count: additionalFiles.length })
+
+  // Refresh media library UI so additional assets appear immediately
+  try {
+    const { useMediaLibraryStore } = await import('../deps/media-library-contract')
+    await useMediaLibraryStore.getState().loadMediaItems()
+  } catch (e) {
+    log.warn('Failed to refresh media library after additional imports:', e)
+  }
+}
+
 async function handleLoadVideo(event: MessageEvent) {
   const store = useEmbeddedStore.getState()
 
@@ -62,33 +183,8 @@ async function handleLoadVideo(event: MessageEvent) {
     }
 
     const primaryName = resolvePrimaryVideoName(videoName)
-
-    // Use pre-fetched buffer if provided (avoids CORS), otherwise fetch URL
-    let blob: Blob
-    if (videoBuffer) {
-      log.info('Using pre-fetched video buffer', { size: videoBuffer.byteLength })
-      blob = new Blob([videoBuffer], { type: 'video/mp4' })
-    } else {
-      log.info('Fetching video from:', videoUrl)
-      const response = await fetch(videoUrl)
-      if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
-      blob = await response.blob()
-    }
-
-    // Extract metadata via worker
-    const file = new File([blob], primaryName, { type: blob.type || 'video/mp4' })
-    const { metadata: workerMeta } = await mediaProcessorService.processMedia(file, file.type)
-
-    const fps = roundToNearestAllowedFps(workerMeta.type === 'video' ? workerMeta.fps : 30)
-    const width = 'width' in workerMeta ? workerMeta.width : 1920
-    const height = 'height' in workerMeta ? workerMeta.height : 1080
-
-    const inputMeta = {
-      codec: workerMeta.type === 'video' ? workerMeta.codec : '',
-      width,
-      height,
-      fps: workerMeta.type === 'video' ? workerMeta.fps : 30,
-    }
+    const blob = await fetchPrimaryBlob(videoUrl, videoBuffer)
+    const { width, height, fps, inputMeta } = await probeInputMetadata(blob, primaryName)
 
     // Always create fresh project and import media first
     const project = await useProjectStore.getState().createProject({
@@ -101,80 +197,14 @@ async function handleLoadVideo(event: MessageEvent) {
 
     const media = await mediaLibraryService.importMediaBlob(blob, project.id, primaryName)
 
-    // If we have a saved project snapshot, restore the timeline onto the fresh project
-    let timelineRestored = false
-    const { projectJson } = event.data.payload
-    if (projectJson) {
-      try {
-        const snapshot = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson
-        const savedTimeline = snapshot.project?.timeline
-        if (savedTimeline?.items) {
-          // Collect all old media IDs referenced in saved timeline
-          const oldMediaIds = new Set<string>()
-          for (const item of savedTimeline.items) {
-            if (item.mediaId) oldMediaIds.add(item.mediaId)
-          }
-
-          // Remap old media IDs to the new media ID
-          const restoredTimeline = {
-            ...savedTimeline,
-            items: savedTimeline.items.map((item: Record<string, unknown>) => {
-              if (item.mediaId && oldMediaIds.has(item.mediaId as string)) {
-                return { ...item, mediaId: media.id, src: undefined, thumbnailUrl: undefined }
-              }
-              return item
-            }),
-          }
-
-          // Update the fresh project with restored timeline in both DB and Zustand store
-          await updateProjectDB(project.id, { timeline: restoredTimeline, updatedAt: Date.now() })
-          const updatedProject = await getProjectDB(project.id)
-          if (updatedProject) {
-            useProjectStore.setState({
-              currentProject: updatedProject,
-              projects: useProjectStore
-                .getState()
-                .projects.map((p) => (p.id === project.id ? updatedProject : p)),
-            })
-          }
-          log.info('Timeline restored from snapshot', {
-            projectId: project.id,
-            remappedMediaIds: oldMediaIds.size,
-          })
-          // Don't set pendingVideoImport — restored timeline already has the video
-          timelineRestored = true
-        }
-      } catch (e) {
-        log.warn('Failed to restore timeline from snapshot, using fresh project', { error: e })
-      }
-    }
-
     // Only add video to timeline for fresh projects (restored ones already have it)
+    const timelineRestored = await restoreTimelineSnapshot(event, project.id, media.id)
     if (!timelineRestored) {
       store.setPendingVideoImport({ mediaId: media.id })
     }
     store.setInputMetadata(inputMeta)
 
-    // Import additional connected assets into the media library (e.g. manual-edit multi-input)
-    const { additionalFiles } = event.data.payload
-    if (additionalFiles?.length) {
-      for (const file of additionalFiles) {
-        try {
-          const fileBlob = new Blob([file.buffer], { type: file.type })
-          await mediaLibraryService.importMediaBlob(fileBlob, project.id, file.name)
-        } catch (e) {
-          log.warn(`Failed to import additional asset ${file.name}:`, e)
-        }
-      }
-      log.info('Additional assets imported', { count: additionalFiles.length })
-      // Refresh media library UI so additional assets appear immediately
-      try {
-        const { useMediaLibraryStore } = await import('../deps/media-library-contract')
-        await useMediaLibraryStore.getState().loadMediaItems()
-      } catch (e) {
-        log.warn('Failed to refresh media library after additional imports:', e)
-      }
-    }
+    await importAdditionalAssets(event, project.id)
 
     router.navigate({
       to: '/editor/$projectId',
@@ -235,30 +265,24 @@ async function handleImportFiles(event: MessageEvent) {
   }
 }
 
+// Inbound message types the embedded editor accepts, each behind the origin allowlist.
+const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | Promise<void>> = {
+  NODARO_LOAD_VIDEO: handleLoadVideo,
+  NODARO_RESET_PROJECT: () => handleResetProject(),
+  NODARO_IMPORT_FILES: handleImportFiles,
+}
+
 function handleMessage(event: MessageEvent) {
-  if (event.data?.type === 'NODARO_LOAD_VIDEO') {
-    if (!isAllowedOrigin(event.origin)) {
-      log.warn('Rejected message from disallowed origin:', event.origin)
-      return
-    }
-    handleLoadVideo(event)
+  const type = event.data?.type
+  const handler = type ? EMBEDDED_MESSAGE_HANDLERS[type] : undefined
+  if (!handler) return
+
+  if (!isAllowedOrigin(event.origin)) {
+    log.warn(`Rejected ${type} from disallowed origin:`, event.origin)
+    return
   }
 
-  if (event.data?.type === 'NODARO_RESET_PROJECT') {
-    if (!isAllowedOrigin(event.origin)) {
-      log.warn('Rejected NODARO_RESET_PROJECT from disallowed origin:', event.origin)
-      return
-    }
-    handleResetProject()
-  }
-
-  if (event.data?.type === 'NODARO_IMPORT_FILES') {
-    if (!isAllowedOrigin(event.origin)) {
-      log.warn('Rejected NODARO_IMPORT_FILES from disallowed origin:', event.origin)
-      return
-    }
-    handleImportFiles(event)
-  }
+  void handler(event)
 }
 
 export function initEmbeddedMessageHandler() {
