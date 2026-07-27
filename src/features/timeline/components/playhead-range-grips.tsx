@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -10,9 +10,12 @@ import { pixelsToFrameNow } from '../utils/zoom-conversions'
 
 // Matches the ruler's top IO lane height in timeline-markers.tsx.
 const IO_LANE_HEIGHT = 12
-const FLAG_WIDTH = 15
-const FLAG_HIT_WIDTH = 24
-const FLAG_HIT_HEIGHT_EXTRA = 6
+// Camtasia-proportioned flags: a wide body in the IO lane with a pointed foot
+// that reaches down the ruler toward the exact frame.
+const FLAG_WIDTH = 18
+const FLAG_HEIGHT = 17
+const FLAG_HIT_WIDTH = 26
+const FLAG_HIT_HEIGHT = 24
 
 // Block the compatibility mousedown so the ruler's mouse-driven seek doesn't
 // also fire when a flag is grabbed (same guard the shared IO markers use).
@@ -29,13 +32,24 @@ interface PlayheadRangeGripsProps {
 interface RangeFlagProps {
   side: 'in' | 'out'
   title: string
+  active: boolean
   onDragStart: (e: React.PointerEvent) => void
-  onClear: () => void
 }
 
-/** One chunky Camtasia-style flag: green hugs the point from the left, red from the right. */
-function RangeFlag({ side, title, onDragStart, onClear }: RangeFlagProps) {
+/**
+ * One Camtasia-style pennant. The green one hangs left of its frame with the
+ * pointed foot touching the line; the red one mirrors it on the right. The
+ * flag being dragged brightens and glows so it's always obvious which side is
+ * in hand.
+ */
+function RangeFlag({ side, title, active, onDragStart }: RangeFlagProps) {
   const color = side === 'in' ? 'var(--color-timeline-in)' : 'var(--color-timeline-out)'
+  // Body fills the top ~60%; the foot slopes down to the frame-side edge.
+  const shape =
+    side === 'in'
+      ? 'polygon(0 0, 100% 0, 100% 100%, 72% 60%, 0 60%)'
+      : 'polygon(0 0, 100% 0, 100% 60%, 28% 60%, 0 100%)'
+
   return (
     <div
       title={title}
@@ -44,39 +58,47 @@ function RangeFlag({ side, title, onDragStart, onClear }: RangeFlagProps) {
         top: 0,
         left: side === 'in' ? -FLAG_HIT_WIDTH + (FLAG_HIT_WIDTH - FLAG_WIDTH) / 2 : 0,
         width: FLAG_HIT_WIDTH,
-        height: IO_LANE_HEIGHT + FLAG_HIT_HEIGHT_EXTRA,
+        height: FLAG_HIT_HEIGHT,
         cursor: 'col-resize',
-        zIndex: side === 'in' ? 2 : 1,
       }}
       onPointerDown={onDragStart}
       onMouseDown={blockMouseDown}
-      onDoubleClick={onClear}
     >
       <div
         aria-hidden="true"
-        className="absolute"
+        className="absolute transition-[filter,transform] duration-100 hover:brightness-125"
         style={{
           top: 0,
           [side === 'in' ? 'right' : 'left']: (FLAG_HIT_WIDTH - FLAG_WIDTH) / 2,
           width: FLAG_WIDTH,
-          height: IO_LANE_HEIGHT,
-          borderRadius: side === 'in' ? '5px 1px 1px 5px' : '1px 5px 5px 1px',
-          background: `linear-gradient(to bottom, color-mix(in oklch, ${color} 92%, white), color-mix(in oklch, ${color} 72%, black))`,
-          boxShadow: `inset 0 1px 0 color-mix(in oklch, white 35%, transparent), 0 0 3px color-mix(in oklch, ${color} 60%, transparent)`,
+          height: FLAG_HEIGHT,
+          filter: active
+            ? `brightness(1.3) drop-shadow(0 0 4px ${color})`
+            : 'drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55))',
+          transform: active ? 'scale(1.12)' : undefined,
+          transformOrigin: side === 'in' ? 'bottom right' : 'bottom left',
         }}
-      />
+      >
+        <div
+          className="absolute inset-0"
+          style={{
+            clipPath: shape,
+            background: `linear-gradient(to bottom, color-mix(in oklch, ${color} 90%, white), ${color} 55%, color-mix(in oklch, ${color} 70%, black))`,
+          }}
+        />
+      </div>
     </div>
   )
 }
 
 /**
- * Camtasia-style range flags: a big green flag and a big red flag that ARE the
- * in/out points. With no range marked they ride the playhead as its two-colored
- * head; dragging one pulls that side away while the other stays anchored — the
- * preview ghost line travels with the dragged flag so you see the frame you are
- * extending over. Once a range exists the flags sit on its edges and each can
- * be re-dragged; double-click a flag (or the toolbar X) clears the range and
- * docks them back on the playhead.
+ * Camtasia-style range flags: a green and a red pennant that ARE the in/out
+ * points. With no range marked they ride the playhead as its two-colored head.
+ * Dragging a flag pulls that side away while the other stays anchored, and the
+ * real playhead line travels with the dragged flag — release the red and it
+ * parks right beside it, green holding the far side. With a range marked each
+ * flag sits on its edge and can be re-dragged; the toolbar X (or Alt+X) clears
+ * the range and docks the flags back on the playhead.
  */
 export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   maxFrame,
@@ -86,6 +108,7 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   const inPoint = useTimelineStore((s) => s.inPoint)
   const outPoint = useTimelineStore((s) => s.outPoint)
   const { frameToPixels } = useTimelineZoomContext()
+  const [draggingSide, setDraggingSide] = useState<'in' | 'out' | null>(null)
 
   const dockedWrapperRef = useRef<HTMLDivElement>(null)
   const frameToPixelsRef = useRef(frameToPixels)
@@ -134,6 +157,7 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
       const anchorFrame =
         side === 'in' ? (timeline.outPoint ?? playheadFrame) : (timeline.inPoint ?? playheadFrame)
 
+      let lastFrame = playheadFrame
       const cleanup = beginIoPointerDrag(
         event,
         (clientX) => {
@@ -142,25 +166,29 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
           if (maxFrameRef.current !== undefined) {
             frame = Math.min(frame, maxFrameRef.current)
           }
+          lastFrame = frame
           // Out first so the in <= out sanitizer never has to intervene.
           if (frame !== anchorFrame) {
             const store = useTimelineStore.getState()
             store.setOutPoint(Math.max(frame, anchorFrame))
             store.setInPoint(Math.min(frame, anchorFrame))
           }
-          // The preview ghost line travels with the dragged flag (deliberately
-          // not suppressed) — Camtasia's "the flag moves with the time".
-          usePlaybackStore.getState().setPreviewFrame(frame)
+          // Camtasia transport: the real playhead travels with the dragged
+          // flag, so the preview shows the frame being extended over and the
+          // line parks beside this flag on release.
+          usePlaybackStore.getState().setScrubFrame(frame)
           return formatTimecodeCompact(frame, useTimelineStore.getState().fps)
         },
         () => {
           document.body.style.cursor = ''
-          usePlaybackStore.getState().setPreviewFrame(null)
+          usePlaybackStore.getState().finishScrub(lastFrame)
+          setDraggingSide(null)
           dragCleanupRef.current = null
         },
       )
       if (!cleanup) return
       document.body.style.cursor = 'col-resize'
+      setDraggingSide(side)
       dragCleanupRef.current = cleanup
     },
     [rulerRef],
@@ -179,24 +207,20 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
     [startDrag],
   )
 
-  const handleClear = useCallback(() => {
-    useTimelineStore.getState().clearInOutPoints()
-  }, [])
-
   const inFlag = (
     <RangeFlag
       side="in"
       title={t('timeline.header.setInPointTooltip')}
+      active={draggingSide === 'in'}
       onDragStart={handleInDragStart}
-      onClear={handleClear}
     />
   )
   const outFlag = (
     <RangeFlag
       side="out"
       title={t('timeline.header.setOutPointTooltip')}
+      active={draggingSide === 'out'}
       onDragStart={handleOutDragStart}
-      onClear={handleClear}
     />
   )
 
