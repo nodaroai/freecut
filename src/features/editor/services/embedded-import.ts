@@ -21,6 +21,7 @@ export async function consumePendingEmbeddedImport(): Promise<void> {
       buildDroppedMediaTimelineItem,
       getDroppedMediaDurationInFrames,
       useItemsStore,
+      useTimelineStore,
     } = await import('@/features/editor/deps/timeline-contract')
 
     // Read from IndexedDB directly (store may not be populated yet)
@@ -80,8 +81,16 @@ export async function consumePendingEmbeddedImport(): Promise<void> {
       },
     })
 
-    addItem(videoItem)
-    log.info('Placed embedded video on timeline', { mediaId, durationInFrames })
+    // Same contract as a media-bin drop: a video whose media has an audio
+    // stream gets its embedded audio split onto a linked audio item, so the
+    // auto-placed primary is never silent.
+    const hasLinkedAudio = videoItem.type === 'video' && !!metadata.audioCodec
+    if (videoItem.type === 'video' && metadata.audioCodec) {
+      useTimelineStore.getState().addItemWithLinkedAudio(videoItem)
+    } else {
+      addItem(videoItem)
+    }
+    log.info('Placed embedded video on timeline', { mediaId, durationInFrames, hasLinkedAudio })
   } catch (error) {
     log.error('Failed to consume pending embedded import', { error })
   } finally {
