@@ -90,6 +90,8 @@ type CompositionActionsProps = ItemContextMenuSectionProps & {
 type MediaActionsProps = ItemContextMenuSectionProps & {
   canReverse?: boolean
   isReversed?: boolean
+  canSeparateAudio?: boolean
+  onSeparateAudio?: () => void
   isVideoItem?: boolean
   playheadInBounds?: boolean
   canRemoveSilence?: boolean
@@ -501,6 +503,8 @@ function MediaActions({
   t,
   canReverse,
   isReversed,
+  canSeparateAudio,
+  onSeparateAudio,
   isVideoItem,
   playheadInBounds,
   canRemoveSilence,
@@ -519,6 +523,15 @@ function MediaActions({
         <>
           <ContextMenuItem onClick={onReverse}>
             {isReversed ? t('timeline.contextMenu.unreverse') : t('timeline.contextMenu.reverse')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
+
+      {canSeparateAudio && onSeparateAudio && (
+        <>
+          <ContextMenuItem onClick={onSeparateAudio}>
+            {t('timeline.contextMenu.separateAudioVideo')}
           </ContextMenuItem>
           <ContextMenuSeparator />
         </>

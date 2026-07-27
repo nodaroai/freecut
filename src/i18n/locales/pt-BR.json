@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "Encaixe por padrão",
       "snapByDefaultDescription": "Define o estado inicial do encaixe quando um projeto é aberto.",
+      "stopAtOutPoint": "Parar a reprodução no ponto de saída",
+      "stopAtOutPointDescription": "Pausa quando o cursor atinge o ponto de saída marcado. Desative para restaurar a reprodução contínua.",
       "showWaveforms": "Mostrar formas de onda",
       "showFilmstrips": "Mostrar miniaturas de vídeo",
       "enableFilmstripExtraction": "Extrair tiras de quadros",

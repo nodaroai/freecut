@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "默认吸附",
       "snapByDefaultDescription": "设置打开项目时的初始吸附状态。",
+      "stopAtOutPoint": "在出点停止播放",
+      "stopAtOutPointDescription": "播放头到达标记的出点时暂停播放。关闭后恢复连续播放。",
       "showWaveforms": "显示波形",
       "showFilmstrips": "显示视频缩略图条",
       "enableFilmstripExtraction": "提取缩略图条",

@@ -4,3 +4,4 @@
  */
 
 export { initTransitionChainSubscription } from '@/features/timeline/stores/transition-chain-store'
+export { initStopAtOutPointSubscription } from '@/features/timeline/stores/stop-at-out-point'

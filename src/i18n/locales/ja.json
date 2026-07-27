@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "デフォルトでスナップ",
       "snapByDefaultDescription": "プロジェクトを開いたときの初期スナップ状態を設定します。",
+      "stopAtOutPoint": "アウトポイントで再生を停止",
+      "stopAtOutPointDescription": "再生ヘッドがマークしたアウトポイントに達すると一時停止します。オフにすると連続再生に戻ります。",
       "showWaveforms": "波形を表示",
       "showFilmstrips": "動画のサムネイル帯を表示",
       "enableFilmstripExtraction": "フィルムストリップを抽出",

@@ -12,7 +12,8 @@ const EDGE_BUDGETS = [
   // Re-baselined for the editor's intentionally split timeline adapter surface:
   // store, hooks, UI, panels, motion, subscriptions, cache and test helpers all
   // cross the feature boundary through dedicated deps/* contracts.
-  { edge: 'editor -> timeline', maxImports: 73, maxFiles: 11 },
+  // +1 for initStopAtOutPointSubscription (stop-at-out-point transport wiring).
+  { edge: 'editor -> timeline', maxImports: 74, maxFiles: 11 },
   // The editor preview contract added one supported preview export. Keep the
   // file budget tight so this remains consolidated behind the existing adapter.
   { edge: 'editor -> preview', maxImports: 16, maxFiles: 2 },

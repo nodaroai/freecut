@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "Standardmäßig einrasten",
       "snapByDefaultDescription": "Legt den anfänglichen Einrast-Status beim Öffnen eines Projekts fest.",
+      "stopAtOutPoint": "Wiedergabe am Out-Punkt stoppen",
+      "stopAtOutPointDescription": "Pausiert, sobald der Playhead den markierten Out-Punkt erreicht. Ausschalten stellt das freie Abspielen wieder her.",
       "showWaveforms": "Wellenformen anzeigen",
       "showFilmstrips": "Video-Vorschaubilder anzeigen",
       "enableFilmstripExtraction": "Filmstreifen extrahieren",

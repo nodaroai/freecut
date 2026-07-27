@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "Varsayılan olarak yapıştır",
       "snapByDefaultDescription": "Bir proje açıldığında başlangıç yapıştırma durumunu ayarlar.",
+      "stopAtOutPoint": "Oynatmayı çıkış noktasında durdur",
+      "stopAtOutPointDescription": "Oynatma kafası işaretli çıkış noktasına ulaştığında duraklatır. Kapatınca kesintisiz oynatmaya dönülür.",
       "showWaveforms": "Dalga formlarını göster",
       "showFilmstrips": "Film şeritlerini göster",
       "enableFilmstripExtraction": "Film şeritlerini çıkar",

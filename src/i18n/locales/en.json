@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "Snap by Default",
       "snapByDefaultDescription": "Sets the initial snap state when a project opens.",
+      "stopAtOutPoint": "Stop playback at Out point",
+      "stopAtOutPointDescription": "Pause when the playhead reaches the marked Out point. Turn off to restore free-run playback.",
       "showWaveforms": "Show Waveforms",
       "showFilmstrips": "Show Filmstrips",
       "enableFilmstripExtraction": "Extract Filmstrips",

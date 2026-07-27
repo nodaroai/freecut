@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "Ajuste por defecto",
       "snapByDefaultDescription": "Define el estado inicial del ajuste al abrir un proyecto.",
+      "stopAtOutPoint": "Detener la reproducción en el punto de salida",
+      "stopAtOutPointDescription": "Pausa cuando el cursor llega al punto de salida marcado. Desactívalo para restaurar la reproducción continua.",
       "showWaveforms": "Mostrar formas de onda",
       "showFilmstrips": "Mostrar miniaturas de vídeo",
       "enableFilmstripExtraction": "Extraer tiras de fotogramas",

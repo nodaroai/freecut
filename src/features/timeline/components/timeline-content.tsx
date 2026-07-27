@@ -35,6 +35,8 @@ import {
 
 // Components
 import { TimelinePlayhead } from './timeline-playhead'
+import { PlayheadRangeGrips } from './playhead-range-grips'
+import { TimelineRangeHighlight } from './timeline-range-highlight'
 import { TimelinePreviewScrubber } from './timeline-preview-scrubber'
 import { TimelineRulerSurface } from './timeline-ruler-surface'
 import { TimelineTrack } from './timeline-track'
@@ -2041,6 +2043,7 @@ export const TimelineContent = memo(function TimelineContent({
         </TimelineTrackSectionsSurface>
 
         {/* One overlay owns each complete marker across the ruler and tracks. */}
+        <TimelineRangeHighlight />
         <TimelinePreviewScrubber inRuler maxFrame={maxTimelineFrame} zIndex={40} />
         <TimelinePlayhead
           inRuler
@@ -2048,6 +2051,7 @@ export const TimelineContent = memo(function TimelineContent({
           topOffsetPx={IO_LANE_HEIGHT}
           coordinateSurfaceRef={rulerCoordinateSurfaceRef}
         />
+        <PlayheadRangeGrips maxFrame={maxTimelineFrame} rulerRef={rulerCoordinateSurfaceRef} />
       </div>
 
       {anyOverflow && (

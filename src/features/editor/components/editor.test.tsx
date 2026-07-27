@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
     BundleExportDialog: () => <div data-testid="bundle-export-dialog" />,
   }),
   initTransitionChainSubscription: vi.fn(() => vi.fn()),
+  initStopAtOutPointSubscription: vi.fn(() => vi.fn()),
   createProjectUpgradeBackup: vi.fn(),
   resizablePanelGroup: vi.fn(),
 }))
@@ -155,6 +156,7 @@ vi.mock('@/features/editor/deps/timeline-hooks', () => ({
 
 vi.mock('@/features/editor/deps/timeline-subscriptions', () => ({
   initTransitionChainSubscription: mocks.initTransitionChainSubscription,
+  initStopAtOutPointSubscription: mocks.initStopAtOutPointSubscription,
 }))
 
 vi.mock('@/features/editor/deps/timeline-store', () => {
