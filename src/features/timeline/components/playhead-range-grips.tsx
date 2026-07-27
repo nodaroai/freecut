@@ -135,8 +135,11 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
     }
 
     updatePosition(usePlaybackStore.getState().currentFrame)
+    // Track the committed frame only — previewFrame also updates during hover
+    // skimming, and the flags must stay glued to the orange playhead line, not
+    // chase the mouse.
     return usePlaybackStore.subscribe((state) => {
-      updatePosition(state.previewFrame ?? state.currentFrame)
+      updatePosition(state.currentFrame)
     })
   }, [isDocked])
 
