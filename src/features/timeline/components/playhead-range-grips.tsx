@@ -282,6 +282,11 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   if (isDocked) {
     return (
       <div
+        // Distinct key: the docked wrapper is positioned imperatively via
+        // style.transform, and React must never recycle that DOM node into the
+        // range-mode wrapper below — the leftover transform would shift every
+        // flag by the playhead position.
+        key="docked"
         ref={dockedWrapperRef}
         className="absolute top-0 left-0"
         style={{ height: IO_LANE_HEIGHT, pointerEvents: 'none', zIndex: 9998 }}
@@ -299,8 +304,9 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
 
   return (
     <div
+      key="range"
       className="absolute top-0 left-0"
-      style={{ height: IO_LANE_HEIGHT, pointerEvents: 'none', zIndex: 9998 }}
+      style={{ height: IO_LANE_HEIGHT, pointerEvents: 'none', zIndex: 9998, transform: 'none' }}
     >
       <div
         className="absolute top-0"
