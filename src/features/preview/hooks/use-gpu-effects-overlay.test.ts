@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { shouldForceContinuousPreviewOverlay } from './use-gpu-effects-overlay'
+import {
+  shouldForceContinuousPreviewOverlay,
+  timelineHasContinuousOverlayContent,
+} from './use-gpu-effects-overlay'
 import type { TimelineItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 import type { SubComposition } from '@/features/preview/deps/timeline-store'
@@ -240,6 +243,68 @@ describe('shouldForceContinuousPreviewOverlay', () => {
     expect(shouldForceContinuousPreviewOverlay([textItem], 0, 120)).toBe(false)
   })
 
+  it('forces continuous overlay only inside a text clip in/out motion window', () => {
+    const motionText: TimelineItem = {
+      id: 'motion-1',
+      type: 'text',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 90,
+      label: 'Title',
+      text: 'Tonight',
+      fontSize: 96,
+      color: '#ffffff',
+      textMotion: {
+        in: {
+          presetId: 'fade-up',
+          durationFrames: 12,
+          staggerFrames: 0,
+          intensity: 1,
+          order: 'forward',
+          easing: 'ease-out',
+          seed: 0,
+        },
+      },
+    } as TimelineItem
+
+    // Inside the 12-frame in-window → overlay forced so the DOM Player never
+    // renders the (unanimatable) motion frame.
+    expect(shouldForceContinuousPreviewOverlay([motionText], 0, 3)).toBe(true)
+    // Settled mid-clip → identity, no need for the overlay.
+    expect(shouldForceContinuousPreviewOverlay([motionText], 0, 40)).toBe(false)
+    // Past the clip entirely → inactive.
+    expect(shouldForceContinuousPreviewOverlay([motionText], 0, 200)).toBe(false)
+  })
+
+  it('forces continuous overlay across the whole clip for a text loop motion', () => {
+    const loopText: TimelineItem = {
+      id: 'motion-loop-1',
+      type: 'text',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 90,
+      label: 'Title',
+      text: 'Tonight',
+      fontSize: 96,
+      color: '#ffffff',
+      textMotion: {
+        loop: {
+          presetId: 'wave',
+          durationFrames: 30,
+          staggerFrames: 3,
+          intensity: 1,
+          order: 'forward',
+          easing: 'linear',
+          seed: 0,
+        },
+      },
+    } as TimelineItem
+
+    expect(shouldForceContinuousPreviewOverlay([loopText], 0, 5)).toBe(true)
+    expect(shouldForceContinuousPreviewOverlay([loopText], 0, 60)).toBe(true)
+    expect(shouldForceContinuousPreviewOverlay([loopText], 0, 200)).toBe(false)
+  })
+
   it('forces continuous overlay when an active compound clip has gpu effects on sub-items', () => {
     const compItem = createCompositionItem()
     const subComp = createSubComposition([
@@ -412,6 +477,45 @@ describe('shouldForceContinuousPreviewOverlay', () => {
           ],
         ]),
       ),
+    ).toBe(true)
+  })
+})
+
+describe('timelineHasContinuousOverlayContent', () => {
+  const gpuEffect = {
+    id: 'effect-1',
+    enabled: true,
+    effect: { type: 'gpu-effect' as const, gpuEffectType: 'gpu-blur', params: { amount: 0.5 } },
+  }
+
+  it('is false for a timeline with no overlay-only content', () => {
+    expect(timelineHasContinuousOverlayContent([createVideoItem()])).toBe(false)
+  })
+
+  it('is true when any item has an enabled GPU effect, regardless of frame position', () => {
+    // The clip sits far from frame 0, yet the overlay must stay warm the whole
+    // session — this is exactly what the frame-based check misses.
+    const effected = createVideoItem({ from: 500, durationInFrames: 60, effects: [gpuEffect] })
+    expect(timelineHasContinuousOverlayContent([createVideoItem(), effected])).toBe(true)
+  })
+
+  it('ignores disabled effects', () => {
+    const disabled = createVideoItem({ effects: [{ ...gpuEffect, enabled: false }] })
+    expect(timelineHasContinuousOverlayContent([disabled])).toBe(false)
+  })
+
+  it('is true for a non-normal blend mode', () => {
+    expect(timelineHasContinuousOverlayContent([createVideoItem({ blendMode: 'screen' })])).toBe(
+      true,
+    )
+  })
+
+  it('detects overlay-only content nested inside a sub-composition', () => {
+    const subComp = createSubComposition([
+      createVideoItem({ id: 'sub-item', effects: [gpuEffect] }),
+    ])
+    expect(
+      timelineHasContinuousOverlayContent([createCompositionItem()], { 'sub-1': subComp }),
     ).toBe(true)
   })
 })

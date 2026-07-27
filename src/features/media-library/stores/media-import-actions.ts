@@ -1,5 +1,5 @@
 import type { MediaLibraryState, MediaLibraryActions, UnsupportedCodecFile } from '../types'
-import type { MediaMetadata } from '@/types/storage'
+import type { MediaAttribution, MediaMetadata } from '@/types/storage'
 import { loadMediaLibraryService } from './media-library-service-access'
 import { proxyService } from '../services/proxy-service'
 import { getMimeType } from '../utils/validation'
@@ -43,7 +43,7 @@ function buildOptimisticMediaItem(
 
   return {
     id: tempId,
-    storageType: storageMode === 'link' ? 'handle' : 'opfs',
+    storageType: storageMode === 'link' ? 'handle' : 'workspace',
     fileHandle: storageMode === 'link' ? handle : undefined,
     fileName: file.name,
     fileSize: file.size,
@@ -117,6 +117,9 @@ function setupImportedVideoProxy(metadata: MediaMetadata): void {
     return
   }
 
+  // ProRes and other browser-undecodable codecs are previewed via live turbores
+  // decode (full fidelity), not an auto-generated proxy. A proxy remains an opt-in
+  // scrub-performance aid via the media library UI, so we still map its key here.
   proxyService.setProxyKey(metadata.id, getSharedProxyKey(metadata))
 }
 
@@ -286,7 +289,11 @@ export function createImportActions(
   get: Get,
 ): Pick<
   MediaLibraryActions,
-  'importMedia' | 'importMediaFromUrl' | 'importHandles' | 'importHandlesForPlacement'
+  | 'importMedia'
+  | 'importMediaFromUrl'
+  | 'importRemoteLottie'
+  | 'importHandles'
+  | 'importHandlesForPlacement'
 > {
   const createOptimisticImportTasks = async (
     handles: FileSystemFileHandle[],
@@ -581,6 +588,52 @@ export function createImportActions(
         set({ error: importError.message, errorLink: null })
         event.failure(importError)
         return []
+      }
+    },
+
+    importRemoteLottie: async (params: {
+      url: string
+      fileName?: string
+      attribution?: MediaAttribution
+    }) => {
+      const { currentProjectId } = get()
+
+      if (!currentProjectId) {
+        set({ error: 'No project selected', errorLink: null })
+        return null
+      }
+
+      set({ error: null, errorLink: null })
+
+      const opId = createOperationId()
+      const event = logger.startEvent('import', opId)
+      event.set('source', 'lottiefiles')
+      event.set('projectId', currentProjectId)
+      event.set('provider', params.attribution?.provider ?? 'unknown')
+
+      try {
+        const { mediaLibraryService } = await loadMediaLibraryService()
+        const metadata = await mediaLibraryService.importLottieFromUrl(
+          params.url,
+          currentProjectId,
+          { fileName: params.fileName, attribution: params.attribution },
+        )
+
+        if (metadata.isDuplicate) {
+          showImportNotifications(0, [metadata.fileName], [], 0, get)
+          event.success({ imported: 0, duplicates: 1, failed: 0, unsupportedCodecs: 0 })
+          return metadata
+        }
+
+        prependImportedMedia(set, metadata)
+        showImportNotifications(1, [], [], 0, get)
+        event.success({ imported: 1, duplicates: 0, failed: 0, unsupportedCodecs: 0 })
+        return metadata
+      } catch (error) {
+        const importError = error instanceof Error ? error : new Error(String(error))
+        set({ error: importError.message, errorLink: null })
+        event.failure(importError)
+        return null
       }
     },
 

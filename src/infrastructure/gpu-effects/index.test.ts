@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import {
   GPU_EFFECT_REGISTRY,
   getGpuCategoriesWithEffects,
@@ -6,6 +6,7 @@ import {
   getGpuEffectDefaultParams,
   getGpuEffectsByCategory,
 } from './index'
+import { EFFECT_PRESETS } from '@/types/effects'
 
 describe('GPU effect registry', () => {
   it('registers every effect with shader metadata and valid default uniforms', () => {
@@ -32,6 +33,55 @@ describe('GPU effect registry', () => {
         expect(Array.from(uniforms!).every(Number.isFinite)).toBe(true)
       }
     }
+  })
+
+  it('packs missing parameters with the same values as declared defaults', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(1234)
+    try {
+      for (const [id, effect] of GPU_EFFECT_REGISTRY) {
+        const defaults = getGpuEffectDefaultParams(id)
+        expect(Array.from(effect.packUniforms({}, 1920, 1080) ?? []), id).toEqual(
+          Array.from(effect.packUniforms(defaults, 1920, 1080) ?? []),
+        )
+      }
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('exposes every color parameter to the shared keyframe pipeline', () => {
+    const colorParams = [...GPU_EFFECT_REGISTRY.values()].flatMap((effect) =>
+      Object.entries(effect.params)
+        .filter(([, param]) => param.type === 'color')
+        .map(([paramKey, param]) => ({ effectId: effect.id, paramKey, param })),
+    )
+
+    expect(colorParams.length).toBeGreaterThan(0)
+    expect(
+      colorParams
+        .filter(({ param }) => param.animatable !== true)
+        .map(({ effectId, paramKey }) => ({
+          effectId,
+          paramKey,
+        })),
+    ).toEqual([])
+  })
+
+  it('packs interpolated eight-digit colors into RGBA uniforms', () => {
+    const effect = getGpuEffect('gpu-fluted-glass')!
+    const uniforms = effect.packUniforms(
+      {
+        ...getGpuEffectDefaultParams(effect.id),
+        colorBack: '#12345680',
+      },
+      1920,
+      1080,
+    )!
+
+    expect(uniforms[0]).toBeCloseTo(0x12 / 255, 6)
+    expect(uniforms[1]).toBeCloseTo(0x34 / 255, 6)
+    expect(uniforms[2]).toBeCloseTo(0x56 / 255, 6)
+    expect(uniforms[3]).toBeCloseTo(0x80 / 255, 6)
   })
 
   it('registers the dither effect with stable default uniforms', () => {
@@ -69,22 +119,8 @@ describe('GPU effect registry', () => {
     expect(effect?.category).toBe('stylize')
 
     const defaults = getGpuEffectDefaultParams('gpu-ascii')
-    expect(defaults).toEqual({
-      charSet: 'standard',
-      fontSize: 8,
-      letterSpacing: 0,
-      lineHeight: 1,
-      matchSourceColor: true,
-      textColor: '#ffffff',
-      bgColor: '#0a0a0f',
-      colorSaturation: 100,
-      asciiOpacity: 100,
-      originalOpacity: 0,
-      contrast: 100,
-      brightness: 0,
-      invert: false,
-    })
 
+    // Default charset 'ascii' is an atlas ramp of 10 glyphs, so glyphCount packs as 10.
     expect(Array.from(effect!.packUniforms(defaults, 1920, 1080)!)).toEqual(
       Array.from(
         new Float32Array([
@@ -103,7 +139,7 @@ describe('GPU effect registry', () => {
           1080,
           0,
           0,
-          0,
+          10,
           1,
           1,
           1,
@@ -202,6 +238,52 @@ describe('GPU effect registry', () => {
     expect(matteUniforms[10]).toBe(1)
   })
 
+  it('registers trigger wave with keyframeable pulse controls', () => {
+    const effect = getGpuEffect('gpu-trigger-wave')
+    expect(effect).toBeDefined()
+    expect(effect?.category).toBe('distort')
+    expect(effect?.uniformSize).toBe(64)
+
+    const defaults = getGpuEffectDefaultParams('gpu-trigger-wave')
+    expect(defaults).toEqual({
+      strength: 0.035,
+      radius: 0.85,
+      frequency: 18,
+      decay: 0.08,
+      phase: 0,
+      speed: 1,
+      centerX: 0.5,
+      centerY: 0.5,
+      chroma: 0.006,
+      scanlineMix: 0.18,
+      glowColor: '#2e6b8c',
+    })
+
+    const uniforms = Array.from(effect!.packUniforms(defaults, 1920, 1080)!)
+    expect(uniforms.slice(0, 10)).toEqual(
+      Array.from(new Float32Array([0.035, 0.85, 18, 0.08, 0.5, 0.5, 0, 1, 0.006, 0.18])),
+    )
+    expect(uniforms[10]).toEqual(expect.any(Number))
+    expect(uniforms[11]).toBeCloseTo(1920 / 1080)
+    expect(uniforms.slice(12, 16)).toEqual(
+      Array.from(new Float32Array([46 / 255, 107 / 255, 140 / 255, 1])),
+    )
+    expect(effect!.params.strength!.animatable).toBe(true)
+    expect(effect!.params.phase!.animatable).toBe(true)
+  })
+
+  it('ships trigger wave as an adjustment-layer preset stack', () => {
+    const preset = EFFECT_PRESETS.find((entry) => entry.id === 'trigger-wave-layer')
+    expect(preset).toBeDefined()
+    expect(preset?.name).toBe('Trigger Wave Layer')
+    expect(preset?.effects.map((effect) => effect.gpuEffectType)).toEqual([
+      'gpu-trigger-wave',
+      'gpu-rgb-split',
+      'gpu-scanlines',
+      'gpu-grain',
+    ])
+  })
+
   it('registers the power window with spatial matte controls', () => {
     const effect = getGpuEffect('gpu-power-window')
     expect(effect).toBeDefined()
@@ -216,10 +298,10 @@ describe('GPU effect registry', () => {
       sizeX: 0.5,
       sizeY: 0.5,
       rotation: 0,
-      feather: 0.15,
+      feather: 0.3,
       invertMask: false,
       showMask: false,
-      exposure: 0,
+      exposure: 0.3,
       saturation: 0,
       temperature: 0,
       tint: 0,
@@ -228,7 +310,7 @@ describe('GPU effect registry', () => {
 
     expect(Array.from(effect!.packUniforms(defaults, 1920, 1080)!)).toEqual(
       Array.from(
-        new Float32Array([0, 0.5, 0.5, 0.5, 0.5, 0, 0.15, 0, 0, 0, 0, 0, 0, 1, 1920, 1080]),
+        new Float32Array([0, 0.5, 0.5, 0.5, 0.5, 0, 0.3, 0, 0, 0.3, 0, 0, 0, 1, 1920, 1080]),
       ),
     )
 

@@ -12,8 +12,9 @@ import { resolveEffectiveTrackStates } from '@/features/preview/deps/timeline-ut
 import { useCompositionsStore, useItemsStore } from '@/features/preview/deps/timeline-store'
 import { appendVirtualTranscriptCaptionTrack } from '@/features/preview/deps/caption-items'
 import { useCornerPinStore } from '../stores/corner-pin-store'
-import { useGizmoStore } from '../stores/gizmo-store'
+import { useGizmoStore, type ItemPreview } from '../stores/gizmo-store'
 import { useMaskEditorStore } from '../stores/mask-editor-store'
+import { resolveGizmoWorldPreviewAsLocal } from '../utils/gizmo-world-preview'
 import { resolveProxyUrl } from '../utils/media-resolver'
 import {
   getMediaResolveCost,
@@ -92,13 +93,31 @@ interface UsePreviewCompositionBaseModelParams {
   mediaById: Record<string, Parameters<typeof getMediaResolveCost>[0]>
 }
 
+/**
+ * Apply transient panel edits to the item snapshot consumed by the canvas
+ * renderer. The DOM player subscribes to the same preview store directly, but
+ * the paused fast-scrub canvas needs the values merged into its live snapshot.
+ */
+export function mergeLiveItemPreview(
+  item: TimelineItem,
+  preview: ItemPreview | undefined,
+): TimelineItem {
+  let liveItem = preview?.properties ? ({ ...item, ...preview.properties } as TimelineItem) : item
+
+  if (liveItem.type === 'lottie' && preview?.lottie) {
+    liveItem = { ...liveItem, ...preview.lottie }
+  }
+
+  return liveItem
+}
+
 export function usePreviewCompositionBaseModel({
   tracks,
   itemsByTrackId,
   mediaById,
 }: UsePreviewCompositionBaseModelParams) {
-  // resolveEffectiveTrackStates applies parent group gate behavior (mute/hide/lock)
-  // and filters out group container tracks (which hold no items)
+  // resolveEffectiveTrackStates applies parent layer-group state (mute/hide/lock/solo)
+  // and filters out Layer Group containers (which hold no items)
   const combinedTracks = useMemo(() => {
     const effectiveTracks = resolveEffectiveTrackStates(tracks).toSorted(
       (a, b) => b.order - a.order,
@@ -178,19 +197,6 @@ export function usePreviewCompositionModel({
     useProxy,
   ])
 
-  const getPreviewTransformOverride = useCallback(
-    (itemId: string): Partial<ResolvedTransform> | undefined => {
-      const gizmoState = useGizmoStore.getState()
-      const unifiedPreviewTransform = gizmoState.preview?.[itemId]?.transform
-      if (unifiedPreviewTransform) return unifiedPreviewTransform
-      if (gizmoState.activeGizmo?.itemId === itemId && gizmoState.previewTransform) {
-        return gizmoState.previewTransform
-      }
-      return undefined
-    },
-    [],
-  )
-
   const getPreviewEffectsOverride = useCallback((itemId: string): ItemEffect[] | undefined => {
     const gizmoState = useGizmoStore.getState()
     const playbackState = usePlaybackStore.getState()
@@ -245,8 +251,46 @@ export function usePreviewCompositionModel({
   )
   fastScrubKeyframesByItemIdRef.current = fastScrubKeyframesByItemId
 
+  const getPreviewTransformOverride = useCallback(
+    (itemId: string): Partial<ResolvedTransform> | undefined => {
+      const gizmoState = useGizmoStore.getState()
+      const unifiedPreviewTransform = gizmoState.preview?.[itemId]?.transform
+      if (unifiedPreviewTransform) return unifiedPreviewTransform
+      if (gizmoState.activeGizmo?.itemId !== itemId || !gizmoState.previewTransform) {
+        return undefined
+      }
+
+      const playbackState = usePlaybackStore.getState()
+      return resolveGizmoWorldPreviewAsLocal({
+        itemId,
+        worldPreviewTransform: gizmoState.previewTransform,
+        canvas: { width: project.width, height: project.height, fps },
+        frame: playbackState.previewFrame ?? playbackState.currentFrame,
+        getItem: (candidateId) => fastScrubLiveItemsByIdRef.current.get(candidateId),
+        getKeyframes: (candidateId) =>
+          fastScrubKeyframesByItemIdRef.current.get(candidateId),
+        getLocalPreviewTransform: (candidateId) =>
+          useGizmoStore.getState().preview?.[candidateId]?.transform,
+      })
+    },
+    [fps, project.height, project.width],
+  )
+
   const getLiveItemSnapshot = useCallback((itemId: string) => {
-    return fastScrubLiveItemsByIdRef.current.get(itemId)
+    const item = fastScrubLiveItemsByIdRef.current.get(itemId)
+    if (!item) return undefined
+    const liveItem = useItemsStore.getState().itemById[itemId]
+    const itemWithLiveTransform =
+      liveItem &&
+      'transform' in liveItem &&
+      'transform' in item &&
+      liveItem.transform !== item.transform
+        ? ({ ...item, transform: liveItem.transform } as TimelineItem)
+        : item
+    return mergeLiveItemPreview(
+      itemWithLiveTransform,
+      useGizmoStore.getState().preview?.[itemId],
+    )
   }, [])
 
   const getLiveKeyframes = useCallback((itemId: string) => {
@@ -305,7 +349,10 @@ export function buildPreviewCompositionData({
     for (const item of track.items) {
       if (
         !item.mediaId ||
-        (item.type !== 'video' && item.type !== 'audio' && item.type !== 'image')
+        (item.type !== 'video' &&
+          item.type !== 'audio' &&
+          item.type !== 'image' &&
+          item.type !== 'lottie')
       ) {
         resolvedItems.push(item)
         fastScrubItems.push(item)

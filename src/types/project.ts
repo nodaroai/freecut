@@ -1,9 +1,23 @@
-import type { AnimatableProperty, EasingType, EasingConfig } from './keyframe'
+import type { ItemKeyframes } from './keyframe'
 import type { AudioEqSettings } from './audio'
 import type { Transition } from './transition'
 import type { CropSettings } from './transform'
 import type { TextStylePresetId } from '@/shared/typography/text-style-preset-ids'
 import type { TextLayoutDrafts, TextSpan, TextStyleFields } from './text'
+import type { TextMotionSpec } from './text-motion'
+import type { MaskVertex } from './masks'
+import type { ShapeStyleFields } from './timeline'
+import type { CompositionControlOverrides, CompositionControlSchema } from './composition-controls'
+
+/**
+ * Selects the editing surface a stored composition naturally opens in.
+ *
+ * Both kinds use the same renderer and can be nested as timeline items. The
+ * distinction is deliberately editorial: sequences use the classic
+ * track/clip editor, while composite-2d compositions use the layer/property
+ * compositing workspace.
+ */
+export type CompositionEditorKind = 'sequence' | 'composite-2d'
 
 export interface Project {
   id: string
@@ -62,7 +76,7 @@ export interface ProjectTimeline {
   }>
   busAudioEq?: AudioEqSettings
   items: Array<
-    {
+    Partial<ShapeStyleFields> & {
       id: string
       trackId: string
       from: number
@@ -71,7 +85,15 @@ export interface ProjectTimeline {
       mediaId?: string
       originId?: string // Tracks lineage for stable React keys
       linkedGroupId?: string
-      type: 'video' | 'audio' | 'text' | 'image' | 'shape' | 'composition' | 'adjustment'
+      type:
+        | 'video'
+        | 'audio'
+        | 'text'
+        | 'image'
+        | 'shape'
+        | 'composition'
+        | 'adjustment'
+        | 'controller'
       // Type-specific fields stored as optional for flexibility
       src?: string
       thumbnailUrl?: string
@@ -90,6 +112,9 @@ export interface ProjectTimeline {
       reverseConformPreviewPath?: string
       reverseConformPreviewKey?: string
       reverseConformPreviewUsesProxy?: boolean
+      reverseConformPreviewIsSourceLevel?: boolean
+      reverseConformPreviewSourceDuration?: number
+      reverseConformPreviewFps?: number
       reverseConformStatus?: 'pending' | 'ready' | 'error'
       reverseConformLocalStart?: number
       text?: string
@@ -106,18 +131,33 @@ export interface ProjectTimeline {
       textStyleScale?: number
       textSpans?: TextSpan[]
       textLayoutDrafts?: TextLayoutDrafts
-      shapeType?: 'rectangle' | 'circle' | 'triangle' | 'ellipse' | 'star' | 'polygon'
-      fillColor?: string
-      strokeColor?: string
-      strokeWidth?: number
+      /** Per-character/word/line animation (see ./text-motion). */
+      textMotion?: TextMotionSpec
+      shapeType?:
+        | 'rectangle'
+        | 'circle'
+        | 'triangle'
+        | 'ellipse'
+        | 'star'
+        | 'polygon'
+        | 'heart'
+        | 'path'
       direction?: 'up' | 'down' | 'left' | 'right'
       points?: number
       innerRadius?: number
+      pathVertices?: MaskVertex[]
+      pathClosed?: boolean
+      isMask?: boolean
+      maskType?: 'clip' | 'alpha'
+      maskFeather?: number
+      maskOpacity?: number
+      maskInvert?: boolean
       speed?: number // Playback speed multiplier (default 1.0)
       // Composition item fields
       compositionId?: string // Reference to a sub-composition
       compositionWidth?: number
       compositionHeight?: number
+      compositionControlOverrides?: CompositionControlOverrides
       // Source dimensions (for video/image items)
       sourceWidth?: number
       sourceHeight?: number
@@ -136,6 +176,8 @@ export interface ProjectTimeline {
         cornerRadius?: number
         aspectRatioLocked?: boolean
       }
+      transformParent?: import('./transform').TransformParentBinding
+      controllerKind?: 'null'
       crop?: CropSettings
       // Audio properties
       volume?: number
@@ -208,10 +250,19 @@ export interface ProjectTimeline {
   }>
   // Transitions between clips
   transitions?: Transition[]
+  /**
+   * Ordered ids of sub-compositions promoted to standalone timeline tabs
+   * ("sequences"), shown alongside the implicit Main timeline. Order = tab
+   * order. Ids that don't resolve to an entry in `compositions` are pruned on
+   * load. Absent/empty means the project has only the Main timeline.
+   */
+  topLevelSequenceIds?: string[]
   // Sub-compositions (pre-comps)
   compositions?: Array<{
     id: string
     name: string
+    /** Missing on projects created before schema v14; normalized to sequence. */
+    editorKind?: CompositionEditorKind
     items: ProjectTimeline['items']
     tracks: ProjectTimeline['tracks']
     transitions?: ProjectTimeline['transitions']
@@ -221,22 +272,14 @@ export interface ProjectTimeline {
     height: number
     durationInFrames: number
     backgroundColor?: string
+    compositionControls?: CompositionControlSchema
     busAudioEq?: AudioEqSettings
+    markers?: ProjectTimeline['markers']
+    inPoint?: number
+    outPoint?: number
   }>
   // Keyframe animations
-  keyframes?: Array<{
-    itemId: string
-    properties: Array<{
-      property: AnimatableProperty
-      keyframes: Array<{
-        id: string
-        frame: number
-        value: number
-        easing: EasingType
-        easingConfig?: EasingConfig
-      }>
-    }>
-  }>
+  keyframes?: ItemKeyframes[]
 }
 
 export interface ProjectResolution {

@@ -1,4 +1,11 @@
-import React, { useMemo } from 'react'
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react'
 import { useVideoConfig } from '../hooks/use-player-compat'
 import type { TimelineItem } from '@/types/timeline'
 import { BLEND_MODE_CSS } from '@/types/blend-mode-css'
@@ -10,19 +17,33 @@ import {
   resolveCornerPinForSize,
 } from '../utils/corner-pin'
 import { getShapePath } from '../utils/shape-path'
-import { useCornerPinStore } from '@/runtime/composition-runtime/deps/stores'
+import {
+  useCornerPinStore,
+  useGizmoStore,
+} from '@/runtime/composition-runtime/deps/stores'
 import { useItemVisualState } from './hooks/use-item-visual-state'
+import { useRuntimeItemKeyframes } from './hooks/use-runtime-item-keyframes'
 import { renderSvgMaskPathsToDataUrl } from '../utils/clip-mask-raster'
 import { getRasterizedMaskLayerSettingsList } from '../utils/mask-preview'
 import type { MaskInfo } from './item'
 import type { CropSettings } from '@/types/transform'
+import type { MediaCropFitMode } from '@/shared/utils/media-crop'
 import { ContainedMediaLayout } from './contained-media-layout'
+import { ItemVisualTransformProvider } from '../contexts/item-visual-transform-context'
+import { useCompositionSpace } from '../contexts/composition-space-context'
+import { resolveGizmoDomTranslation } from '../utils/gizmo-dom-translation'
+import {
+  buildItemTransformDependencyPlan,
+  useLiveItemTransform,
+  useLiveTimelineItemResolver,
+} from '../contexts/live-item-transform-context'
+import { KeyframesContext } from '../contexts/keyframes-context-core'
 
 interface ItemVisualWrapperProps {
   item: TimelineItem
   masks?: MaskInfo[]
   mediaContent?: {
-    fitMode: 'contain'
+    fitMode: MediaCropFitMode
     sourceWidth?: number
     sourceHeight?: number
     crop?: CropSettings
@@ -84,6 +105,7 @@ function renderRasterizedMaskLayer(
 
   ctx.clearRect(0, 0, canvasWidth, canvasHeight)
   ctx.save()
+  ctx.globalAlpha = Math.max(0, Math.min(1, resolvedTransform.opacity))
 
   if (resolvedTransform.rotation !== 0) {
     ctx.translate(centerX, centerY)
@@ -162,6 +184,34 @@ function renderRasterizedMaskLayer(
   return canvas
 }
 
+function featherRasterMask(
+  maskCanvas: HTMLCanvasElement,
+  canvasWidth: number,
+  canvasHeight: number,
+  feather: number,
+): HTMLCanvasElement {
+  if (feather <= 0) return maskCanvas
+  const blurredMask = createRasterMaskCanvas(canvasWidth, canvasHeight)
+  if (!blurredMask) return maskCanvas
+  blurredMask.ctx.filter = `blur(${feather}px)`
+  blurredMask.ctx.drawImage(maskCanvas, 0, 0)
+  return blurredMask.canvas
+}
+
+function applyRasterMaskOpacity(
+  maskCanvas: HTMLCanvasElement,
+  canvasWidth: number,
+  canvasHeight: number,
+  opacity: number,
+): HTMLCanvasElement {
+  if (opacity >= 1) return maskCanvas
+  const opacityMask = createRasterMaskCanvas(canvasWidth, canvasHeight)
+  if (!opacityMask) return maskCanvas
+  opacityMask.ctx.globalAlpha = Math.max(0, opacity)
+  opacityMask.ctx.drawImage(maskCanvas, 0, 0)
+  return opacityMask.canvas
+}
+
 function applyRasterizedMaskLayerSettings(
   maskCanvas: HTMLCanvasElement,
   canvasWidth: number,
@@ -169,9 +219,10 @@ function applyRasterizedMaskLayerSettings(
   settings: {
     invert: boolean
     feather: number
+    opacity: number
   },
 ): HTMLCanvasElement {
-  if (!settings.invert && settings.feather <= 0) {
+  if (!settings.invert && settings.feather <= 0 && settings.opacity >= 1) {
     return maskCanvas
   }
 
@@ -190,18 +241,12 @@ function applyRasterizedMaskLayerSettings(
     processedMask.ctx.drawImage(maskCanvas, 0, 0)
   }
 
-  if (settings.feather <= 0) {
-    return processedMask.canvas
-  }
-
-  const blurredMask = createRasterMaskCanvas(canvasWidth, canvasHeight)
-  if (!blurredMask) {
-    return processedMask.canvas
-  }
-
-  blurredMask.ctx.filter = `blur(${settings.feather}px)`
-  blurredMask.ctx.drawImage(processedMask.canvas, 0, 0)
-  return blurredMask.canvas
+  return applyRasterMaskOpacity(
+    featherRasterMask(processedMask.canvas, canvasWidth, canvasHeight, settings.feather),
+    canvasWidth,
+    canvasHeight,
+    settings.opacity,
+  )
 }
 
 /**
@@ -223,10 +268,150 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
   mediaContent,
   children,
 }) => {
+  item = useLiveItemTransform(item)
   const { width: canvasWidth, height: canvasHeight } = useVideoConfig()
+  const compositionSpace = useCompositionSpace()
+  const scaleX = compositionSpace?.scaleX ?? 1
+  const scaleY = compositionSpace?.scaleY ?? 1
+  const getLiveItem = useLiveTimelineItemResolver()
+  const keyframesContext = useContext(KeyframesContext)
+  const itemKeyframes = useRuntimeItemKeyframes(item.id)
+  const getDependencyItem = useCallback(
+    (itemId: string) =>
+      getLiveItem(itemId) ?? keyframesContext?.getItem(itemId),
+    [getLiveItem, keyframesContext],
+  )
+  const getDependencyKeyframes = useCallback(
+    (itemId: string) =>
+      itemId === item.id
+        ? itemKeyframes
+        : keyframesContext?.getItemKeyframes(itemId),
+    [item.id, itemKeyframes, keyframesContext],
+  )
+  const transformDependencyPlan = useMemo(
+    () =>
+      buildItemTransformDependencyPlan(
+        item,
+        getDependencyItem,
+        getDependencyKeyframes,
+      ),
+    [getDependencyItem, getDependencyKeyframes, item],
+  )
 
   // Get all visual state from consolidated hook
-  const state = useItemVisualState(item, masks)
+  const state = useItemVisualState(item, masks, { transformDependencyPlan })
+  const contentVisualTransform = useMemo(
+    () => ({
+      width: state.transform.width,
+      height: state.transform.height,
+    }),
+    [state.transform.height, state.transform.width],
+  )
+  const followsActiveTranslate = useCallback(
+    (activeItemId: string) =>
+      transformDependencyPlan.linearTranslateSourceItemIds.has(activeItemId),
+    [transformDependencyPlan],
+  )
+  const transformNodeRef = useRef<HTMLDivElement>(null)
+  const renderedTransformRef = useRef(state.transform)
+  const presentationInteractionRef = useRef<{
+    interactionId: number
+    startTransform: typeof state.transform
+  } | null>(null)
+  const acknowledgedHandoffRef = useRef<number | null>(null)
+
+  const syncGizmoPresentation = useCallback(
+    (gizmoState: ReturnType<typeof useGizmoStore.getState>) => {
+      const transformNode = transformNodeRef.current
+      if (!transformNode) return
+
+      const activeGizmo = gizmoState.activeGizmo
+      const handoff = gizmoState.presentationHandoff
+      const livePresentation =
+        activeGizmo?.mode === 'translate' && gizmoState.previewTransform
+          ? {
+              interactionId: activeGizmo.interactionId,
+              itemId: activeGizmo.itemId,
+              startTransform: activeGizmo.startTransform,
+              finalTransform: gizmoState.previewTransform,
+              settling: false,
+            }
+          : null
+      const presentation =
+        livePresentation ??
+        (handoff?.mode === 'translate'
+          ? {
+              interactionId: handoff.interactionId,
+              itemId: handoff.itemId,
+              startTransform: handoff.startTransform,
+              finalTransform: handoff.finalTransform,
+              settling: true,
+            }
+          : null)
+      if (
+        !presentation ||
+        (presentation.settling &&
+          acknowledgedHandoffRef.current === presentation.interactionId)
+      ) {
+        presentationInteractionRef.current = null
+        transformNode.style.removeProperty('translate')
+        return
+      }
+      const interactionId = presentation.interactionId
+
+      if (presentationInteractionRef.current?.interactionId !== interactionId) {
+        presentationInteractionRef.current = {
+          interactionId,
+          startTransform: { ...renderedTransformRef.current },
+        }
+        acknowledgedHandoffRef.current = null
+      }
+
+      const translation = resolveGizmoDomTranslation({
+        itemId: item.id,
+        followsActiveItem: followsActiveTranslate(presentation.itemId),
+        activeItemId: presentation.itemId,
+        activeStartTransform: presentation.startTransform,
+        previewTransform: presentation.finalTransform,
+        renderedTransform: renderedTransformRef.current,
+        interactionStartTransform: presentationInteractionRef.current.startTransform,
+        scaleX,
+        scaleY,
+      })
+      if (!translation) {
+        presentationInteractionRef.current = null
+        transformNode.style.removeProperty('translate')
+        return
+      }
+
+      if (
+        presentation.settling &&
+        Math.abs(translation.x) < 0.01 &&
+        Math.abs(translation.y) < 0.01
+      ) {
+        acknowledgedHandoffRef.current = interactionId
+        presentationInteractionRef.current = null
+        transformNode.style.removeProperty('translate')
+        requestAnimationFrame(() =>
+          useGizmoStore.getState().completePresentationHandoff(interactionId),
+        )
+        return
+      }
+
+      transformNode.style.setProperty('translate', `${translation.x}px ${translation.y}px`)
+    },
+    [followsActiveTranslate, item.id, scaleX, scaleY],
+  )
+
+  useLayoutEffect(() => {
+    renderedTransformRef.current = state.transform
+    syncGizmoPresentation(useGizmoStore.getState())
+  }, [state.transform, syncGizmoPresentation])
+
+  useEffect(
+    () => useGizmoStore.subscribe(syncGizmoPresentation),
+    [syncGizmoPresentation],
+  )
   const shouldRasterizeSvgMask =
     state.maskType === 'svg-mask' && !!state.svgMaskPaths && state.maskFeather > 0
   const hasCornerPinnedMask = masks.some((mask) => hasCornerPin(mask.shape.cornerPin))
@@ -243,12 +428,14 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
       canvasHeight,
       state.maskFeather,
       state.maskInvert,
+      state.maskOpacity,
     )
   }, [
     shouldRasterizeSvgMask,
     state.svgMaskPaths,
     state.maskFeather,
     state.maskInvert,
+    state.maskOpacity,
     canvasWidth,
     canvasHeight,
   ])
@@ -280,7 +467,7 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
         maskLayer,
         width,
         height,
-        maskLayerSettings[index] ?? { invert: false, feather: 0 },
+        maskLayerSettings[index] ?? { invert: false, feather: 0, opacity: 1 },
       )
 
       combinedMask.ctx.globalCompositeOperation = 'destination-in'
@@ -347,26 +534,32 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
     s.editingItemId === item.id ? s.previewCornerPin : null,
   )
   const effectiveCornerPin = cornerPinPreview ?? item.cornerPin
+  const hasMediaContent = mediaContent !== undefined
+  const mediaFitMode = mediaContent?.fitMode
+  const mediaSourceWidth = mediaContent?.sourceWidth
+  const mediaSourceHeight = mediaContent?.sourceHeight
   const effectiveCrop = state.propertiesPreview?.crop ?? state.animatedCrop ?? mediaContent?.crop
   const cornerPinTargetRect = useMemo(() => {
     if (state.maskType !== null) {
       return resolveCornerPinTargetRect(state.transform.width, state.transform.height)
     }
 
-    if (mediaContent?.fitMode === 'contain') {
+    if (hasMediaContent && mediaFitMode) {
       return resolveCornerPinTargetRect(state.transform.width, state.transform.height, {
-        sourceWidth: mediaContent.sourceWidth ?? state.transform.width,
-        sourceHeight: mediaContent.sourceHeight ?? state.transform.height,
+        sourceWidth: mediaSourceWidth ?? state.transform.width,
+        sourceHeight: mediaSourceHeight ?? state.transform.height,
         crop: effectiveCrop,
+        fitMode: mediaFitMode,
       })
     }
 
     return resolveCornerPinTargetRect(state.transform.width, state.transform.height)
   }, [
     effectiveCrop,
-    mediaContent?.fitMode,
-    mediaContent?.sourceHeight,
-    mediaContent?.sourceWidth,
+    hasMediaContent,
+    mediaFitMode,
+    mediaSourceHeight,
+    mediaSourceWidth,
     state.maskType,
     state.transform.height,
     state.transform.width,
@@ -453,6 +646,7 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
               width={canvasWidth}
               height={canvasHeight}
               fill={state.maskInvert ? 'white' : 'black'}
+              fillOpacity={state.maskInvert ? state.maskOpacity : 1}
             />
             {/* Mask shapes with optional stroke */}
             {state.svgMaskPaths.map(({ path: pathD, strokeWidth }, i) => (
@@ -460,6 +654,7 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
                 key={i}
                 d={pathD}
                 fill={state.maskInvert ? 'black' : 'white'}
+                fillOpacity={state.maskInvert ? 1 : state.maskOpacity}
                 stroke={strokeWidth > 0 ? (state.maskInvert ? 'black' : 'white') : undefined}
                 strokeWidth={strokeWidth > 0 ? strokeWidth : undefined}
                 filter={state.maskFeather > 0 ? `url(#${filterId})` : undefined}
@@ -475,6 +670,7 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
     state.svgMaskId,
     state.svgMaskPaths,
     state.maskFeather,
+    state.maskOpacity,
     state.maskInvert,
     canvasWidth,
     canvasHeight,
@@ -499,23 +695,23 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
     }
   }, [maskStyle, blendModeCss])
 
-  const effectiveMediaChildren =
-    mediaContent?.fitMode === 'contain' ? (
-      <ContainedMediaLayout
-        sourceWidth={mediaContent.sourceWidth ?? state.transform.width}
-        sourceHeight={mediaContent.sourceHeight ?? state.transform.height}
-        containerWidth={state.transform.width}
-        containerHeight={state.transform.height}
-        crop={effectiveCrop}
-      >
-        {children}
-      </ContainedMediaLayout>
-    ) : (
-      children
-    )
+  const effectiveMediaChildren = mediaContent ? (
+    <ContainedMediaLayout
+      sourceWidth={mediaContent.sourceWidth ?? state.transform.width}
+      sourceHeight={mediaContent.sourceHeight ?? state.transform.height}
+      containerWidth={state.transform.width}
+      containerHeight={state.transform.height}
+      crop={effectiveCrop}
+      fitMode={mediaContent.fitMode}
+    >
+      {children}
+    </ContainedMediaLayout>
+  ) : (
+    children
+  )
 
   const cornerPinFrameStyle = useMemo((): React.CSSProperties => {
-    if (mediaContent?.fitMode === 'contain' && cornerPinStyle) {
+    if (hasMediaContent && cornerPinStyle) {
       return containedMediaStyle
     }
 
@@ -523,22 +719,22 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
       width: '100%',
       height: '100%',
     }
-  }, [containedMediaStyle, cornerPinStyle, mediaContent?.fitMode])
+  }, [containedMediaStyle, cornerPinStyle, hasMediaContent])
 
-  const pinnedMediaBody =
-    mediaContent?.fitMode === 'contain' ? (
-      <ContainedMediaLayout
-        sourceWidth={cornerPinTargetRect.width}
-        sourceHeight={cornerPinTargetRect.height}
-        containerWidth={cornerPinTargetRect.width}
-        containerHeight={cornerPinTargetRect.height}
-        crop={effectiveCrop}
-      >
-        {children}
-      </ContainedMediaLayout>
-    ) : (
-      children
-    )
+  const pinnedMediaBody = mediaContent ? (
+    <ContainedMediaLayout
+      sourceWidth={cornerPinTargetRect.width}
+      sourceHeight={cornerPinTargetRect.height}
+      containerWidth={cornerPinTargetRect.width}
+      containerHeight={cornerPinTargetRect.height}
+      crop={effectiveCrop}
+      fitMode={mediaContent.fitMode}
+    >
+      {children}
+    </ContainedMediaLayout>
+  ) : (
+    children
+  )
 
   const pinnedMediaContent = (
     <div
@@ -594,35 +790,41 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
   // When there's no mask, skip the full-canvas mask container div entirely
   if (state.maskType === null) {
     return (
-      <div
-        style={{
-          ...state.transformStyle,
-          overflow: state.transform.cornerRadius > 0 && !cornerPinStyle ? 'hidden' : undefined,
-          mixBlendMode: blendModeCss,
-        }}
-      >
-        {innerContent}
-      </div>
-    )
-  }
-
-  return (
-    <>
-      {/* SVG mask definitions (hidden, referenced via CSS) */}
-      {svgMaskDefs}
-
-      {/* Masks are authored in composition space, so they must be applied on a
-          full-canvas wrapper instead of the item-sized transform node. */}
-      <div style={maskContainerStyle}>
+      <ItemVisualTransformProvider value={contentVisualTransform}>
         <div
+          ref={transformNodeRef}
           style={{
             ...state.transformStyle,
             overflow: state.transform.cornerRadius > 0 && !cornerPinStyle ? 'hidden' : undefined,
+            mixBlendMode: blendModeCss,
           }}
         >
           {innerContent}
         </div>
-      </div>
-    </>
+      </ItemVisualTransformProvider>
+    )
+  }
+
+  return (
+    <ItemVisualTransformProvider value={contentVisualTransform}>
+      <>
+        {/* SVG mask definitions (hidden, referenced by CSS) */}
+        {svgMaskDefs}
+
+        {/* Masks are authored in composition space, so they must be applied on a
+            full-canvas wrapper instead of the item-sized transform node. */}
+        <div style={maskContainerStyle}>
+          <div
+            ref={transformNodeRef}
+            style={{
+              ...state.transformStyle,
+              overflow: state.transform.cornerRadius > 0 && !cornerPinStyle ? 'hidden' : undefined,
+            }}
+          >
+            {innerContent}
+          </div>
+        </div>
+      </>
+    </ItemVisualTransformProvider>
   )
 }

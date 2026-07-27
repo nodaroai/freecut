@@ -1,5 +1,11 @@
 import type { VisualEffect } from '@/types/effects'
-import type { AdjustmentItem, ShapeItem, ShapeType, TextItem } from '@/types/timeline'
+import type {
+  AdjustmentItem,
+  ControllerItem,
+  ShapeItem,
+  ShapeType,
+  TextItem,
+} from '@/types/timeline'
 import {
   TEXT_STYLE_PRESETS,
   buildTextStylePresetTemplate,
@@ -14,6 +20,7 @@ export interface TimelineTemplateDragData {
   label: string
   textStylePresetId?: TextStylePresetId
   shapeType?: ShapeType
+  shapePreset?: 'solid' | 'gradient'
   effects?: VisualEffect[]
 }
 
@@ -48,6 +55,13 @@ export function isTimelineTemplateDragData(value: unknown): value is TimelineTem
     return false
   }
   if (candidate.effects !== undefined && !Array.isArray(candidate.effects)) return false
+  if (
+    candidate.shapePreset !== undefined &&
+    candidate.shapePreset !== 'solid' &&
+    candidate.shapePreset !== 'gradient'
+  ) {
+    return false
+  }
 
   return (
     candidate.itemType !== 'shape' ||
@@ -178,6 +192,43 @@ export function createDefaultShapeItem(
   }
 }
 
+export function createDefaultSolidColorItem(params: VisualLayerPlacement): ShapeItem {
+  const item = createDefaultShapeItem({ ...params, shapeType: 'rectangle' })
+  return {
+    ...item,
+    label: 'Solid Color',
+    fillColor: '#2d2d2d',
+    fillType: 'solid',
+    strokeEnabled: false,
+    transform: {
+      ...item.transform,
+      width: params.canvasWidth,
+      height: params.canvasHeight,
+      aspectRatioLocked: true,
+    },
+  }
+}
+
+export function createDefaultGradientItem(params: VisualLayerPlacement): ShapeItem {
+  const item = createDefaultShapeItem({ ...params, shapeType: 'rectangle' })
+  return {
+    ...item,
+    label: 'Gradient',
+    fillColor: '#3b82f6',
+    fillType: 'linear',
+    gradientStartColor: '#3b82f6',
+    gradientEndColor: '#8b5cf6',
+    gradientAngle: 0,
+    strokeEnabled: false,
+    transform: {
+      ...item.transform,
+      width: params.canvasWidth,
+      height: params.canvasHeight,
+      aspectRatioLocked: true,
+    },
+  }
+}
+
 export function createDefaultAdjustmentItem(
   params: LayerPlacement & {
     effects?: VisualEffect[]
@@ -200,6 +251,29 @@ export function createDefaultAdjustmentItem(
         enabled: true,
       })) ?? [],
     effectOpacity: 1,
+  }
+}
+
+export function createDefaultControllerItem(params: VisualLayerPlacement): ControllerItem {
+  const { trackId, from, durationInFrames, canvasWidth, canvasHeight } = params
+  const size = Math.max(48, Math.min(canvasWidth, canvasHeight) * 0.08)
+  return {
+    id: crypto.randomUUID(),
+    type: 'controller',
+    controllerKind: 'null',
+    trackId,
+    from,
+    durationInFrames,
+    label: 'Null Object',
+    transform: {
+      x: 0,
+      y: 0,
+      width: size,
+      height: size,
+      rotation: 0,
+      opacity: 1,
+      aspectRatioLocked: true,
+    },
   }
 }
 
@@ -227,8 +301,8 @@ export function createTimelineTemplateItem(params: {
     })
   }
 
-  return createDefaultShapeItem({
-    ...placement,
-    shapeType: template.shapeType ?? 'rectangle',
-  })
+  if (template.shapePreset === 'solid') return createDefaultSolidColorItem(placement)
+  if (template.shapePreset === 'gradient') return createDefaultGradientItem(placement)
+
+  return createDefaultShapeItem({ ...placement, shapeType: template.shapeType ?? 'rectangle' })
 }

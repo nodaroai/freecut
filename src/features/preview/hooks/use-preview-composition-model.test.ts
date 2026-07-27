@@ -1,6 +1,31 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { TimelineTrack } from '@/types/timeline'
-import { buildPreviewCompositionData } from './use-preview-composition-model'
+import { buildPreviewCompositionData, mergeLiveItemPreview } from './use-preview-composition-model'
+
+describe('mergeLiveItemPreview', () => {
+  it('merges live shape properties into the canvas renderer snapshot', () => {
+    const shape = {
+      id: 'shape-1',
+      trackId: 'track-1',
+      type: 'shape' as const,
+      shapeType: 'path' as const,
+      fillColor: '#000000',
+      label: 'Path',
+      from: 0,
+      durationInFrames: 100,
+      trimPathOffset: 0,
+    }
+
+    expect(
+      mergeLiveItemPreview(shape, {
+        properties: { trimPathOffset: 135, taperStartWidth: 20 },
+      }),
+    ).toMatchObject({ trimPathOffset: 135, taperStartWidth: 20 })
+    expect(shape.trimPathOffset).toBe(0)
+  })
+})
 
 describe('buildPreviewCompositionData', () => {
   it('derives playback and fast-scrub sources separately and computes boundaries', () => {
@@ -59,6 +84,52 @@ describe('buildPreviewCompositionData', () => {
     if (playbackVideoItem?.type === 'video' && scrubVideoItem?.type === 'video') {
       expect(playbackVideoItem.audioSrc).toBe('blob://video')
       expect(scrubVideoItem.audioSrc).toBe('blob://video')
+    }
+  })
+
+  it('resolves a lottie item src from resolvedUrls (fixes stale blob URL after reload)', () => {
+    const track: TimelineTrack = {
+      id: 'track-1',
+      name: 'Overlay',
+      height: 80,
+      locked: false,
+      visible: true,
+      muted: false,
+      solo: false,
+      order: 1,
+      items: [
+        {
+          id: 'clip-1',
+          trackId: 'track-1',
+          type: 'lottie',
+          mediaId: 'media-lottie',
+          // Dead blob URL from a previous session, as loaded from disk.
+          src: 'blob:stale-url',
+          frameRate: 30,
+          totalFrames: 90,
+          label: 'spinner.lottie',
+          from: 0,
+          durationInFrames: 90,
+        },
+      ],
+    }
+
+    const result = buildPreviewCompositionData({
+      combinedTracks: [track],
+      fps: 30,
+      items: track.items,
+      keyframes: [],
+      transitions: [],
+      resolvedUrls: new Map([['media-lottie', 'blob://fresh-lottie']]),
+      useProxy: false,
+      blobUrlVersion: 0,
+      project: { width: 1920, height: 1080, backgroundColor: '#000000' },
+    })
+
+    const lottieItem = result.inputProps.tracks[0]?.items[0]
+    expect(lottieItem?.type).toBe('lottie')
+    if (lottieItem && 'src' in lottieItem) {
+      expect(lottieItem.src).toBe('blob://fresh-lottie')
     }
   })
 

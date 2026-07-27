@@ -6,10 +6,14 @@ import type {
   WhisperWorkerMessage,
 } from '../types'
 import { createLogger } from '@/shared/logging/logger'
+import { getChunkStartProgress, transcribingProgressEvent } from '../lib/chunk-progress'
 import {
   updateDownloadProgress,
   type DownloadProgressCache,
 } from '@/shared/utils/download-progress'
+import { joinTranscriptWords } from '@/shared/utils/transcript-text'
+import { resolveWhisperWordTimings, type RawWhisperWord } from '../lib/whisper-word-timings'
+import { getWhisperWebGpuBatchSize } from '../lib/whisper-runtime-options'
 
 const logger = createLogger('TranscriptionWorker')
 
@@ -17,9 +21,6 @@ const TRANSFORMERS_CDN_URL = 'https://esm.sh/@huggingface/transformers@3.8.1?bun
 const WASM_CDN_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/'
 const WHISPER_CHUNK_SECONDS = 30
 const WHISPER_STRIDE_SECONDS = 5
-// Batch the internal 30 s windows of each span on WebGPU (measured ~1.5x faster on a
-// 120 s span). WASM gains nothing from batching and pays the memory, so keep it serial.
-const WHISPER_WEBGPU_BATCH_SIZE = 8
 const WHISPER_TASK = 'transcribe'
 const RECENT_WORD_RETENTION_SECONDS = 8
 const DUPLICATE_WORD_START_TOLERANCE_SECONDS = 0.5
@@ -138,7 +139,7 @@ function enqueue(chunk: PCMChunk): void {
 }
 
 async function initPipeline(modelId: string, quantization: QuantizationType): Promise<void> {
-  postMain({ type: 'progress', event: { stage: 'loading', progress: 0 } })
+  postMain({ type: 'progress', event: { stage: 'downloading', progress: 0 } })
   reportedEstimatedBytes = 0
 
   try {
@@ -180,8 +181,10 @@ async function initPipeline(modelId: string, quantization: QuantizationType): Pr
         postMain({
           type: 'progress',
           event: {
-            stage: 'loading',
+            stage: 'downloading',
             progress: downloadProgress.fraction,
+            receivedBytes: downloadProgress.loaded,
+            totalBytes: downloadProgress.total,
           },
         })
       }
@@ -208,7 +211,9 @@ async function initPipeline(modelId: string, quantization: QuantizationType): Pr
         postMain({ type: 'runtime', info: { backend: 'wasm' } })
       }
 
-      postMain({ type: 'progress', event: { stage: 'loading', progress: 0.99 } })
+      // Weights are down; what remains is graph compile + the pre-warm inference below,
+      // neither of which reports progress.
+      postMain({ type: 'progress', event: { stage: 'preparing', progress: 0 } })
       try {
         await asrPipeline(new Float32Array(1_600), {
           sampling_rate: 16_000,
@@ -221,7 +226,7 @@ async function initPipeline(modelId: string, quantization: QuantizationType): Pr
     }
 
     pipelineReady = true
-    postMain({ type: 'progress', event: { stage: 'loading', progress: 1 } })
+    postMain({ type: 'progress', event: { stage: 'preparing', progress: 1 } })
     postMain({ type: 'ready' })
 
     if (queue.length > 0 && !processing) {
@@ -279,19 +284,23 @@ async function transcribeChunk(chunk: PCMChunk): Promise<void> {
 
   if (chunk.samples.length === 0) {
     if (chunk.final) {
+      postMain({ type: 'progress', event: { stage: 'transcribing', progress: 1 } })
       postMain({ type: 'done' })
     }
     return
   }
 
-  postMain({ type: 'progress', event: { stage: 'transcribing', progress: 0 } })
+  const startProgress = getChunkStartProgress(chunk)
+  if (startProgress !== null) {
+    postMain({ type: 'progress', event: { stage: 'transcribing', progress: startProgress } })
+  }
 
   const result = await asrPipeline(chunk.samples, {
     sampling_rate: 16_000,
     return_timestamps: 'word',
     chunk_length_s: WHISPER_CHUNK_SECONDS,
     stride_length_s: WHISPER_STRIDE_SECONDS,
-    batch_size: activeDevice === 'webgpu' ? WHISPER_WEBGPU_BATCH_SIZE : 1,
+    batch_size: activeDevice === 'webgpu' ? getWhisperWebGpuBatchSize(currentModelId ?? '') : 1,
     force_full_sequences: false,
     top_k: 0,
     do_sample: false,
@@ -301,29 +310,11 @@ async function transcribeChunk(chunk: PCMChunk): Promise<void> {
 
   const output = result as {
     text?: string
-    chunks?: Array<{
-      text: string
-      timestamp: [number | null, number | null]
-      confidence?: number
-    }>
+    chunks?: RawWhisperWord[]
   }
 
   const words = dedupeOverlappingWords(
-    (output.chunks ?? []).flatMap((word): TranscriptWord[] => {
-      const start = word.timestamp[0]
-      const end = word.timestamp[1]
-      if (start === null || end === null || end <= start) {
-        return []
-      }
-      return [
-        {
-          text: word.text,
-          start: start + chunk.timestamp,
-          end: end + chunk.timestamp,
-          ...(typeof word.confidence === 'number' ? { confidence: word.confidence } : {}),
-        },
-      ]
-    }),
+    resolveWhisperWordTimings(output.chunks ?? [], chunk.timestamp, chunk.samples.length / 16_000),
   )
 
   if (words.length > 0) {
@@ -341,10 +332,7 @@ async function transcribeChunk(chunk: PCMChunk): Promise<void> {
     postMain({
       type: 'segment',
       segment: {
-        text: words
-          .map((word) => word.text)
-          .join(' ')
-          .trim(),
+        text: joinTranscriptWords(words.map((word) => word.text)),
         start: words[0]?.start ?? chunk.timestamp,
         end: words.at(-1)?.end ?? chunk.timestamp,
         words,
@@ -352,7 +340,7 @@ async function transcribeChunk(chunk: PCMChunk): Promise<void> {
     })
   }
 
-  postMain({ type: 'progress', event: { stage: 'transcribing', progress: 1 } })
+  postMain({ type: 'progress', event: transcribingProgressEvent(chunk) })
 
   if (chunk.final) {
     postMain({ type: 'done' })

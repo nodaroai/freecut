@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "エディターツールバー",
     "workspaces": {
+      "motion": "Motion",
       "label": "ワークスペース",
       "edit": "編集",
       "color": "カラー",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "キーボードショートカット",
     "keyboardShortcutsAria": "キーボードショートカット",
     "viewOnGitHub": "GitHub で表示",
+    "joinDiscord": "Discord に参加",
     "debugPanel": "デバッグパネル",
     "debugPanelAria": "デバッグパネル",
     "save": "保存",
@@ -80,7 +82,11 @@
       "autoSave": "自動保存",
       "interval": "間隔",
       "intervalMinutes": "{{count}} 分",
-      "undoHistoryDepth": "元に戻す履歴の深さ"
+      "undoHistoryDepth": "元に戻す履歴の深さ",
+      "uiSounds": "インターフェースサウンド",
+      "uiSoundVolume": "サウンド音量",
+      "uiSoundVoice": "サウンドテーマ",
+      "uiSoundPreview": "プレビュー"
     },
     "ai": {
       "captionSampleInterval": "字幕のサンプリング間隔",

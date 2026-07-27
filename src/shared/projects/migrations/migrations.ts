@@ -9,6 +9,7 @@
 
 import type { Migration } from './types'
 import type { Project, ProjectTimeline } from '@/types/project'
+import { sanitizeTextMotion } from './sanitize-text-motion'
 
 // Historical constants used by specific migrations.
 // Keep these as literals so old migration behavior doesn't drift when
@@ -826,6 +827,165 @@ const migrations: Record<number, Migration> = {
         timeline: {
           ...project.timeline,
           masterBusDb: 0,
+        },
+      }
+    },
+  },
+  11: {
+    version: 11,
+    description:
+      'Convert gpu-gradient-map from fixed shadow/mid/highlight colors to preset + custom stops',
+    migrate: (project: Project): Project => {
+      if (!project.timeline) return project
+
+      const convertItem = (item: unknown): unknown => {
+        const record = item as Record<string, unknown>
+        const effects = record.effects as
+          | Array<{ id: string; effect: Record<string, unknown>; enabled: boolean }>
+          | undefined
+        if (!effects || effects.length === 0) return item
+
+        let changed = false
+        const nextEffects = effects.map((entry) => {
+          const effect = entry.effect
+          if (effect?.type !== 'gpu-effect' || effect.gpuEffectType !== 'gpu-gradient-map') {
+            return entry
+          }
+          const params = (effect.params ?? {}) as Record<string, unknown>
+          if ('preset' in params || 'customStops' in params) return entry // already migrated
+
+          const shadow = typeof params.shadowColor === 'string' ? params.shadowColor : '#241634'
+          const mid = typeof params.midColor === 'string' ? params.midColor : '#c2456b'
+          const high = typeof params.highlightColor === 'string' ? params.highlightColor : '#ffd9a0'
+          const mix = typeof params.mix === 'number' ? params.mix : 1
+          changed = true
+          return {
+            ...entry,
+            effect: {
+              ...effect,
+              params: { preset: 'custom', customStops: `${shadow}, ${mid}, ${high}`, mix },
+            },
+          }
+        })
+        return changed ? { ...record, effects: nextEffects } : item
+      }
+
+      const timeline = project.timeline
+      return {
+        ...project,
+        timeline: {
+          ...timeline,
+          items: timeline.items?.map(convertItem) ?? timeline.items,
+          compositions:
+            timeline.compositions?.map((composition) => ({
+              ...composition,
+              items: composition.items?.map(convertItem) ?? composition.items,
+            })) ?? timeline.compositions,
+        },
+      } as Project
+    },
+  },
+  /**
+   * Version 12: Sanitize motion-text specs (textMotion) on text items
+   *
+   * Motion text stores an optional parametric `textMotion` record on text
+   * items (see src/types/text-motion.ts). Sanitize any pre-existing value:
+   * drop slots with unknown preset ids or malformed shapes, clamp numerics,
+   * and remove empty specs entirely. Normalization re-applies the same
+   * sanitizer on every load.
+   */
+  12: {
+    version: 12,
+    description: 'Sanitize motion-text specs (textMotion) on text items',
+    migrate: (project: Project): Project => {
+      if (!project.timeline) return project
+
+      const convertItem = (item: unknown): unknown => {
+        const record = item as Record<string, unknown>
+        if (record.type !== 'text' || record.textMotion === undefined) return item
+        return { ...record, textMotion: sanitizeTextMotion(record.textMotion) }
+      }
+
+      const timeline = project.timeline
+      return {
+        ...project,
+        timeline: {
+          ...timeline,
+          items: timeline.items?.map(convertItem) ?? timeline.items,
+          compositions:
+            timeline.compositions?.map((composition) => ({
+              ...composition,
+              items: composition.items?.map(convertItem) ?? composition.items,
+            })) ?? timeline.compositions,
+        },
+      } as Project
+    },
+  },
+  /**
+   * Version 13: Introduce standalone timeline tabs (multi-timeline)
+   *
+   * Adds the optional `timeline.topLevelSequenceIds` field — the ordered set of
+   * sub-compositions promoted to standalone timeline tabs ("sequences"). This
+   * is a purely additive optional field: existing projects have only the Main
+   * timeline, so the field stays absent and no data transform is required.
+   * Normalization prunes any ids that don't resolve to a composition.
+   */
+  13: {
+    version: 13,
+    description: 'Add topLevelSequenceIds for standalone timeline tabs (multi-timeline)',
+    migrate: (project: Project): Project => project,
+  },
+  /**
+   * Version 14: Persist the composition editing surface.
+   *
+   * Every composition created before the dedicated compositing workspace is a
+   * classic sequence/compound timeline. Mark those explicitly so opening a
+   * legacy project can never silently route it into the new layer editor.
+   */
+  14: {
+    version: 14,
+    description: 'Add sequence vs composite-2d composition editor kind',
+    migrate: (project: Project): Project => {
+      if (!project.timeline?.compositions) return project
+      return {
+        ...project,
+        timeline: {
+          ...project.timeline,
+          compositions: project.timeline.compositions.map((composition) => ({
+            ...composition,
+            editorKind: composition.editorKind === 'composite-2d' ? 'composite-2d' : 'sequence',
+          })),
+        },
+      }
+    },
+  },
+  /**
+   * Version 15: Mark animation records as Animation Core v2.
+   *
+   * Legacy scalar lanes remain intact and continue to evaluate exactly as
+   * authored. The marker makes the additive vector lanes unambiguous while
+   * allowing projects to transition property-by-property.
+   */
+  15: {
+    version: 15,
+    description: 'Version animation records for vector Position and Scale lanes',
+    migrate: (project: Project): Project => {
+      if (!project.timeline) return project
+
+      const markKeyframes = (
+        keyframes: ProjectTimeline['keyframes'],
+      ): ProjectTimeline['keyframes'] =>
+        keyframes?.map((itemKeyframes) => ({ ...itemKeyframes, animationVersion: 2 }))
+
+      return {
+        ...project,
+        timeline: {
+          ...project.timeline,
+          keyframes: markKeyframes(project.timeline.keyframes),
+          compositions: project.timeline.compositions?.map((composition) => ({
+            ...composition,
+            keyframes: markKeyframes(composition.keyframes),
+          })),
         },
       }
     },

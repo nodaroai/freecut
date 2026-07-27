@@ -461,7 +461,6 @@
           "zoomTo100": "缩放到 100%",
           "toggleSnap": "切换吸附",
           "toggleCanvasSnap": "切换画布（操控器）吸附",
-          "toggleKeyframeEditorPanel": "切换关键帧编辑器面板",
           "editWorkspace": "切换到剪辑工作区",
           "colorWorkspace": "切换到调色工作区",
           "copy": "复制所选项目或关键帧",
@@ -474,6 +473,12 @@
           "clearKeyframes": "清除所选项目的所有关键帧",
           "keyframeEditorGraph": "将关键帧编辑器切换到图形视图",
           "keyframeEditorDopesheet": "将关键帧编辑器切换到摄影表视图",
+          "keyframeEditorSplit": "将关键帧编辑器切换到拆分视图",
+          "editKeyframeAdd": "在播放头处为所选编辑图层添加关键帧",
+          "keyframePrevious": "跳转到上一个属性关键帧",
+          "keyframeNext": "跳转到下一个属性关键帧",
+          "keyframeToggleAuto": "切换活动属性的自动关键帧",
+          "keyframeFit": "使所选关键帧适合视图",
           "markIn": "标记入点",
           "markOut": "标记出点",
           "clearInOut": "清除入点/出点",
@@ -481,7 +486,8 @@
           "overwriteEdit": "覆盖编辑",
           "saveProject": "保存项目",
           "exportVideo": "导出视频",
-          "openSceneBrowser": "打开场景浏览器（搜索 AI 字幕）"
+          "openSceneBrowser": "打开场景浏览器（搜索 AI 字幕）",
+          "animateWorkspace": "切换到动画工作区"
         },
         "searchPlaceholder": "搜索命令或快捷键",
         "searchResults": "快捷键搜索结果",
@@ -491,7 +497,35 @@
         "resetAllConfirmAction": "全部重置",
         "resetAllToast": "快捷键已重置为默认值",
         "searchResultCount_one": "{{count}} 个结果",
-        "searchResultCount_other": "{{count}} 个结果"
+        "searchResultCount_other": "{{count}} 个结果",
+        "filters": {
+          "custom": "已自定义",
+          "conflicts": "冲突",
+          "unassigned": "未分配"
+        },
+        "scopes": {
+          "keyframes": "关键帧编辑器获得焦点时生效",
+          "sourceMonitor": "源监视器获得焦点时生效"
+        },
+        "scopedBadge": "限定",
+        "addAlternate": "添加备用",
+        "removeBinding": "移除快捷键",
+        "keyboardLabel": "屏幕键盘",
+        "keyNoCommand": "{{key}} 键，无快捷键",
+        "layoutFallbackNote": "显示美式键盘布局，实际按键可能不同。",
+        "undo": "撤销",
+        "reassignedToast": "已重新分配快捷键",
+        "importNoChanges": "此预设与当前快捷键一致。",
+        "importReviewTitle": "查看快捷键导入",
+        "importReviewDescription": "应用此预设将替换你当前的自定义快捷键。",
+        "importApply": "应用预设",
+        "importChangeCount_one": "将更改 {{count}} 个快捷键",
+        "importChangeCount_other": "将更改 {{count}} 个快捷键",
+        "importReplaceCount_one": "替换 {{count}} 个自定义快捷键",
+        "importReplaceCount_other": "替换 {{count}} 个自定义快捷键",
+        "announceRecording": "正在为 {{command}} 录制快捷键。请按下组合键。",
+        "announceCaptured": "已捕获 {{binding}}",
+        "announceConflict": "{{binding}} 与 {{action}} 冲突"
       }
     }
   },
@@ -503,6 +537,20 @@
       "unexpectedError": "发生了意外错误",
       "tryAgain": "重试",
       "reloadPage": "重新加载页面"
+    },
+    "routeError": {
+      "title": "出了点问题",
+      "description": "FreeCut 无法完成此页面的加载。",
+      "projectNotFoundTitle": "找不到此项目",
+      "projectNotFoundDescription": "该项目可能已被移动或删除，或者你打开的是旧链接。工作区中的其他项目仍然可用。",
+      "backToProjects": "返回项目列表",
+      "supportHint": "如需帮助，请复制错误详情并发送给开发者。",
+      "copyDetails": "复制错误详情",
+      "detailsCopied": "已复制错误详情",
+      "copyFailed": "无法复制详情",
+      "causePermission": "FreeCut 已失去使用工作区文件夹的权限。请重新连接，或选择其他文件夹。",
+      "causeMissing": "找不到你的工作区文件夹。它可能已被移动、重命名或删除。",
+      "causeUnsupported": "你的工作区文件夹位于不支持 FreeCut 所需全部功能的驱动器上。云同步文件夹和网络文件夹经常如此。选择本地磁盘上的文件夹通常可以解决。"
     }
   }
 }

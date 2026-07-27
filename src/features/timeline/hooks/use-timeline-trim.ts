@@ -12,6 +12,7 @@ import { useSnapCalculator } from './use-snap-calculator'
 import { setActiveSnapTargetIfChanged } from '../utils/snap-target-state'
 import { clampTrimAmount, clampToAdjacentItems, type TrimHandle } from '../utils/trim-utils'
 import { useTransitionsStore } from '../stores/transitions-store'
+import { useKeyframesStore } from '../stores/keyframes-store'
 import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store'
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store'
 import { useTransitionBreakPreviewStore } from '../stores/transition-break-preview-store'
@@ -39,10 +40,11 @@ import {
   type PreviewItemUpdate,
 } from '../utils/item-edit-preview'
 import {
-  clampRippleTrimDeltaToPreserveTransition,
-  clampRollingTrimDeltaToPreserveTransition,
-} from '../utils/transition-utils'
+  clampRippleTrimDeltaToPreserveEditState,
+  clampRollingTrimDeltaToPreserveEditState,
+} from '../utils/trim-edit-constraints'
 import { getTransitionBridgeAtHandle } from '../utils/transition-edit-guards'
+import { createRafCoalescedCallback } from '../utils/raf-coalesced-callback'
 
 interface TrimState {
   isTrimming: boolean
@@ -332,13 +334,14 @@ export function useTimelineTrim(
           }
         }
 
-        const transitionAtHandle = getTransitionBridgeAtHandle(transitions, currentItem.id, handle!)
-        const transitionClamped = clampRollingTrimDeltaToPreserveTransition(
+        const transitionClamped = clampRollingTrimDeltaToPreserveEditState(
           currentItem,
           handle!,
           deltaFrames,
           neighbor,
-          transitionAtHandle,
+          allItems,
+          transitions,
+          useKeyframesStore.getState().keyframesByItemId,
           fps,
         )
         if (transitionClamped !== deltaFrames) {
@@ -348,21 +351,20 @@ export function useTimelineTrim(
         }
       }
 
-      if (isRippleEdit && !trimStateRef.current.destroyTransitionAtHandle) {
-        const transitionAtHandle = getTransitionBridgeAtHandle(transitions, currentItem.id, handle!)
-        const neighborAtHandle = transitionAtHandle
-          ? (allItems.find((candidate) =>
-              handle === 'end'
-                ? candidate.id === transitionAtHandle.rightClipId
-                : candidate.id === transitionAtHandle.leftClipId,
-            ) ?? null)
+      if (isRippleEdit) {
+        const transitionAtHandle = trimStateRef.current.destroyTransitionAtHandle
+          ? getTransitionBridgeAtHandle(transitions, currentItem.id, handle!)
           : null
-        const transitionClamped = clampRippleTrimDeltaToPreserveTransition(
+        const preservedTransitions = transitionAtHandle
+          ? transitions.filter((transition) => transition.id !== transitionAtHandle.id)
+          : transitions
+        const transitionClamped = clampRippleTrimDeltaToPreserveEditState(
           currentItem,
           handle!,
           deltaFrames,
-          neighborAtHandle,
-          transitionAtHandle,
+          allItems,
+          preservedTransitions,
+          useKeyframesStore.getState().keyframesByItemId,
           fps,
         )
         if (transitionClamped !== deltaFrames) {
@@ -627,15 +629,17 @@ export function useTimelineTrim(
         isConstrained !== trimStateRef.current.isConstrained ||
         constraintLabel !== trimStateRef.current.constraintLabel
       ) {
-        setTrimState((prev) => ({
-          ...prev,
+        const nextTrimState = {
+          ...trimStateRef.current,
           currentDelta: deltaFrames,
           isRollingEdit: isRolling,
           isRippleEdit,
           neighborId: neighborId,
           isConstrained,
           constraintLabel,
-        }))
+        }
+        trimStateRef.current = nextTrimState
+        setTrimState(nextTrimState)
       }
 
       setActiveSnapTargetIfChanged({
@@ -738,6 +742,11 @@ export function useTimelineTrim(
   // Setup and cleanup mouse event listeners
   useEffect(() => {
     if (trimState.isTrimming) {
+      const coalescedMouseMove = createRafCoalescedCallback(handleMouseMove)
+      const handleCoalescedMouseUp = () => {
+        coalescedMouseMove.flush()
+        handleMouseUp()
+      }
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Alt') {
           e.preventDefault() // Prevent browser menu activation on Windows
@@ -752,14 +761,15 @@ export function useTimelineTrim(
         if (e.key === 'Shift') shiftKeyRef.current = false
       }
 
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
+      window.addEventListener('mousemove', coalescedMouseMove.queue)
+      window.addEventListener('mouseup', handleCoalescedMouseUp)
       window.addEventListener('keydown', handleKeyDown)
       window.addEventListener('keyup', handleKeyUp)
 
       return () => {
-        window.removeEventListener('mousemove', handleMouseMove)
-        window.removeEventListener('mouseup', handleMouseUp)
+        window.removeEventListener('mousemove', coalescedMouseMove.queue)
+        window.removeEventListener('mouseup', handleCoalescedMouseUp)
+        coalescedMouseMove.cancel()
         window.removeEventListener('keydown', handleKeyDown)
         window.removeEventListener('keyup', handleKeyUp)
         useRollingEditPreviewStore.getState().clearPreview()

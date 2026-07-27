@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "Editor-Symbolleiste",
     "workspaces": {
+      "motion": "Motion",
       "label": "Arbeitsbereiche",
       "edit": "Schnitt",
       "color": "Farbe",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "Tastenkürzel",
     "keyboardShortcutsAria": "Tastenkürzel",
     "viewOnGitHub": "Auf GitHub ansehen",
+    "joinDiscord": "Discord beitreten",
     "debugPanel": "Debug-Bereich",
     "debugPanelAria": "Debug-Bereich",
     "save": "Speichern",
@@ -80,7 +82,11 @@
       "autoSave": "Automatisches Speichern",
       "interval": "Intervall",
       "intervalMinutes": "{{count}} Min.",
-      "undoHistoryDepth": "Tiefe des Rückgängig-Verlaufs"
+      "undoHistoryDepth": "Tiefe des Rückgängig-Verlaufs",
+      "uiSounds": "Interface-Sounds",
+      "uiSoundVolume": "Lautstärke",
+      "uiSoundVoice": "Sound-Thema",
+      "uiSoundPreview": "Vorschau"
     },
     "ai": {
       "captionSampleInterval": "Untertitel-Abtastintervall",

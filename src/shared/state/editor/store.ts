@@ -11,6 +11,7 @@ import {
   type EditorWorkspaceId,
   type EditorWorkspaceLayout,
 } from '@/config/editor-workspaces'
+import { usePlaybackStore } from '@/shared/state/playback'
 
 const LEGACY_SIDEBAR_DEFAULT_WIDTH = 320
 const WORKSPACE_STORAGE_KEY = 'editor:workspace'
@@ -123,7 +124,6 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   activePanel: null,
   leftSidebarOpen: true,
   rightSidebarOpen: true,
-  keyframeEditorOpen: false,
   keyframeEditorShortcutScopeActive: false,
   transcriptEditorShortcutScopeActive: false,
   workspace: initialWorkspace,
@@ -169,32 +169,22 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   setActivePanel: (panel) => set({ activePanel: panel }),
   setLeftSidebarOpen: (open) => set({ leftSidebarOpen: open }),
   setRightSidebarOpen: (open) => set({ rightSidebarOpen: open }),
-  setKeyframeEditorOpen: (open) =>
-    set((state) => ({
-      keyframeEditorOpen: open,
-      keyframeEditorShortcutScopeActive: open ? state.keyframeEditorShortcutScopeActive : false,
-      leftSidebarOpen: open ? true : state.leftSidebarOpen,
-    })),
   setKeyframeEditorShortcutScopeActive: (active) =>
     set({ keyframeEditorShortcutScopeActive: active }),
   setTranscriptEditorShortcutScopeActive: (active) =>
     set({ transcriptEditorShortcutScopeActive: active }),
   toggleLeftSidebar: () => set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
   toggleRightSidebar: () => set((state) => ({ rightSidebarOpen: !state.rightSidebarOpen })),
-  toggleKeyframeEditorOpen: () =>
-    set((state) => {
-      const nextOpen = !state.keyframeEditorOpen
-      return {
-        keyframeEditorOpen: nextOpen,
-        keyframeEditorShortcutScopeActive: nextOpen
-          ? state.keyframeEditorShortcutScopeActive
-          : false,
-        leftSidebarOpen: nextOpen ? true : state.leftSidebarOpen,
-      }
-    }),
   setWorkspace: (workspace) =>
     set((state) => {
       if (state.workspace === workspace) return state
+
+      // A workspace swap can replace the mounted preview surface. Stop the
+      // shared clock before React mounts the destination canvas so it cannot
+      // inherit live playback and briefly advance footage while settling.
+      const playback = usePlaybackStore.getState()
+      playback.pause()
+      playback.setPreviewFrame(null)
 
       // Remember the outgoing workspace's layout so the user's tweaks
       // survive a round trip; the incoming workspace restores its own

@@ -84,6 +84,18 @@
       "selectFormat": "形式を選択",
       "selectQuality": "品質を選択",
       "selectResolution": "解像度を選択",
+      "sequence": "シーケンス",
+      "subtitleMode": {
+        "off": "オフ",
+        "burn": "焼き込み",
+        "sidecar": "外部 .srt",
+        "embedded": "埋め込みトラック",
+        "offDescription": "書き出した動画に字幕は入りません。",
+        "burnDescription": "字幕を動画に焼き込みます。すべてのプレーヤーで表示されます。",
+        "sidecarDescription": "字幕なしの動画と別の .srt 字幕ファイル。",
+        "embeddedDescription": "オン/オフ切り替え可能な字幕トラック（WebM/MKV）。"
+      },
+      "subtitles": "字幕",
       "video": "動画"
     },
     "videoContainer": {
@@ -126,6 +138,15 @@
         "video-codec-supported": {
           "title": "動画コーデックに対応しています",
           "detail": "{{codec}} はこのブラウザーで {{container}} としてエンコードできます。"
+        },
+        "audio-codec-supported": {
+          "title": "音声コーデックに対応しています",
+          "detail": "このブラウザーでは {{codec}} 音声を {{container}} にエンコードできます。"
+        },
+        "audio-codec-unavailable": {
+          "title": "音声コーデックを利用できません",
+          "detail": "このブラウザーでは {{container}} 用の {{codec}} 音声をエンコードできません。",
+          "fix": "Opus 音声を使用するには WebM または MKV を選ぶか、対応ブラウザーに更新してください。"
         },
         "worker-unavailable-fallback": {
           "title": "ワーカー書き出しを利用できません",

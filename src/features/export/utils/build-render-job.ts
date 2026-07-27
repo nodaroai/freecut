@@ -9,11 +9,14 @@
 
 import type { ExtendedExportSettings } from '@/types/export'
 import type { ProjectMarker } from '@/types/timeline'
-import { useTimelineStore } from '@/features/export/deps/timeline'
+import {
+  getActiveExportSequenceId,
+  getExportableSequence,
+  type ExportableSequence,
+} from '@/features/export/deps/timeline-compositions'
 import { useProjectStore } from '@/features/export/deps/projects'
-import { usePlaybackStore } from '@/shared/state/playback'
-import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
-import { resolveClientSettings } from './render-pipeline'
+import { mapRequestedClientSettings, resolveClientSettings } from './render-pipeline'
+import { assessSmartCopyEligibility } from './smart-copy'
 import type { ClientExportSettings } from './client-renderer'
 import type { RenderJob, RenderJobSnapshot } from '../stores/render-queue-store'
 
@@ -47,37 +50,41 @@ interface TimelineCapture {
   markers: ProjectMarker[]
 }
 
-/** Read + deep-copy everything a render needs from the live stores. */
-function captureTimeline(): TimelineCapture {
-  const tl = useTimelineStore.getState()
+/**
+ * Read + deep-copy everything a render needs for a chosen sequence (Main or a
+ * standalone sequence tab). Defaults to the active tab — "export what you see" —
+ * so callers that don't pick a sequence behave exactly as before.
+ */
+function captureTimeline(sequence?: ExportableSequence): TimelineCapture {
+  const seq = sequence ?? getExportableSequence(getActiveExportSequenceId())
   const currentProject = useProjectStore.getState().currentProject
-  const playback = usePlaybackStore.getState()
-
-  const width = currentProject?.metadata?.width ?? DEFAULT_PROJECT_WIDTH
-  const height = currentProject?.metadata?.height ?? DEFAULT_PROJECT_HEIGHT
 
   const snapshot: RenderJobSnapshot = {
-    tracks: clone(tl.tracks),
-    items: clone(tl.items),
-    transitions: clone(tl.transitions ?? []),
-    keyframes: clone(tl.keyframes ?? []),
-    fps: tl.fps,
-    width,
-    height,
-    backgroundColor: currentProject?.metadata?.backgroundColor,
-    busAudioEq: playback.busAudioEq,
-    masterBusDb: playback.masterBusDb,
+    tracks: clone(seq.tracks),
+    items: clone(seq.items),
+    transitions: clone(seq.transitions),
+    keyframes: clone(seq.keyframes),
+    fps: seq.fps,
+    width: seq.width,
+    height: seq.height,
+    backgroundColor: seq.backgroundColor,
+    busAudioEq: seq.busAudioEq,
+    masterBusDb: seq.masterBusDb,
   }
+
+  // Distinguish exported sequence files from the Main-timeline export.
+  const baseName = currentProject?.name ?? 'export'
+  const projectName = seq.id === null ? baseName : `${baseName} - ${seq.name}`
 
   return {
     snapshot,
-    fps: tl.fps,
+    fps: seq.fps,
     projectId: currentProject?.id,
-    projectName: currentProject?.name ?? 'export',
-    durationFrames: timelineDurationFrames(tl.items),
-    storeInPoint: tl.inPoint,
-    storeOutPoint: tl.outPoint,
-    markers: tl.markers ?? [],
+    projectName,
+    durationFrames: seq.durationFrames || timelineDurationFrames(seq.items),
+    storeInPoint: seq.inPoint,
+    storeOutPoint: seq.outPoint,
+    markers: seq.markers,
   }
 }
 
@@ -97,6 +104,8 @@ export interface BuildRenderJobOptions {
   name?: string
   /** Reuse a single capture across many segment jobs (avoids re-cloning). */
   capture?: TimelineCapture
+  /** Which sequence to export (Main or a standalone tab). Defaults to active. */
+  sequence?: ExportableSequence
 }
 
 /**
@@ -143,9 +152,27 @@ export async function buildRenderJob({
   outPoint = null,
   name,
   capture,
+  sequence,
 }: BuildRenderJobOptions): Promise<RenderJob> {
-  const cap = capture ?? captureTimeline()
-  const { clientSettings, exportMode } = await resolveClientSettings(settings, cap.fps)
+  const cap = capture ?? captureTimeline(sequence)
+  const requested = mapRequestedClientSettings(settings, cap.fps)
+  const smartCopy = assessSmartCopyEligibility({
+    settings: requested.clientSettings,
+    tracks: cap.snapshot.tracks,
+    items: cap.snapshot.items,
+    transitions: cap.snapshot.transitions,
+    keyframes: cap.snapshot.keyframes,
+    fps: cap.snapshot.fps,
+    width: cap.snapshot.width,
+    height: cap.snapshot.height,
+    inPoint,
+    outPoint,
+    busAudioEq: cap.snapshot.busAudioEq,
+    masterBusDb: cap.snapshot.masterBusDb,
+  })
+  const { clientSettings, exportMode } = smartCopy.eligible
+    ? requested
+    : await resolveClientSettings(settings, cap.fps)
   return assembleJob(cap, clientSettings, exportMode, inPoint, outPoint, name)
 }
 
@@ -204,8 +231,9 @@ export async function buildSegmentJobs(
   settings: ExtendedExportSettings,
   ranges: FrameRange[],
   partLabel: (index: number, range: FrameRange) => string,
+  sequence?: ExportableSequence,
 ): Promise<RenderJob[]> {
-  const capture = captureTimeline()
+  const capture = captureTimeline(sequence)
   const { clientSettings, exportMode } = await resolveClientSettings(settings, capture.fps)
   return ranges.map((range, i) =>
     assembleJob(capture, clientSettings, exportMode, range.start, range.end, partLabel(i, range)),

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { ClientCodec } from './client-renderer'
 const { mockCanEncodeVideo } = vi.hoisted(() => ({
@@ -23,7 +25,6 @@ import {
   getDefaultAudioCodec,
   getDefaultVideoCodec,
   getSupportedCodecs,
-  getVideoBitrateForQuality,
   mapToClientSettings,
   selectFallbackVideoCodec,
   validateSettings,
@@ -60,7 +61,7 @@ describe('client-renderer export matrix', () => {
 
     expect(clientSettings.codec).toBe('av1')
     expect(clientSettings.container).toBe('webm')
-    expect(clientSettings.videoBitrate).toBe(getVideoBitrateForQuality('high'))
+    expect(clientSettings.videoBitrate).toBe(2_400_000)
   })
 
   it('only falls back to codecs that match the selected container', () => {

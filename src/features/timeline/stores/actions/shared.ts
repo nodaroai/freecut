@@ -11,6 +11,7 @@ import { emitDomainEvent } from '@/shared/utils/domain-events'
 import { useTimelineCommandStore } from '../timeline-command-store'
 import { useItemsStore } from '../items-store'
 import { useTransitionsStore } from '../transitions-store'
+import { useTimelineSettingsStore } from '../timeline-settings-store'
 import { useKeyframesStore } from '../keyframes-store'
 import { useCompositionsStore, type SubComposition } from '../compositions-store'
 import { useCompositionNavigationStore } from '../composition-navigation-store'
@@ -40,7 +41,13 @@ export function applyTransitionRepairs(
   const items = useItemsStore.getState().items
   const transitions = useTransitionsStore.getState().transitions
   const { valid, repaired, broken } = withPerfMeasure('tl.repairTransitions', () =>
-    repairTransitions(changedClipIds, items, transitions, deletedClipIds),
+    repairTransitions(
+      changedClipIds,
+      items,
+      transitions,
+      deletedClipIds,
+      useTimelineSettingsStore.getState().fps,
+    ),
   )
 
   // Merge valid + repaired transitions
@@ -102,31 +109,46 @@ export function getRootTimelineSnapshot(
   currentSnapshot: TimelineSnapshotLike,
 ): TimelineScopeSnapshot {
   const navState = useCompositionNavigationStore.getState()
-  if (navState.activeCompositionId === null) {
-    return {
-      compositionId: null,
-      ...currentSnapshot,
-    }
+  const onMainTab = (navState.breadcrumbs[0]?.compositionId ?? null) === null
+
+  // The "root" is always the Main timeline. Where its content lives depends on
+  // where we are: live (Main tab, no drill-in), stashed under a compound-clip
+  // drill-in from Main, or held aside while a sequence tab is active.
+  const emptyRoot: TimelineScopeSnapshot = {
+    compositionId: null,
+    items: [],
+    tracks: [],
+    transitions: [],
+    keyframes: [],
   }
 
-  const rootStash = navState.stashStack[0]
-  if (!rootStash) {
-    return {
-      compositionId: null,
-      items: [],
-      tracks: [],
-      transitions: [],
-      keyframes: [],
+  if (onMainTab) {
+    if (navState.activeCompositionId === null) {
+      return { compositionId: null, ...currentSnapshot }
     }
+    const rootStash = navState.stashStack[0]
+    return rootStash
+      ? {
+          compositionId: rootStash.compositionId,
+          items: rootStash.items,
+          tracks: rootStash.tracks,
+          transitions: rootStash.transitions,
+          keyframes: rootStash.keyframes,
+        }
+      : emptyRoot
   }
 
-  return {
-    compositionId: rootStash.compositionId,
-    items: rootStash.items,
-    tracks: rootStash.tracks,
-    transitions: rootStash.transitions,
-    keyframes: rootStash.keyframes,
-  }
+  // On a sequence tab: Main is held in mainHolder.
+  const main = navState.mainHolder
+  return main
+    ? {
+        compositionId: null,
+        items: main.items,
+        tracks: main.tracks,
+        transitions: main.transitions,
+        keyframes: main.keyframes,
+      }
+    : emptyRoot
 }
 
 export function getEffectiveCompositions(currentSnapshot: TimelineSnapshotLike): SubComposition[] {

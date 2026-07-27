@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "编辑器工具栏",
     "workspaces": {
+      "motion": "Motion",
       "label": "工作区",
       "edit": "剪辑",
       "color": "调色",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "键盘快捷键",
     "keyboardShortcutsAria": "键盘快捷键",
     "viewOnGitHub": "在 GitHub 上查看",
+    "joinDiscord": "加入 Discord",
     "debugPanel": "调试面板",
     "debugPanelAria": "调试面板",
     "save": "保存",
@@ -80,7 +82,11 @@
       "autoSave": "自动保存",
       "interval": "间隔",
       "intervalMinutes": "{{count}} 分钟",
-      "undoHistoryDepth": "撤销历史深度"
+      "undoHistoryDepth": "撤销历史深度",
+      "uiSounds": "界面音效",
+      "uiSoundVolume": "音效音量",
+      "uiSoundVoice": "音效主题",
+      "uiSoundPreview": "试听"
     },
     "ai": {
       "captionSampleInterval": "字幕采样间隔",

@@ -1,4 +1,5 @@
 import { createLogger } from '@/shared/logging/logger'
+import { migrateProject } from '@/shared/projects/migrations'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { roundToNearestAllowedFps } from '../utils/codec-mapping'
 import { useProjectStore } from '../deps/projects-contract'
@@ -106,7 +107,15 @@ async function restoreTimelineSnapshot(
   if (!projectJson) return false
 
   try {
-    const snapshot = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson
+    const parsed = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson
+    if (!parsed?.project) return false
+
+    // Snapshots can predate schema bumps (saved by an older editor build). Bring
+    // them to the current schema before grafting the timeline onto the fresh
+    // project — the fresh project is already at the current version, so the
+    // editor's own migration gate never sees this data.
+    const snapshot = { ...parsed, project: migrateProject(parsed.project).project }
+
     const savedTimeline = snapshot.project?.timeline
     if (!savedTimeline?.items) return false
 

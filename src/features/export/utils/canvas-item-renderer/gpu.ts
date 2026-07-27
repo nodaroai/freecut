@@ -20,19 +20,27 @@ import {
   invertCornerPinHomography,
   resolveCornerPinForSize,
 } from '@/features/export/deps/composition-runtime'
-import { resolveAnimatedTextItem } from '@/features/export/deps/keyframes'
+import { resolveAnimatedShapeItem, resolveAnimatedTextItem } from '@/features/export/deps/keyframes'
 import type { GpuTexturePool } from '@/infrastructure/gpu-compositor'
 import type { GpuMediaRect, GpuMediaRenderParams } from '@/infrastructure/gpu-media'
 import { MAX_GPU_SHAPE_PATH_VERTICES } from '@/infrastructure/gpu-shapes'
 import { doesMaskAffectTrack } from '@/shared/utils/mask-scope'
+import { isTextMotionActive } from '@/shared/typography/text-motion'
+import { flattenBezierPath } from '@/shared/graphics/shapes/bezier-path'
+import { resolveShapeLinearGradient } from '@/shared/graphics/shapes/linear-gradient'
+import { recordPreviewVideoSource } from '@/shared/logging/preview-scrub-performance'
 import { getAnimatedTransform } from '../canvas-keyframes'
 import { combineEffects, getAdjustmentLayerEffects, getGpuEffectInstances } from '../canvas-effects'
 import {
   getItemRenderTimelineSpan,
-  getRenderTimelineSourceStart,
+  resolveCompositionSourceFrame,
   type RenderTimelineSpan,
 } from '../render-span'
-import { resolvePreviewDomVideoDrawDecision } from '../frame-source-policy'
+import {
+  isPreviewGpuEffectFrameHoldFresh,
+  resolvePreviewDomVideoDrawDecision,
+  shouldHoldPreviewGpuEffectFrame,
+} from '../frame-source-policy'
 import type {
   GpuBitmapMaskTextureCacheEntry,
   GpuTextTextureCacheEntry,
@@ -42,28 +50,153 @@ import type {
   ResolvedGpuMediaParticipantSource,
   TransitionParticipantRenderState,
 } from './types'
+import { resolveSubCompRenderDataForInstance } from './composition-instance'
 import {
   GPU_BITMAP_MASK_TEXTURE_CACHE_MAX_BYTES,
   GPU_TEXT_TEXTURE_CACHE_MAX_BYTES,
   log,
   resolveItemTransform,
 } from './shared'
+import { calculateContainedMediaDrawLayout, hasCropFeather } from './media-draw'
 import {
-  calculateContainedMediaDrawLayout,
-  calculateMediaDrawDimensions,
-  hasCropFeather,
-} from './media-draw'
-import { findSubCompOcclusionCutoffOrder, getActiveSubCompMasks } from './composition'
+  createSubCompositionRenderContext,
+  findSubCompOcclusionCutoffOrder,
+  getActiveSubCompMasks,
+} from './composition'
 import { resolveVideoParticipantSourceTime } from './video'
+
+type GpuParticipantRenderOptions = { clear?: boolean; blend?: boolean }
+
+function renderGpuShapeParticipantToTexture(
+  prepared: PreparedGpuMediaParticipant,
+  rctx: ItemRenderContext,
+  outputTexture: GPUTexture,
+  options?: GpuParticipantRenderOptions,
+): boolean {
+  const { media, participant } = prepared
+  if (media.kind !== 'shape') return false
+
+  return (
+    rctx.gpuShapePipeline?.renderShapeToTexture(outputTexture, {
+      outputWidth: rctx.canvasSettings.width,
+      outputHeight: rctx.canvasSettings.height,
+      transformRect: prepared.transformRect,
+      rotationRad: prepared.rotationRad,
+      opacity: participant.transform.opacity,
+      shapeType: media.item.shapeType,
+      fillColor: media.fillColor,
+      gradientEndColor: media.gradientEndColor,
+      gradientAngleRad: media.gradientAngleRad,
+      strokeColor: media.strokeColor,
+      strokeWidth: media.item.strokeWidth,
+      cornerRadius: media.item.cornerRadius,
+      direction: media.item.direction,
+      points: media.item.points,
+      innerRadius: media.item.innerRadius,
+      trimPathStart: media.item.trimPathStart,
+      trimPathEnd: media.item.trimPathEnd,
+      trimPathOffset: media.item.trimPathOffset,
+      taperStartWidth: media.item.taperStartWidth,
+      taperEndWidth: media.item.taperEndWidth,
+      taperStartLength: media.item.taperStartLength,
+      taperEndLength: media.item.taperEndLength,
+      aspectRatioLocked: participant.item.transform?.aspectRatioLocked,
+      pathVertices: media.pathVertices,
+      pathClosed: media.item.pathClosed,
+      clear: options?.clear,
+      blend: options?.blend,
+    }) ?? false
+  )
+}
+
+function renderGpuTextureParticipantToTexture(
+  prepared: PreparedGpuMediaParticipant,
+  rctx: ItemRenderContext,
+  outputTexture: GPUTexture,
+  options?: GpuParticipantRenderOptions,
+): boolean {
+  const { media, participant } = prepared
+  if (media.kind !== 'text' && media.kind !== 'composition') return false
+
+  const isComposition = media.kind === 'composition'
+  return (
+    rctx.gpuMediaPipeline?.renderTextureToTexture(media.texture, outputTexture, {
+      sourceWidth: media.sourceWidth,
+      sourceHeight: media.sourceHeight,
+      outputWidth: rctx.canvasSettings.width,
+      outputHeight: rctx.canvasSettings.height,
+      sourceRect: isComposition
+        ? prepared.sourceRect
+        : { x: 0, y: 0, width: media.sourceWidth, height: media.sourceHeight },
+      destRect: prepared.destRect,
+      transformRect: prepared.transformRect,
+      featherPixels: isComposition ? prepared.featherPixels : undefined,
+      cornerRadius: prepared.cornerRadius,
+      cornerPin: prepared.cornerPin,
+      opacity: participant.transform.opacity,
+      rotationRad: prepared.rotationRad,
+      clear: options?.clear,
+      blend: options?.blend,
+    }) ?? false
+  )
+}
+
+function renderGpuSourceParticipantToTexture(
+  prepared: PreparedGpuMediaParticipant,
+  rctx: ItemRenderContext,
+  outputTexture: GPUTexture,
+  options?: GpuParticipantRenderOptions,
+): boolean {
+  const { media, participant } = prepared
+  if (media.kind !== 'media') return false
+
+  return (
+    rctx.gpuMediaPipeline?.renderSourceToTexture(media.source, outputTexture, {
+      sourceWidth: media.sourceWidth,
+      sourceHeight: media.sourceHeight,
+      outputWidth: rctx.canvasSettings.width,
+      outputHeight: rctx.canvasSettings.height,
+      sourceRect: prepared.sourceRect,
+      destRect: prepared.destRect,
+      transformRect: prepared.transformRect,
+      featherPixels: prepared.featherPixels,
+      cornerRadius: prepared.cornerRadius,
+      cornerPin: prepared.cornerPin,
+      opacity: participant.transform.opacity,
+      rotationRad: prepared.rotationRad,
+      flipX: prepared.flipX,
+      flipY: prepared.flipY,
+      clear: options?.clear,
+      blend: options?.blend,
+    }) ?? false
+  )
+}
+
+function renderPreparedGpuParticipantToTexture(
+  prepared: PreparedGpuMediaParticipant,
+  rctx: ItemRenderContext,
+  outputTexture: GPUTexture,
+  options?: GpuParticipantRenderOptions,
+): boolean {
+  switch (prepared.media.kind) {
+    case 'shape':
+      return renderGpuShapeParticipantToTexture(prepared, rctx, outputTexture, options)
+    case 'text':
+    case 'composition':
+      return renderGpuTextureParticipantToTexture(prepared, rctx, outputTexture, options)
+    case 'media':
+      return renderGpuSourceParticipantToTexture(prepared, rctx, outputTexture, options)
+  }
+}
 
 export async function renderGpuMediaParticipantToTexture(
   prepared: PreparedGpuMediaParticipant,
   rctx: ItemRenderContext,
   gpuTexturePool: Pick<GpuTexturePool, 'acquire' | 'release'>,
   outputTexture: GPUTexture,
-  options?: { clear?: boolean; blend?: boolean },
+  options?: GpuParticipantRenderOptions,
 ): Promise<boolean> {
-  const { participant, media } = prepared
+  const { participant } = prepared
 
   const mediaOutputTexture =
     participant.effects.length > 0
@@ -71,61 +204,12 @@ export async function renderGpuMediaParticipantToTexture(
       : outputTexture
 
   try {
-    const renderedMedia =
-      media.kind === 'shape'
-        ? (rctx.gpuShapePipeline?.renderShapeToTexture(mediaOutputTexture, {
-            outputWidth: rctx.canvasSettings.width,
-            outputHeight: rctx.canvasSettings.height,
-            transformRect: prepared.transformRect,
-            rotationRad: prepared.rotationRad,
-            opacity: participant.transform.opacity,
-            shapeType: media.item.shapeType,
-            fillColor: media.fillColor,
-            strokeColor: media.strokeColor,
-            strokeWidth: media.item.strokeWidth,
-            cornerRadius: media.item.cornerRadius,
-            direction: media.item.direction,
-            points: media.item.points,
-            innerRadius: media.item.innerRadius,
-            aspectRatioLocked: participant.item.transform?.aspectRatioLocked,
-            pathVertices: media.pathVertices,
-            clear: options?.clear,
-            blend: options?.blend,
-          }) ?? false)
-        : media.kind === 'text' || media.kind === 'composition'
-          ? (rctx.gpuMediaPipeline?.renderTextureToTexture(media.texture, mediaOutputTexture, {
-              sourceWidth: media.sourceWidth,
-              sourceHeight: media.sourceHeight,
-              outputWidth: rctx.canvasSettings.width,
-              outputHeight: rctx.canvasSettings.height,
-              sourceRect: { x: 0, y: 0, width: media.sourceWidth, height: media.sourceHeight },
-              destRect: prepared.destRect,
-              transformRect: prepared.transformRect,
-              cornerRadius: prepared.cornerRadius,
-              cornerPin: prepared.cornerPin,
-              opacity: participant.transform.opacity,
-              rotationRad: prepared.rotationRad,
-              clear: options?.clear,
-              blend: options?.blend,
-            }) ?? false)
-          : (rctx.gpuMediaPipeline?.renderSourceToTexture(media.source, mediaOutputTexture, {
-              sourceWidth: media.sourceWidth,
-              sourceHeight: media.sourceHeight,
-              outputWidth: rctx.canvasSettings.width,
-              outputHeight: rctx.canvasSettings.height,
-              sourceRect: prepared.sourceRect,
-              destRect: prepared.destRect,
-              transformRect: prepared.transformRect,
-              featherPixels: prepared.featherPixels,
-              cornerRadius: prepared.cornerRadius,
-              cornerPin: prepared.cornerPin,
-              opacity: participant.transform.opacity,
-              rotationRad: prepared.rotationRad,
-              flipX: prepared.flipX,
-              flipY: prepared.flipY,
-              clear: options?.clear,
-              blend: options?.blend,
-            }) ?? false)
+    const renderedMedia = renderPreparedGpuParticipantToTexture(
+      prepared,
+      rctx,
+      mediaOutputTexture,
+      options,
+    )
     if (!renderedMedia) return false
     if (mediaOutputTexture === outputTexture) return true
     if (!rctx.gpuPipeline) return false
@@ -181,6 +265,57 @@ export async function renderItemGpuEffectsToTexture(
   }
 }
 
+interface PreviewGpuEffectFrameCacheEntry {
+  canvas: OffscreenCanvas
+  frame: number
+}
+
+const previewGpuEffectFrameCache = new WeakMap<
+  ItemRenderContext,
+  Map<string, PreviewGpuEffectFrameCacheEntry>
+>()
+
+function getPreviewGpuEffectFrameCache(
+  rctx: ItemRenderContext,
+): Map<string, PreviewGpuEffectFrameCacheEntry> {
+  let cache = previewGpuEffectFrameCache.get(rctx)
+  if (!cache) {
+    cache = new Map()
+    previewGpuEffectFrameCache.set(rctx, cache)
+  }
+  return cache
+}
+
+function getFreshPreviewGpuEffectFrame(
+  rctx: ItemRenderContext,
+  itemId: string,
+  currentFrame: number,
+): PreviewGpuEffectFrameCacheEntry | null {
+  const cachedFrame = getPreviewGpuEffectFrameCache(rctx).get(itemId)
+  if (!cachedFrame) return null
+  return isPreviewGpuEffectFrameHoldFresh({
+    currentFrame,
+    cachedFrame: cachedFrame.frame,
+    hasCachedFrame: true,
+    fps: rctx.fps,
+  })
+    ? cachedFrame
+    : null
+}
+
+function resolvePreviewGpuEffectFallback(params: {
+  heldFrame: PreviewGpuEffectFrameCacheEntry | null
+  shouldHold: boolean
+  holdReason: string
+  missReason: string
+  details?: Record<string, unknown>
+  record: (reason: string, details?: Record<string, unknown>) => void
+}): OffscreenCanvas | null {
+  const useHeldFrame = params.shouldHold && Boolean(params.heldFrame)
+  params.record(useHeldFrame ? params.holdReason : params.missReason, params.details)
+  return useHeldFrame ? params.heldFrame!.canvas : null
+}
+
 export function renderPreviewVideoGpuEffectsToCanvas(
   item: TimelineItem,
   transform: ItemTransform,
@@ -223,6 +358,13 @@ export function renderPreviewVideoGpuEffectsToCanvas(
     recordFastPath('no-dom-provider')
     return null
   }
+  if (rctx.nonBlockingVideoFrameToleranceSeconds !== undefined) {
+    // Reverse playback should use the full item path so decoded worker frames
+    // remain the preferred source. The DOM-only fast path can otherwise splice
+    // a late nested seek between monotonic worker frames.
+    recordFastPath('non-blocking-frame-delivery')
+    return null
+  }
   if (item.crop) {
     recordFastPath('crop')
     return null
@@ -258,6 +400,8 @@ export function renderPreviewVideoGpuEffectsToCanvas(
     return null
   }
 
+  const frameCache = getPreviewGpuEffectFrameCache(rctx)
+  const heldFrame = getFreshPreviewGpuEffectFrame(rctx, item.id, frame)
   const video = rctx.domVideoElementProvider(item.id)
   const renderSpan = getItemRenderTimelineSpan(item)
   const sourceTime = resolveVideoParticipantSourceTime(item, renderSpan, frame, rctx)
@@ -269,19 +413,39 @@ export function renderPreviewVideoGpuEffectsToCanvas(
     isRenderingTransition: rctx.isRenderingTransition === true,
   })
   if (!video) {
-    recordFastPath('no-dom-video')
-    return null
+    return resolvePreviewGpuEffectFallback({
+      heldFrame,
+      shouldHold: true,
+      holdReason: 'hold-missing-dom-video',
+      missReason: 'no-dom-video',
+      record: recordFastPath,
+    })
   }
   if (!decision.shouldDraw) {
-    recordFastPath(decision.hasReadyDomVideo ? 'dom-video-drift' : 'dom-video-not-ready', {
-      drift: decision.drift,
-      driftThreshold: decision.driftThreshold,
-      videoTime: video.currentTime,
-      sourceTime,
-      readyState: video.readyState,
-      videoWidth: video.videoWidth,
+    return resolvePreviewGpuEffectFallback({
+      heldFrame,
+      shouldHold: shouldHoldPreviewGpuEffectFrame({
+        domVideo: video,
+        sourceTime,
+        speed,
+        isRenderingTransition: rctx.isRenderingTransition === true,
+        currentFrame: frame,
+        cachedFrame: heldFrame?.frame ?? -Infinity,
+        hasCachedFrame: Boolean(heldFrame),
+        fps: rctx.fps,
+      }),
+      holdReason: 'hold-metadata-frame',
+      missReason: decision.hasReadyDomVideo ? 'dom-video-drift' : 'dom-video-not-ready',
+      details: {
+        drift: decision.drift,
+        driftThreshold: decision.driftThreshold,
+        videoTime: video.currentTime,
+        sourceTime,
+        readyState: video.readyState,
+        videoWidth: video.videoWidth,
+      },
+      record: recordFastPath,
     })
-    return null
   }
 
   const drawLayout = calculateContainedMediaDrawLayout(
@@ -304,15 +468,34 @@ export function renderPreviewVideoGpuEffectsToCanvas(
       rctx.canvasSettings.width,
       rctx.canvasSettings.height,
     )
+    if (!canvas) {
+      // applyEffectsToVideo bailed (importExternalTexture unsupported/failed).
+      // Returning null drops this item to the per-frame mediabunny decode path,
+      // so this must NOT be recorded as a fast-path hit.
+      return resolvePreviewGpuEffectFallback({
+        heldFrame,
+        shouldHold: true,
+        holdReason: 'hold-apply-null',
+        missReason: 'apply-null',
+        record: recordFastPath,
+      })
+    }
     recordFastPath('hit', {
       effectCount: enabledEffects.length,
       videoTime: video.currentTime,
       sourceTime,
     })
+    recordPreviewVideoSource({ frame, itemId: item.id, path: 'dom-video', sourceTime })
+    frameCache.set(item.id, { canvas, frame })
     return canvas
   } catch {
-    recordFastPath('apply-failed')
-    return null
+    return resolvePreviewGpuEffectFallback({
+      heldFrame,
+      shouldHold: true,
+      holdReason: 'hold-apply-failed',
+      missReason: 'apply-failed',
+      record: recordFastPath,
+    })
   }
 }
 
@@ -363,7 +546,11 @@ export async function prepareGpuMediaParticipant(
       width: textTransform.width,
       height: textTransform.height,
     }
-    if (transformRect.width <= 0 || transformRect.height <= 0) return null
+    if (transformRect.width <= 0 || transformRect.height <= 0) {
+      // Motion-bypass text sources own their texture — release it.
+      media.close?.()
+      return null
+    }
     return {
       participant,
       media,
@@ -379,34 +566,13 @@ export async function prepareGpuMediaParticipant(
     }
   }
 
-  if (media.kind === 'composition') {
-    const transformRect = calculateMediaDrawDimensions(
-      media.sourceWidth,
-      media.sourceHeight,
-      participant.transform,
-      rctx.canvasSettings,
-    )
-    if (transformRect.width <= 0 || transformRect.height <= 0) return null
-    return {
-      participant,
-      media,
-      sourceRect: { x: 0, y: 0, width: media.sourceWidth, height: media.sourceHeight },
-      destRect: transformRect,
-      transformRect,
-      featherPixels: { left: 0, right: 0, top: 0, bottom: 0 },
-      cornerRadius: participant.transform.cornerRadius,
-      rotationRad: (participant.transform.rotation * Math.PI) / 180,
-      flipX: false,
-      flipY: false,
-    }
-  }
-
   const layout = calculateContainedMediaDrawLayout(
     media.sourceWidth,
     media.sourceHeight,
     participant.transform,
     rctx.canvasSettings,
     media.item.crop,
+    media.kind === 'composition' ? 'fill' : 'contain',
   )
   if (layout.viewportRect.width <= 0 || layout.viewportRect.height <= 0) {
     media.close?.()
@@ -451,24 +617,58 @@ async function resolveGpuMediaParticipantSource(
   if (transform.opacity < 0 || transform.opacity > 1) return null
 
   if (participant.item.type === 'shape') {
-    const shape = participant.item
+    const itemKeyframes =
+      rctx.getCurrentKeyframes?.(participant.item.id) ?? rctx.keyframesMap.get(participant.item.id)
+    const shape = resolveAnimatedShapeItem(
+      participant.item,
+      itemKeyframes,
+      frame - participant.item.from,
+      rctx.canvasSettings.getExpressionItem && rctx.canvasSettings.getExpressionKeyframes
+        ? {
+            globalFrame: frame,
+            canvas: rctx.canvasSettings,
+            getItem: rctx.canvasSettings.getExpressionItem,
+            getKeyframes: rctx.canvasSettings.getExpressionKeyframes,
+          }
+        : undefined,
+    )
     if (getGpuShapeUnsupportedReason(shape, transform, participant.effects, rctx)) return null
     const resolvedPathVertices =
       shape.shapeType === 'path' ? resolveGpuShapePathVertices(shape, transform) : undefined
     const pathVertices = resolvedPathVertices ?? undefined
-    const fillColor = parseGpuColor(shape.fillColor)
+    const linearGradient = resolveShapeLinearGradient(shape)
+    const parsedFillColor = parseGpuColor(linearGradient?.startColor ?? shape.fillColor)
+    const parsedGradientEndColor = linearGradient
+      ? parseGpuColor(linearGradient.endColor)
+      : undefined
     const parsedStrokeColor =
-      shape.strokeWidth && shape.strokeWidth > 0 && shape.strokeColor
+      (shape.strokeEnabled ?? true) &&
+      shape.strokeWidth &&
+      shape.strokeWidth > 0 &&
+      shape.strokeColor
         ? parseGpuColor(shape.strokeColor)
         : undefined
-    if (!fillColor) return null
+    if (!parsedFillColor || (linearGradient && !parsedGradientEndColor)) return null
+    const fillEnabled =
+      shape.shapeType === 'path' && shape.pathClosed === false ? false : (shape.fillEnabled ?? true)
+    const fillColor: [number, number, number, number] = fillEnabled
+      ? parsedFillColor
+      : [parsedFillColor[0], parsedFillColor[1], parsedFillColor[2], 0]
     const strokeColor = parsedStrokeColor ?? undefined
+    const gradientEndColor: [number, number, number, number] | undefined =
+      parsedGradientEndColor && linearGradient
+        ? fillEnabled
+          ? parsedGradientEndColor
+          : [parsedGradientEndColor[0], parsedGradientEndColor[1], parsedGradientEndColor[2], 0]
+        : undefined
     return {
       kind: 'shape',
       item: shape,
       sourceWidth: transform.width,
       sourceHeight: transform.height,
       fillColor,
+      gradientEndColor,
+      gradientAngleRad: linearGradient ? (linearGradient.angle * Math.PI) / 180 : undefined,
       strokeColor,
       pathVertices,
     }
@@ -539,15 +739,11 @@ function resolveGpuTextParticipantSource(
 ): ResolvedGpuMediaParticipantSource | null {
   if (!rctx.gpuPipeline || !rctx.gpuMediaPipeline || !rctx.gpuTextTextureCache) return null
 
+  const relativeFrame = frame - participant.item.from
   const itemKeyframes =
     rctx.getCurrentKeyframes?.(participant.item.id) ?? rctx.keyframesMap.get(participant.item.id)
   const resolvedTextItem = {
-    ...resolveAnimatedTextItem(
-      participant.item,
-      itemKeyframes,
-      frame - participant.item.from,
-      rctx.canvasSettings,
-    ),
+    ...resolveAnimatedTextItem(participant.item, itemKeyframes, relativeFrame, rctx.canvasSettings),
     cornerPin: participant.item.cornerPin,
   }
   const baseTransform = resolveItemTransform(participant.transform)
@@ -557,9 +753,23 @@ function resolveGpuTextParticipantSource(
     : resolvedTransform
   const sourceWidth = Math.max(2, Math.ceil(textureTransform.width))
   const sourceHeight = Math.max(2, Math.ceil(textureTransform.height))
-  const cacheKey = getGpuTextTextureCacheKey(resolvedTextItem, sourceWidth, sourceHeight)
-  const cached = rctx.gpuTextTextureCache.get(cacheKey)
-  if (cached) {
+
+  // Motion text (design D6): while a motion window is active the texture
+  // changes every frame — bypass the cache in BOTH directions (no lookup, no
+  // store) and render directly; the glyph atlas persists, so the per-frame
+  // cost is a vertex rewrite + one draw. Settled frames take the normal
+  // cached path with no motion params, so their pixels and cache key match a
+  // motion-less render exactly.
+  const textMotionSpec = participant.item.textMotion
+  const textMotionActive =
+    textMotionSpec !== undefined &&
+    isTextMotionActive(textMotionSpec, relativeFrame, rctx.fps, participant.item.durationInFrames)
+
+  const cacheKey = textMotionActive
+    ? null
+    : getGpuTextTextureCacheKey(resolvedTextItem, sourceWidth, sourceHeight)
+  const cached = cacheKey ? rctx.gpuTextTextureCache.get(cacheKey) : undefined
+  if (cacheKey && cached) {
     rctx.gpuTextTextureCache.delete(cacheKey)
     rctx.gpuTextTextureCache.set(cacheKey, cached)
     logGpuTextTextureCacheEvent('hit', {
@@ -591,6 +801,16 @@ function resolveGpuTextParticipantSource(
       item: resolvedTextItem,
       width: sourceWidth,
       height: sourceHeight,
+      ...(textMotionActive && textMotionSpec
+        ? {
+            motion: {
+              spec: textMotionSpec,
+              relativeFrame,
+              fps: rctx.fps,
+              durationInFrames: participant.item.durationInFrames,
+            },
+          }
+        : {}),
     })
     if (rendered) {
       logGpuTextTextureCacheEvent('atlas-render', {
@@ -598,7 +818,21 @@ function resolveGpuTextParticipantSource(
         width: sourceWidth,
         height: sourceHeight,
         bytes: getGpuTextureByteSize(sourceWidth, sourceHeight),
+        ...(textMotionActive ? { textMotionBypass: true } : {}),
       })
+      if (!cacheKey) {
+        // Motion-active frame: the texture is per-frame garbage as far as the
+        // cache is concerned — hand ownership to the caller (all consumers
+        // run `media.close?.()` in a finally).
+        return {
+          kind: 'text',
+          item: resolvedTextItem,
+          sourceWidth,
+          sourceHeight,
+          texture,
+          close: () => texture.destroy(),
+        }
+      }
       rctx.gpuTextTextureCache.set(cacheKey, {
         texture,
         width: sourceWidth,
@@ -676,12 +910,17 @@ async function renderGpuSubCompChildrenToTexture(
 ): Promise<GPUTexture | null> {
   const gpuPipeline = rctx.gpuPipeline
   if (!gpuPipeline) return null
-  const subData = rctx.subCompRenderData.get(participant.item.compositionId)
+  const subData = resolveSubCompRenderDataForInstance(participant.item, rctx)
   const subAdjustmentLayers = subData?.adjustmentLayers ?? []
   if (!subData) return null
   const effectiveRenderSpan = participant.renderSpan ?? getItemRenderTimelineSpan(participant.item)
-  const sourceOffset = getRenderTimelineSourceStart(participant.item, effectiveRenderSpan)
-  const localFrame = frame - effectiveRenderSpan.from + sourceOffset
+  const localFrame = resolveCompositionSourceFrame(
+    participant.item,
+    frame,
+    rctx.fps,
+    subData.fps,
+    effectiveRenderSpan,
+  )
   if (localFrame < 0 || localFrame >= subData.durationInFrames) return null
 
   const activeMasks = getActiveSubCompMasks(
@@ -692,6 +931,7 @@ async function renderGpuSubCompChildrenToTexture(
   )
 
   const subCanvasSettings = { width, height, fps: subData.fps }
+  const subRctx = createSubCompositionRenderContext(rctx, subData, subCanvasSettings)
   const occlusionCutoffOrder = findSubCompOcclusionCutoffOrder(
     subData,
     localFrame,
@@ -709,7 +949,12 @@ async function renderGpuSubCompChildrenToTexture(
     if (occlusionCutoffOrder !== null && track.order > occlusionCutoffOrder) continue
     for (const item of track.items) {
       if (localFrame < item.from || localFrame >= item.from + item.durationInFrames) continue
-      if (item.type === 'adjustment' || (item.type === 'shape' && item.isMask)) continue
+      if (
+        item.type === 'adjustment' ||
+        item.type === 'controller' ||
+        (item.type === 'shape' && item.isMask)
+      )
+        continue
       if (item.blendMode && item.blendMode !== 'normal' && !rctx.gpuMediaBlendPipeline) {
         return null
       }
@@ -761,11 +1006,6 @@ async function renderGpuSubCompChildrenToTexture(
       GPUTextureUsage.RENDER_ATTACHMENT |
       GPUTextureUsage.COPY_DST,
   })
-  const subRctx: ItemRenderContext = {
-    ...rctx,
-    fps: subData.fps,
-    canvasSettings: subCanvasSettings,
-  }
   try {
     let layerIndex = 0
     for (const visibleChild of visibleChildren) {
@@ -1011,6 +1251,7 @@ function releaseGpuScratchTexture(rctx: ItemRenderContext, texture: GPUTexture):
   texture.destroy()
 }
 
+// fallow-ignore-next-line complexity
 export function getGpuShapeUnsupportedReason(
   shape: ShapeItem,
   transform: ItemTransform,
@@ -1022,8 +1263,33 @@ export function getGpuShapeUnsupportedReason(
   if (shape.shapeType === 'path' && !resolveGpuShapePathVertices(shape, transform)) {
     return 'unsupported-path-complexity'
   }
-  if (!parseGpuColor(shape.fillColor)) return 'unsupported-shape-fill'
   if (
+    shape.shapeType === 'path' &&
+    shape.strokeEnabled !== false &&
+    (shape.strokeWidth ?? 0) > 0 &&
+    ((shape.strokeLineCap ?? 'butt') !== 'round' || (shape.strokeLineJoin ?? 'miter') !== 'round')
+  ) {
+    return 'unsupported-path-stroke-style'
+  }
+  if (
+    shape.shapeType !== 'path' &&
+    ((shape.trimPathStart ?? 0) !== 0 || (shape.trimPathEnd ?? 100) !== 100)
+  ) {
+    return 'canvas-trim-path-metrics-required'
+  }
+  const fillEnabled =
+    shape.shapeType === 'path' && shape.pathClosed === false ? false : shape.fillEnabled !== false
+  if (fillEnabled) {
+    const linearGradient = resolveShapeLinearGradient(shape)
+    if (
+      !parseGpuColor(linearGradient?.startColor ?? shape.fillColor) ||
+      (linearGradient && !parseGpuColor(linearGradient.endColor))
+    ) {
+      return 'unsupported-shape-fill'
+    }
+  }
+  if (
+    shape.strokeEnabled !== false &&
     shape.strokeWidth &&
     shape.strokeWidth > 0 &&
     shape.strokeColor &&
@@ -1043,7 +1309,7 @@ function areGpuSubCompMasksSupported(masks: ReturnType<typeof getActiveSubCompMa
     if ((mask.shape.strokeWidth ?? 0) > 0) return false
     if (
       mask.shape.shapeType === 'path' &&
-      !resolveGpuShapePathVertices(mask.shape, mask.transform)
+      !resolveGpuShapePathVertices({ ...mask.shape, pathClosed: true }, mask.transform)
     ) {
       return false
     }
@@ -1112,7 +1378,7 @@ function renderGpuSubCompMaskToTexture(
   if (!gpuShapePipeline) return false
   const pathVertices =
     mask.shape.shapeType === 'path'
-      ? resolveGpuShapePathVertices(mask.shape, mask.transform)
+      ? resolveGpuShapePathVertices({ ...mask.shape, pathClosed: true }, mask.transform)
       : undefined
   if (mask.shape.shapeType === 'path' && !pathVertices) return false
   const resolvedPathVertices = pathVertices ?? undefined
@@ -1127,7 +1393,7 @@ function renderGpuSubCompMaskToTexture(
     outputHeight: rctx.canvasSettings.height,
     transformRect,
     rotationRad: (mask.transform.rotation * Math.PI) / 180,
-    opacity: 1,
+    opacity: mask.opacity,
     shapeType: mask.shape.shapeType,
     fillColor: [1, 1, 1, 1],
     cornerRadius: mask.shape.cornerRadius,
@@ -1136,6 +1402,7 @@ function renderGpuSubCompMaskToTexture(
     innerRadius: mask.shape.innerRadius,
     aspectRatioLocked: mask.shape.transform?.aspectRatioLocked,
     pathVertices: resolvedPathVertices,
+    pathClosed: true,
     maskFeatherPixels: mask.maskType === 'alpha' ? mask.feather : 0,
     clear: true,
     blend: false,
@@ -1205,6 +1472,7 @@ function getGpuBitmapMaskTextureCacheKey(
     pathVertices: mask.shape.pathVertices,
     maskType: mask.maskType,
     feather: mask.feather,
+    opacity: mask.opacity,
   })
 }
 
@@ -1262,7 +1530,7 @@ function logGpuTextTextureCacheEvent(
 }
 
 function resolveGpuMediaCornerPin(
-  item: ImageItem | VideoItem | TextItem,
+  item: CompositionItem | ImageItem | VideoItem | TextItem,
   mediaRect: GpuMediaRect,
 ): NonNullable<GpuMediaRenderParams['cornerPin']> | undefined {
   if (!hasCornerPin(item.cornerPin)) return undefined
@@ -1311,122 +1579,48 @@ function parseGpuColor(color: string): [number, number, number, number] | null {
   return [r, g, b, a]
 }
 
+// fallow-ignore-next-line complexity
 function resolveGpuShapePathVertices(
   shape: ShapeItem,
   transform: ItemTransform,
-): Array<[number, number]> | null {
+): Array<[number, number, number?]> | null {
   const vertices = shape.pathVertices
-  if (!vertices || vertices.length < 3) return null
-  const flattened: Array<[number, number]> = []
-  const toLocal = (position: [number, number]): [number, number] => [
-    (position[0] - 0.5) * transform.width,
-    (position[1] - 0.5) * transform.height,
-  ]
-  flattened.push(toLocal(vertices[0]!.position))
-  for (let i = 0; i < vertices.length; i++) {
-    const curr = vertices[i]!
-    const next = vertices[(i + 1) % vertices.length]!
-    const hasCurve =
-      curr.outHandle[0] !== 0 ||
-      curr.outHandle[1] !== 0 ||
-      next.inHandle[0] !== 0 ||
-      next.inHandle[1] !== 0
-    if (!hasCurve) {
-      if (i < vertices.length - 1) flattened.push(toLocal(next.position))
-      continue
+  const closed = shape.pathClosed ?? true
+  if (!vertices || vertices.length < (closed ? 3 : 2)) return null
+  const flattened = flattenBezierPath(vertices, transform.width, transform.height, closed)
+  const metricPoints = flattened.points
+  let points = metricPoints
+  if (closed && points.length > 1 && points.at(-1)?.progress === 1) points = points.slice(0, -1)
+  if (points.length < (closed ? 3 : 2)) return null
+
+  const sampleAtProgress = (progress: number): [number, number, number] => {
+    const nextIndex = metricPoints.findIndex((point) => point.progress >= progress)
+    if (nextIndex <= 0) {
+      const point = metricPoints[0]!
+      return [point.x - transform.width / 2, point.y - transform.height / 2, progress]
     }
-    const p0 = curr.position
-    const p1: [number, number] = [
-      curr.position[0] + curr.outHandle[0],
-      curr.position[1] + curr.outHandle[1],
+    const previous = metricPoints[nextIndex - 1]!
+    const next = metricPoints[nextIndex]!
+    const span = Math.max(next.progress - previous.progress, Number.EPSILON)
+    const amount = (progress - previous.progress) / span
+    return [
+      previous.x + (next.x - previous.x) * amount - transform.width / 2,
+      previous.y + (next.y - previous.y) * amount - transform.height / 2,
+      progress,
     ]
-    const p2: [number, number] = [
-      next.position[0] + next.inHandle[0],
-      next.position[1] + next.inHandle[1],
-    ]
-    const p3 = next.position
-    const steps = Math.max(2, Math.min(6, Math.ceil(estimateBezierLength(p0, p1, p2, p3) * 8)))
-    for (let step = 1; step <= steps; step++) {
-      if (i === vertices.length - 1 && step === steps) continue
-      flattened.push(toLocal(sampleCubicBezier(p0, p1, p2, p3, step / steps)))
-    }
   }
-  if (flattened.length < 3) return null
-  return flattened.length <= MAX_GPU_SHAPE_PATH_VERTICES
-    ? flattened
-    : downsampleClosedPathVertices(flattened, MAX_GPU_SHAPE_PATH_VERTICES)
-}
 
-function sampleCubicBezier(
-  p0: [number, number],
-  p1: [number, number],
-  p2: [number, number],
-  p3: [number, number],
-  t: number,
-): [number, number] {
-  const mt = 1 - t
-  const a = mt * mt * mt
-  const b = 3 * mt * mt * t
-  const c = 3 * mt * t * t
-  const d = t * t * t
-  return [
-    a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
-    a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
-  ]
-}
-
-function estimateBezierLength(
-  p0: [number, number],
-  p1: [number, number],
-  p2: [number, number],
-  p3: [number, number],
-): number {
-  return distance2d(p0, p1) + distance2d(p1, p2) + distance2d(p2, p3)
-}
-
-function distance2d(a: [number, number], b: [number, number]): number {
-  return Math.hypot(a[0] - b[0], a[1] - b[1])
-}
-
-function downsampleClosedPathVertices(
-  vertices: Array<[number, number]>,
-  maxVertices: number,
-): Array<[number, number]> | null {
-  if (vertices.length <= maxVertices) return vertices
-  if (maxVertices < 3) return null
-  const segmentLengths = vertices.map((vertex, index) =>
-    distance2d(vertex, vertices[(index + 1) % vertices.length]!),
+  if (points.length <= MAX_GPU_SHAPE_PATH_VERTICES) {
+    return points.map((point) => [
+      point.x - transform.width / 2,
+      point.y - transform.height / 2,
+      point.progress,
+    ])
+  }
+  const sampleCount = MAX_GPU_SHAPE_PATH_VERTICES
+  return Array.from({ length: sampleCount }, (_, index) =>
+    sampleAtProgress(index / (closed ? sampleCount : sampleCount - 1)),
   )
-  const perimeter = segmentLengths.reduce((sum, length) => sum + length, 0)
-  if (perimeter <= 0) return null
-
-  const result: Array<[number, number]> = [vertices[0]!]
-  for (let i = 1; i < maxVertices; i++) {
-    result.push(
-      sampleClosedPolylineAtDistance(vertices, segmentLengths, (perimeter * i) / maxVertices),
-    )
-  }
-  return result.length >= 3 ? result : null
-}
-
-function sampleClosedPolylineAtDistance(
-  vertices: Array<[number, number]>,
-  segmentLengths: number[],
-  targetDistance: number,
-): [number, number] {
-  let traversed = 0
-  for (let i = 0; i < vertices.length; i++) {
-    const segmentLength = segmentLengths[i] ?? 0
-    const next = vertices[(i + 1) % vertices.length]!
-    if (segmentLength <= 0) continue
-    if (traversed + segmentLength >= targetDistance) {
-      const t = (targetDistance - traversed) / segmentLength
-      const current = vertices[i]!
-      return [current[0] + (next[0] - current[0]) * t, current[1] + (next[1] - current[1]) * t]
-    }
-    traversed += segmentLength
-  }
-  return vertices[vertices.length - 1]!
 }
 
 /**

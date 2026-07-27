@@ -31,7 +31,13 @@ ${FULLSCREEN_VERTEX}
 @group(0) @binding(1) var inputTex: texture_2d<f32>;
 @fragment
 fn blitFragment(input: VertexOutput) -> @location(0) vec4f {
-  return textureSample(inputTex, texSampler, input.uv);
+  // Effect textures carry straight (non-premultiplied) alpha, but the output
+  // canvas is configured alphaMode:'premultiplied'. Premultiply here so that a
+  // pixel an effect left with colour at alpha 0 (e.g. a gradient map over a
+  // transparent Lottie) reads as fully transparent instead of leaking that
+  // colour over the layers below. Opaque pixels (a = 1) are unchanged.
+  let c = textureSample(inputTex, texSampler, input.uv);
+  return vec4f(c.rgb * c.a, c.a);
 }
 `
 
@@ -90,6 +96,10 @@ export class EffectsPipeline {
   private format: GPUTextureFormat
   private pipelines = new Map<string, GPURenderPipeline>()
   private bindGroupLayouts = new Map<string, GPUBindGroupLayout>()
+  // Compute-variant effects (definition.compute set) get their own pipeline +
+  // layout maps; the fragment maps above stay untouched.
+  private computePipelines = new Map<string, GPUComputePipeline>()
+  private computeBindGroupLayouts = new Map<string, GPUBindGroupLayout>()
   private sampler: GPUSampler
   private blitPipeline: GPURenderPipeline | null = null
   private blitBindGroupLayout: GPUBindGroupLayout | null = null
@@ -118,8 +128,6 @@ export class EffectsPipeline {
   // Cached blit bind groups for ping/pong input views
   private blitBindGroupPing: GPUBindGroup | null = null
   private blitBindGroupPong: GPUBindGroup | null = null
-  // GPU backpressure: count of frames still in-flight on the GPU queue
-  private gpuFramesInFlight = 0
   // Reusable offscreen canvas for applyEffectsToCanvas output (non-batch)
   private outputCanvas: OffscreenCanvas | null = null
   private outputCtx: GPUCanvasContext | null = null
@@ -188,7 +196,11 @@ export class EffectsPipeline {
     this.createImportExternalPipeline()
 
     for (const [id, effect] of GPU_EFFECT_REGISTRY) {
-      this.createEffectPipeline(id, effect)
+      if (effect.compute) {
+        this.createComputeEffectPipeline(id, effect)
+      } else {
+        this.createEffectPipeline(id, effect)
+      }
     }
     this.initialized = true
   }
@@ -296,6 +308,49 @@ export class EffectsPipeline {
     }
   }
 
+  private createComputeEffectPipeline(id: string, effect: GpuEffectDefinition): void {
+    try {
+      const shaderCode = `${COMMON_WGSL}\n${effect.shader}`
+      const shaderModule = this.device.createShaderModule({
+        label: `effect-${id}-compute`,
+        code: shaderCode,
+      })
+
+      // Compute layout: input as a loadable texture (no sampler — textureLoad),
+      // output as a write-only storage texture, uniforms at binding 2.
+      const entries: GPUBindGroupLayoutEntry[] = [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
+        },
+      ]
+      if (effect.uniformSize > 0) {
+        entries.push({
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform' },
+        })
+      }
+
+      const bindGroupLayout = this.device.createBindGroupLayout({
+        label: `effect-${id}-compute-layout`,
+        entries,
+      })
+      this.computeBindGroupLayouts.set(id, bindGroupLayout)
+
+      const pipeline = this.device.createComputePipeline({
+        label: `effect-${id}-compute-pipeline`,
+        layout: this.device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+        compute: { module: shaderModule, entryPoint: effect.entryPoint },
+      })
+      this.computePipelines.set(id, pipeline)
+    } catch (e) {
+      getLogger().warn(`Failed to create compute pipeline for ${id}`, e)
+    }
+  }
+
   private ensurePingPong(w: number, h: number): void {
     if (this.pingTexture && this.texW === w && this.texH === h) return
     this.pingTexture?.destroy()
@@ -303,8 +358,12 @@ export class EffectsPipeline {
     const desc: GPUTextureDescriptor = {
       size: { width: w, height: h },
       format: 'rgba8unorm',
+      // STORAGE_BINDING lets compute-variant effects write these textures via
+      // textureStore. rgba8unorm is a core writable-storage format, so this
+      // needs no extra device feature. Fragment effects ignore the extra usage.
       usage:
         GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.STORAGE_BINDING |
         GPUTextureUsage.RENDER_ATTACHMENT |
         GPUTextureUsage.COPY_SRC |
         GPUTextureUsage.COPY_DST,
@@ -430,10 +489,6 @@ export class EffectsPipeline {
 
     for (let effectIndex = 0; effectIndex < effects.length; effectIndex++) {
       const effect = effects[effectIndex]!
-      const pipeline = this.pipelines.get(effect.type)
-      const layout = this.bindGroupLayouts.get(effect.type)
-      if (!pipeline || !layout) continue
-
       const definition = getGpuEffect(effect.type)
       if (!definition) continue
 
@@ -444,6 +499,53 @@ export class EffectsPipeline {
         this.device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer)
       }
 
+      // Bind groups are cached by pass, effect type, and input view identity.
+      // Uniform contents change via writeBuffer, but each encoded pass gets a
+      // stable buffer object of its own, so the cached group stays valid.
+      const viewKey = inputView === this.pingView ? 'ping' : 'pong'
+
+      // Compute-variant effects: read input via textureLoad, scatter to the
+      // output storage texture. Output is the opposite ping/pong texture, so no
+      // read-after-write hazard within the pass.
+      if (definition.compute) {
+        const computePipeline = this.computePipelines.get(effect.type)
+        const computeLayout = this.computeBindGroupLayouts.get(effect.type)
+        if (!computePipeline || !computeLayout) continue
+
+        const cacheKey = `${effectIndex}:${effect.type}:compute:${viewKey}`
+        let bindGroup = this.effectBindGroupCache.get(cacheKey)
+        if (!bindGroup) {
+          const bindEntries: GPUBindGroupEntry[] = [
+            { binding: 0, resource: inputView },
+            { binding: 1, resource: outputView },
+          ]
+          if (uniformBuffer) {
+            bindEntries.push({ binding: 2, resource: { buffer: uniformBuffer } })
+          }
+          bindGroup = this.device.createBindGroup({ layout: computeLayout, entries: bindEntries })
+          this.effectBindGroupCache.set(cacheKey, bindGroup)
+        }
+
+        const [gx, gy, gz] = definition.compute.dispatch(w, h)
+        const pass = commandEncoder.beginComputePass()
+        pass.setPipeline(computePipeline)
+        pass.setBindGroup(0, bindGroup)
+        pass.dispatchWorkgroups(gx, gy, gz)
+        pass.end()
+
+        const tempTexC = inputTex
+        inputTex = outputTex
+        outputTex = tempTexC
+        const tempViewC = inputView
+        inputView = outputView
+        outputView = tempViewC
+        continue
+      }
+
+      const pipeline = this.pipelines.get(effect.type)
+      const layout = this.bindGroupLayouts.get(effect.type)
+      if (!pipeline || !layout) continue
+
       // Auxiliary data texture (curve/color LUT) — kept current before binding.
       let dataTextureView: GPUTextureView | null = null
       if (definition.dataTexture) {
@@ -451,10 +553,6 @@ export class EffectsPipeline {
         if (!dataTextureView) continue
       }
 
-      // Cache bind groups by pass, effect type, and input view identity. Uniform data changes
-      // via writeBuffer (and data texture contents via writeTexture), but each encoded pass
-      // gets a stable buffer/texture object of its own.
-      const viewKey = inputView === this.pingView ? 'ping' : 'pong'
       const cacheKey = `${effectIndex}:${effect.type}:${viewKey}`
       let bindGroup = this.effectBindGroupCache.get(cacheKey)
       if (!bindGroup) {
@@ -506,18 +604,6 @@ export class EffectsPipeline {
     } catch {
       return null
     }
-  }
-
-  private trackSubmittedWork(): void {
-    this.gpuFramesInFlight++
-    this.device.queue.onSubmittedWorkDone().then(
-      () => {
-        this.gpuFramesInFlight = Math.max(0, this.gpuFramesInFlight - 1)
-      },
-      () => {
-        this.gpuFramesInFlight = Math.max(0, this.gpuFramesInFlight - 1)
-      },
-    )
   }
 
   /**
@@ -718,7 +804,6 @@ export class EffectsPipeline {
       { width: w, height: h },
     )
     this.device.queue.submit([commandEncoder.finish()])
-    this.trackSubmittedWork()
     return true
   }
 
@@ -772,7 +857,6 @@ export class EffectsPipeline {
       { width, height },
     )
     this.device.queue.submit([commandEncoder.finish()])
-    this.trackSubmittedWork()
     return true
   }
 
@@ -907,6 +991,100 @@ export class EffectsPipeline {
     return outCanvas
   }
 
+  /**
+   * Like applyEffectsToVideo, but writes the result into a caller-owned
+   * GPUTexture instead of blitting to a WebGPU canvas. Keeps the effected video
+   * frame GPU-native so it can be fed straight into the GPU compositor as a
+   * layer — avoiding the per-item `drawImage(gpuCanvas -> 2D canvas)` readback
+   * the canvas-output path forces during preview compositing.
+   *
+   * Zero-copy source (importExternalTexture). Returns false if
+   * importExternalTexture is unsupported, the video isn't ready, the output
+   * texture's dimensions don't match canvasWidth/canvasHeight, or its format is
+   * not 'rgba8unorm' (the format of the internal ping/pong textures the final
+   * copyTextureToTexture reads from — mismatched formats would silently corrupt
+   * the output via an async device error).
+   */
+  applyEffectsToVideoTexture(
+    video: HTMLVideoElement,
+    effects: GpuEffectInstance[],
+    destRect: { x: number; y: number; width: number; height: number },
+    canvasWidth: number,
+    canvasHeight: number,
+    outputTexture: GPUTexture,
+  ): boolean {
+    const enabled = effects.filter((e) => e.enabled)
+    if (!this.importPipeline || !this.importBindGroupLayout || !this.importUniformBuffer)
+      return false
+    if (video.readyState < 2 || video.videoWidth < 2) return false
+
+    const w = canvasWidth
+    const h = canvasHeight
+    if (w < 2 || h < 2) return false
+    if (outputTexture.width !== w || outputTexture.height !== h) return false
+    // copyTextureToTexture requires copy-compatible formats; 'rgba8unorm' is the
+    // format used by the internal ping/pong textures this copies from.
+    if (outputTexture.format !== 'rgba8unorm') return false
+
+    this.ensurePingPong(w, h)
+    if (!this.pingTexture || !this.pongTexture) return false
+
+    let externalTexture: GPUExternalTexture
+    try {
+      externalTexture = this.device.importExternalTexture({ source: video })
+    } catch {
+      return false
+    }
+
+    const uvRect = new Float32Array([
+      destRect.x / w,
+      destRect.y / h,
+      (destRect.x + destRect.width) / w,
+      (destRect.y + destRect.height) / h,
+    ])
+    this.device.queue.writeBuffer(this.importUniformBuffer, 0, uvRect.buffer)
+
+    const commandEncoder = this.device.createCommandEncoder()
+
+    // Pass 1: import external video texture → ping (with positioning).
+    const importBindGroup = this.device.createBindGroup({
+      layout: this.importBindGroupLayout,
+      entries: [
+        { binding: 0, resource: this.sampler },
+        { binding: 1, resource: externalTexture },
+        { binding: 2, resource: { buffer: this.importUniformBuffer } },
+      ],
+    })
+    const importPass = commandEncoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: this.pingView!,
+          loadOp: 'clear',
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          storeOp: 'store',
+        },
+      ],
+    })
+    importPass.setPipeline(this.importPipeline)
+    importPass.setBindGroup(0, importBindGroup)
+    importPass.draw(6)
+    importPass.end()
+
+    // Pass 2+: effect chain (no-op when empty — ping already holds the frame).
+    const finalTex =
+      enabled.length > 0
+        ? this.runEffectChain(commandEncoder, enabled, this.pingTexture, this.pongTexture, w, h)
+        : this.pingTexture
+
+    commandEncoder.copyTextureToTexture(
+      { texture: finalTex },
+      { texture: outputTexture },
+      { width: w, height: h },
+    )
+    this.device.queue.submit([commandEncoder.finish()])
+    return true
+  }
+
   getDevice(): GPUDevice {
     return this.device
   }
@@ -925,8 +1103,11 @@ export class EffectsPipeline {
     this.poolMode = false
     this.outputPool = []
     this.batchIndex = 0
+    // `uniformBuffers` is indexed by effect position, so a skipped or
+    // uniform-less effect leaves a hole. `for...of` yields `undefined` for
+    // sparse holes (unlike `.forEach`), so guard before destroying.
     for (const buf of this.uniformBuffers) {
-      buf.destroy()
+      buf?.destroy()
     }
     this.uniformBuffers = []
     for (const entry of this.dataTextureCache.values()) {
@@ -936,9 +1117,10 @@ export class EffectsPipeline {
     this.effectBindGroupCache.clear()
     this.blitBindGroupPing = null
     this.blitBindGroupPong = null
-    this.gpuFramesInFlight = 0
     this.pipelines.clear()
     this.bindGroupLayouts.clear()
+    this.computePipelines.clear()
+    this.computeBindGroupLayouts.clear()
     this.blitPipeline = null
     this.blitBindGroupLayout = null
     this.importPipeline = null

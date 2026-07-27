@@ -1,6 +1,10 @@
 export {
   useCompositionsStore,
   type SubComposition,
-  collectReachableCompositionIdsFromItems,
+  getActiveCompositionId,
+  getActiveExportSequenceId,
+  getExportableSequence,
+  listExportableSequences,
+  type ExportableSequence,
   collectReachableCompositionIdsFromTracks,
 } from './timeline-compositions-contract'

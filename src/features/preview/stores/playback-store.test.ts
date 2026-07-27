@@ -9,6 +9,7 @@ describe('playback-store', () => {
       currentFrameEpoch: 0,
       isPlaying: false,
       playbackRate: 1,
+      transportMode: 'normal',
       loop: false,
       volume: 1,
       muted: false,
@@ -26,19 +27,6 @@ describe('playback-store', () => {
       captureFrameImageData: null,
       captureCanvasSource: null,
     })
-  })
-
-  it('has correct initial state', () => {
-    const state = usePlaybackStore.getState()
-    expect(state.currentFrame).toBe(0)
-    expect(state.isPlaying).toBe(false)
-    expect(state.playbackRate).toBe(1)
-    expect(state.loop).toBe(false)
-    expect(state.volume).toBe(1)
-    expect(state.muted).toBe(false)
-    expect(state.zoom).toBe(-1)
-    expect(state.previewFrame).toBe(null)
-    expect(usePreviewBridgeStore.getState().displayedFrame).toBe(null)
   })
 
   describe('frame navigation', () => {
@@ -106,6 +94,32 @@ describe('playback-store', () => {
       const stateD = usePlaybackStore.getState()
       expect(stateC).toBe(stateD)
     })
+
+    it('clears active skimming atomically when playback starts', () => {
+      usePlaybackStore.getState().setPreviewFrame(42, 'item-1')
+      const beforePlay = usePlaybackStore.getState()
+
+      usePlaybackStore.getState().play()
+
+      const playing = usePlaybackStore.getState()
+      expect(playing.isPlaying).toBe(true)
+      expect(playing.previewFrame).toBeNull()
+      expect(playing.previewItemId).toBeNull()
+      expect(playing.previewFrameEpoch).toBeGreaterThan(beforePlay.previewFrameEpoch)
+      expect(playing.previewFrameEpoch).toBe(playing.frameUpdateEpoch)
+    })
+
+    it('clears active skimming when toggle starts playback', () => {
+      usePlaybackStore.getState().setPreviewFrame(42, 'item-1')
+
+      usePlaybackStore.getState().togglePlayPause()
+
+      expect(usePlaybackStore.getState()).toMatchObject({
+        isPlaying: true,
+        previewFrame: null,
+        previewItemId: null,
+      })
+    })
   })
 
   describe('playback rate', () => {
@@ -115,6 +129,53 @@ describe('playback-store', () => {
 
       usePlaybackStore.getState().setPlaybackRate(0.5)
       expect(usePlaybackStore.getState().playbackRate).toBe(0.5)
+    })
+
+    it('applies J/L shuttle transitions atomically and resets on pause', () => {
+      const listener = vi.fn()
+      const unsubscribe = usePlaybackStore.subscribe(listener)
+
+      usePlaybackStore.getState().shuttleForward()
+      expect(usePlaybackStore.getState()).toMatchObject({
+        isPlaying: true,
+        playbackRate: 1,
+        transportMode: 'shuttle',
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      listener.mockClear()
+      usePlaybackStore.getState().shuttleForward()
+      expect(usePlaybackStore.getState().playbackRate).toBe(2)
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      listener.mockClear()
+      usePlaybackStore.getState().shuttleReverse()
+      expect(usePlaybackStore.getState()).toMatchObject({
+        isPlaying: true,
+        playbackRate: -1,
+        transportMode: 'shuttle',
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      listener.mockClear()
+      usePlaybackStore.getState().pause()
+      expect(usePlaybackStore.getState()).toMatchObject({
+        isPlaying: false,
+        playbackRate: 1,
+        transportMode: 'normal',
+      })
+      expect(listener).toHaveBeenCalledTimes(1)
+      unsubscribe()
+    })
+
+    it('keeps shuttle rate out of persisted playback settings', () => {
+      usePlaybackStore.getState().shuttleReverse()
+      const options = usePlaybackStore.persist.getOptions()
+      const persisted = options.partialize?.(usePlaybackStore.getState())
+
+      expect(persisted).not.toHaveProperty('playbackRate')
+      expect(persisted).not.toHaveProperty('isPlaying')
+      expect(persisted).not.toHaveProperty('transportMode')
     })
   })
 
@@ -156,10 +217,6 @@ describe('playback-store', () => {
   })
 
   describe('preview quality', () => {
-    it('defaults to full quality', () => {
-      expect(usePlaybackStore.getState().previewQuality).toBe(1)
-    })
-
     it('stores user-selected fast scrub quality', () => {
       usePlaybackStore.getState().setPreviewQuality(0.5)
       expect(usePlaybackStore.getState().previewQuality).toBe(0.5)
@@ -209,6 +266,28 @@ describe('playback-store', () => {
       expect(state.currentFrameEpoch).toBe(state.previewFrameEpoch)
     })
 
+    it('finishes a transient scrub in one atomic state update', () => {
+      usePlaybackStore.setState({
+        currentFrame: 10,
+        previewFrame: 42,
+        previewItemId: 'item-1',
+        compositionVisualFrozen: true,
+      })
+      const listener = vi.fn()
+      const unsubscribe = usePlaybackStore.subscribe(listener)
+
+      usePlaybackStore.getState().finishScrub(42)
+
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect(usePlaybackStore.getState()).toMatchObject({
+        currentFrame: 42,
+        previewFrame: null,
+        previewItemId: null,
+        compositionVisualFrozen: false,
+      })
+      unsubscribe()
+    })
+
     it('avoids entering scrub mode when the paused ruler clicks the already-current frame', () => {
       usePlaybackStore.getState().setCurrentFrame(42)
       const stateA = usePlaybackStore.getState()
@@ -219,6 +298,21 @@ describe('playback-store', () => {
       expect(stateB).toBe(stateA)
       expect(stateB.currentFrame).toBe(42)
       expect(stateB.previewFrame).toBeNull()
+    })
+
+    it('rejects hover and scrub frame writes during playback', () => {
+      usePlaybackStore.getState().setCurrentFrame(12)
+      usePlaybackStore.getState().play()
+      const playing = usePlaybackStore.getState()
+
+      usePlaybackStore.getState().setPreviewFrame(42, 'item-1')
+      usePlaybackStore.getState().setScrubFrame(42, 'item-1')
+
+      const afterSkimAttempts = usePlaybackStore.getState()
+      expect(afterSkimAttempts).toBe(playing)
+      expect(afterSkimAttempts.currentFrame).toBe(12)
+      expect(afterSkimAttempts.previewFrame).toBeNull()
+      expect(afterSkimAttempts.previewItemId).toBeNull()
     })
   })
 })

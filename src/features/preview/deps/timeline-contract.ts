@@ -5,16 +5,17 @@
 export type { DroppableMediaType, SubComposition } from '@/features/timeline/contracts/preview'
 export {
   buildDroppedMediaTimelineItem,
-  createNewVideoZoneTrack,
+  createOverlayLayerTrack,
   createTimelineTemplateItem,
   getDefaultGeneratedLayerDurationInFrames,
   isTimelineTemplateDragData,
   buildSubCompositionInput,
-  collectSubCompositionMediaIds,
+  buildSubCompositionPreviewSignature,
   createClassicTrack,
   createScrubThrottleState,
   findBestCanvasDropPlacement,
   getDroppedMediaDurationInFrames,
+  getSynchronizedLinkedItems,
   getTrackKind,
   performInsertEdit,
   performOverwriteEdit,
@@ -37,3 +38,5 @@ export {
   useTransitionsStore,
   useWaveform,
 } from '@/features/timeline/contracts/preview'
+
+export const importFilmstripCache = () => import('@/features/timeline/services/filmstrip-cache')

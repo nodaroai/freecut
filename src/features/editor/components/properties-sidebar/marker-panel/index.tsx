@@ -2,10 +2,14 @@ import { useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
 import { MapPin, Trash2 } from 'lucide-react'
 import { useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { useSelectionStore } from '@/shared/state/selection'
+import { formatTimecodeDotFrames } from '@/shared/utils/time-utils'
+import { getMarkerOrdinals } from '@/shared/timeline/marker-names'
 import { PropertySection, PropertyRow, NumberInput, ColorPicker } from '../components'
+import { MarkerList } from './marker-list'
 
 const DEFAULT_MARKER_COLOR = 'oklch(0.65 0.20 250)'
 
@@ -38,6 +42,14 @@ export function MarkerPanel() {
     () => markers.find((m) => m.id === selectedMarkerId),
     [markers, selectedMarkerId],
   )
+
+  // The name this marker shows while its label is empty, used as the input's
+  // placeholder so the field previews what the ruler and list already display.
+  const defaultName = useMemo(() => {
+    if (!selectedMarkerId) return ''
+    const ordinal = getMarkerOrdinals(markers).get(selectedMarkerId)
+    return ordinal === undefined ? '' : t('timeline.markerName', { index: ordinal })
+  }, [markers, selectedMarkerId, t])
 
   // Handle frame change
   const handleFrameChange = useCallback(
@@ -85,23 +97,15 @@ export function MarkerPanel() {
     }
   }, [selectedMarkerId, selectedMarker?.color, updateMarker])
 
-  // Format frame as timecode (MM:SS.FF)
-  const formatTimecode = useCallback(
-    (frame: number): string => {
-      const totalSeconds = frame / fps
-      const minutes = Math.floor(totalSeconds / 60)
-      const seconds = Math.floor(totalSeconds % 60)
-      const remainingFrames = frame % fps
-      return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(remainingFrames).padStart(2, '0')}`
-    },
-    [fps],
-  )
-
   if (!selectedMarker) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <MapPin className="w-8 h-8 text-muted-foreground/50 mb-2" />
-        <p className="text-xs text-muted-foreground">{t('editor.markerPanel.notFound')}</p>
+      <div className="space-y-4">
+        <div className="flex flex-col items-center justify-center py-10 text-center">
+          <MapPin className="w-8 h-8 text-muted-foreground/50 mb-2" />
+          <p className="text-xs text-muted-foreground">{t('editor.markerPanel.notFound')}</p>
+        </div>
+        <Separator />
+        <MarkerList />
       </div>
     )
   }
@@ -124,7 +128,7 @@ export function MarkerPanel() {
         {/* Timecode (read-only) */}
         <PropertyRow label={t('editor.markerPanel.time')}>
           <span className="text-xs font-mono tabular-nums text-muted-foreground">
-            {formatTimecode(selectedMarker.frame)}
+            {formatTimecodeDotFrames(selectedMarker.frame, fps)}
           </span>
         </PropertyRow>
 
@@ -133,7 +137,7 @@ export function MarkerPanel() {
           <Input
             value={selectedMarker.label || ''}
             onChange={handleLabelChange}
-            placeholder={t('editor.markerPanel.labelPlaceholder')}
+            placeholder={defaultName}
             className="h-7 text-xs flex-1 min-w-0"
           />
         </PropertyRow>
@@ -161,6 +165,11 @@ export function MarkerPanel() {
           </Button>
         </div>
       </PropertySection>
+
+      <Separator />
+
+      {/* All markers — jump between / manage the full set from the same panel */}
+      <MarkerList />
     </div>
   )
 }

@@ -2,8 +2,12 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   getTranscriptionOverallProgress,
+  getTranscriptionProgressDetail,
+  getTranscriptionProgressLabel,
   getTranscriptionStageLabel,
+  isIndeterminateTranscriptionProgress,
 } from '@/shared/utils/transcription-progress'
+import { formatDuration } from '@/shared/utils/time-utils'
 import { useMediaLibraryStore } from '../stores/media-library-store'
 import { useMediaPreparationStore } from '../stores/media-preparation-store'
 
@@ -18,6 +22,13 @@ export function useMediaTaskProgress() {
   const { t } = useTranslation()
   const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus)
   const proxyProgress = useMediaLibraryStore((s) => s.proxyProgress)
+  const interpolationStatus = useMediaLibraryStore((s) => s.interpolationStatus)
+  const interpolationProgress = useMediaLibraryStore((s) => s.interpolationProgress)
+  const interpolationStage = useMediaLibraryStore((s) => s.interpolationStage)
+  const interpolationEtaSeconds = useMediaLibraryStore((s) => s.interpolationEtaSeconds)
+  const upscaleStatus = useMediaLibraryStore((s) => s.upscaleStatus)
+  const upscaleProgress = useMediaLibraryStore((s) => s.upscaleProgress)
+  const upscaleEtaSeconds = useMediaLibraryStore((s) => s.upscaleEtaSeconds)
   const transcriptStatus = useMediaLibraryStore((s) => s.transcriptStatus)
   const transcriptProgress = useMediaLibraryStore((s) => s.transcriptProgress)
   const analysisProgress = useMediaLibraryStore((s) => s.analysisProgress)
@@ -31,6 +42,117 @@ export function useMediaTaskProgress() {
     }
     return count
   }, [proxyStatus])
+
+  const interpolatingCount = useMemo(() => {
+    let count = 0
+    for (const status of interpolationStatus.values()) {
+      if (status === 'generating') count++
+    }
+    return count
+  }, [interpolationStatus])
+
+  const interpolatingAvgProgress = useMemo(() => {
+    if (interpolatingCount === 0) return 0
+    let total = 0
+    let count = 0
+    for (const [id, status] of interpolationStatus.entries()) {
+      if (status === 'generating') {
+        total += interpolationProgress.get(id) ?? 0
+        count++
+      }
+    }
+    return count > 0 ? total / count : 0
+  }, [interpolationStatus, interpolationProgress, interpolatingCount])
+
+  /**
+   * The one-time 21MB RIFE download is worth calling out — otherwise the first run looks like
+   * a stalled render. Any job still downloading flips the whole label.
+   */
+  const isDownloadingInterpolationModel = useMemo(() => {
+    for (const [id, status] of interpolationStatus.entries()) {
+      if (status === 'generating' && interpolationStage.get(id) === 'downloading-model') return true
+    }
+    return false
+  }, [interpolationStatus, interpolationStage])
+
+  /**
+   * Only one interpolation renders at a time, so the longest remaining estimate is the active
+   * job's. Queued jobs have no estimate at all, which is why this is a max and not a sum.
+   */
+  const interpolationEtaLabel = useMemo(() => {
+    let longest: number | null = null
+    for (const [id, status] of interpolationStatus.entries()) {
+      if (status !== 'generating') continue
+      const eta = interpolationEtaSeconds.get(id)
+      if (eta !== undefined && (longest === null || eta > longest)) longest = eta
+    }
+    if (longest === null || longest < 1) return null
+    return t('media.library.timeRemaining', { time: formatDuration(longest) })
+  }, [interpolationStatus, interpolationEtaSeconds, t])
+
+  const interpolationItemRows = useMemo(() => {
+    const rows: Array<{ id: string; name: string; percent: number }> = []
+    for (const [id, status] of interpolationStatus.entries()) {
+      if (status === 'generating') {
+        rows.push({
+          id,
+          name: mediaById[id]?.fileName ?? id,
+          percent: Math.round((interpolationProgress.get(id) ?? 0) * 100),
+        })
+      }
+    }
+    return rows
+  }, [interpolationStatus, interpolationProgress, mediaById])
+
+  const upscalingCount = useMemo(() => {
+    let count = 0
+    for (const status of upscaleStatus.values()) {
+      if (status === 'generating') count++
+    }
+    return count
+  }, [upscaleStatus])
+
+  const upscalingAvgProgress = useMemo(() => {
+    if (upscalingCount === 0) return 0
+    let total = 0
+    let count = 0
+    for (const [id, status] of upscaleStatus.entries()) {
+      if (status === 'generating') {
+        total += upscaleProgress.get(id) ?? 0
+        count++
+      }
+    }
+    return count > 0 ? total / count : 0
+  }, [upscaleStatus, upscaleProgress, upscalingCount])
+
+  /**
+   * Only one upscale renders at a time, so the longest remaining estimate is the active job's.
+   * Queued jobs have no estimate at all, which is why this is a max and not a sum.
+   */
+  const upscaleEtaLabel = useMemo(() => {
+    let longest: number | null = null
+    for (const [id, status] of upscaleStatus.entries()) {
+      if (status !== 'generating') continue
+      const eta = upscaleEtaSeconds.get(id)
+      if (eta !== undefined && (longest === null || eta > longest)) longest = eta
+    }
+    if (longest === null || longest < 1) return null
+    return t('media.library.timeRemaining', { time: formatDuration(longest) })
+  }, [upscaleStatus, upscaleEtaSeconds, t])
+
+  const upscaleItemRows = useMemo(() => {
+    const rows: Array<{ id: string; name: string; percent: number }> = []
+    for (const [id, status] of upscaleStatus.entries()) {
+      if (status === 'generating') {
+        rows.push({
+          id,
+          name: mediaById[id]?.fileName ?? id,
+          percent: Math.round((upscaleProgress.get(id) ?? 0) * 100),
+        })
+      }
+    }
+    return rows
+  }, [upscaleStatus, upscaleProgress, mediaById])
 
   const analysisPercent =
     analysisProgress && analysisProgress.total > 0
@@ -81,16 +203,33 @@ export function useMediaTaskProgress() {
     return count > 0 ? total / count : 0
   }, [transcriptStatus, transcriptProgress, transcribingCount])
 
-  const singleTranscriptionStageLabel = useMemo(() => {
+  // Only meaningful for a single job — with several in flight there is no one stage to name.
+  const singleTranscriptionProgress = useMemo(() => {
     if (transcribingCount !== 1) return null
     for (const [id, status] of transcriptStatus.entries()) {
       if (status === 'queued' || status === 'transcribing') {
-        const progress = transcriptProgress.get(id)
-        return progress ? getTranscriptionStageLabel(progress.stage) : null
+        return transcriptProgress.get(id) ?? null
       }
     }
     return null
   }, [transcriptStatus, transcriptProgress, transcribingCount])
+
+  const singleTranscriptionStageLabel = singleTranscriptionProgress
+    ? getTranscriptionProgressLabel(singleTranscriptionProgress)
+    : null
+
+  // Only the byte counter, never the compile prose: this bar lives in a ~250px panel, where
+  // "Optimizing for your hardware" truncates to noise. The pulsing indeterminate bar alongside
+  // "Preparing model" already says the compile is working. The dialog has room for the prose.
+  const singleTranscriptionDetail =
+    singleTranscriptionProgress?.stage === 'downloading'
+      ? getTranscriptionProgressDetail(singleTranscriptionProgress)
+      : null
+
+  /** Some stages report no fraction at all — show a moving bar, not a stalled one. */
+  const singleTranscriptionIndeterminate = singleTranscriptionProgress
+    ? isIndeterminateTranscriptionProgress(singleTranscriptionProgress)
+    : false
 
   // Per-item breakdowns shown when the aggregate progress bar is expanded.
   const proxyItemRows = useMemo(() => {
@@ -188,9 +327,20 @@ export function useMediaTaskProgress() {
     generatingCount,
     generatingAvgProgress,
     proxyItemRows,
+    interpolatingCount,
+    interpolatingAvgProgress,
+    interpolationItemRows,
+    interpolationEtaLabel,
+    isDownloadingInterpolationModel,
+    upscalingCount,
+    upscalingAvgProgress,
+    upscaleItemRows,
+    upscaleEtaLabel,
     transcribingCount,
     transcribingAvgProgress,
     singleTranscriptionStageLabel,
+    singleTranscriptionDetail,
+    singleTranscriptionIndeterminate,
     transcriptionItemRows,
     preparationItemRows,
     preparingCount,

@@ -26,6 +26,7 @@ import {
   getVideoItemSourceTimeSeconds,
   mapTimelineFrameToSubCompositionFrame,
   resolvePausedVariableSpeedPrewarmPlan,
+  resolveActivePreviewLookaheadTimestamps,
   shouldRunJumpPreseek,
 } from './render-pump-preseek'
 
@@ -69,6 +70,37 @@ describe('render pump preseek helpers', () => {
     })
 
     expect(getVideoItemSourceTimeSeconds(item, 16, 30)).toBeCloseTo(2.4)
+  })
+
+  it('computes descending source time for a reversed clip', () => {
+    const item = makeVideoItem({
+      from: 10,
+      durationInFrames: 30,
+      sourceStart: 120,
+      sourceEnd: 180,
+      sourceFps: 60,
+      speed: 1,
+      isReversed: true,
+    })
+
+    expect(getVideoItemSourceTimeSeconds(item, 10, 30)).toBeCloseTo(179 / 60)
+    expect(getVideoItemSourceTimeSeconds(item, 11, 30)).toBeCloseTo(177 / 60)
+    expect(getVideoItemSourceTimeSeconds(item, 39, 30)).toBeCloseTo(121 / 60)
+  })
+
+  it('derives the reverse endpoint when sourceEnd is absent', () => {
+    const item = makeVideoItem({
+      from: 10,
+      durationInFrames: 15,
+      sourceStart: 120,
+      sourceEnd: undefined,
+      sourceFps: 60,
+      speed: 2,
+      isReversed: true,
+    })
+
+    expect(getVideoItemSourceTimeSeconds(item, 10, 30)).toBeCloseTo(179 / 60)
+    expect(getVideoItemSourceTimeSeconds(item, 11, 30)).toBeCloseTo(175 / 60)
   })
 
   it('requires explicit source fps when requested', () => {
@@ -118,6 +150,83 @@ describe('render pump preseek helpers', () => {
     expectMapCloseTo(
       collectVisibleTrackVideoSourceTimesBySrc(tracks, 10, 30),
       new Map([['same.mp4', [10 / 30, 40 / 30]]]),
+    )
+  })
+
+  it('does not register hidden root tracks as active preview dependencies', () => {
+    const visibleTrack = makeTrack([
+      makeVideoItem({
+        id: 'visible',
+        src: 'visible.mp4',
+        from: 0,
+        durationInFrames: 20,
+        sourceStart: 0,
+        sourceFps: 30,
+        speed: 1,
+      }),
+    ])
+    const hiddenTrack = {
+      ...makeTrack([
+        makeVideoItem({
+          id: 'hidden',
+          trackId: 'track-hidden',
+          src: 'hidden.mp4',
+          from: 0,
+          durationInFrames: 20,
+          sourceStart: 0,
+          sourceFps: 30,
+          speed: 1,
+        }),
+      ]),
+      id: 'track-hidden',
+      visible: false,
+    }
+
+    expectMapCloseTo(
+      collectVisibleTrackVideoSourceTimesBySrc([visibleTrack, hiddenTrack], 10, 30),
+      new Map([['visible.mp4', [10 / 30]]]),
+    )
+  })
+
+  it('registers only solo root tracks when any track is soloed', () => {
+    const visibleNonSoloTrack = {
+      ...makeTrack([
+        makeVideoItem({
+          id: 'visible-non-solo',
+          trackId: 'track-visible',
+          src: 'visible.mp4',
+          from: 0,
+          durationInFrames: 20,
+          sourceStart: 0,
+          sourceFps: 30,
+          speed: 1,
+        }),
+      ]),
+      id: 'track-visible',
+      visible: true,
+      solo: false,
+    }
+    const hiddenSoloTrack = {
+      ...makeTrack([
+        makeVideoItem({
+          id: 'hidden-solo',
+          trackId: 'track-solo',
+          src: 'solo.mp4',
+          from: 0,
+          durationInFrames: 20,
+          sourceStart: 0,
+          sourceFps: 30,
+          speed: 1,
+        }),
+      ]),
+      id: 'track-solo',
+      visible: false,
+      solo: true,
+    }
+
+    expectMapCloseTo(
+      collectVisibleTrackVideoSourceTimesBySrc([visibleNonSoloTrack, hiddenSoloTrack], 10, 30),
+      new Map([['solo.mp4', [10 / 30]]]),
     )
   })
 
@@ -409,6 +518,44 @@ describe('shouldRunJumpPreseek', () => {
   })
 })
 
+describe('active preview lookahead', () => {
+  it('keeps an adjacent frame on both sides for fine scrubbing', () => {
+    expect(
+      resolveActivePreviewLookaheadTimestamps({
+        sourceTime: 10,
+        previousSourceTime: 9.99,
+        elapsedMs: 100,
+        sourceFps: 30,
+        fallbackDirection: 1,
+      }),
+    ).toEqual([10 + 1 / 30, 10 - 1 / 30])
+  })
+
+  it('spreads directional lookahead when scrub velocity is high', () => {
+    expect(
+      resolveActivePreviewLookaheadTimestamps({
+        sourceTime: 20,
+        previousSourceTime: 10,
+        elapsedMs: 50,
+        sourceFps: 30,
+        fallbackDirection: 1,
+      }),
+    ).toEqual([20 + 1 / 30, 20 + 120 / 30, 20 - 1 / 30])
+  })
+
+  it('clamps backward lookahead to the start of the source', () => {
+    expect(
+      resolveActivePreviewLookaheadTimestamps({
+        sourceTime: 0,
+        previousSourceTime: 1,
+        elapsedMs: 16,
+        sourceFps: 30,
+        fallbackDirection: -1,
+      }),
+    ).toEqual([1 / 30])
+  })
+})
+
 describe('compound clip preseek recursion', () => {
   function makeCompositionItem(overrides: Partial<CompositionItem> = {}): CompositionItem {
     return {
@@ -472,6 +619,141 @@ describe('compound clip preseek recursion', () => {
     // relativeFrame 90 -> subCompFrame 90 -> localFrame 30 @30fps = 1.0s
     expect(result.size).toBe(1)
     expect(result.get('blob:fresh')![0]).toBeCloseTo(1.0)
+  })
+
+  it('does not gate a compound frame on video from a hidden nested track', () => {
+    const tracks = [makeMixedTrack([makeCompositionItem()])]
+    const hiddenNestedTrack = {
+      ...makeMixedTrack([]),
+      id: 'sub-track-1',
+      visible: false,
+    }
+    const result = collectVisibleTrackVideoSourceTimesBySrc(tracks, 190, 30, {
+      requireExplicitSourceFps: true,
+      resolveComposition: () => ({
+        fps: 30,
+        items: [makeSubVideoItem()],
+        tracks: [hiddenNestedTrack],
+      }),
+      resolveItemSrc: () => 'blob:hidden',
+    })
+
+    expect(result.size).toBe(0)
+  })
+
+  it('registers only solo nested tracks when a compound track is soloed', () => {
+    const tracks = [makeMixedTrack([makeCompositionItem()])]
+    const visibleNonSoloTrack = {
+      ...makeMixedTrack([]),
+      id: 'sub-track-visible',
+      visible: true,
+      solo: false,
+    }
+    const hiddenSoloTrack = {
+      ...makeMixedTrack([]),
+      id: 'sub-track-solo',
+      visible: false,
+      solo: true,
+    }
+    const result = collectVisibleTrackVideoSourceTimesBySrc(tracks, 190, 30, {
+      requireExplicitSourceFps: true,
+      resolveComposition: () => ({
+        fps: 30,
+        items: [
+          makeSubVideoItem({
+            id: 'visible-non-solo',
+            trackId: 'sub-track-visible',
+            src: 'blob:visible',
+          }),
+          makeSubVideoItem({
+            id: 'hidden-solo',
+            trackId: 'sub-track-solo',
+            src: 'blob:solo',
+          }),
+        ],
+        tracks: [visibleNonSoloTrack, hiddenSoloTrack],
+      }),
+    })
+
+    expectMapCloseTo(result, new Map([['blob:solo', [1]]]))
+  })
+
+  it('collects video through two nested compound clips', () => {
+    const outer = makeCompositionItem({ compositionId: 'sub-outer' })
+    const nested = makeCompositionItem({
+      id: 'nested-comp',
+      compositionId: 'sub-inner',
+      from: 0,
+      durationInFrames: 300,
+    })
+    const tracks = [makeMixedTrack([outer])]
+    const result = collectVisibleTrackVideoSourceTimesBySrc(tracks, 190, 30, {
+      requireExplicitSourceFps: false,
+      resolveComposition: (id) => {
+        if (id === 'sub-outer') return { fps: 30, items: [nested] }
+        if (id === 'sub-inner') return { fps: 30, items: [makeSubVideoItem()] }
+        return null
+      },
+      resolveItemSrc: () => 'blob:nested-fresh',
+    })
+
+    expect(result.get('blob:nested-fresh')![0]).toBeCloseTo(1.0)
+  })
+
+  it('propagates an outer wrapper slip through nested compounds exactly once', () => {
+    const outer = makeCompositionItem({
+      compositionId: 'sub-outer',
+      sourceStart: 30,
+    })
+    const nested = makeCompositionItem({
+      id: 'nested-comp',
+      compositionId: 'sub-inner',
+      from: 0,
+      durationInFrames: 300,
+      sourceStart: 15,
+    })
+    const leaf = makeSubVideoItem()
+    const tracks = [makeMixedTrack([outer])]
+    const collect = (sourceStart: number) =>
+      collectVisibleTrackVideoSourceTimesBySrc(
+        [makeMixedTrack([{ ...outer, sourceStart }])],
+        190,
+        30,
+        {
+          requireExplicitSourceFps: false,
+          resolveComposition: (id) => {
+            if (id === 'sub-outer') return { fps: 30, items: [nested] }
+            if (id === 'sub-inner') return { fps: 30, items: [leaf] }
+            return null
+          },
+          resolveItemSrc: () => 'blob:nested-fresh',
+        },
+      )
+
+    const beforeSlip = collect(30)
+    const afterSlip = collect(42)
+
+    expect(tracks[0]?.items[0]).toMatchObject({ sourceStart: 30 })
+    expect(nested).toMatchObject({ sourceStart: 15 })
+    expect(leaf).toMatchObject({ sourceStart: 0 })
+    expect(beforeSlip.get('blob:nested-fresh')![0]).toBeCloseTo(2.5)
+    expect(afterSlip.get('blob:nested-fresh')![0]).toBeCloseTo(2.9)
+  })
+
+  it('breaks cyclic compound references without recursing forever', () => {
+    const outer = makeCompositionItem({ compositionId: 'sub-cycle' })
+    const nestedCycle = makeCompositionItem({
+      id: 'nested-cycle',
+      compositionId: 'sub-cycle',
+      from: 0,
+      durationInFrames: 300,
+    })
+
+    const result = collectVisibleTrackVideoSourceTimesBySrc([makeMixedTrack([outer])], 190, 30, {
+      resolveComposition: () => ({ fps: 30, items: [nestedCycle] }),
+    })
+
+    expect(result.size).toBe(0)
   })
 
   it('skips composition items when no resolver is provided (old behavior)', () => {
@@ -548,6 +830,18 @@ describe('compound clip preseek recursion', () => {
       resolveItemSrc: () => 'blob:fresh',
     })
     expect(result.size).toBe(0)
+  })
+
+  it('uses the compound fps for held scrubs when legacy sub-items omit sourceFps', () => {
+    const subItem = makeSubVideoItem({ sourceFps: undefined })
+    const tracks = [makeMixedTrack([makeCompositionItem()])]
+    const result = collectVisibleTrackVideoSourceTimesBySrc(tracks, 190, 30, {
+      requireExplicitSourceFps: false,
+      resolveComposition: resolveComposition([subItem]),
+      resolveItemSrc: () => 'blob:fresh',
+    })
+
+    expect(result.get('blob:fresh')![0]).toBeCloseTo(1.0)
   })
 
   it('resolves direct video items with empty stored src by mediaId', () => {

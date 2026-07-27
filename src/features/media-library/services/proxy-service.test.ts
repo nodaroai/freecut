@@ -316,6 +316,38 @@ describe('proxyService.loadExistingProxies', () => {
     )
   })
 
+  it('skips (but keeps) a ready proxy whose codec this machine cannot play', async () => {
+    // jsdom's HTMLMediaElement.canPlayType returns '' for HEVC, so an HEVC proxy (e.g.
+    // generated on another machine) is treated as unplayable here.
+    const removeEntry = vi.fn(async () => undefined)
+    installProxyStorageFixture({
+      proxyKey: 'proxy-hevc',
+      files: {
+        'meta.json': createJsonFile({
+          version: 4,
+          width: 960,
+          height: 540,
+          sourceWidth: 3840,
+          sourceHeight: 2160,
+          status: 'ready',
+          createdAt: 1,
+          codec: 'hevc',
+        }),
+        'proxy.mp4': createBinaryFile(2048),
+      },
+      onRemoveEntry: removeEntry,
+    })
+
+    const { proxyService } = await import('./proxy-service')
+    proxyService.setProxyKey('video-hevc', 'proxy-hevc')
+
+    // Not treated as stale, not loaded, and NOT removed (kept for machines that can play it).
+    await expect(proxyService.loadExistingProxies(['video-hevc'])).resolves.toEqual([])
+    expect(objectUrlRegistryMocks.registerObjectUrl).not.toHaveBeenCalled()
+    expect(removeEntry).not.toHaveBeenCalled()
+    expect(proxyService.hasProxy('video-hevc')).toBe(false)
+  })
+
   it('exposes centralized OPFS proxy path strings byte-for-byte', async () => {
     const { proxyOpfsFilePath, proxyOpfsMetaPath } = await import('../proxy-constants')
 
@@ -432,5 +464,48 @@ describe('proxyService.loadExistingProxies', () => {
         sourceHeight: 1080,
       })
     })
+  })
+
+  it('cancels an automatically scheduled background proxy during preview cleanup', async () => {
+    const worker = { postMessage: vi.fn() } as unknown as Worker
+    workerManagerMocks.getWorker.mockReturnValue(worker)
+    const { proxyService } = await import('./proxy-service')
+
+    proxyService.generateProxy(
+      'video-background',
+      { kind: 'opfs', path: 'content/background/data', mimeType: 'video/mp4' },
+      1920,
+      1080,
+      'proxy-video-background',
+      { priority: 'background' },
+    )
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(1))
+    proxyService.cancelBackgroundProxy('video-background', 'proxy-video-background')
+
+    expect(worker.postMessage).toHaveBeenLastCalledWith({
+      type: 'cancel',
+      mediaId: 'proxy-video-background',
+    })
+  })
+
+  it('does not cancel a background proxy after a user promotes it', async () => {
+    const worker = { postMessage: vi.fn() } as unknown as Worker
+    workerManagerMocks.getWorker.mockReturnValue(worker)
+    const { proxyService } = await import('./proxy-service')
+    const source = { kind: 'opfs', path: 'content/promoted/data', mimeType: 'video/mp4' } as const
+
+    proxyService.generateProxy(
+      'video-promoted',
+      source,
+      1920,
+      1080,
+      'proxy-video-promoted',
+      { priority: 'background' },
+    )
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(1))
+    proxyService.generateProxy('video-promoted', source, 1920, 1080, 'proxy-video-promoted')
+    proxyService.cancelBackgroundProxy('video-promoted', 'proxy-video-promoted')
+
+    expect(worker.postMessage).toHaveBeenCalledTimes(1)
   })
 })

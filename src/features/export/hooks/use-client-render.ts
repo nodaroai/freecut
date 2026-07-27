@@ -9,7 +9,7 @@
  * lockstep.
  */
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { ExportSettings, ExtendedExportSettings } from '@/types/export'
 import type { RenderProgress, ClientRenderResult, ClientCodec } from '../utils/client-renderer'
 import {
@@ -19,8 +19,17 @@ import {
   estimateFileSize,
   getVideoBitrateForQuality,
 } from '../utils/client-renderer'
-import { isExtendedSettings, resolveClientSettings, runRender } from '../utils/render-pipeline'
+import {
+  isExtendedSettings,
+  mapRequestedClientSettings,
+  resolveClientSettings,
+  runRender,
+} from '../utils/render-pipeline'
+import { trySmartCopyExport } from '../utils/smart-copy'
 import { convertTimelineToComposition } from '../utils/timeline-to-composition'
+import { buildTranscriptSubtitleCues } from '../utils/embedded-subtitle-export'
+import { serializeSrt } from '@/shared/utils/subtitles'
+import { releaseTemporaryExportOutput } from '../utils/export-output-target'
 import { useTimelineStore } from '@/features/export/deps/timeline'
 import { useProjectStore } from '@/features/export/deps/projects'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
@@ -44,6 +53,7 @@ interface UseClientRenderReturn {
   // State
   isExporting: boolean
   progress: number
+  progressMessage?: string
   renderedFrames?: number
   totalFrames?: number
   status: ClientRenderStatus
@@ -68,11 +78,13 @@ interface UseClientRenderReturn {
 export function useClientRender(): UseClientRenderReturn {
   const [isExporting, setIsExporting] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [progressMessage, setProgressMessage] = useState<string>()
   const [renderedFrames, setRenderedFrames] = useState<number>()
   const [totalFrames, setTotalFrames] = useState<number>()
   const [status, setStatus] = useState<ClientRenderStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ClientRenderResult | null>(null)
+  const resultRef = useRef<ClientRenderResult | null>(null)
 
   // AbortController for cancellation
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -82,6 +94,7 @@ export function useClientRender(): UseClientRenderReturn {
    */
   const handleProgress = useCallback((progressData: RenderProgress) => {
     setProgress(progressData.progress)
+    setProgressMessage(progressData.message)
     setRenderedFrames(progressData.currentFrame)
     setTotalFrames(progressData.totalFrames)
 
@@ -111,8 +124,12 @@ export function useClientRender(): UseClientRenderReturn {
       const event = log.startEvent('render', opId)
 
       try {
+        const previousResult = resultRef.current
+        resultRef.current = null
+        void releaseTemporaryExportOutput(previousResult)
         setIsExporting(true)
         setProgress(0)
+        setProgressMessage(undefined)
         setError(null)
         setResult(null)
         setStatus('preparing')
@@ -133,14 +150,49 @@ export function useClientRender(): UseClientRenderReturn {
         const projectWidth = currentProject?.metadata?.width ?? DEFAULT_PROJECT_WIDTH
         const projectHeight = currentProject?.metadata?.height ?? DEFAULT_PROJECT_HEIGHT
 
-        // Resolve settings + codec fallback (one source of truth with the queue).
-        const { clientSettings, exportMode, renderWholeProject, codecFallback } =
-          await resolveClientSettings(settings, fps)
-        if (codecFallback) event.set('codecFallback', codecFallback)
-
-        // When renderWholeProject is true, ignore in/out points
+        const requested = mapRequestedClientSettings(settings, fps)
+        // When renderWholeProject is true, ignore in/out points.
+        const { exportMode, renderWholeProject } = requested
         const effectiveInPoint = renderWholeProject ? null : inPoint
         const effectiveOutPoint = renderWholeProject ? null : outPoint
+        const signal = abortControllerRef.current.signal
+
+        const smartCopy = await trySmartCopyExport(
+          {
+            settings: requested.clientSettings,
+            tracks,
+            items,
+            transitions,
+            keyframes,
+            fps,
+            width: projectWidth,
+            height: projectHeight,
+            inPoint: effectiveInPoint,
+            outPoint: effectiveOutPoint,
+            busAudioEq,
+            masterBusDb,
+          },
+          signal,
+          handleProgress,
+        )
+
+        if (smartCopy.result) {
+          resultRef.current = smartCopy.result
+          setResult(smartCopy.result)
+          setStatus('completed')
+          setProgress(100)
+          event.set('renderPath', 'smart-copy')
+          event.success({
+            fileSize: smartCopy.result.fileSize,
+            fileSizeFormatted: formatBytes(smartCopy.result.fileSize),
+            duration: smartCopy.result.duration,
+          })
+          return
+        }
+
+        // Resolve settings + codec fallback only when an encoder is required.
+        const { clientSettings, codecFallback } = await resolveClientSettings(settings, fps)
+        if (codecFallback) event.set('codecFallback', codecFallback)
 
         const extended = isExtendedSettings(settings)
         event.merge({
@@ -155,7 +207,7 @@ export function useClientRender(): UseClientRenderReturn {
           projectResolution: `${projectWidth}x${projectHeight}`,
           videoContainer: extended ? settings.videoContainer : undefined,
           audioContainer: extended ? settings.audioContainer : undefined,
-          embedSubtitles: clientSettings.embedSubtitles,
+          subtitleMode: clientSettings.subtitleMode,
           projectId: currentProject?.id,
           codec: clientSettings.codec,
           container: clientSettings.container,
@@ -206,7 +258,12 @@ export function useClientRender(): UseClientRenderReturn {
             totalResolvedItems++
             if ('src' in item && item.src) {
               itemsWithSrc++
-            } else if (item.type === 'video' || item.type === 'audio' || item.type === 'image') {
+            } else if (
+              item.type === 'video' ||
+              item.type === 'audio' ||
+              item.type === 'image' ||
+              item.type === 'lottie'
+            ) {
               itemsMissingSrc++
               log.warn('Media item missing src after resolve', {
                 opId,
@@ -225,7 +282,6 @@ export function useClientRender(): UseClientRenderReturn {
         })
 
         // Run the render (worker, with automatic main-thread fallback).
-        const signal = abortControllerRef.current.signal
         const {
           result: renderResult,
           renderPath,
@@ -239,7 +295,23 @@ export function useClientRender(): UseClientRenderReturn {
         })
         if (fallbackReason) event.set('workerFallbackReason', fallbackReason)
 
-        setResult(renderResult)
+        // Sidecar mode: the video is muxed clean; build the .srt from the same
+        // (export-trimmed) composition on the main thread and attach it so the
+        // dialog can offer it as a second download.
+        let finalResult = renderResult
+        if (clientSettings.subtitleMode === 'sidecar') {
+          const cues = buildTranscriptSubtitleCues(composition)
+          if (cues.length > 0) {
+            finalResult = {
+              ...renderResult,
+              subtitleSidecar: { filename: 'subtitles.srt', content: serializeSrt(cues) },
+            }
+            event.set('subtitleSidecarCues', cues.length)
+          }
+        }
+
+        resultRef.current = finalResult
+        setResult(finalResult)
         setStatus('completed')
         setProgress(100)
 
@@ -301,13 +373,29 @@ export function useClientRender(): UseClientRenderReturn {
     else if (mime.includes('audio/wav') || mime.includes('wave')) extension = 'wav'
     else if (mime.includes('audio/aac') || mime.includes('adts')) extension = 'aac'
 
-    a.download = `export-${Date.now()}.${extension}`
+    const baseName = `export-${Date.now()}`
+    a.download = `${baseName}.${extension}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
 
     // Revoke during idle — download has already started by then
     requestIdleCallback(() => URL.revokeObjectURL(url))
+
+    // Sidecar mode: download the .srt alongside, sharing the video's base name.
+    const sidecar = result.subtitleSidecar
+    if (sidecar) {
+      const sidecarExt = sidecar.filename.split('.').pop() ?? 'srt'
+      const sidecarBlob = new Blob([sidecar.content], { type: 'text/plain;charset=utf-8' })
+      const sidecarUrl = URL.createObjectURL(sidecarBlob)
+      const sidecarLink = document.createElement('a')
+      sidecarLink.href = sidecarUrl
+      sidecarLink.download = `${baseName}.${sidecarExt}`
+      document.body.appendChild(sidecarLink)
+      sidecarLink.click()
+      document.body.removeChild(sidecarLink)
+      requestIdleCallback(() => URL.revokeObjectURL(sidecarUrl))
+    }
   }, [result])
 
   /**
@@ -318,12 +406,24 @@ export function useClientRender(): UseClientRenderReturn {
     abortControllerRef.current = null
     setIsExporting(false)
     setProgress(0)
+    setProgressMessage(undefined)
     setRenderedFrames(undefined)
     setTotalFrames(undefined)
     setStatus('idle')
     setError(null)
+    const previousResult = resultRef.current
+    resultRef.current = null
+    void releaseTemporaryExportOutput(previousResult)
     setResult(null)
   }, [])
+
+  useEffect(
+    () => () => {
+      void releaseTemporaryExportOutput(resultRef.current)
+      resultRef.current = null
+    },
+    [],
+  )
 
   /**
    * Get supported codecs for the current resolution
@@ -365,6 +465,7 @@ export function useClientRender(): UseClientRenderReturn {
   return {
     isExporting,
     progress,
+    progressMessage,
     renderedFrames,
     totalFrames,
     status,

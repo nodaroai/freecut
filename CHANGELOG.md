@@ -4,11 +4,127 @@ All notable changes to FreeCut. Weekly CalVer: `YYYY.MM.DD` = the Monday of the 
 
 <!-- Entries below are generated via the `changelog` skill. Newest first. -->
 
-## [Current] — week of 2026-06-15
+## [Current] — week of 2026-07-20
+
+### Added
+- Solid color and gradient layers in Motion
+- Crop clips with handles directly on the canvas, including compound clips
+- Promote any clip to a Motion Clip and open it in the Motion editor
+- Transform parenting with a pick whip, with invalid targets flagged as you drag
+- Set composition in and out points, and trim a comp to that region
+- Composition duration and timecode, switchable between frames and seconds
+- Animate individual path vertices
+- Filter the dopesheet to show only animated properties
+- Jump between applied animations from the timeline
+- Keyframes pushed outside a clip are flagged with one-click cleanup
+
+### Fixed
+- A clear "project not found" screen with copyable details instead of a crash
+- Captions keep their transcript boundaries when edited
+- Playhead stays locked to the cursor during edge scrolling
+- Timeline scrubbing cancels cleanly when the window loses focus
+
+### Improved
+- Filmstrips and waveforms stay visible and smooth while zooming the timeline
+- The Motion dopesheet stays responsive with large layer stacks
+
+## [2026.07.13] — week of 2026-07-13 to 2026-07-19
+
+### Added
+- Pen tool — draw and edit vector paths directly on the canvas
+- Shape strokes with caps, joins, trim paths, and taper
+- Link any property to another with a pick whip
+- Expressions — drive a property from another with live formulas
+- Parent a Motion layer to another so it inherits the transform
+- Motion Library — save a clip's animation and reuse it anywhere in the project
+- Split Position into X and Y to animate each independently
+- Procedural motion now shows as bands on the timeline
+- Drag text motion timing directly on the timeline
+- Edit spatial effects like power windows on the canvas
+
+### Fixed
+- Reversed clips no longer show mismatched captions or seek to the wrong frame
+- Transitions clamp correctly when trimming footage at a different frame rate
+- Preview holds the current frame instead of flashing while scrubbing and skimming
+
+## [2026.07.06] — week of 2026-07-06 to 2026-07-12
+
+### Added
+- Motion — a layered compositing workspace with layers, groups, and a graph editor
+- Lottie animations — import .json and .lottie files and play them on the timeline
+- Customize Lottie colors, themes, text, and value slots, with live preview
+- Browse and import free LottieFiles animations from inside the editor
+- Record a voiceover from your microphone, synced live to the timeline
+- Frame interpolation — generate 2×, 4×, or 8× smoother video
+- Upscale video 2× on your GPU
+- Silence removal reworked with a review step before you commit
+- Text and shape presets land on a new layer at the playhead
+- Unlabelled markers get automatic names, shown on hover in the ruler
+- Shift-click a section header to collapse or expand every properties section
+
+### Fixed
+- Transcription shows real model-download progress instead of a frozen bar
+- Timeline track heights are remembered when you reopen a project
+- No more false "new version available" prompts while editing
+- Fixed edge seams and shimmer on GPU effects in the preview
+- Copied, generated, and imported media now save reliably to your workspace folder
+- Missing media shows a relink prompt on the clip instead of failing silently
+- Go To Start returns to the first frame after reopening a project
+
+### Improved
+- Playback starts almost instantly instead of stalling on the first frame
+- Saving a project stays fast no matter how large your workspace grows
+- Projects open faster — thumbnails and media details load in parallel
+- Effects apply to the preview instantly, without a warm-up delay
+- Smoother timeline zooming, clip dragging, and marquee selection
+
+## [2026.06.29] — week of 2026-06-29 to 2026-07-05
+
+### Added
+- Sequences — build multiple timelines in one project and switch between them in tabs
+- Export any sequence, not just the main timeline
+- Motion text — animate text by character, word, or line
+- Per-clip easing editor: preset curves, draggable handles, live preview, and custom presets
+- Color picker gains hex/alpha input and an in-app eyedropper
+- Optional interface sounds with a voice picker
+- Redesigned keyboard-shortcut editor in Settings
+- Subtitle export modes: off, burn in, sidecar file, or embedded track
+- Edit ProRes footage — import, preview, and thumbnails
+- Procedural motion modifiers — drift, breath, shake, sway, and spin, with one-click bake to keyframes
+- New GPU effects: gradient map, VHS, CRT, Droste, block glitch, glass distortion, ink, and pixel sort
+- ASCII effect now supports custom text, fonts, and glyph character sets
+- Browse and jump to markers from a list in the properties sidebar
+
+### Fixed
+- Fixed an export crash triggered by certain layered effects
+- Preview no longer hangs mid-clip during playback
+
+### Improved
+- Keyframe graph editor gains fit-to-view, a grid, and smoother scrolling
+- Clearer Animate workflow with procedural and keyframe state indicators
+
+## [2026.06.22] — week of 2026-06-22 to 2026-06-28
+
+### Added
+- Reorder tracks by dragging the track header — clip rows follow along
+
+### Fixed
+- Track reordering no longer drops transitions between composition clips
+- Audio now plays for MKV and other non-native file containers
+- Timeline momentum scrolling stays consistent across display refresh rates
+
+### Improved
+- Clips start faster when the playhead reaches them (pre-mounted ahead of time)
+- Snappier tooltips and tactile press feedback, with reduced-motion support
+- AI models are cached on disk so they don't re-download each session
+
+## [2026.06.15] — week of 2026-06-15 to 2026-06-21
 
 ### Added
 - New Animate workspace — keyframe animation with a dopesheet, curve (graph) editor, and side-by-side split view
-- Save, reuse, and apply animation presets, with a built-in motion-preset library that travels with exported projects
+- Save, reuse, and apply animation presets, with a library that travels with exported projects
+- On-device transcription with the new Parakeet engine (Whisper fallback) — auto-caption clips, then search and edit transcripts in a dedicated panel
+- Redesigned Color workspace — grade, effects, and keyframes in three columns with a reworked navigator
 - Live animated A/B previews in the transition picker, rendered through real GPU shaders
 - Live GPU-rendered previews in the effect picker
 - Drag text and shape presets straight onto the preview canvas as overlay layers
@@ -18,25 +134,39 @@ All notable changes to FreeCut. Weekly CalVer: `YYYY.MM.DD` = the Monday of the 
 ### Fixed
 - Ctrl+click now reliably toggles clip selection
 - Middle-click pans the timeline instead of starting a clip drag
+- Delete/Backspace no longer deletes clips while editing a transcript
 - Fixed decoder and video-source memory leaks during long editing sessions
 
 ### Improved
 - Smoother playback of clips with keyframe animation
-- Smoother scrubbing — preview now reuses zero-copy video frames and cached text and warps
+- Smoother scrubbing — preview reuses zero-copy video frames and cached text and warps
 
 ## [2026.06.08] — week of 2026-06-08 to 2026-06-14
 
 ### Added
 - DaVinci-style Color workspace — color wheels, curves, LUT import, grade presets, bypass, and copy/paste grading
 - Video scopes in the Color workspace — waveform, vectorscope, and histogram
+- Switch between Edit and Color workspaces, with your layout remembered
 - In-app user guide, linked from the toolbar
+
+### Fixed
+- Project list no longer breaks when a project file is corrupt
+
+### Improved
+- Keyframe editor — guided empty state, mode legend, and clearer draggable controls
+- Faster playback cold-start when returning to a backgrounded tab
 
 ## [2026.06.01] — week of 2026-06-01 to 2026-06-07
 
 ### Added
 - Audio clips show an interactive waveform instead of a flat placeholder
 - Hear audio while you scrub and skim the timeline
+- Searchable keyboard-shortcut editor with conflict detection and reset
+- Projects scan for missing media on load and flag what's broken
 - Export dialog warns before risky, very long renders
+
+### Improved
+- Auto-save is now on by default, with clearer onboarding and import feedback
 
 ## [2026.05.25] — week of 2026-05-25 to 2026-05-31
 

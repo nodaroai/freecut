@@ -61,6 +61,32 @@ interface ProxyMetadata {
   sourceHeight?: number
   status: string
   createdAt: number
+  /** Video codec the proxy was encoded with ('avc' | 'hevc'); absent on legacy H.264 proxies. */
+  codec?: string
+}
+
+// A proxy's codec is recorded in its metadata. A proxy generated on one machine (e.g. an
+// HEVC proxy) may not be playable on another (HEVC support is platform-dependent); using it
+// would break preview. Gate on `<video>` playback support so an unplayable proxy is skipped
+// and the source is used instead. H.264 — and legacy proxies with no recorded codec — are
+// universally playable.
+let hevcVideoPlayable: boolean | null = null
+function canPlayProxyCodec(codec: string | undefined): boolean {
+  if (!codec || codec === 'avc') return true
+  if (codec === 'hevc') {
+    if (hevcVideoPlayable === null) {
+      try {
+        hevcVideoPlayable =
+          typeof document !== 'undefined' &&
+          document.createElement('video').canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') ===
+            'probably'
+      } catch {
+        hevcVideoPlayable = false
+      }
+    }
+    return hevcVideoPlayable
+  }
+  return true // Unknown codec — don't block; best effort.
 }
 
 type ProxyStatusListener = (
@@ -140,6 +166,7 @@ class ProxyService {
   private pendingJobsByKey = new Map<string, QueuedProxyJob>()
   private pendingJobOrder: string[] = []
   private activeJobPhaseByKey = new Map<string, 'loading' | 'processing'>()
+  private activeJobPriorityByKey = new Map<string, ProxyJobPriority>()
   private progressEmissionByProxyKey = new Map<string, ProgressEmissionState>()
   private statusListener: ProxyStatusListener | null = null
   private mediaResolver: ProxyMediaResolver | null = null
@@ -285,6 +312,9 @@ class ProxyService {
         existingJob.priority = 'user'
         this.insertPendingJob(existingJob)
       }
+      if ((options?.priority ?? 'user') === 'user') {
+        this.activeJobPriorityByKey.set(resolvedProxyKey, 'user')
+      }
       this.emitStatusForProxyKey(
         resolvedProxyKey,
         'generating',
@@ -322,6 +352,7 @@ class ProxyService {
 
     if (this.pendingJobsByKey.has(resolvedProxyKey)) {
       this.removePendingJob(resolvedProxyKey)
+      this.activeJobPriorityByKey.delete(resolvedProxyKey)
       return
     }
 
@@ -332,6 +363,7 @@ class ProxyService {
 
     if (activePhase === 'loading') {
       this.activeJobPhaseByKey.delete(resolvedProxyKey)
+      this.activeJobPriorityByKey.delete(resolvedProxyKey)
       this.drainQueue()
       return
     }
@@ -343,12 +375,28 @@ class ProxyService {
     } as ProxyWorkerRequest)
   }
 
+  cancelBackgroundProxy(mediaId: string, proxyKey?: string): void {
+    const resolvedProxyKey = this.resolveProxyKey(mediaId, proxyKey)
+    const pendingPriority = this.pendingJobsByKey.get(resolvedProxyKey)?.priority
+    const activePriority = this.activeJobPriorityByKey.get(resolvedProxyKey)
+    if (pendingPriority !== 'background' && activePriority !== 'background') return
+    this.cancelProxy(mediaId, resolvedProxyKey)
+  }
+
   /**
    * Get proxy blob URL if available
    */
   getProxyBlobUrl(mediaId: string, proxyKey?: string): string | null {
     const resolvedProxyKey = this.resolveProxyKey(mediaId, proxyKey)
     return this.proxyBlobUrlByKey.get(resolvedProxyKey) ?? null
+  }
+
+  getMediaIdByProxyUrl(url: string): string | null {
+    for (const [proxyKey, proxyUrl] of this.proxyBlobUrlByKey) {
+      if (proxyUrl !== url) continue
+      return this.mediaIdsByProxyKey.get(proxyKey)?.values().next().value ?? null
+    }
+    return null
   }
 
   /**
@@ -485,6 +533,16 @@ class ProxyService {
             continue
           }
 
+          // Skip (but keep) a proxy this machine can't play — e.g. an HEVC proxy generated
+          // on another machine. Preview falls back to the source; the file stays for
+          // machines that can use it.
+          if (!canPlayProxyCodec(metadata.codec)) {
+            logger.debug(
+              `Skipping proxy ${proxyKey}: codec '${metadata.codec}' not playable here; using source`,
+            )
+            continue
+          }
+
           // Load proxy file and create blob URL
           const proxyHandle = await mediaDir.getFileHandle(PROXY_FILE_NAME)
           const proxyFile = await proxyHandle.getFile()
@@ -551,6 +609,9 @@ class ProxyService {
 
       if (metadata.status !== 'ready') return false
       if (metadata.version !== PROXY_SCHEMA_VERSION) return false
+      // Don't hydrate a proxy this machine can't play (e.g. HEVC on a non-HEVC machine);
+      // the source is used instead.
+      if (!canPlayProxyCodec(metadata.codec)) return false
 
       // Back-fill OPFS with both files so subsequent local reads are fast
       // and stay co-located with the rest of the proxy pipeline.
@@ -611,6 +672,7 @@ class ProxyService {
       case 'complete': {
         const wasCancelled = !this.generatingProxyKeys.has(proxyKey)
         this.activeJobPhaseByKey.delete(proxyKey)
+        this.activeJobPriorityByKey.delete(proxyKey)
         this.generatingProxyKeys.delete(proxyKey)
         this.progressByProxyKey.delete(proxyKey)
         this.clearProgressEmissionState(proxyKey)
@@ -625,6 +687,7 @@ class ProxyService {
 
       case 'cancelled': {
         this.activeJobPhaseByKey.delete(proxyKey)
+        this.activeJobPriorityByKey.delete(proxyKey)
         this.generatingProxyKeys.delete(proxyKey)
         this.progressByProxyKey.delete(proxyKey)
         this.clearProgressEmissionState(proxyKey)
@@ -635,6 +698,7 @@ class ProxyService {
       case 'error': {
         const wasCancelled = !this.generatingProxyKeys.has(proxyKey)
         this.activeJobPhaseByKey.delete(proxyKey)
+        this.activeJobPriorityByKey.delete(proxyKey)
         this.generatingProxyKeys.delete(proxyKey)
         this.progressByProxyKey.delete(proxyKey)
         this.clearProgressEmissionState(proxyKey)
@@ -902,6 +966,7 @@ class ProxyService {
 
   private async runQueuedJob(job: QueuedProxyJob): Promise<void> {
     const { proxyKey } = job
+    this.activeJobPriorityByKey.set(proxyKey, job.priority)
     try {
       const worker = this.getWorker()
 
@@ -926,6 +991,7 @@ class ProxyService {
       } catch (error) {
         if (!this.generatingProxyKeys.has(proxyKey)) {
           this.activeJobPhaseByKey.delete(proxyKey)
+          this.activeJobPriorityByKey.delete(proxyKey)
           this.drainQueue()
           return
         }
@@ -936,6 +1002,7 @@ class ProxyService {
 
       if (!this.generatingProxyKeys.has(proxyKey)) {
         this.activeJobPhaseByKey.delete(proxyKey)
+        this.activeJobPriorityByKey.delete(proxyKey)
         this.drainQueue()
         return
       }
@@ -960,6 +1027,7 @@ class ProxyService {
 
   private failQueuedJob(proxyKey: string, message: string, error?: unknown): void {
     this.activeJobPhaseByKey.delete(proxyKey)
+    this.activeJobPriorityByKey.delete(proxyKey)
     this.generatingProxyKeys.delete(proxyKey)
     this.progressByProxyKey.delete(proxyKey)
     this.clearProgressEmissionState(proxyKey)

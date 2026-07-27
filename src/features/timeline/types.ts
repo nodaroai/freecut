@@ -13,8 +13,13 @@ import type {
   ItemKeyframes,
   AnimatableProperty,
   Keyframe,
+  KeyframeRef,
   EasingType,
   EasingConfig,
+  VectorAnimatableProperty,
+  VectorKeyframe,
+  VectorPropertyKeyframes,
+  TransformAnimatableProperty,
 } from '@/types/keyframe'
 import type { MaskVertex } from '@/types/masks'
 import type { AutoKeyframeOperation } from '@/features/timeline/deps/keyframes'
@@ -29,6 +34,8 @@ export type TransformHistoryOperation =
 
 export interface TransformCommandOptions {
   operation?: TransformHistoryOperation
+  /** Optional keyframe writes committed in the same undoable transform gesture. */
+  autoKeyframeOperations?: AutoKeyframeOperation[]
 }
 
 export interface LoadTimelineOptions {
@@ -86,15 +93,30 @@ export interface TimelineActions {
   removeSilenceFromItems: (
     itemIds: string[],
     silenceRangesByMediaId: Record<string, Array<{ start: number; end: number }>>,
-  ) => { analyzedItemCount: number; removedItemCount: number; splitCount: number }
+  ) => {
+    analyzedItemCount: number
+    removedRangeCount: number
+    removedItemCount: number
+    splitCount: number
+  }
   removeFillerWordsFromItems: (
     itemIds: string[],
     fillerRangesByMediaId: Record<string, Array<{ start: number; end: number }>>,
-  ) => { analyzedItemCount: number; removedItemCount: number; splitCount: number }
+  ) => {
+    analyzedItemCount: number
+    removedRangeCount: number
+    removedItemCount: number
+    splitCount: number
+  }
   removeTranscriptRangesFromItems: (
     itemIds: string[],
     rangesByMediaId: Record<string, Array<{ start: number; end: number }>>,
-  ) => { analyzedItemCount: number; removedItemCount: number; splitCount: number }
+  ) => {
+    analyzedItemCount: number
+    removedRangeCount: number
+    removedItemCount: number
+    splitCount: number
+  }
   joinItems: (itemIds: string[]) => void
   rateStretchItem: (id: string, newFrom: number, newDuration: number, newSpeed: number) => void
   resetSpeedWithRipple: (itemIds: string[]) => void
@@ -209,8 +231,37 @@ export interface TimelineActions {
     keyframeId: string,
     updates: Partial<Omit<Keyframe, 'id'>>,
   ) => void
+  upsertVectorKeyframe: (
+    itemId: string,
+    property: VectorAnimatableProperty,
+    input: {
+      frame: number
+      value: { x: number; y: number }
+      easing?: EasingType
+      easingConfig?: EasingConfig
+      temporalEase?: VectorKeyframe['temporalEase']
+      spatial?: VectorKeyframe['spatial']
+    },
+  ) => string
+  updateVectorKeyframe: (
+    itemId: string,
+    property: VectorAnimatableProperty,
+    keyframeId: string,
+    updates: Partial<Omit<VectorKeyframe, 'id'>>,
+  ) => void
+  removeVectorKeyframe: (
+    itemId: string,
+    property: VectorAnimatableProperty,
+    keyframeId: string,
+  ) => void
+  promoteTransformToVector: (
+    itemId: string,
+    vectorProperty: VectorPropertyKeyframes,
+    removeScalarProperties: readonly TransformAnimatableProperty[],
+  ) => void
   applyAutoKeyframeOperations: (operations: AutoKeyframeOperation[]) => void
   removeKeyframe: (itemId: string, property: AnimatableProperty, keyframeId: string) => void
+  removeKeyframes: (refs: KeyframeRef[]) => void
   removeKeyframesForItem: (itemId: string) => void
   removeKeyframesForProperty: (itemId: string, property: AnimatableProperty) => void
   getKeyframesForItem: (itemId: string) => ItemKeyframes | undefined

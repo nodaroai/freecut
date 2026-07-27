@@ -6,6 +6,7 @@ import {
   getLeftEditorSidebarBounds,
 } from '@/config/editor-layout'
 import { useSettingsStore } from '@/features/editor/deps/settings'
+import { usePlaybackStore } from '@/shared/state/playback'
 
 describe('editor-store', () => {
   beforeEach(() => {
@@ -28,7 +29,6 @@ describe('editor-store', () => {
       workspace: 'edit',
       leftSidebarOpen: true,
       rightSidebarOpen: true,
-      keyframeEditorOpen: false,
       keyframeEditorShortcutScopeActive: false,
       activeTab: 'media',
       clipInspectorTab: 'video',
@@ -49,28 +49,7 @@ describe('editor-store', () => {
       propertiesFullColumn: false,
       mediaFullColumn: true,
     })
-  })
-
-  it('has correct initial state', () => {
-    const state = useEditorStore.getState()
-    expect(state.activePanel).toBe(null)
-    expect(state.leftSidebarOpen).toBe(true)
-    expect(state.rightSidebarOpen).toBe(true)
-    expect(state.keyframeEditorOpen).toBe(false)
-    expect(state.keyframeEditorShortcutScopeActive).toBe(false)
-    expect(state.activeTab).toBe('media')
-    expect(state.clipInspectorTab).toBe('video')
-    expect(state.sourcePreviewMediaId).toBe(null)
-    expect(state.mediaSkimPreviewMediaId).toBe(null)
-    expect(state.mediaSkimPreviewFrame).toBe(null)
-    expect(state.compoundClipSkimPreviewCompositionId).toBe(null)
-    expect(state.compoundClipSkimPreviewFrame).toBe(null)
-    expect(state.sourcePatchVideoEnabled).toBe(true)
-    expect(state.sourcePatchAudioEnabled).toBe(true)
-    expect(state.sourcePatchVideoTrackId).toBe(null)
-    expect(state.sourcePatchAudioTrackId).toBe(null)
-    expect(state.linkedSelectionEnabled).toBe(true)
-    expect(state.colorScopesOpen).toBe(false)
+    usePlaybackStore.setState({ isPlaying: false, previewFrame: null, previewItemId: null })
   })
 
   it('sets active panel', () => {
@@ -99,19 +78,6 @@ describe('editor-store', () => {
 
     useEditorStore.getState().toggleRightSidebar()
     expect(useEditorStore.getState().rightSidebarOpen).toBe(true)
-  })
-
-  it('opens the keyframe editor and reveals the left sidebar', () => {
-    useEditorStore.getState().setLeftSidebarOpen(false)
-    expect(useEditorStore.getState().keyframeEditorOpen).toBe(false)
-
-    useEditorStore.getState().toggleKeyframeEditorOpen()
-
-    expect(useEditorStore.getState().keyframeEditorOpen).toBe(true)
-    expect(useEditorStore.getState().leftSidebarOpen).toBe(true)
-
-    useEditorStore.getState().setKeyframeEditorOpen(false)
-    expect(useEditorStore.getState().keyframeEditorOpen).toBe(false)
   })
 
   it('sets active tab', () => {
@@ -271,6 +237,16 @@ describe('editor-store', () => {
     const currentState = useEditorStore.getState()
     useEditorStore.getState().setWorkspace('edit')
     expect(useEditorStore.getState()).toBe(currentState)
+  })
+
+  it('stops transient preview playback before switching workspaces', () => {
+    usePlaybackStore.setState({ isPlaying: true, previewFrame: 42, previewItemId: 'clip-1' })
+
+    useEditorStore.getState().setWorkspace('color')
+
+    expect(usePlaybackStore.getState().isPlaying).toBe(false)
+    expect(usePlaybackStore.getState().previewFrame).toBeNull()
+    expect(usePlaybackStore.getState().previewItemId).toBeNull()
   })
 
   it('toggles linked selection', () => {

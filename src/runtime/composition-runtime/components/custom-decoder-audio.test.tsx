@@ -6,6 +6,12 @@ const audioDecodeMocks = vi.hoisted(() => ({
   getOrDecodeAudio: vi.fn(),
   getOrDecodeAudioSliceForPlayback: vi.fn(),
 }))
+const clockRateMocks = vi.hoisted(() => ({ current: 1 }))
+
+vi.mock('@/runtime/composition-runtime/deps/player', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/runtime/composition-runtime/deps/player')>()),
+  useClockPlaybackRate: () => clockRateMocks.current,
+}))
 
 const playbackStateMocks = vi.hoisted(() => ({
   current: {
@@ -15,6 +21,15 @@ const playbackStateMocks = vi.hoisted(() => ({
     resolvedVolume: 1,
     resolvedPitchShiftSemitones: 0,
     resolvedAudioEqStages: [],
+  } as {
+    frame: number
+    fps: number
+    playing: boolean
+    transportPlaybackRate?: number
+    isPreviewScrubbing?: boolean
+    resolvedVolume: number
+    resolvedPitchShiftSemitones: number
+    resolvedAudioEqStages: unknown[]
   },
 }))
 
@@ -97,6 +112,7 @@ function makeAudioBuffer(durationSeconds = 8): AudioBuffer {
 describe('CustomDecoderAudio', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clockRateMocks.current = 1
     playbackStateMocks.current = {
       frame: 0,
       fps: 30,
@@ -154,6 +170,46 @@ describe('CustomDecoderAudio', () => {
         'data-has-fallback',
         'true',
       )
+    })
+  })
+
+  it('defers pitch-preserved decoding until an active preview scrub settles', async () => {
+    playbackStateMocks.current.isPreviewScrubbing = true
+    audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mockResolvedValue({
+      buffer: makeAudioBuffer(),
+      startTime: 0,
+      isComplete: false,
+    })
+    audioDecodeMocks.getOrDecodeAudio.mockReturnValue(new Promise<AudioBuffer>(() => {}))
+
+    const { rerender } = render(
+      <CustomDecoderAudio
+        src="blob:audio"
+        mediaId="media-1"
+        itemId="item-1"
+        durationInFrames={240}
+        playbackRate={1.5}
+      />,
+    )
+
+    await Promise.resolve()
+    expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).not.toHaveBeenCalled()
+    expect(audioDecodeMocks.getOrDecodeAudio).not.toHaveBeenCalled()
+
+    playbackStateMocks.current.isPreviewScrubbing = false
+    rerender(
+      <CustomDecoderAudio
+        src="blob:audio"
+        mediaId="media-1"
+        itemId="item-1"
+        durationInFrames={240}
+        playbackRate={1.5}
+        volumeMultiplier={1.01}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -293,6 +349,36 @@ describe('CustomDecoderAudio', () => {
       expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
     })
 
+    expect(document.querySelector('[data-testid="buffered"]')).toBeNull()
+    expect(document.querySelector('[data-testid="pitch"]')).toBeInTheDocument()
+  })
+
+  it('switches custom-codec audio to SoundTouch during forward shuttle', async () => {
+    audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mockResolvedValue({
+      buffer: makeAudioBuffer(),
+      startTime: 0,
+      isComplete: false,
+    })
+    audioDecodeMocks.getOrDecodeAudio.mockReturnValue(new Promise<AudioBuffer>(() => {}))
+
+    const props = {
+      src: 'blob:opus-audio',
+      mediaId: 'media-opus',
+      itemId: 'item-opus',
+      durationInFrames: 120,
+      playbackRate: 1,
+    }
+    const { rerender } = render(<CustomDecoderAudio {...props} />)
+
+    expect(document.querySelector('[data-testid="buffered"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-testid="pitch"]')).toBeNull()
+
+    clockRateMocks.current = 2
+    rerender(<CustomDecoderAudio {...props} volumeMultiplier={1.01} />)
+
+    await waitFor(() => {
+      expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
+    })
     expect(document.querySelector('[data-testid="buffered"]')).toBeNull()
     expect(document.querySelector('[data-testid="pitch"]')).toBeInTheDocument()
   })

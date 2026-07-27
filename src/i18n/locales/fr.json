@@ -37,6 +37,7 @@
   "toolbar": {
     "ariaLabel": "Barre d'outils de l'éditeur",
     "workspaces": {
+      "motion": "Motion",
       "label": "Espaces de travail",
       "edit": "Montage",
       "color": "Étalonnage",
@@ -52,6 +53,7 @@
     "keyboardShortcuts": "Raccourcis clavier",
     "keyboardShortcutsAria": "Raccourcis clavier",
     "viewOnGitHub": "Voir sur GitHub",
+    "joinDiscord": "Rejoindre Discord",
     "debugPanel": "Panneau de débogage",
     "debugPanelAria": "Panneau de débogage",
     "save": "Enregistrer",
@@ -80,7 +82,11 @@
       "autoSave": "Enregistrement automatique",
       "interval": "Intervalle",
       "intervalMinutes": "{{count}} min",
-      "undoHistoryDepth": "Profondeur de l'historique d'annulation"
+      "undoHistoryDepth": "Profondeur de l'historique d'annulation",
+      "uiSounds": "Sons de l'interface",
+      "uiSoundVolume": "Volume du son",
+      "uiSoundVoice": "Thème sonore",
+      "uiSoundPreview": "Aperçu"
     },
     "ai": {
       "captionSampleInterval": "Intervalle d'échantillonnage des sous-titres",

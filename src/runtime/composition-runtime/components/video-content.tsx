@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
-import { useSequenceContext } from '@/runtime/composition-runtime/deps/player'
+import { useClockPlaybackRate, useSequenceContext } from '@/runtime/composition-runtime/deps/player'
 import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
+import { useMediaLibraryStore } from '@/runtime/composition-runtime/deps/stores'
 import { useVideoConfig, useIsPlaying } from '../hooks/use-player-compat'
 import { useClock } from '@/runtime/composition-runtime/deps/player'
 import type { ResolvedAudioEqSettings } from '@/types/audio'
@@ -13,19 +14,23 @@ import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { getVideoTargetTimeSeconds } from '../utils/video-timing'
 import {
   getVideoSyncTargetContext,
+  isVideoSyncTargetDiscontinuity,
   planLayoutVideoSync,
   planPausedVideoFrameSync,
   planPlayingVideoDriftCorrection,
   planPlayingVideoInitialSync,
   planPremountedVideoSync,
   planVideoFrameCallbackCorrection,
+  shouldIssueCoalescedReverseVideoSeek,
   shouldReactOwnPlaybackRate,
+  shouldUpdateVideoPlaybackRate,
 } from '../utils/video-sync-plan'
 import {
   registerDomVideoElement,
   unregisterDomVideoElement,
 } from '../utils/dom-video-element-registry'
 import { subscribeToWarmupActivity } from '../utils/activity-rewarm'
+import { ProResPreviewCanvas } from './prores-preview-canvas'
 import {
   applyVideoElementAudioState,
   useVideoAudioState,
@@ -33,9 +38,36 @@ import {
   videoAudioContexts,
   ensureAudioContextResumed,
 } from './video-audio-context'
+import { getBrowserMediaPlaybackRate } from '@/shared/state/playback/shuttle'
 
 const videoLog = createLogger('NativePreviewVideo')
 const contentLog = createLogger('VideoContent')
+
+// Media IDs discovered to be undecodable by a <video> element (e.g. ProRes). Once a
+// clip fails and falls back to live turbores decode, we remember it for the session so
+// later mounts skip the doomed <video> entirely — avoiding a remount → error → retry →
+// re-resolve flicker loop.
+const liveDecodeMediaIds = new Set<string>()
+
+// Whether a media item must skip the <video> element and decode live (ProRes and other
+// browser-undecodable codecs). Consulted both when initializing state and when the active
+// item changes on a pooled VideoContent lane, so a fresh item recomputes its decode path
+// instead of inheriting the previous clip's fallback state.
+function shouldUseLiveDecodeForMedia(mediaId: string | undefined): boolean {
+  if (mediaId === undefined) return false
+  if (liveDecodeMediaIds.has(mediaId)) return true
+  // Detect browser-undecodable codecs (ProRes) up front from the import-time codec probe, so
+  // we skip mounting the <video> element that would error, invalidate the blob URL, and flash
+  // "Media not loaded" while it re-resolves and falls back. Older media without the flag
+  // (undefined) keep the error-driven fallback path.
+  const media = useMediaLibraryStore.getState().mediaById[mediaId]
+  if (media?.videoCodecSupported === false) {
+    liveDecodeMediaIds.add(mediaId)
+    return true
+  }
+  return false
+}
+
 videoLog.setLevel(2) // WARN — suppress noisy per-frame debug logs
 const POOL_RELEASE_STICKY_MS = 400
 
@@ -97,37 +129,74 @@ const NativePreviewVideo: React.FC<{
   const { fps } = useVideoConfig()
   const pool = useVideoSourcePool()
   const elementRef = useRef<HTMLVideoElement | null>(null)
-  const forceRenderTimeoutRef = useRef<number | null>(null)
   const preWarmTimerRef = useRef<number | null>(null)
-  const preWarmGenRef = useRef(0)
+  const preWarmInFlightRef = useRef(false)
+  const itemIdRef = useRef(itemId)
+  itemIdRef.current = itemId
 
   // Brief muted play/pause that fills the decode buffer and re-acquires the
   // browser's media pipeline, so a subsequent play() starts in ~2 frames
-  // instead of stalling 200-300ms on pipeline re-init. Debounced; superseded
-  // or play-interrupted warms are invalidated via preWarmGenRef.
+  // instead of stalling 200-300ms on pipeline re-init. Debounced so repeated
+  // warm-up signals collapse into one play/pause cycle.
   const schedulePreWarm = useCallback(() => {
+    // play() itself can emit canplay. Ignore that re-entrant warm request or
+    // it can supersede the cycle that owns the pause and position reset.
+    if (preWarmInFlightRef.current) return
     if (preWarmTimerRef.current !== null) {
       clearTimeout(preWarmTimerRef.current)
     }
-    preWarmGenRef.current += 1
-    const gen = preWarmGenRef.current
     preWarmTimerRef.current = window.setTimeout(() => {
       preWarmTimerRef.current = null
       const v = elementRef.current
       if (v && v.paused && v.readyState >= 2 && !usePlaybackStore.getState().isPlaying) {
+        const style = window.getComputedStyle(v)
+        const isVisiblyPresented =
+          v.isConnected &&
+          v.getClientRects().length > 0 &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          style.opacity !== '0'
+        // A play/pause warm can present decoded-ahead frames even when its
+        // source time is restored afterward. Never warm the visible paused
+        // program-monitor element; hidden pool/transition lanes can still use
+        // the latency optimization without changing what the user sees.
+        if (isVisiblyPresented) return
+
+        const wasMuted = v.muted
+        const warmStartTime = v.currentTime
+        const warmStartItemId = itemIdRef.current
+        const warmStartPlayback = usePlaybackStore.getState()
+        const warmStartFrame = warmStartPlayback.currentFrame
+        const warmStartPreviewFrame = warmStartPlayback.previewFrame
         v.muted = true
+        preWarmInFlightRef.current = true
         v.play()
-          .then(() => {
-            // Only pause if this pre-warm is still current and playback hasn't started
-            if (gen === preWarmGenRef.current && !usePlaybackStore.getState().isPlaying) {
-              v.pause()
-            }
-            // Always unmute — if playback started or another scrub superseded
-            // this pre-warm, leaving muted=true causes silent playback.
-            v.muted = false
-          })
           .catch(() => {
-            v.muted = false
+            // Best-effort decoder warm-up.
+          })
+          .finally(() => {
+            const playback = usePlaybackStore.getState()
+            if (!playback.isPlaying) {
+              v.pause()
+              // Warm-up is allowed to decode ahead, but a paused preview must
+              // still show its requested source time. Avoid restoring a stale
+              // position if the playhead or mounted item changed meanwhile.
+              if (
+                elementRef.current === v &&
+                itemIdRef.current === warmStartItemId &&
+                playback.currentFrame === warmStartFrame &&
+                playback.previewFrame === warmStartPreviewFrame &&
+                Math.abs(v.currentTime - warmStartTime) > 0.001
+              ) {
+                try {
+                  v.currentTime = warmStartTime
+                } catch {
+                  // The pooled element may be settling or have been released.
+                }
+              }
+            }
+            v.muted = wasMuted
+            preWarmInFlightRef.current = false
           })
       }
     }, 50)
@@ -138,23 +207,30 @@ const NativePreviewVideo: React.FC<{
   const lastSyncTimeRef = useRef<number>(Date.now())
   const needsInitialSyncRef = useRef<boolean>(true)
   const lastFrameRef = useRef<number>(-1)
+  const reverseSeekInFlightRef = useRef(false)
+  const latestReverseSeekTargetRef = useRef<number | null>(null)
+  const pausedSeekInFlightRef = useRef(false)
+  const latestPausedSeekTargetRef = useRef<number | null>(null)
   const registeredElementRef = useRef<HTMLVideoElement | null>(null)
   const registeredItemIdRef = useRef<string | null>(null)
-  const itemIdRef = useRef(itemId)
   const forceCssCompositeRef = useRef(forceCssComposite)
   audioVolumeRef.current = audioVolume
   audioEqStagesRef.current = audioEqStages
   onErrorRef.current = onError
-  itemIdRef.current = itemId
   forceCssCompositeRef.current = forceCssComposite
 
   // Clock instance for imperative access in rVFC callback
   const clock = useClock()
+  const transportPlaybackRate = useClockPlaybackRate()
+  const isReverseShuttle = transportPlaybackRate < 0
+  const mediaPlaybackRate = getBrowserMediaPlaybackRate(playbackRate, transportPlaybackRate)
   const sequenceFromRef = useRef(0)
   // Stable refs for rVFC callback (avoids stale closures)
   const safeTrimBeforeRef = useRef(safeTrimBefore)
   const sourceFpsRef = useRef(sourceFps)
   const playbackRateRef = useRef(playbackRate)
+  const transportPlaybackRateRef = useRef(transportPlaybackRate)
+  const mediaPlaybackRateRef = useRef(mediaPlaybackRate)
   const isReversedRef = useRef(isReversed)
   const reverseSourceEndRef = useRef(reverseSourceEnd)
   const fpsRef = useRef(fps)
@@ -162,6 +238,8 @@ const NativePreviewVideo: React.FC<{
   safeTrimBeforeRef.current = safeTrimBefore
   sourceFpsRef.current = sourceFps
   playbackRateRef.current = playbackRate
+  transportPlaybackRateRef.current = transportPlaybackRate
+  mediaPlaybackRateRef.current = mediaPlaybackRate
   isReversedRef.current = isReversed
   reverseSourceEndRef.current = reverseSourceEnd
   fpsRef.current = fps
@@ -293,7 +371,9 @@ const NativePreviewVideo: React.FC<{
     const initialSourceFps = sourceFpsRef.current
     const initialFrame = frameRef.current
     const initialPlaybackRate = playbackRateRef.current
+    const initialMediaPlaybackRate = mediaPlaybackRateRef.current
     const initialIsReversed = isReversedRef.current
+    const initialRequiresVisualSeek = initialIsReversed || transportPlaybackRateRef.current < 0
     const initialReverseSourceEnd = reverseSourceEndRef.current
     const initialFps = fpsRef.current
     const initialSequenceFrameOffset = sequenceFrameOffsetRef.current
@@ -311,13 +391,13 @@ const NativePreviewVideo: React.FC<{
     const currentlyPlaying = usePlaybackStore.getState().isPlaying
     const isNearTarget = Math.abs(element.currentTime - clampedInitial) < 0.2
     const isContinuousPlayback =
-      !initialIsReversed && currentlyPlaying && isNearTarget && element.readyState >= 2
+      !initialRequiresVisualSeek && currentlyPlaying && isNearTarget && element.readyState >= 2
 
     elementRef.current = element
     syncRegisteredVideoElement(itemIdRef.current, element)
     applyVideoElementAudioState(element, audioVolumeRef.current, audioEqStagesRef.current)
 
-    if (initialIsReversed) {
+    if (initialRequiresVisualSeek) {
       element.pause()
       element.playbackRate = 1
       element.currentTime = clampedInitial
@@ -326,7 +406,7 @@ const NativePreviewVideo: React.FC<{
       // Split boundary during playback: element was just paused by cleanup
       // but is at the right position. Resume immediately to minimize the
       // decode pipeline interruption (pause→play in same synchronous batch).
-      element.playbackRate = initialPlaybackRate
+      element.playbackRate = initialMediaPlaybackRate
       element.play().catch(() => {})
       needsInitialSyncRef.current = false
     } else if (currentlyPlaying) {
@@ -334,7 +414,7 @@ const NativePreviewVideo: React.FC<{
       // shadow mount, or resume near a boundary). Seek and play immediately
       // instead of pausing and waiting for the sync effect next frame.
       // This eliminates ~16-50ms of React scheduling + readyState gate delay.
-      element.playbackRate = initialPlaybackRate
+      element.playbackRate = initialMediaPlaybackRate
       element.currentTime = clampedInitial
       if (element.readyState >= 2) {
         element.play().catch(() => {})
@@ -346,41 +426,65 @@ const NativePreviewVideo: React.FC<{
     }
 
     // Set up event listeners
+    const syncCanPlayTarget = () => {
+      const liveTargetTime = getVideoTargetTimeSeconds(
+        safeTrimBeforeRef.current,
+        sourceFpsRef.current,
+        frameRef.current,
+        playbackRateRef.current,
+        fpsRef.current,
+        sequenceFrameOffsetRef.current,
+        isReversedRef.current,
+        reverseSourceEndRef.current,
+      )
+      const clampedLiveTargetTime = Math.min(
+        Math.max(0, liveTargetTime),
+        (element.duration || Infinity) - 0.05,
+      )
+      if (Math.abs(element.currentTime - clampedLiveTargetTime) <= 0.016) return
+      try {
+        element.currentTime = clampedLiveTargetTime
+      } catch {
+        // Seek failed - element may still be stabilizing.
+      }
+    }
+    const applyCanPlayTransport = () => {
+      if (isReversedRef.current || transportPlaybackRateRef.current < 0) {
+        element.pause()
+        element.playbackRate = 1
+        return
+      }
+      element.playbackRate = mediaPlaybackRateRef.current
+      element.play().catch(() => {})
+    }
     const handleCanPlay = () => {
       videoLog.debug(`[${shortId}] canplay:`, element.readyState)
       if (usePlaybackStore.getState().isPlaying && element.paused && element.readyState >= 2) {
-        const liveTargetTime = getVideoTargetTimeSeconds(
-          safeTrimBeforeRef.current,
-          sourceFpsRef.current,
-          frameRef.current,
-          playbackRateRef.current,
-          fpsRef.current,
-          sequenceFrameOffsetRef.current,
-          isReversedRef.current,
-          reverseSourceEndRef.current,
-        )
-        const clampedLiveTargetTime = Math.min(
-          Math.max(0, liveTargetTime),
-          (element.duration || Infinity) - 0.05,
-        )
-        if (Math.abs(element.currentTime - clampedLiveTargetTime) > 0.016) {
-          try {
-            element.currentTime = clampedLiveTargetTime
-          } catch {
-            // Seek failed - element may still be stabilizing.
-          }
-        }
-        if (isReversedRef.current) {
-          element.pause()
-          element.playbackRate = 1
-        } else {
-          element.playbackRate = playbackRateRef.current
-          element.play().catch(() => {})
-        }
+        syncCanPlayTarget()
+        applyCanPlayTransport()
         needsInitialSyncRef.current = false
+      } else if (!usePlaybackStore.getState().isPlaying) {
+        // The first warm can run before HAVE_CURRENT_DATA and return. Re-arm
+        // as soon as the paused current source becomes decodable.
+        schedulePreWarm()
       }
     }
     const handleSeeked = () => {
+      reverseSeekInFlightRef.current = false
+      pausedSeekInFlightRef.current = false
+      const latestPausedTarget = latestPausedSeekTargetRef.current
+      if (
+        !usePlaybackStore.getState().isPlaying &&
+        latestPausedTarget !== null &&
+        Math.abs(element.currentTime - latestPausedTarget) > 0.001
+      ) {
+        try {
+          element.currentTime = latestPausedTarget
+          pausedSeekInFlightRef.current = true
+        } catch {
+          // The latest skim target remains queued for the next sync pass.
+        }
+      }
       videoLog.debug(`[${shortId}] seeked:`, element.currentTime)
     }
     const handleError = () => {
@@ -451,22 +555,11 @@ const NativePreviewVideo: React.FC<{
       )
     }
 
-    // Force a frame render by doing a quick play/pause - some browsers need this
-    // to actually display the video frame after seeking.
+    // Warm the paused current source so the next Play keeps its decoder hot.
     // Only when NOT playing — during playback, the sync effect handles play()
     // and this timeout’s play→pause sequence would race with it.
     if (!currentlyPlaying) {
-      const forceFrameRender = () => {
-        if (element.paused && element.readyState >= 2 && !usePlaybackStore.getState().isPlaying) {
-          element
-            .play()
-            .then(() => {
-              element.pause()
-            })
-            .catch(() => {})
-        }
-      }
-      forceRenderTimeoutRef.current = window.setTimeout(forceFrameRender, 100)
+      schedulePreWarm()
     }
 
     // Stall watchdog: if the element is stuck at readyState 0 for too long
@@ -498,14 +591,15 @@ const NativePreviewVideo: React.FC<{
 
       // Pause and remove from DOM
       element.pause()
-      if (forceRenderTimeoutRef.current !== null) {
-        clearTimeout(forceRenderTimeoutRef.current)
-        forceRenderTimeoutRef.current = null
-      }
       if (preWarmTimerRef.current !== null) {
         clearTimeout(preWarmTimerRef.current)
         preWarmTimerRef.current = null
       }
+      preWarmInFlightRef.current = false
+      reverseSeekInFlightRef.current = false
+      latestReverseSeekTargetRef.current = null
+      pausedSeekInFlightRef.current = false
+      latestPausedSeekTargetRef.current = null
       if (stallTimerId !== null) {
         clearTimeout(stallTimerId)
         stallTimerId = null
@@ -534,6 +628,7 @@ const NativePreviewVideo: React.FC<{
     syncRegisteredVideoElement,
     clearRegisteredVideoElement,
     fitMode,
+    schedulePreWarm,
   ])
 
   useEffect(() => {
@@ -564,7 +659,7 @@ const NativePreviewVideo: React.FC<{
         sharedTransitionSync,
       })
     ) {
-      video.playbackRate = playbackRate
+      video.playbackRate = mediaPlaybackRate
     }
 
     const syncContext = getVideoSyncTargetContext({
@@ -591,21 +686,40 @@ const NativePreviewVideo: React.FC<{
       video.pause()
     }
 
-    if (layoutPlan.seekTo !== null) {
+    const applyLayoutSeek = (seekTo: number) => {
       try {
-        video.currentTime = layoutPlan.seekTo
-        lastSyncTimeRef.current = Date.now()
-        if (layoutPlan.shouldMarkInitialSyncComplete) {
-          needsInitialSyncRef.current = false
+        if (!isPlaying) {
+          latestPausedSeekTargetRef.current = seekTo
+          if (
+            shouldIssueCoalescedReverseVideoSeek({
+              seeking: video.seeking,
+              seekInFlight: pausedSeekInFlightRef.current,
+              currentTime: video.currentTime,
+              targetTime: seekTo,
+            })
+          ) {
+            video.currentTime = seekTo
+            pausedSeekInFlightRef.current = true
+          }
+        } else {
+          video.currentTime = seekTo
+        }
+        if (video.currentTime === seekTo || isPlaying) {
+          lastSyncTimeRef.current = Date.now()
+          if (layoutPlan.shouldMarkInitialSyncComplete) {
+            needsInitialSyncRef.current = false
+          }
         }
       } catch {
         // Seek failed - element may still be initializing
       }
     }
+    if (layoutPlan.seekTo !== null) applyLayoutSeek(layoutPlan.seekTo)
   }, [
     frame,
     isPlaying,
     isReversed,
+    mediaPlaybackRate,
     playbackRate,
     reverseSourceEnd,
     safeTrimBefore,
@@ -627,7 +741,7 @@ const NativePreviewVideo: React.FC<{
         sharedTransitionSync,
       })
     ) {
-      video.playbackRate = playbackRate
+      video.playbackRate = mediaPlaybackRate
     }
 
     // Update sequenceFrom for rVFC callback.
@@ -667,17 +781,24 @@ const NativePreviewVideo: React.FC<{
       })
     }
 
-    if (isReversed && isPlaying) {
+    if ((isReversed || isReverseShuttle) && isPlaying) {
       if (!video.paused) {
         video.pause()
       }
       video.playbackRate = 1
+      latestReverseSeekTargetRef.current = syncContext.clampedTargetTime
       if (
         syncContext.canSeek &&
-        Math.abs(video.currentTime - syncContext.clampedTargetTime) > 0.001
+        shouldIssueCoalescedReverseVideoSeek({
+          seeking: video.seeking,
+          seekInFlight: reverseSeekInFlightRef.current,
+          currentTime: video.currentTime,
+          targetTime: latestReverseSeekTargetRef.current,
+        })
       ) {
         try {
-          video.currentTime = syncContext.clampedTargetTime
+          video.currentTime = latestReverseSeekTargetRef.current
+          reverseSeekInFlightRef.current = true
           lastSyncTimeRef.current = Date.now()
           needsInitialSyncRef.current = false
         } catch {
@@ -686,6 +807,10 @@ const NativePreviewVideo: React.FC<{
       }
       return
     }
+    reverseSeekInFlightRef.current = false
+    latestReverseSeekTargetRef.current = null
+    pausedSeekInFlightRef.current = false
+    latestPausedSeekTargetRef.current = null
 
     // During premount, always pause - don't play until clip is actually visible.
     // Exception: if the element is held by a transition session (marked via
@@ -715,9 +840,6 @@ const NativePreviewVideo: React.FC<{
         clearTimeout(preWarmTimerRef.current)
         preWarmTimerRef.current = null
       }
-      // Invalidate any in-flight pre-warm promise so its .then()/.catch() no-ops
-      preWarmGenRef.current += 1
-
       // Initial sync on first play after mount/seek.
       // Skip the seek if element is already at the target (avoids readyState
       // drop from redundant seeks, which delays play start by 100-300ms).
@@ -794,7 +916,18 @@ const NativePreviewVideo: React.FC<{
         })
         if (pausedSyncPlan.seekTo !== null) {
           try {
-            video.currentTime = pausedSyncPlan.seekTo
+            latestPausedSeekTargetRef.current = pausedSyncPlan.seekTo
+            if (
+              shouldIssueCoalescedReverseVideoSeek({
+                seeking: video.seeking,
+                seekInFlight: pausedSeekInFlightRef.current,
+                currentTime: video.currentTime,
+                targetTime: pausedSyncPlan.seekTo,
+              })
+            ) {
+              video.currentTime = pausedSyncPlan.seekTo
+              pausedSeekInFlightRef.current = true
+            }
           } catch {
             // Seek failed - video may not be ready yet
           }
@@ -812,6 +945,8 @@ const NativePreviewVideo: React.FC<{
     fps,
     isPlaying,
     isReversed,
+    isReverseShuttle,
+    mediaPlaybackRate,
     playbackRate,
     reverseSourceEnd,
     safeTrimBefore,
@@ -842,16 +977,26 @@ const NativePreviewVideo: React.FC<{
   // jitter pattern that hard-seek-only correction causes.
   useEffect(() => {
     const video = elementRef.current
-    if (!video || !isPlaying || isReversed || !supportsRVFC || sharedTransitionSync) return
+    if (
+      !video ||
+      !isPlaying ||
+      isReversed ||
+      isReverseShuttle ||
+      !supportsRVFC ||
+      sharedTransitionSync
+    )
+      return
 
     // Pre-resume AudioContext so audio starts immediately with video.
     // Without this, suspended AudioContext adds 50-100ms audio delay on cold resume.
     ensureAudioContextResumed()
 
     // Set initial playbackRate when RVFC takes over
-    video.playbackRate = playbackRateRef.current
+    video.playbackRate = mediaPlaybackRateRef.current
 
     let handle: number
+    let previousTargetTime: number | null = null
+    let previousCallbackTimeMs = Date.now()
     const onVideoFrame = () => {
       const v = elementRef.current
       if (!v) return
@@ -867,7 +1012,7 @@ const NativePreviewVideo: React.FC<{
         return
       }
 
-      const nominalRate = playbackRateRef.current
+      const nominalRate = mediaPlaybackRateRef.current
       const timelineFps = fpsRef.current
       const clipSourceFps = sourceFpsRef.current
       const trim = safeTrimBeforeRef.current
@@ -875,7 +1020,7 @@ const NativePreviewVideo: React.FC<{
         trim,
         clipSourceFps,
         localFrame,
-        nominalRate,
+        playbackRateRef.current,
         timelineFps,
         sequenceFrameOffsetRef.current,
         isReversedRef.current,
@@ -883,11 +1028,21 @@ const NativePreviewVideo: React.FC<{
       )
       const dur = v.duration || Infinity
       const clamped = Math.min(Math.max(0, target), dur - 0.05)
+      const callbackTimeMs = Date.now()
+      const targetDiscontinuity = isVideoSyncTargetDiscontinuity({
+        previousTargetTime,
+        targetTime: clamped,
+        elapsedMs: callbackTimeMs - previousCallbackTimeMs,
+        nominalRate,
+      })
+      previousTargetTime = clamped
+      previousCallbackTimeMs = callbackTimeMs
       const correctionPlan = planVideoFrameCallbackCorrection({
         currentTime: v.currentTime,
         targetTime: clamped,
         nominalRate,
         readyState: v.readyState,
+        targetDiscontinuity,
       })
 
       if (correctionPlan.kind === 'seek') {
@@ -900,7 +1055,9 @@ const NativePreviewVideo: React.FC<{
           // Seek may fail if element isn't fully loaded
         }
       }
-      v.playbackRate = correctionPlan.playbackRate
+      if (shouldUpdateVideoPlaybackRate(v.playbackRate, correctionPlan.playbackRate)) {
+        v.playbackRate = correctionPlan.playbackRate
+      }
 
       handle = v.requestVideoFrameCallback(onVideoFrame)
     }
@@ -910,10 +1067,10 @@ const NativePreviewVideo: React.FC<{
       video.cancelVideoFrameCallback(handle)
       // Reset to nominal rate when RVFC stops managing
       if (elementRef.current) {
-        elementRef.current.playbackRate = playbackRateRef.current
+        elementRef.current.playbackRate = mediaPlaybackRateRef.current
       }
     }
-  }, [clock, isPlaying, isReversed, poolClipId, sharedTransitionSync])
+  }, [clock, isPlaying, isReversed, isReverseShuttle, poolClipId, sharedTransitionSync])
 
   // Keep volume/gain in sync for pooled element.
   useEffect(() => {
@@ -1002,12 +1159,34 @@ export const VideoContent: React.FC<{
   // from the crossfade renderer.
   const audioVolume = item._sharedTransitionSync ? 0 : baseAudioVolume
   const [hasError, setHasError] = useState(false)
+  // ProRes (and other browser-undecodable codecs) can't play through a <video>
+  // element, so on failure we fall back to live turbores decode painted to a canvas.
+  // Initialize from the session set so a known-undecodable clip never mounts a <video>.
+  const [useLiveDecode, setUseLiveDecode] = useState(() =>
+    shouldUseLiveDecodeForMedia(item.mediaId),
+  )
+  const liveDecodeTriedRef = useRef(false)
   // One-shot per-item retry: on first failure, invalidate the blob URL so
   // the upstream resolver (driven by `useBlobUrlVersion`) produces a fresh
   // one. Fixes `ERR_UPLOAD_FILE_CHANGED` / "Format error" when a blob URL
   // was captured before a concurrent mirror-write completed, which manifests
   // as "works on refresh, fails on direct URL first load".
   const retriedRef = useRef(false)
+
+  // VideoContent instances are reused across clips on a pooled lane (the item prop swaps
+  // without a remount — see the pooled-handoff test). Re-key the decode/error state to the
+  // active media so handoffs don't carry over stale fallback state: a previously failed
+  // ProRes clip must not force a decodable next item into live decode, and a newly
+  // unsupported item must still enter the upfront live-decode flow. Adjusting state during
+  // render (React's documented pattern) avoids a stale-state flash before an effect fires.
+  const [activeMediaId, setActiveMediaId] = useState(item.mediaId)
+  if (activeMediaId !== item.mediaId) {
+    setActiveMediaId(item.mediaId)
+    setHasError(false)
+    setUseLiveDecode(shouldUseLiveDecodeForMedia(item.mediaId))
+    liveDecodeTriedRef.current = false
+    retriedRef.current = false
+  }
 
   // NativePreviewVideo mounts pooled <video> into this container.
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -1017,16 +1196,45 @@ export const VideoContent: React.FC<{
     (error: Error) => {
       contentLog.warn(`Media error for item ${item.id}:`, error.message)
 
-      if (isRecoverableVideoLoadError(error.message) && !retriedRef.current && item.mediaId) {
+      // Skip the blob-refresh retry for media already known to need live decode — the
+      // failure is the codec, not a stale blob, so re-resolving just causes churn.
+      const knownLiveDecode = item.mediaId !== undefined && liveDecodeMediaIds.has(item.mediaId)
+      if (
+        !knownLiveDecode &&
+        isRecoverableVideoLoadError(error.message) &&
+        !retriedRef.current &&
+        item.mediaId
+      ) {
         retriedRef.current = true
         contentLog.info(`Retrying item ${item.id} with fresh blob URL for media ${item.mediaId}`)
         blobUrlManager.invalidate(item.mediaId)
         return
       }
 
+      // The <video> element can't decode this source. Before giving up, try live
+      // turbores decode (ProRes). If that also fails, the canvas reports back and we
+      // show the unavailable state.
+      if (!liveDecodeTriedRef.current) {
+        liveDecodeTriedRef.current = true
+        if (item.mediaId) {
+          liveDecodeMediaIds.add(item.mediaId)
+        }
+        contentLog.info(`Falling back to live decode for item ${item.id}`)
+        setUseLiveDecode(true)
+        return
+      }
+
       setHasError(true)
     },
     [item.id, item.mediaId],
+  )
+
+  const handleLiveDecodeError = useCallback(
+    (error: Error) => {
+      contentLog.warn(`Live decode failed for item ${item.id}:`, error.message)
+      setHasError(true)
+    },
+    [item.id],
   )
 
   // Show error state if media failed to load
@@ -1044,6 +1252,23 @@ export const VideoContent: React.FC<{
       >
         <p style={{ color: '#666', fontSize: 14 }}>Media unavailable</p>
       </div>
+    )
+  }
+
+  // ProRes and other browser-undecodable codecs: decode live via turbores to a canvas.
+  if (useLiveDecode) {
+    return (
+      <ProResPreviewCanvas
+        itemId={item.id}
+        src={item.src!}
+        safeTrimBefore={safeTrimBefore}
+        sequenceFrameOffset={item._sequenceFrameOffset ?? 0}
+        sourceFps={sourceFps}
+        playbackRate={playbackRate}
+        isReversed={isReversed}
+        reverseSourceEnd={reverseSourceEnd}
+        onError={handleLiveDecodeError}
+      />
     )
   }
 

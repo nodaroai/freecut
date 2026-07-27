@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import type { ItemKeyframes } from '@/types/keyframe'
 import { useKeyframeSelectionStore } from './keyframe-selection-store'
@@ -87,5 +89,50 @@ describe('useKeyframeSelectionStore', () => {
     ])
     expect(useKeyframesStore.getState().getAllKeyframesForProperty('item-1', 'x')).toEqual([])
     expect(useKeyframesStore.getState().getAllKeyframesForProperty('item-1', 'opacity')).toEqual([])
+  })
+
+  it('copies and cuts a selected vector axis without creating scalar lanes', () => {
+    useKeyframesStore.getState().setKeyframes([
+      {
+        itemId: 'item-vector',
+        animationVersion: 2,
+        properties: [],
+        vectorProperties: [
+          {
+            property: 'position',
+            keyframes: [
+              {
+                id: 'position-a',
+                frame: 12,
+                value: { x: 40, y: 72 },
+                easing: 'ease-in-out',
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    useKeyframeSelectionStore.getState().selectKeyframe({
+      itemId: 'item-vector',
+      property: 'y',
+      keyframeId: 'position-a:y',
+    })
+
+    useKeyframeSelectionStore.getState().copySelectedKeyframes()
+    expect(useKeyframeSelectionStore.getState().clipboard?.keyframes).toEqual([
+      {
+        property: 'y',
+        frame: 0,
+        value: 72,
+        easing: 'ease-in-out',
+        easingConfig: undefined,
+      },
+    ])
+
+    useKeyframeSelectionStore.getState().cutSelectedKeyframes()
+    expect(
+      useKeyframesStore.getState().getVectorKeyframesForProperty('item-vector', 'position'),
+    ).toEqual([])
+    expect(useKeyframesStore.getState().getAllKeyframesForProperty('item-vector', 'y')).toEqual([])
   })
 })

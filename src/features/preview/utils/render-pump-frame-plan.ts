@@ -13,10 +13,19 @@ import {
   type FastScrubBoundarySource,
 } from './preview-constants'
 
+const COMMITTED_SCRUB_SNAPSHOT_GUARD_MS = 30_000
+
 export type RenderPumpFrameState = Pick<
   PlaybackState,
   'currentFrame' | 'currentFrameEpoch' | 'previewFrame' | 'previewFrameEpoch'
 >
+
+export type PreviewPresentationHandoffState = Pick<
+  PlaybackState,
+  'currentFrame' | 'previewFrame' | 'isPlaying'
+>
+
+export type RenderedPlaybackState = Pick<PlaybackState, 'isPlaying' | 'playbackRate'>
 
 type ScrubDirection = -1 | 0 | 1
 
@@ -24,6 +33,223 @@ interface ResolveRenderPumpTargetFrameParams {
   state: RenderPumpFrameState
   forceFastScrubOverlay: boolean
   isPausedInsideTransition: boolean
+  settlingReleasedScrubFrame?: number | null
+}
+
+interface ResolveActivePreviewPresentationTargetParams {
+  state: PreviewPresentationHandoffState
+  prev: PreviewPresentationHandoffState
+  settlingReleasedScrubFrame: number | null
+  forceFastScrubOverlay: boolean
+}
+
+interface ShouldRejectBlankTransportHandoffParams {
+  isTransportSettling: boolean
+  renderedFrame: number
+  displayedFrame: number | null
+  renderedFrameBlank: boolean
+  displayedFrameBlank: boolean
+}
+
+interface ShouldRejectBlankReleasedScrubHandoffParams {
+  releaseGuardFrame: number | null
+  renderedFrame: number
+  currentFrame: number
+  previewFrame: number | null
+  isPlaying: boolean
+  snapshotFrame: number | null
+  renderedFrameBlank: boolean
+  snapshotFrameBlank: boolean
+}
+
+interface ShouldPreservePausedTransportPresentationParams {
+  holdActive: boolean
+  heldFrame: number | null
+  renderedFrame: number
+  displayedFrame: number | null
+  currentFrame: number
+  previewFrame: number | null
+  isPlaying: boolean
+}
+
+interface ShouldDropStalePausedPreviewRenderParams {
+  renderedFrame: number
+  currentFrame: number
+  previewFrame: number | null
+  isPlaying: boolean
+}
+
+interface ShouldRestoreCommittedPreviewSnapshotParams {
+  previewFrame: number | null
+  previousPreviewFrame: number | null
+  currentFrame: number
+  snapshotFrame: number | null
+}
+
+interface ShouldRecoverFailedActivePreseekScheduleParams {
+  effectDisposed: boolean
+  recoveredFailedSchedule: boolean
+  scheduleVersion: number
+  activeScheduleVersion: number
+  mounted: boolean
+  isPlaying: boolean
+  currentTarget: number
+  targetFrame: number
+}
+
+/**
+ * Browser media elements cannot sustain negative playback rates. Reverse
+ * shuttle therefore shares the display-cadenced composition render lane used
+ * by workspaces that always require the rendered overlay.
+ */
+export function shouldUseRenderedPlaybackOverlay(
+  state: RenderedPlaybackState,
+  forceFastScrubOverlay: boolean,
+): boolean {
+  return state.isPlaying && (forceFastScrubOverlay || state.playbackRate < 0)
+}
+
+/**
+ * Keeps the last valid rendered surface pinned while an exact replacement is
+ * prepared. Scrubs always own this lane; continuous-overlay playback also
+ * borrows it for the single play/pause handoff frame so nested composition
+ * canvases cannot expose their freshly-cleared backing surface.
+ */
+export function resolveActivePreviewPresentationTarget({
+  state,
+  prev,
+  settlingReleasedScrubFrame,
+  forceFastScrubOverlay,
+}: ResolveActivePreviewPresentationTargetParams): number | null {
+  return (
+    state.previewFrame ??
+    settlingReleasedScrubFrame ??
+    (forceFastScrubOverlay && state.isPlaying !== prev.isPlaying ? state.currentFrame : null)
+  )
+}
+
+/**
+ * A play/pause handoff for the frame already on screen must be visually
+ * idempotent. If the shared render target was cleared while a nested source
+ * was settling, keep the known-good front buffer instead of presenting black.
+ */
+export function shouldRejectBlankTransportHandoff({
+  isTransportSettling,
+  renderedFrame,
+  displayedFrame,
+  renderedFrameBlank,
+  displayedFrameBlank,
+}: ShouldRejectBlankTransportHandoffParams): boolean {
+  return (
+    isTransportSettling &&
+    displayedFrame !== null &&
+    Math.abs(renderedFrame - displayedFrame) <= 1 &&
+    renderedFrameBlank &&
+    !displayedFrameBlank
+  )
+}
+
+/**
+ * A committed snapshot is authoritative for the exact frame from which a
+ * ruler skim began. A delayed/cancelled compound render may finish after
+ * release with a cleared canvas; it must not replace that known-good frame or
+ * become the cached representation for the playhead.
+ */
+export function shouldRejectBlankReleasedScrubHandoff({
+  releaseGuardFrame,
+  renderedFrame,
+  currentFrame,
+  previewFrame,
+  isPlaying,
+  snapshotFrame,
+  renderedFrameBlank,
+  snapshotFrameBlank,
+}: ShouldRejectBlankReleasedScrubHandoffParams): boolean {
+  return (
+    releaseGuardFrame !== null &&
+    renderedFrame === releaseGuardFrame &&
+    currentFrame === releaseGuardFrame &&
+    previewFrame === null &&
+    !isPlaying &&
+    snapshotFrame === releaseGuardFrame &&
+    renderedFrameBlank &&
+    !snapshotFrameBlank
+  )
+}
+
+export function resolveReleasedScrubSnapshotGuardUntilMs({ nowMs }: { nowMs: number }): number {
+  return nowMs + COMMITTED_SCRUB_SNAPSHOT_GUARD_MS
+}
+
+/** Prevents a delayed quality/decoder pass from visibly replacing the frame
+ * that was on screen when transport paused. A new preview target or playback
+ * lifecycle releases the hold at the call site. */
+export function shouldPreservePausedTransportPresentation({
+  holdActive,
+  heldFrame,
+  renderedFrame,
+  displayedFrame,
+  currentFrame,
+  previewFrame,
+  isPlaying,
+}: ShouldPreservePausedTransportPresentationParams): boolean {
+  return (
+    holdActive &&
+    heldFrame !== null &&
+    !isPlaying &&
+    previewFrame === null &&
+    currentFrame === heldFrame &&
+    renderedFrame === heldFrame &&
+    displayedFrame === heldFrame
+  )
+}
+
+/** A hover target can be superseded while its render is in flight. Only the
+ * latest paused target may take ownership of the shared offscreen canvas,
+ * regardless of whether the workspace normally forces the overlay. */
+export function shouldDropStalePausedPreviewRender({
+  renderedFrame,
+  currentFrame,
+  previewFrame,
+  isPlaying,
+}: ShouldDropStalePausedPreviewRenderParams): boolean {
+  if (isPlaying) return false
+  return renderedFrame !== (previewFrame ?? currentFrame)
+}
+
+export function shouldRestoreCommittedPreviewSnapshot({
+  previewFrame,
+  previousPreviewFrame,
+  currentFrame,
+  snapshotFrame,
+}: ShouldRestoreCommittedPreviewSnapshotParams): boolean {
+  return previewFrame === null && previousPreviewFrame !== null && snapshotFrame === currentFrame
+}
+
+/**
+ * A decoder promise can settle after the render-pump effect that created it
+ * has been replaced. The shared mounted ref may already be true for the new
+ * effect, so the old effect's own disposed state must participate in the
+ * generation check before it can release the active-preview gate.
+ */
+export function shouldRecoverFailedActivePreseekSchedule({
+  effectDisposed,
+  recoveredFailedSchedule,
+  scheduleVersion,
+  activeScheduleVersion,
+  mounted,
+  isPlaying,
+  currentTarget,
+  targetFrame,
+}: ShouldRecoverFailedActivePreseekScheduleParams): boolean {
+  return (
+    !effectDisposed &&
+    !recoveredFailedSchedule &&
+    scheduleVersion === activeScheduleVersion &&
+    mounted &&
+    !isPlaying &&
+    currentTarget === targetFrame
+  )
 }
 
 interface ResolveScrubDirectionPlanParams {
@@ -68,9 +294,11 @@ export function resolveRenderPumpTargetFrame({
   state,
   forceFastScrubOverlay,
   isPausedInsideTransition,
+  settlingReleasedScrubFrame = null,
 }: ResolveRenderPumpTargetFrameParams): number | null {
   return (
     state.previewFrame ??
+    settlingReleasedScrubFrame ??
     (forceFastScrubOverlay || isPausedInsideTransition ? state.currentFrame : null)
   )
 }

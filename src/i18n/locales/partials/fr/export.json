@@ -84,6 +84,18 @@
       "selectFormat": "Sélectionner un format",
       "selectQuality": "Sélectionner une qualité",
       "selectResolution": "Sélectionner une résolution",
+      "sequence": "Séquence",
+      "subtitleMode": {
+        "off": "Désactivé",
+        "burn": "Incrustés",
+        "sidecar": "Fichier .srt",
+        "embedded": "Piste intégrée",
+        "offDescription": "Aucun sous-titre dans la vidéo exportée.",
+        "burnDescription": "Les sous-titres sont incrustés dans la vidéo, visibles sur tous les lecteurs.",
+        "sidecarDescription": "Vidéo sans incrustation et un fichier de sous-titres .srt séparé.",
+        "embeddedDescription": "Une piste de sous-titres activable (WebM/MKV)."
+      },
+      "subtitles": "Sous-titres",
       "video": "Vidéo"
     },
     "videoContainer": {
@@ -126,6 +138,15 @@
         "video-codec-supported": {
           "title": "Codec vidéo pris en charge",
           "detail": "{{codec}} peut être encodé en {{container}} dans ce navigateur."
+        },
+        "audio-codec-supported": {
+          "title": "Codec audio pris en charge",
+          "detail": "L’audio {{codec}} peut être encodé dans {{container}} avec ce navigateur."
+        },
+        "audio-codec-unavailable": {
+          "title": "Codec audio indisponible",
+          "detail": "Ce navigateur ne peut pas encoder l’audio {{codec}} pour {{container}}.",
+          "fix": "Choisissez WebM ou MKV pour utiliser l’audio Opus, ou mettez à jour votre navigateur."
         },
         "worker-unavailable-fallback": {
           "title": "Exportation par worker indisponible",

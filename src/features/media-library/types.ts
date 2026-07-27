@@ -1,5 +1,7 @@
-import type { MediaMetadata } from '@/types/storage'
+import type { MediaAttribution, MediaMetadata } from '@/types/storage'
 import type { TranscriptionProgressSnapshot } from '@/shared/utils/transcription-progress'
+import type { InterpolationStage } from './frame-interpolation-constants'
+import type { UpscaleStage } from './upscale-constants'
 
 export interface MediaLibraryNotification {
   type: 'info' | 'success' | 'warning' | 'error'
@@ -64,7 +66,7 @@ export interface MediaLibraryState {
   selectedMediaIds: string[]
   selectedCompositionIds: string[]
   searchQuery: string
-  filterByType: 'video' | 'audio' | 'image' | null
+  filterByType: 'video' | 'audio' | 'image' | 'lottie' | null
   sortBy: 'name' | 'date' | 'size'
   viewMode: 'grid' | 'list'
   /** Grid item size (1 = largest / fewer columns, 5 = smallest / more columns) */
@@ -90,6 +92,20 @@ export interface MediaLibraryState {
   // Proxy video generation
   proxyStatus: Map<string, 'generating' | 'ready' | 'error'>
   proxyProgress: Map<string, number>
+
+  // RIFE frame interpolation, keyed by the SOURCE media id
+  interpolationStatus: Map<string, 'generating' | 'ready' | 'error'>
+  interpolationProgress: Map<string, number>
+  interpolationStage: Map<string, InterpolationStage>
+  /** Seconds left in the render. Absent until the rate estimate warms up. */
+  interpolationEtaSeconds: Map<string, number>
+
+  // Anime4K upscaling, keyed by the SOURCE media id
+  upscaleStatus: Map<string, 'generating' | 'ready' | 'error'>
+  upscaleProgress: Map<string, number>
+  upscaleStage: Map<string, UpscaleStage>
+  /** Seconds left in the render. Absent until the rate estimate warms up. */
+  upscaleEtaSeconds: Map<string, number>
 
   // Transcript generation
   transcriptStatus: Map<string, MediaTranscriptStatus>
@@ -130,6 +146,17 @@ export interface MediaLibraryActions {
    */
   importMediaFromUrl: (url: string) => Promise<MediaMetadata[]>
   /**
+   * Import a Lottie animation from a provider (e.g. the LottieFiles browser)
+   * into OPFS-backed storage, recording attribution. Returns the media when it
+   * is available in the project — either freshly imported or an existing
+   * duplicate (flagged `isDuplicate`) — and null only when the import fails.
+   */
+  importRemoteLottie: (params: {
+    url: string
+    fileName?: string
+    attribution?: MediaAttribution
+  }) => Promise<MediaMetadata | null>
+  /**
    * Import media from file handles (for drag-drop). Defaults to copy mode.
    */
   importHandles: (
@@ -160,7 +187,7 @@ export interface MediaLibraryActions {
 
   // Filters & Search
   setSearchQuery: (query: string) => void
-  setFilterByType: (type: 'video' | 'audio' | 'image' | null) => void
+  setFilterByType: (type: 'video' | 'audio' | 'image' | 'lottie' | null) => void
   setSortBy: (sortBy: 'name' | 'date' | 'size') => void
   setViewMode: (viewMode: 'grid' | 'list') => void
   setMediaItemSize: (size: number) => void
@@ -209,6 +236,26 @@ export interface MediaLibraryActions {
   setProxyStatus: (mediaId: string, status: 'generating' | 'ready' | 'error') => void
   clearProxyStatus: (mediaId: string) => void
   setProxyProgress: (mediaId: string, progress: number) => void
+
+  // RIFE frame interpolation
+  setInterpolationStatus: (mediaId: string, status: 'generating' | 'ready' | 'error') => void
+  clearInterpolationStatus: (mediaId: string) => void
+  setInterpolationProgress: (
+    mediaId: string,
+    progress: number,
+    stage: InterpolationStage,
+    etaSeconds?: number | null,
+  ) => void
+
+  // Anime4K upscaling
+  setUpscaleStatus: (mediaId: string, status: 'generating' | 'ready' | 'error') => void
+  clearUpscaleStatus: (mediaId: string) => void
+  setUpscaleProgress: (
+    mediaId: string,
+    progress: number,
+    stage: UpscaleStage,
+    etaSeconds?: number | null,
+  ) => void
 
   // Transcript generation
   setTranscriptStatus: (mediaId: string, status: MediaTranscriptStatus) => void

@@ -1,5 +1,6 @@
-import { render, waitFor } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { shouldIssueCoalescedReverseVideoSeek } from '../utils/video-sync-plan'
 import { VideoContent } from './video-content'
 
 const testState = vi.hoisted(() => ({
@@ -101,6 +102,7 @@ vi.mock('@/runtime/composition-runtime/deps/player', () => ({
     currentFrame: 0,
     onFrameChange: () => () => {},
   }),
+  useClockPlaybackRate: () => 1,
   interpolate: () => 0,
   isVideoPoolAbortError: () => false,
 }))
@@ -211,5 +213,134 @@ describe('VideoContent pooled handoff', () => {
 
     expect(acquireForClipMock).toHaveBeenCalledTimes(1)
     expect(releaseClipMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a decoder pre-warm single-flight and restores its paused source time', async () => {
+    vi.useFakeTimers()
+    playbackState.isPlaying = false
+    const pooledElement = createMockVideoElement()
+    let resolvePlay!: () => void
+    pooledElement.play = vi.fn(() => {
+      Object.defineProperty(pooledElement, 'paused', {
+        configurable: true,
+        get: () => false,
+      })
+      return new Promise<void>((resolve) => {
+        resolvePlay = resolve
+      })
+    })
+    acquireForClipMock.mockReturnValue(pooledElement)
+
+    const rendered = render(
+      <VideoContent
+        item={{
+          id: 'clip-a',
+          type: 'video',
+          trackId: 'track-1',
+          from: 0,
+          durationInFrames: 90,
+          label: 'Clip A',
+          src: 'blob:test',
+          _poolClipId: 'group-origin-1',
+        }}
+        muted={false}
+        safeTrimBefore={0}
+        playbackRate={1}
+        sourceFps={30}
+        audioEqStages={[]}
+      />,
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50)
+    })
+    expect(pooledElement.play).toHaveBeenCalledTimes(1)
+    const preWarmStartTime = pooledElement.currentTime
+
+    // play() can emit canplay while its promise is still pending. That signal
+    // must not start another warm or leave the element on a decoded-ahead frame.
+    pooledElement.currentTime = 0.25
+    pooledElement.dispatchEvent(new Event('canplay'))
+    await act(async () => {
+      resolvePlay()
+      await Promise.resolve()
+    })
+
+    expect(pooledElement.pause).toHaveBeenCalled()
+    expect(pooledElement.currentTime).toBe(preWarmStartTime)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(pooledElement.play).toHaveBeenCalledTimes(1)
+    rendered.unmount()
+    vi.useRealTimers()
+  })
+
+  it('never plays a visibly presented paused video to warm its decoder', async () => {
+    vi.useFakeTimers()
+    playbackState.isPlaying = false
+    const pooledElement = createMockVideoElement()
+    pooledElement.getClientRects = vi.fn(
+      () => ({ length: 1 }) as unknown as DOMRectList,
+    )
+    acquireForClipMock.mockReturnValue(pooledElement)
+
+    const rendered = render(
+      <VideoContent
+        item={{
+          id: 'clip-visible',
+          type: 'video',
+          trackId: 'track-1',
+          from: 0,
+          durationInFrames: 90,
+          label: 'Visible clip',
+          src: 'blob:test',
+          _poolClipId: 'group-origin-visible',
+        }}
+        muted={false}
+        safeTrimBefore={0}
+        playbackRate={1}
+        sourceFps={30}
+        audioEqStages={[]}
+      />,
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+
+    expect(pooledElement.isConnected).toBe(true)
+    expect(pooledElement.play).not.toHaveBeenCalled()
+    rendered.unmount()
+    vi.useRealTimers()
+  })
+})
+
+describe('coalesced reverse video seeking', () => {
+  it('keeps only one browser seek in flight and accepts the newest target after settlement', () => {
+    expect(
+      shouldIssueCoalescedReverseVideoSeek({
+        seeking: false,
+        seekInFlight: false,
+        currentTime: 8,
+        targetTime: 7.5,
+      }),
+    ).toBe(true)
+    expect(
+      shouldIssueCoalescedReverseVideoSeek({
+        seeking: true,
+        seekInFlight: true,
+        currentTime: 8,
+        targetTime: 6,
+      }),
+    ).toBe(false)
+    expect(
+      shouldIssueCoalescedReverseVideoSeek({
+        seeking: false,
+        seekInFlight: false,
+        currentTime: 6.0005,
+        targetTime: 6,
+      }),
+    ).toBe(false)
   })
 })

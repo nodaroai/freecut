@@ -1,25 +1,26 @@
 import type { ItemKeyframes } from '@/types/keyframe'
 import type { TimelineTrack } from '@/types/timeline'
 
-function hasVisibleStyledText(track: TimelineTrack): boolean {
+function hasVisibleText(track: TimelineTrack): boolean {
+  if (!track.visible) return false
+
+  // DOM/CSS is the at-rest reference renderer. Canvas 2D has subtly
+  // different baseline metrics and downscale sampling even for plain text,
+  // so keep every non-motion text item on the Player while scrubbing.
+  return track.items.some((item) => item.type === 'text')
+}
+
+function hasVisibleMotionText(track: TimelineTrack): boolean {
   if (!track.visible) return false
 
   for (const item of track.items) {
     if (item.type !== 'text') continue
 
-    // Generated captions always render via the Player during scrub.
-    const isGeneratedCaption = item.textRole === 'caption' || item.captionSource !== undefined
-    if (isGeneratedCaption) return true
-
-    // Styled text (shadow or stroke) rasterizes subtly differently on the 2D
-    // canvas fast-scrub path (fillText/strokeText at project resolution, then
-    // downscaled) than via the DOM/CSS path used at rest — the baseline metric,
-    // the downscale resample, and stroke anti-aliasing all diverge. A static
-    // title would "pop" vertically when entering/leaving scrub. Keep it on the
-    // Player during scrub so skim and rest share one renderer. Animation is no
-    // longer required — static styled text needs unifying too.
-    const hasStyledText = !!item.textShadow || (item.stroke?.width ?? 0) > 0
-    if (hasStyledText) return true
+    // Motion-text clips animate per-glyph and can only render correctly via
+    // the canvas/GPU preview path, so never prefer the Player while one is visible.
+    const hasMotion =
+      !!item.textMotion && !!(item.textMotion.in || item.textMotion.out || item.textMotion.loop)
+    if (hasMotion) return true
   }
 
   return false
@@ -27,15 +28,18 @@ function hasVisibleStyledText(track: TimelineTrack): boolean {
 
 /**
  * Whether the preview should render via the DOM Player instead of the 2D-canvas
- * fast-scrub overlay while scrubbing, so styled text / captions don't shift
- * between the two text renderers.
+ * fast-scrub overlay while scrubbing, so text does not shift between the two
+ * rasterizers. Even plain text differs subtly in baseline metrics and
+ * downscale sampling between DOM/CSS and Canvas 2D.
  *
  * `_keyframes` is retained for call-site compatibility; it no longer affects
- * the result (animation used to gate this, but static styled text diverges too).
+ * the result (animation used to gate this, but all static text can diverge).
  */
 export function shouldPreferPlayerForStyledTextScrub(
   tracks: TimelineTrack[],
   _keyframes?: ItemKeyframes[],
 ): boolean {
-  return tracks.some(hasVisibleStyledText)
+  if (tracks.some(hasVisibleMotionText)) return false
+
+  return tracks.some(hasVisibleText)
 }

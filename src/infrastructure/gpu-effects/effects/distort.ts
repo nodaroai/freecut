@@ -253,6 +253,188 @@ fn waveFragment(input: VertexOutput) -> @location(0) vec4f {
     ]),
 }
 
+export const triggerWave: GpuEffectDefinition = {
+  id: 'gpu-trigger-wave',
+  name: 'Trigger Wave',
+  category: 'distort',
+  entryPoint: 'triggerWaveFragment',
+  uniformSize: 64,
+  shader: /* wgsl */ `
+struct TriggerWaveParams {
+  settingsA: vec4f,
+  settingsB: vec4f,
+  settingsC: vec4f,
+  settingsD: vec4f,
+};
+@group(0) @binding(0) var texSampler: sampler;
+@group(0) @binding(1) var inputTex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> params: TriggerWaveParams;
+
+@fragment
+fn triggerWaveFragment(input: VertexOutput) -> @location(0) vec4f {
+  let strength = params.settingsA.x;
+  let radius = max(params.settingsA.y, 0.001);
+  let frequency = max(params.settingsA.z, 0.001);
+  let decay = max(params.settingsA.w, 0.001);
+
+  let center = vec2f(params.settingsB.x, params.settingsB.y);
+  let phase = fract(params.settingsB.z + params.settingsB.w * params.settingsC.z);
+  let chroma = params.settingsC.x;
+  let scanlineMix = clamp(params.settingsC.y, 0.0, 1.0);
+  let aspect = max(params.settingsC.w, 0.001);
+  let glowColor = params.settingsD.rgb * params.settingsD.a;
+
+  let aspectDelta = vec2f((input.uv.x - center.x) * aspect, input.uv.y - center.y);
+  let dist = length(aspectDelta);
+  let safeDist = max(dist, 0.0001);
+  let direction = vec2f(aspectDelta.x / aspect, aspectDelta.y) / safeDist;
+
+  let ringRadius = phase * radius;
+  let band = exp(-abs(dist - ringRadius) / decay);
+  let tail = 1.0 - smoothstep(0.2, 1.0, phase);
+  let carrier = sin((dist - ringRadius) * frequency * TAU);
+  let force = carrier * band * tail * strength;
+  let warpedUv = input.uv + direction * force;
+
+  var color = textureSample(inputTex, texSampler, warpedUv);
+  if (chroma > 0.0) {
+    let chromaOffset = direction * chroma * band * (0.25 + abs(strength) * 20.0);
+    let red = textureSample(inputTex, texSampler, warpedUv + chromaOffset).r;
+    let blue = textureSample(inputTex, texSampler, warpedUv - chromaOffset).b;
+    color = vec4f(red, color.g, blue, color.a);
+  }
+
+  if (scanlineMix > 0.0) {
+    let line = 0.78 + 0.22 * sin(input.position.y * 2.4 + phase * TAU * 8.0);
+    color = vec4f(mix(color.rgb, color.rgb * line, scanlineMix), color.a);
+  }
+
+  let glow = band * tail * clamp(abs(strength) * 12.0, 0.0, 1.0);
+  color = vec4f(color.rgb + glowColor * glow, color.a);
+  return vec4f(clamp(color.rgb, vec3f(0.0), vec3f(1.0)), color.a);
+}`,
+  params: {
+    strength: {
+      type: 'number',
+      label: 'Strength',
+      default: 0.035,
+      min: -0.15,
+      max: 0.15,
+      step: 0.001,
+      animatable: true,
+    },
+    radius: {
+      type: 'number',
+      label: 'Radius',
+      default: 0.85,
+      min: 0.1,
+      max: 1.5,
+      step: 0.01,
+      animatable: true,
+    },
+    frequency: {
+      type: 'number',
+      label: 'Frequency',
+      default: 18,
+      min: 2,
+      max: 64,
+      step: 1,
+      animatable: true,
+    },
+    decay: {
+      type: 'number',
+      label: 'Decay',
+      default: 0.08,
+      min: 0.01,
+      max: 0.3,
+      step: 0.01,
+      animatable: true,
+    },
+    phase: {
+      type: 'number',
+      label: 'Phase',
+      default: 0,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    speed: {
+      type: 'number',
+      label: 'Speed',
+      default: 1,
+      min: 0,
+      max: 4,
+      step: 0.1,
+      animatable: false,
+    },
+    centerX: {
+      type: 'number',
+      label: 'Center X',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    centerY: {
+      type: 'number',
+      label: 'Center Y',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    chroma: {
+      type: 'number',
+      label: 'Chroma',
+      default: 0.006,
+      min: 0,
+      max: 0.05,
+      step: 0.001,
+      animatable: true,
+    },
+    scanlineMix: {
+      type: 'number',
+      label: 'Scanlines',
+      default: 0.18,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    glowColor: {
+      type: 'color',
+      label: 'Glow Color',
+      default: '#2e6b8c',
+      animatable: true,
+    },
+  },
+  packUniforms: (p, w, h) => {
+    const time = performance.now() / 1000
+    const glowColor = parseHexColor((p.glowColor as string) ?? '#2e6b8c', [0.18, 0.42, 0.55, 1])
+    return new Float32Array([
+      (p.strength as number) ?? 0.035,
+      (p.radius as number) ?? 0.85,
+      (p.frequency as number) ?? 18,
+      (p.decay as number) ?? 0.08,
+      (p.centerX as number) ?? 0.5,
+      (p.centerY as number) ?? 0.5,
+      (p.phase as number) ?? 0,
+      (p.speed as number) ?? 1,
+      (p.chroma as number) ?? 0.006,
+      (p.scanlineMix as number) ?? 0.18,
+      time,
+      w / Math.max(h, 1),
+      glowColor[0],
+      glowColor[1],
+      glowColor[2],
+      glowColor[3],
+    ])
+  },
+}
+
 export const bulge: GpuEffectDefinition = {
   id: 'gpu-bulge',
   name: 'Bulge/Pinch',
@@ -394,7 +576,8 @@ fn mirrorFragment(input: VertexOutput) -> @location(0) vec4f {
     horizontal: { type: 'boolean', label: 'Horizontal', default: true },
     vertical: { type: 'boolean', label: 'Vertical', default: false },
   },
-  packUniforms: (p) => new Float32Array([p.horizontal ? 1 : 0, p.vertical ? 1 : 0, 0, 0]),
+  packUniforms: (p) =>
+    new Float32Array([p.horizontal !== false ? 1 : 0, p.vertical === true ? 1 : 0, 0, 0]),
 }
 
 // Adapted from Paper Design's fluted-glass shader (published package source).
@@ -642,16 +825,28 @@ fn flutedGlassFragment(input: VertexOutput) -> @location(0) vec4f {
     distortion *= fadeX;
   }
 
-  let dudx = dpdx(input.uv);
-  let dudy = dpdy(input.uv);
-  var grainUV = input.uv - 0.5;
-  let derivativeScale = 0.8 / max(vec2f(length(dudx), length(dudy)), vec2f(0.0001));
-  grainUV *= derivativeScale;
-  grainUV += 0.5;
-  var grain = flutedOverlayNoise(grainUV);
-  grain = smoothstep(0.4, 0.7, grain);
-  grain *= grainMixer;
-  distortion = mix(distortion, 0.0, grain);
+  // Grain UV (and its derivatives) are only needed when grain or grain overlay
+  // are active. grainMixer/grainOverlay are uniform, so these branches are
+  // coherent across the draw — no divergence — and the dpdx/dpdy derivatives
+  // stay in uniform control flow. Skips ~36 sin-based hash() calls per pixel
+  // when grain is off (the common case), which dominates this shader's ALU.
+  let grainActive = grainMixer > 0.0 || grainOverlay > 0.0;
+  var grainUV = input.uv;
+  if (grainActive) {
+    let dudx = dpdx(input.uv);
+    let dudy = dpdy(input.uv);
+    var gUV = input.uv - 0.5;
+    let derivativeScale = 0.8 / max(vec2f(length(dudx), length(dudy)), vec2f(0.0001));
+    gUV *= derivativeScale;
+    gUV += 0.5;
+    grainUV = gUV;
+  }
+  if (grainMixer > 0.0) {
+    var grain = flutedOverlayNoise(grainUV);
+    grain = smoothstep(0.4, 0.7, grain);
+    grain *= grainMixer;
+    distortion = mix(distortion, 0.0, grain);
+  }
 
   shadows = min(shadows, 1.0);
   shadows += maskStrokeInner;
@@ -680,11 +875,15 @@ fn flutedGlassFragment(input: VertexOutput) -> @location(0) vec4f {
   edgeDistortion *= mask;
   let frame = getUvFrame(uv, edgeDistortion);
 
-  var stretch = 1.0 - smoothstep(0.0, 0.5, xNonSmooth) * smoothstep(1.0, 0.5, xNonSmooth);
-  stretch = pow(stretch, 2.0);
-  stretch *= mask;
-  stretch *= getUvFrame(uv, 0.1 + 0.05 * mask * frameFade);
-  uv = vec2f(uv.x, mix(uv.y, 0.5, stretchAmount * stretch));
+  // stretchAmount is uniform — skip the stretch warp (and its getUvFrame /
+  // fwidth work) entirely when stretch is off.
+  if (stretchAmount > 0.0) {
+    var stretch = 1.0 - smoothstep(0.0, 0.5, xNonSmooth) * smoothstep(1.0, 0.5, xNonSmooth);
+    stretch = pow(stretch, 2.0);
+    stretch *= mask;
+    stretch *= getUvFrame(uv, 0.1 + 0.05 * mask * frameFade);
+    uv = vec2f(uv.x, mix(uv.y, 0.5, stretchAmount * stretch));
+  }
 
   let imageSample = getBlur(uv, 1.0 / vec2f(width, height), vec2f(0.0, 1.0), blur);
   let image = vec4f(imageSample.rgb * imageSample.a, imageSample.a);
@@ -707,26 +906,34 @@ fn flutedGlassFragment(input: VertexOutput) -> @location(0) vec4f {
   color += backColor.rgb * (1.0 - opacity);
   opacity += backColor.a * (1.0 - opacity);
 
-  var grainOverlayNoise = flutedOverlayNoise(rotate2d(grainUV, 1.0) + vec2f(3.0));
-  grainOverlayNoise = mix(grainOverlayNoise, flutedOverlayNoise(rotate2d(grainUV, 2.0) + vec2f(-1.0)), 0.5);
-  grainOverlayNoise = pow(grainOverlayNoise, 1.3);
+  // grainOverlay is uniform — the two-octave overlay noise (24 sin-based
+  // hash() calls) only runs when the overlay is actually dialed in.
+  if (grainOverlay > 0.0) {
+    var grainOverlayNoise = flutedOverlayNoise(rotate2d(grainUV, 1.0) + vec2f(3.0));
+    grainOverlayNoise = mix(grainOverlayNoise, flutedOverlayNoise(rotate2d(grainUV, 2.0) + vec2f(-1.0)), 0.5);
+    grainOverlayNoise = pow(grainOverlayNoise, 1.3);
 
-  let grainOverlayV = grainOverlayNoise * 2.0 - 1.0;
-  let grainOverlayColor = vec3f(select(0.0, 1.0, grainOverlayV >= 0.0));
-  var grainOverlayStrength = grainOverlay * abs(grainOverlayV);
-  grainOverlayStrength = pow(grainOverlayStrength, 0.8);
-  grainOverlayStrength *= mask;
-  color = mix(color, grainOverlayColor, 0.35 * grainOverlayStrength);
-
-  opacity += 0.5 * grainOverlayStrength;
+    let grainOverlayV = grainOverlayNoise * 2.0 - 1.0;
+    let grainOverlayColor = vec3f(select(0.0, 1.0, grainOverlayV >= 0.0));
+    var grainOverlayStrength = grainOverlay * abs(grainOverlayV);
+    grainOverlayStrength = pow(grainOverlayStrength, 0.8);
+    grainOverlayStrength *= mask;
+    color = mix(color, grainOverlayColor, 0.35 * grainOverlayStrength);
+    opacity += 0.5 * grainOverlayStrength;
+  }
   opacity = clamp(opacity, 0.0, 1.0);
 
   return vec4f(color, opacity);
 }`,
   params: {
-    colorBack: { type: 'color', label: 'Back Color', default: '#00000000' },
-    colorShadow: { type: 'color', label: 'Shadow Color', default: '#000000' },
-    colorHighlight: { type: 'color', label: 'Highlight Color', default: '#ffffff' },
+    colorBack: { type: 'color', label: 'Back Color', default: '#00000000', animatable: true },
+    colorShadow: { type: 'color', label: 'Shadow Color', default: '#000000', animatable: true },
+    colorHighlight: {
+      type: 'color',
+      label: 'Highlight Color',
+      default: '#ffffff',
+      animatable: true,
+    },
     shadows: {
       type: 'number',
       label: 'Shadows',
@@ -954,4 +1161,558 @@ fn flutedGlassFragment(input: VertexOutput) -> @location(0) vec4f {
       marginBottom,
     ])
   },
+}
+
+// Radial sibling of Fluted Glass: concentric-ring lens refraction from an
+// origin (bullseye / rippled-pond glass). Shares the shadow/highlight lighting
+// model with the fluted shader.
+export const rippleGlass: GpuEffectDefinition = {
+  id: 'gpu-ripple-glass',
+  name: 'Ripple Glass',
+  category: 'distort',
+  entryPoint: 'rippleGlassFragment',
+  uniformSize: 80,
+  shader: /* wgsl */ `
+struct RippleGlassParams {
+  colorShadow: vec4f,
+  colorHighlight: vec4f,
+  settingsA: vec4f,
+  settingsB: vec4f,
+  settingsC: vec4f,
+};
+@group(0) @binding(0) var texSampler: sampler;
+@group(0) @binding(1) var inputTex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> params: RippleGlassParams;
+
+@fragment
+fn rippleGlassFragment(input: VertexOutput) -> @location(0) vec4f {
+  let amount = params.settingsA.x;
+  let rings = max(params.settingsA.y, 1.0);
+  let shadowsAmount = clamp(params.settingsA.z, 0.0, 1.0);
+  let highlightsAmount = clamp(params.settingsA.w, 0.0, 1.0);
+
+  let origin = vec2f(params.settingsB.x, params.settingsB.y);
+  let phase = params.settingsB.z;
+  let falloff = max(params.settingsB.w, 0.001);
+
+  let aberration = params.settingsC.x;
+  let aspect = max(params.settingsC.w, 0.0001);
+
+  // Aspect-corrected radial vector from the ripple origin.
+  var p = input.uv - origin;
+  p.x *= aspect;
+  let dist = length(p);
+  let dir = p / max(dist, 1e-4);
+  // Radial offset expressed back in uv space (undo the aspect scaling on x).
+  let radialUv = vec2f(dir.x / aspect, dir.y);
+
+  let ringWidth = 1.0 / rings;
+  let ringCoord = dist / ringWidth - phase;   // integer part = ring index
+  let x = fract(ringCoord);                     // 0..1 within the ring
+  let centered = x - 0.5;
+
+  // Cylindrical lens bend: soft at the ring centre, steep toward the seams,
+  // pulling samples back toward each ring centre (magnifying the band).
+  let bend = -sign(centered) * pow(abs(centered) * 2.0, 1.5);
+
+  // Reach envelope — fades the ripple away from the origin.
+  let envelope = exp(-dist / falloff);
+
+  let push = bend * amount * ringWidth * 1.5 * envelope;
+  let offsetUv = radialUv * push;
+
+  var color: vec4f;
+  if (aberration > 0.0) {
+    let ca = radialUv * aberration * ringWidth * envelope;
+    let r = textureSample(inputTex, texSampler, input.uv + offsetUv + ca).r;
+    let g = textureSample(inputTex, texSampler, input.uv + offsetUv).g;
+    let b = textureSample(inputTex, texSampler, input.uv + offsetUv - ca).b;
+    let a = textureSample(inputTex, texSampler, input.uv + offsetUv).a;
+    color = vec4f(r, g, b, a);
+  } else {
+    color = textureSample(inputTex, texSampler, input.uv + offsetUv);
+  }
+
+  // Thin bright seam between rings + groove shadow that deepens toward it.
+  let aa = 2.0 * max(0.001, fwidth(ringCoord));
+  var highlights = 1.0 - (smoothstep(0.0, aa, x) * smoothstep(1.0, 1.0 - aa, x));
+  highlights = clamp(highlights * highlightsAmount * envelope, 0.0, 1.0);
+
+  var shadows = pow(abs(centered) * 2.0, 1.3);
+  shadows = clamp(shadows * shadowsAmount * envelope, 0.0, 1.0);
+
+  let shadowColor = params.colorShadow;
+  let highlightColor = params.colorHighlight;
+
+  var rgb = color.rgb;
+  rgb = mix(rgb, shadowColor.rgb, 0.5 * shadows * shadowColor.a);
+  rgb += highlightColor.rgb * highlights * highlightColor.a;
+  rgb = clamp(rgb, vec3f(0.0), vec3f(1.0));
+
+  return vec4f(rgb, color.a);
+}`,
+  params: {
+    colorShadow: { type: 'color', label: 'Shadow Color', default: '#000000', animatable: true },
+    colorHighlight: {
+      type: 'color',
+      label: 'Highlight Color',
+      default: '#ffffff',
+      animatable: true,
+    },
+    amount: {
+      type: 'number',
+      label: 'Amount',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    rings: {
+      type: 'number',
+      label: 'Rings',
+      default: 14,
+      min: 1,
+      max: 64,
+      step: 1,
+      animatable: true,
+    },
+    shadows: {
+      type: 'number',
+      label: 'Shadows',
+      default: 0.25,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    highlights: {
+      type: 'number',
+      label: 'Highlights',
+      default: 0.1,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    originX: {
+      type: 'number',
+      label: 'Origin X',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    originY: {
+      type: 'number',
+      label: 'Origin Y',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    phase: {
+      type: 'number',
+      label: 'Phase',
+      default: 0,
+      min: -1,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    falloff: {
+      type: 'number',
+      label: 'Falloff',
+      default: 0.35,
+      min: 0.05,
+      max: 2,
+      step: 0.01,
+      animatable: true,
+    },
+    aberration: {
+      type: 'number',
+      label: 'Aberration',
+      default: 0,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+  },
+  packUniforms: (p, w, h) => {
+    const shadow = parseHexColor((p.colorShadow as string) ?? '#000000', [0, 0, 0, 1])
+    const highlight = parseHexColor((p.colorHighlight as string) ?? '#ffffff', [1, 1, 1, 1])
+    return new Float32Array([
+      shadow[0],
+      shadow[1],
+      shadow[2],
+      shadow[3],
+      highlight[0],
+      highlight[1],
+      highlight[2],
+      highlight[3],
+      (p.amount as number) ?? 0.5,
+      (p.rings as number) ?? 14,
+      (p.shadows as number) ?? 0.25,
+      (p.highlights as number) ?? 0.1,
+      (p.originX as number) ?? 0.5,
+      (p.originY as number) ?? 0.5,
+      (p.phase as number) ?? 0,
+      (p.falloff as number) ?? 0.35,
+      (p.aberration as number) ?? 0,
+      w,
+      h,
+      w / Math.max(h, 1),
+    ])
+  },
+}
+
+// 2D sibling of Fluted Glass: a grid of rounded lens cells, each magnifying
+// its own patch (privacy-glass block wall). Reuses the shadow/highlight model.
+export const glassMosaic: GpuEffectDefinition = {
+  id: 'gpu-glass-mosaic',
+  name: 'Glass Mosaic',
+  category: 'distort',
+  entryPoint: 'glassMosaicFragment',
+  uniformSize: 64,
+  shader: /* wgsl */ `
+struct GlassMosaicParams {
+  colorShadow: vec4f,
+  colorHighlight: vec4f,
+  settingsA: vec4f,
+  settingsB: vec4f,
+};
+@group(0) @binding(0) var texSampler: sampler;
+@group(0) @binding(1) var inputTex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> params: GlassMosaicParams;
+
+@fragment
+fn glassMosaicFragment(input: VertexOutput) -> @location(0) vec4f {
+  let amount = params.settingsA.x;
+  let cells = max(params.settingsA.y, 1.0);
+  let shadowsAmount = clamp(params.settingsA.z, 0.0, 1.0);
+  let highlightsAmount = clamp(params.settingsA.w, 0.0, 1.0);
+  let aberration = params.settingsB.x;
+  let aspect = max(params.settingsB.w, 0.0001);
+
+  // Square-ish cells: cellsX counts columns across the width; rows scale by
+  // aspect so each tile stays roughly square regardless of frame proportions.
+  let cellUvSize = vec2f(1.0 / cells, aspect / cells);
+  let grid = input.uv / cellUvSize;
+  let local = fract(grid) - 0.5;                 // -0.5..0.5 within the cell
+  let localUv = local * cellUvSize;              // same offset, in uv space
+
+  // Spherical lens: magnify toward each cell centre, fading out near the rim.
+  let dd = dot(local * 2.0, local * 2.0);        // 0 centre .. up to 2 at corners
+  let lens = amount * pow(clamp(1.0 - dd, 0.0, 1.0), 0.5);
+  let sampleUv = input.uv - localUv * lens;
+
+  var color: vec4f;
+  if (aberration > 0.0) {
+    let ca = localUv * aberration;
+    let r = textureSample(inputTex, texSampler, sampleUv - ca).r;
+    let g = textureSample(inputTex, texSampler, sampleUv).g;
+    let b = textureSample(inputTex, texSampler, sampleUv + ca).b;
+    let a = textureSample(inputTex, texSampler, sampleUv).a;
+    color = vec4f(r, g, b, a);
+  } else {
+    color = textureSample(inputTex, texSampler, sampleUv);
+  }
+
+  // Rounded-square edge factor: 0 at the cell centre, 1 at the rim.
+  let edge = max(abs(local.x), abs(local.y)) * 2.0;
+  let fw = fwidth(edge) + 0.001;
+
+  // Bright bevel just inside each cell border.
+  var highlights = smoothstep(1.0 - 6.0 * fw, 1.0 - 2.0 * fw, edge);
+  highlights *= highlightsAmount;
+
+  // Darker mortar at the seams + a gentle vignette toward the rim.
+  let gap = smoothstep(1.0 - 2.0 * fw, 1.0, edge);
+  var shadows = pow(edge, 3.0) * 0.5 + gap;
+  shadows = clamp(shadows * shadowsAmount, 0.0, 1.0);
+
+  // Diagonal bevel (light from top-left) gives each tile a glassy roundness.
+  let bevel = (-local.x - local.y) * amount * 0.5;
+
+  let shadowColor = params.colorShadow;
+  let highlightColor = params.colorHighlight;
+
+  var rgb = color.rgb * (1.0 + bevel);
+  rgb = mix(rgb, shadowColor.rgb, 0.5 * shadows * shadowColor.a);
+  rgb += highlightColor.rgb * highlights * highlightColor.a;
+  rgb = clamp(rgb, vec3f(0.0), vec3f(1.0));
+
+  return vec4f(rgb, color.a);
+}`,
+  params: {
+    colorShadow: { type: 'color', label: 'Shadow Color', default: '#000000', animatable: true },
+    colorHighlight: {
+      type: 'color',
+      label: 'Highlight Color',
+      default: '#ffffff',
+      animatable: true,
+    },
+    amount: {
+      type: 'number',
+      label: 'Amount',
+      default: 0.55,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    cells: {
+      type: 'number',
+      label: 'Cells',
+      default: 18,
+      min: 2,
+      max: 80,
+      step: 1,
+      animatable: true,
+    },
+    shadows: {
+      type: 'number',
+      label: 'Shadows',
+      default: 0.3,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    highlights: {
+      type: 'number',
+      label: 'Highlights',
+      default: 0.12,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    aberration: {
+      type: 'number',
+      label: 'Aberration',
+      default: 0,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+  },
+  packUniforms: (p, w, h) => {
+    const shadow = parseHexColor((p.colorShadow as string) ?? '#000000', [0, 0, 0, 1])
+    const highlight = parseHexColor((p.colorHighlight as string) ?? '#ffffff', [1, 1, 1, 1])
+    return new Float32Array([
+      shadow[0],
+      shadow[1],
+      shadow[2],
+      shadow[3],
+      highlight[0],
+      highlight[1],
+      highlight[2],
+      highlight[3],
+      (p.amount as number) ?? 0.55,
+      (p.cells as number) ?? 18,
+      (p.shadows as number) ?? 0.3,
+      (p.highlights as number) ?? 0.12,
+      (p.aberration as number) ?? 0,
+      w,
+      h,
+      w / Math.max(h, 1),
+    ])
+  },
+}
+
+export const blocks: GpuEffectDefinition = {
+  id: 'gpu-blocks',
+  name: 'Blocks',
+  category: 'distort',
+  entryPoint: 'blocksFragment',
+  uniformSize: 32,
+  shader: /* wgsl */ `
+struct BlocksParams {
+  size: f32, depth: f32, studSize: f32, gap: f32,
+  width: f32, height: f32, pad0: f32, pad1: f32
+};
+@group(0) @binding(0) var texSampler: sampler;
+@group(0) @binding(1) var inputTex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> params: BlocksParams;
+@fragment
+fn blocksFragment(input: VertexOutput) -> @location(0) vec4f {
+  let cellX = max(params.size, 1.0) / params.width;
+  let cellY = max(params.size, 1.0) / params.height;
+  let cellIndex = vec2f(floor(input.uv.x / cellX), floor(input.uv.y / cellY));
+  let cellCenter = vec2f((cellIndex.x + 0.5) * cellX, (cellIndex.y + 0.5) * cellY);
+  let color = textureSample(inputTex, texSampler, cellCenter);
+
+  // local position within the cell, centered at 0 (range -0.5..0.5)
+  let local = vec2f(fract(input.uv.x / cellX), fract(input.uv.y / cellY)) - vec2f(0.5);
+  let edge = max(abs(local.x), abs(local.y));
+
+  // bevel: light from top-left, shadow toward bottom-right
+  let shade = (-local.x - local.y) * params.depth;
+
+  // raised stud at the cell center with its own bevel
+  let studR = clamp(params.studSize, 0.0, 1.0) * 0.4;
+  let stud = smoothstep(studR, studR - 0.03, length(local));
+  let studShade = stud * ((-local.x - local.y) * params.depth * 2.0 + params.depth * 0.18);
+
+  var rgb = color.rgb * (1.0 + shade) + color.rgb * studShade;
+
+  // darken the mortar gap between blocks
+  let gapMask = step(edge, 0.5 - clamp(params.gap, 0.0, 0.4));
+  rgb = rgb * mix(0.55, 1.0, gapMask);
+
+  return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), color.a);
+}`,
+  params: {
+    size: {
+      type: 'number',
+      label: 'Block Size',
+      default: 24,
+      min: 4,
+      max: 120,
+      step: 1,
+      animatable: true,
+    },
+    depth: {
+      type: 'number',
+      label: 'Depth',
+      default: 0.5,
+      min: 0,
+      max: 1.5,
+      step: 0.01,
+      animatable: true,
+    },
+    studSize: {
+      type: 'number',
+      label: 'Stud Size',
+      default: 0.55,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    gap: {
+      type: 'number',
+      label: 'Gap',
+      default: 0.06,
+      min: 0,
+      max: 0.4,
+      step: 0.01,
+      animatable: true,
+    },
+  },
+  packUniforms: (p, w, h) =>
+    new Float32Array([
+      (p.size as number) ?? 24,
+      (p.depth as number) ?? 0.5,
+      (p.studSize as number) ?? 0.55,
+      (p.gap as number) ?? 0.06,
+      w,
+      h,
+      0,
+      0,
+    ]),
+}
+
+export const droste: GpuEffectDefinition = {
+  id: 'gpu-droste',
+  name: 'Droste',
+  category: 'distort',
+  entryPoint: 'drosteFragment',
+  uniformSize: 32,
+  shader: /* wgsl */ `
+struct DrosteParams {
+  strength: f32, scale: f32, centerX: f32, centerY: f32,
+  spin: f32, width: f32, height: f32, pad: f32
+};
+@group(0) @binding(0) var texSampler: sampler;
+@group(0) @binding(1) var inputTex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> params: DrosteParams;
+@fragment
+fn drosteFragment(input: VertexOutput) -> @location(0) vec4f {
+  let aspect = params.width / max(params.height, 1.0);
+  let center = vec2f(params.centerX, params.centerY);
+  let p = (input.uv - center) * vec2f(aspect, 1.0);
+
+  let r = max(length(p), 1e-4);
+  let a = atan2(p.y, p.x);
+  var z = vec2f(log(r), a);
+
+  let period = log(max(params.scale, 1.0001));
+  // Escher twist; strength dials from plain recursive zoom (0) to full spiral
+  let alpha = atan2(period, TAU) * clamp(params.strength, 0.0, 2.0);
+  let co = max(cos(alpha), 1e-3);
+  let si = sin(alpha);
+  z = vec2f(z.x * co - z.y * si, z.x * si + z.y * co) / co;
+
+  // tile the log-radius into a single repeating band
+  z.x = z.x - period * floor(z.x / period);
+
+  let er = exp(z.x);
+  let na = z.y + params.spin;
+  let uv = center + vec2f(cos(na), sin(na)) * er / vec2f(aspect, 1.0);
+  return textureSample(inputTex, texSampler, fract(uv));
+}`,
+  params: {
+    strength: {
+      type: 'number',
+      label: 'Spiral',
+      default: 1,
+      min: 0,
+      max: 2,
+      step: 0.01,
+      animatable: true,
+    },
+    scale: {
+      type: 'number',
+      label: 'Scale',
+      default: 2,
+      min: 1.1,
+      max: 6,
+      step: 0.05,
+      animatable: true,
+    },
+    centerX: {
+      type: 'number',
+      label: 'Center X',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    centerY: {
+      type: 'number',
+      label: 'Center Y',
+      default: 0.5,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      animatable: true,
+    },
+    spin: {
+      type: 'number',
+      label: 'Spin',
+      default: 0,
+      min: -6.28318,
+      max: 6.28318,
+      step: 0.01,
+      animatable: true,
+    },
+  },
+  packUniforms: (p, w, h) =>
+    new Float32Array([
+      (p.strength as number) ?? 1,
+      (p.scale as number) ?? 2,
+      (p.centerX as number) ?? 0.5,
+      (p.centerY as number) ?? 0.5,
+      (p.spin as number) ?? 0,
+      w,
+      h,
+      0,
+    ]),
 }
