@@ -17,6 +17,9 @@ import {
   clampSpeed,
 } from '../utils/source-calculations'
 import { isCompositionWrapperItem, wouldCreateCompositionCycle } from '../utils/composition-graph'
+import { normalizeClassicTrackNames } from '../utils/classic-tracks'
+import { pruneEmptyLayerGroups } from '../utils/group-utils'
+import { resolveTrackHeight } from '../utils/track-heights'
 import { getActiveCompositionId } from './composition-navigation-active'
 import { useCompositionsStore } from './compositions-store'
 import { useTimelineSettingsStore } from './timeline-settings-store'
@@ -160,12 +163,23 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
       // passes the existing stored object, normalization is a no-op re-clone, so
       // reuse the previous reference.
       const previousById = new Map(state.tracks.map((track) => [track.id, track]))
-      const nextTracks = tracks
+      const sortedTracks = pruneEmptyLayerGroups(tracks)
         .map((track) => {
           const previous = previousById.get(track.id)
-          return previous === track ? previous : normalizeTrack(track)
+          const normalized = previous === track ? previous : normalizeTrack(track)
+          // Height is a local view preference (see utils/track-heights.ts), so
+          // it is always re-derived here rather than read off the track. This is
+          // the single funnel for track writes, which keeps whatever height a
+          // caller happens to carry — a project file, a snapshot restored by
+          // undo, a freshly created track — from leaking into the timeline.
+          const height = resolveTrackHeight(normalized.id)
+          return normalized.height === height ? normalized : { ...normalized, height }
         })
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      // Re-derive classic V#/A# labels from the settled stack order so create /
+      // delete history can't leave names out of sequence (e.g. V1, V5, V3, V4).
+      // No-ops (and preserves references) when names already match position.
+      const nextTracks = normalizeClassicTrackNames(sortedTracks)
 
       // If the result is element-wise identical to the current tracks, keep the
       // same array reference so `s.tracks` selectors don't fire at all.
@@ -305,6 +319,7 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
     const activeCompositionId = getActiveCompositionId()
     const compositionById = useCompositionsStore.getState().compositionById
     const linkedGroupMap = new Map<string, string>()
+    const duplicatedItemIdByOriginalId = new Map<string, string>()
 
     for (let i = 0; i < itemIds.length; i++) {
       const original = itemsMap.get(itemIds[i]!)
@@ -340,13 +355,27 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
       } as TimelineItem
 
       newItems.push(normalizeFrameFields(duplicate))
+      duplicatedItemIdByOriginalId.set(original.id, duplicate.id)
     }
 
+    const remappedItems = newItems.map((item) => {
+      const originalParentId = item.transformParent?.parentItemId
+      const duplicatedParentId = originalParentId
+        ? duplicatedItemIdByOriginalId.get(originalParentId)
+        : undefined
+      return duplicatedParentId
+        ? ({
+            ...item,
+            transformParent: { ...item.transformParent, parentItemId: duplicatedParentId },
+          } as TimelineItem)
+        : item
+    })
+
     set((state) => {
-      const nextItems = [...state.items, ...newItems]
+      const nextItems = [...state.items, ...remappedItems]
       return withItemIndexes(nextItems, state)
     })
-    return newItems
+    return remappedItems
   },
 
   // Trim item start
@@ -559,9 +588,14 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
         // playback stays on the smooth forward-through-conform path across
         // the cut (same as forward-split clips reuse one source). Track each
         // half's offset into the conform so the runtime reads the right slice.
-        const parentConformOffset = item.reverseConformLocalStart ?? 0
-        leftItem.reverseConformLocalStart = parentConformOffset
-        rightItem.reverseConformLocalStart = parentConformOffset + leftDuration
+        if (item.reverseConformPreviewIsSourceLevel === true) {
+          leftItem.reverseConformLocalStart = undefined
+          rightItem.reverseConformLocalStart = undefined
+        } else {
+          const parentConformOffset = item.reverseConformLocalStart ?? 0
+          leftItem.reverseConformLocalStart = parentConformOffset
+          rightItem.reverseConformLocalStart = parentConformOffset + leftDuration
+        }
       } else {
         // Explicitly set sourceStart on left item so it has full explicit bounds.
         // Without this, the left item inherits undefined sourceStart from the original,

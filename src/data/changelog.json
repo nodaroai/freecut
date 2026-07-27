@@ -1,53 +1,348 @@
 {
   "current": {
     "version": "current",
-    "date": "2026-06-20",
+    "date": "2026-07-26",
     "groups": {
       "added": [
         {
-          "title": "New Animate workspace — keyframe animation with a dopesheet, curve (graph) editor, and side-by-side split view"
+          "title": "Solid color and gradient layers in Motion"
         },
         {
-          "title": "Save, reuse, and apply animation presets, with a built-in motion-preset library that travels with exported projects"
+          "title": "Crop clips with handles directly on the canvas, including compound clips"
         },
         {
-          "title": "Live animated A/B previews in the transition picker, rendered through real GPU shaders"
+          "title": "Promote any clip to a Motion Clip and open it in the Motion editor"
         },
         {
-          "title": "Live GPU-rendered previews in the effect picker"
+          "title": "Transform parenting with a pick whip, with invalid targets flagged as you drag"
         },
         {
-          "title": "Drag text and shape presets straight onto the preview canvas as overlay layers"
+          "title": "Set composition in and out points, and trim a comp to that region"
         },
         {
-          "title": "Track-size and add-track controls in the timeline header"
+          "title": "Composition duration and timecode, switchable between frames and seconds"
         },
         {
-          "title": "Color picker hex input with live preview"
+          "title": "Animate individual path vertices"
+        },
+        {
+          "title": "Filter the dopesheet to show only animated properties"
+        },
+        {
+          "title": "Jump between applied animations from the timeline"
+        },
+        {
+          "title": "Keyframes pushed outside a clip are flagged with one-click cleanup"
         }
       ],
       "fixed": [
         {
-          "title": "Ctrl+click now reliably toggles clip selection"
+          "title": "A clear \"project not found\" screen with copyable details instead of a crash"
         },
         {
-          "title": "Middle-click pans the timeline instead of starting a clip drag"
+          "title": "Captions keep their transcript boundaries when edited"
         },
         {
-          "title": "Fixed decoder and video-source memory leaks during long editing sessions"
+          "title": "Playhead stays locked to the cursor during edge scrolling"
+        },
+        {
+          "title": "Timeline scrubbing cancels cleanly when the window loses focus"
         }
       ],
       "improved": [
         {
-          "title": "Smoother playback of clips with keyframe animation"
+          "title": "Filmstrips and waveforms stay visible and smooth while zooming the timeline"
         },
         {
-          "title": "Smoother scrubbing — preview now reuses zero-copy video frames and cached text and warps"
+          "title": "The Motion dopesheet stays responsive with large layer stacks"
         }
       ]
     }
   },
   "releases": [
+    {
+      "version": "2026.07.13",
+      "date": "2026-07-13",
+      "groups": {
+        "added": [
+          {
+            "title": "Pen tool — draw and edit vector paths directly on the canvas"
+          },
+          {
+            "title": "Shape strokes with caps, joins, trim paths, and taper"
+          },
+          {
+            "title": "Link any property to another with a pick whip"
+          },
+          {
+            "title": "Expressions — drive a property from another with live formulas"
+          },
+          {
+            "title": "Parent a Motion layer to another so it inherits the transform"
+          },
+          {
+            "title": "Motion Library — save a clip's animation and reuse it anywhere in the project"
+          },
+          {
+            "title": "Split Position into X and Y to animate each independently"
+          },
+          {
+            "title": "Procedural motion now shows as bands on the timeline"
+          },
+          {
+            "title": "Drag text motion timing directly on the timeline"
+          },
+          {
+            "title": "Edit spatial effects like power windows on the canvas"
+          }
+        ],
+        "fixed": [
+          {
+            "title": "Reversed clips no longer show mismatched captions or seek to the wrong frame"
+          },
+          {
+            "title": "Transitions clamp correctly when trimming footage at a different frame rate"
+          },
+          {
+            "title": "Preview holds the current frame instead of flashing while scrubbing and skimming"
+          }
+        ]
+      }
+    },
+    {
+      "version": "2026.07.06",
+      "date": "2026-07-06",
+      "groups": {
+        "added": [
+          {
+            "title": "Motion — a layered compositing workspace with layers, groups, and a graph editor"
+          },
+          {
+            "title": "Lottie animations — import .json and .lottie files and play them on the timeline"
+          },
+          {
+            "title": "Customize Lottie colors, themes, text, and value slots, with live preview"
+          },
+          {
+            "title": "Browse and import free LottieFiles animations from inside the editor"
+          },
+          {
+            "title": "Record a voiceover from your microphone, synced live to the timeline"
+          },
+          {
+            "title": "Frame interpolation — generate 2×, 4×, or 8× smoother video"
+          },
+          {
+            "title": "Upscale video 2× on your GPU"
+          },
+          {
+            "title": "Silence removal reworked with a review step before you commit"
+          },
+          {
+            "title": "Text and shape presets land on a new layer at the playhead"
+          },
+          {
+            "title": "Unlabelled markers get automatic names, shown on hover in the ruler"
+          },
+          {
+            "title": "Shift-click a section header to collapse or expand every properties section"
+          }
+        ],
+        "fixed": [
+          {
+            "title": "Transcription shows real model-download progress instead of a frozen bar"
+          },
+          {
+            "title": "Timeline track heights are remembered when you reopen a project"
+          },
+          {
+            "title": "No more false \"new version available\" prompts while editing"
+          },
+          {
+            "title": "Fixed edge seams and shimmer on GPU effects in the preview"
+          },
+          {
+            "title": "Copied, generated, and imported media now save reliably to your workspace folder"
+          },
+          {
+            "title": "Missing media shows a relink prompt on the clip instead of failing silently"
+          },
+          {
+            "title": "Go To Start returns to the first frame after reopening a project"
+          }
+        ],
+        "improved": [
+          {
+            "title": "Playback starts almost instantly instead of stalling on the first frame"
+          },
+          {
+            "title": "Saving a project stays fast no matter how large your workspace grows"
+          },
+          {
+            "title": "Projects open faster — thumbnails and media details load in parallel"
+          },
+          {
+            "title": "Effects apply to the preview instantly, without a warm-up delay"
+          },
+          {
+            "title": "Smoother timeline zooming, clip dragging, and marquee selection"
+          }
+        ]
+      }
+    },
+    {
+      "version": "2026.06.29",
+      "date": "2026-06-29",
+      "groups": {
+        "added": [
+          {
+            "title": "Sequences — build multiple timelines in one project and switch between them in tabs"
+          },
+          {
+            "title": "Export any sequence, not just the main timeline"
+          },
+          {
+            "title": "Motion text — animate text by character, word, or line"
+          },
+          {
+            "title": "Per-clip easing editor: preset curves, draggable handles, live preview, and custom presets"
+          },
+          {
+            "title": "Color picker gains hex/alpha input and an in-app eyedropper"
+          },
+          {
+            "title": "Optional interface sounds with a voice picker"
+          },
+          {
+            "title": "Redesigned keyboard-shortcut editor in Settings"
+          },
+          {
+            "title": "Subtitle export modes: off, burn in, sidecar file, or embedded track"
+          },
+          {
+            "title": "Edit ProRes footage — import, preview, and thumbnails"
+          },
+          {
+            "title": "Procedural motion modifiers — drift, breath, shake, sway, and spin, with one-click bake to keyframes"
+          },
+          {
+            "title": "New GPU effects: gradient map, VHS, CRT, Droste, block glitch, glass distortion, ink, and pixel sort"
+          },
+          {
+            "title": "ASCII effect now supports custom text, fonts, and glyph character sets"
+          },
+          {
+            "title": "Browse and jump to markers from a list in the properties sidebar"
+          }
+        ],
+        "fixed": [
+          {
+            "title": "Fixed an export crash triggered by certain layered effects"
+          },
+          {
+            "title": "Preview no longer hangs mid-clip during playback"
+          }
+        ],
+        "improved": [
+          {
+            "title": "Keyframe graph editor gains fit-to-view, a grid, and smoother scrolling"
+          },
+          {
+            "title": "Clearer Animate workflow with procedural and keyframe state indicators"
+          }
+        ]
+      }
+    },
+    {
+      "version": "2026.06.22",
+      "date": "2026-06-22",
+      "groups": {
+        "added": [
+          {
+            "title": "Reorder tracks by dragging the track header — clip rows follow along"
+          }
+        ],
+        "fixed": [
+          {
+            "title": "Track reordering no longer drops transitions between composition clips"
+          },
+          {
+            "title": "Audio now plays for MKV and other non-native file containers"
+          },
+          {
+            "title": "Timeline momentum scrolling stays consistent across display refresh rates"
+          }
+        ],
+        "improved": [
+          {
+            "title": "Clips start faster when the playhead reaches them (pre-mounted ahead of time)"
+          },
+          {
+            "title": "Snappier tooltips and tactile press feedback, with reduced-motion support"
+          },
+          {
+            "title": "AI models are cached on disk so they don't re-download each session"
+          }
+        ]
+      }
+    },
+    {
+      "version": "2026.06.15",
+      "date": "2026-06-15",
+      "groups": {
+        "added": [
+          {
+            "title": "New Animate workspace — keyframe animation with a dopesheet, curve (graph) editor, and side-by-side split view"
+          },
+          {
+            "title": "Save, reuse, and apply animation presets, with a library that travels with exported projects"
+          },
+          {
+            "title": "On-device transcription with the new Parakeet engine (Whisper fallback) — auto-caption clips, then search and edit transcripts in a dedicated panel"
+          },
+          {
+            "title": "Redesigned Color workspace — grade, effects, and keyframes in three columns with a reworked navigator"
+          },
+          {
+            "title": "Live animated A/B previews in the transition picker, rendered through real GPU shaders"
+          },
+          {
+            "title": "Live GPU-rendered previews in the effect picker"
+          },
+          {
+            "title": "Drag text and shape presets straight onto the preview canvas as overlay layers"
+          },
+          {
+            "title": "Track-size and add-track controls in the timeline header"
+          },
+          {
+            "title": "Color picker hex input with live preview"
+          }
+        ],
+        "fixed": [
+          {
+            "title": "Ctrl+click now reliably toggles clip selection"
+          },
+          {
+            "title": "Middle-click pans the timeline instead of starting a clip drag"
+          },
+          {
+            "title": "Delete/Backspace no longer deletes clips while editing a transcript"
+          },
+          {
+            "title": "Fixed decoder and video-source memory leaks during long editing sessions"
+          }
+        ],
+        "improved": [
+          {
+            "title": "Smoother playback of clips with keyframe animation"
+          },
+          {
+            "title": "Smoother scrubbing — preview reuses zero-copy video frames and cached text and warps"
+          }
+        ]
+      }
+    },
     {
       "version": "2026.06.08",
       "date": "2026-06-08",
@@ -60,7 +355,23 @@
             "title": "Video scopes in the Color workspace — waveform, vectorscope, and histogram"
           },
           {
+            "title": "Switch between Edit and Color workspaces, with your layout remembered"
+          },
+          {
             "title": "In-app user guide, linked from the toolbar"
+          }
+        ],
+        "fixed": [
+          {
+            "title": "Project list no longer breaks when a project file is corrupt"
+          }
+        ],
+        "improved": [
+          {
+            "title": "Keyframe editor — guided empty state, mode legend, and clearer draggable controls"
+          },
+          {
+            "title": "Faster playback cold-start when returning to a backgrounded tab"
           }
         ]
       }
@@ -77,7 +388,18 @@
             "title": "Hear audio while you scrub and skim the timeline"
           },
           {
+            "title": "Searchable keyboard-shortcut editor with conflict detection and reset"
+          },
+          {
+            "title": "Projects scan for missing media on load and flag what's broken"
+          },
+          {
             "title": "Export dialog warns before risky, very long renders"
+          }
+        ],
+        "improved": [
+          {
+            "title": "Auto-save is now on by default, with clearer onboarding and import feedback"
           }
         ]
       }

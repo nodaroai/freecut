@@ -93,7 +93,6 @@ type MediaActionsProps = ItemContextMenuSectionProps & {
   isVideoItem?: boolean
   playheadInBounds?: boolean
   canRemoveSilence?: boolean
-  isRemovingSilence?: boolean
   canRemoveFillers?: boolean
   isRemovingFillers?: boolean
   isTextItem?: boolean
@@ -287,7 +286,11 @@ const ItemContextMenuFull = memo(function ItemContextMenuFull({
   }, [onPendingActivationHandled, pendingActivation])
 
   return (
-    <ContextMenu>
+    // Keep the timeline menu non-modal. Several actions (including Reverse)
+    // hand off directly to a dialog; overlapping Radix modal layers can race
+    // while restoring `body` pointer events and leave the timeline unable to
+    // receive hover/move events after the dialog closes.
+    <ContextMenu modal={false}>
       <ContextMenuTrigger asChild disabled={trackLocked}>
         <span ref={triggerRef} data-item-context-anchor style={{ display: 'contents' }}>
           {children}
@@ -501,7 +504,6 @@ function MediaActions({
   isVideoItem,
   playheadInBounds,
   canRemoveSilence,
-  isRemovingSilence,
   canRemoveFillers,
   isRemovingFillers,
   isTextItem,
@@ -534,10 +536,8 @@ function MediaActions({
 
       {canRemoveSilence && onRemoveSilence && (
         <>
-          <ContextMenuItem onClick={onRemoveSilence} disabled={isRemovingSilence}>
-            {isRemovingSilence
-              ? t('timeline.contextMenu.detectingSilence')
-              : t('timeline.contextMenu.removeSilence')}
+          <ContextMenuItem onClick={onRemoveSilence}>
+            {t('timeline.contextMenu.removeSilence')}
           </ContextMenuItem>
           <ContextMenuSeparator />
         </>

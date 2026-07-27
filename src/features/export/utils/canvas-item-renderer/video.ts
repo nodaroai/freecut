@@ -17,6 +17,7 @@ import {
   shouldAllowPreviewVideoElementFallback,
   shouldTryPreviewWorkerBitmap,
   shouldUsePreviewStrictWaitingFallback,
+  waitForPreviewDomVideoDrawDecision,
 } from '../frame-source-policy'
 import type { CanvasPool } from '../canvas-pool'
 import type { CanvasSettings, ItemRenderContext, ItemTransform } from './types'
@@ -34,10 +35,102 @@ import {
   hasCropFeather,
 } from './media-draw'
 import { isPreviewTraceEnabled, recordRenderTrace } from '@/shared/logging/preview-trace'
+import { recordPreviewVideoSource } from '@/shared/logging/preview-scrub-performance'
 
 function getTier2VideoFrameToleranceSeconds(sourceFps: number): number {
   const normalizedSourceFps = Number.isFinite(sourceFps) && sourceFps > 0 ? sourceFps : 30
   return (1 / normalizedSourceFps) * TIER2_VIDEO_FRAME_TOLERANCE_FACTOR
+}
+
+function canUseWorkerPredecodedFrame(
+  rctx: ItemRenderContext,
+  workerSource: string | null | undefined,
+): boolean {
+  if (!workerSource) return false
+  return rctx.renderMode === 'preview' || rctx.allowPredecodedVideoFrames === true
+}
+
+function tryDrawActivePreviewFallback(options: {
+  rctx: ItemRenderContext
+  previewRootFrame: number
+  workerSource: string
+  sourceTime: number
+  toleranceSeconds: number
+  drawBitmap: (bitmap: ImageBitmap) => boolean
+  timelineFrame: number
+  itemId: string
+  allowOutsideActivePreview?: boolean
+}): boolean {
+  const { rctx, previewRootFrame, workerSource, sourceTime, toleranceSeconds, drawBitmap } = options
+  if (
+    !options.allowOutsideActivePreview &&
+    !rctx.isActivePreviewFrameCurrent?.(previewRootFrame)
+  )
+    return false
+  const bitmap = rctx.getCachedActivePreviewFallbackBitmap?.(
+    workerSource,
+    sourceTime,
+    toleranceSeconds,
+  )
+  if (!bitmap || !drawBitmap(bitmap)) return false
+  rctx.markActivePreviewFallbackUsed?.()
+  recordPreviewVideoSource({
+    frame: options.timelineFrame,
+    itemId: options.itemId,
+    path: 'proxy-fallback',
+    sourceTime,
+  })
+  return true
+}
+
+interface WorkerBitmapDrawOptions {
+  rctx: ItemRenderContext
+  workerSource: string
+  sourceTime: number
+  toleranceSeconds: number
+  drawBitmap: (bitmap: ImageBitmap) => boolean
+  timelineFrame: number
+  itemId: string
+}
+
+function tryDrawCachedWorkerBitmap(options: WorkerBitmapDrawOptions): boolean {
+  const bitmap = options.rctx.getCachedPredecodedBitmap?.(
+    options.workerSource,
+    options.sourceTime,
+    options.toleranceSeconds,
+  )
+  if (!bitmap || !options.drawBitmap(bitmap)) return false
+  recordPreviewVideoSource({
+    frame: options.timelineFrame,
+    itemId: options.itemId,
+    path: 'worker-bitmap',
+    sourceTime: options.sourceTime,
+  })
+  return true
+}
+
+async function tryDrawInflightWorkerBitmap(
+  options: WorkerBitmapDrawOptions & { previewRootFrame: number },
+): Promise<boolean> {
+  const waitForBitmap = options.rctx.waitForInflightPredecodedBitmap
+  if (!waitForBitmap) return false
+  const maxWaitMs = options.rctx.isActivePreviewFrameCurrent?.(options.previewRootFrame)
+    ? WORKER_PRESEEK_WAIT_MS
+    : (options.rctx.workerPredecodeWaitMs ?? WORKER_PRESEEK_WAIT_MS)
+  const bitmap = await waitForBitmap(
+    options.workerSource,
+    options.sourceTime,
+    options.toleranceSeconds,
+    maxWaitMs,
+  )
+  if (!bitmap || !options.drawBitmap(bitmap)) return false
+  recordPreviewVideoSource({
+    frame: options.timelineFrame,
+    itemId: options.itemId,
+    path: 'worker-bitmap',
+    sourceTime: options.sourceTime,
+  })
+  return true
 }
 
 function clampVideoSourceTime(
@@ -96,10 +189,14 @@ async function tryDrawWorkerPredecodedBitmap(
   transform: ItemTransform,
   canvasSettings: CanvasSettings,
   rctx: ItemRenderContext,
+  timelineFrame: number,
   sourceTime: number,
   toleranceSeconds: number,
+  allowInactiveProxyFallback = false,
 ): Promise<boolean> {
-  if (rctx.renderMode !== 'preview' || !item.src) {
+  const previewRootFrame = rctx.previewRootTimelineFrame ?? timelineFrame
+  const workerSource = rctx.getResolvedVideoSource?.(item, sourceTime, toleranceSeconds) ?? item.src
+  if (!canUseWorkerPredecodedFrame(rctx, workerSource)) {
     return false
   }
 
@@ -117,26 +214,33 @@ async function tryDrawWorkerPredecodedBitmap(
     )
   }
 
-  const cachedBitmap = rctx.getCachedPredecodedBitmap?.(item.src, sourceTime, toleranceSeconds)
-  if (cachedBitmap && drawBitmap(cachedBitmap)) {
-    return true
-  }
-
-  if (!rctx.waitForInflightPredecodedBitmap) {
-    return false
-  }
-
-  const inflightBitmap = await rctx.waitForInflightPredecodedBitmap(
-    item.src,
+  const workerBitmapOptions = {
+    rctx,
+    workerSource,
     sourceTime,
     toleranceSeconds,
-    WORKER_PRESEEK_WAIT_MS,
-  )
-  if (inflightBitmap && drawBitmap(inflightBitmap)) {
-    return true
+    drawBitmap,
+    timelineFrame,
+    itemId: item.id,
   }
+  if (tryDrawCachedWorkerBitmap(workerBitmapOptions)) return true
 
-  return false
+  if (
+    tryDrawActivePreviewFallback({
+      rctx,
+      previewRootFrame,
+      workerSource,
+      sourceTime,
+      toleranceSeconds,
+      drawBitmap,
+      timelineFrame,
+      itemId: item.id,
+      allowOutsideActivePreview: allowInactiveProxyFallback,
+    })
+  )
+    return true
+
+  return tryDrawInflightWorkerBitmap({ ...workerBitmapOptions, previewRootFrame })
 }
 
 /**
@@ -150,7 +254,7 @@ export async function renderVideoItem(
   rctx: ItemRenderContext,
   sourceFrameOffset: number = 0,
   renderSpan?: RenderTimelineSpan,
-): Promise<void> {
+): Promise<boolean> {
   const {
     fps,
     videoExtractors,
@@ -164,7 +268,7 @@ export async function renderVideoItem(
   const isPreviewMode = rctx.renderMode === 'preview'
   const allowVideoElementFallback = !isPreviewMode
   const hasFallbackVideoElement = videoElements.has(item.id)
-  const extractor = videoExtractors.get(item.id)
+  let extractor = videoExtractors.get(item.id)
   let mediabunnyFailedThisFrame = false
   const effectiveRenderSpan = renderSpan ?? getItemRenderTimelineSpan(item)
 
@@ -200,6 +304,99 @@ export async function renderVideoItem(
       ? (snappedSourceFrame + 1e-4) / sourceFps
       : rawSourceTime
   const tier2ToleranceSeconds = getTier2VideoFrameToleranceSeconds(sourceFps)
+  const nonBlockingToleranceSeconds = rctx.nonBlockingVideoFrameToleranceSeconds
+  const previewRootFrame = rctx.previewRootTimelineFrame ?? frame
+  const holdPreviewFrontBuffer = () => {
+    if (isPreviewMode) rctx.markActivePreviewFramePending?.()
+  }
+  if (rctx.allowPredecodedVideoFrames) {
+    const drewWorkerBitmap = await tryDrawWorkerPredecodedBitmap(
+      ctx,
+      item,
+      transform,
+      canvasSettings,
+      rctx,
+      frame,
+      sourceTime,
+      tier2ToleranceSeconds,
+    )
+    if (drewWorkerBitmap) return true
+    if (!extractor && rctx.ensureVideoItemReady) {
+      await rctx.ensureVideoItemReady(item.id, item)
+      extractor = videoExtractors.get(item.id)
+    }
+  }
+  if (rctx.isActivePreviewFrameSuperseded?.(previewRootFrame)) {
+    // A repeated ruler exit can supersede a committed-frame render and then
+    // request that same frame again before this render unwinds. Frame-number
+    // checks alone can no longer identify this cleared canvas as stale, so
+    // explicitly abort its parent render.
+    holdPreviewFrontBuffer()
+    return false
+  }
+  if (isPreviewMode && rctx.isActivePreviewFrameCurrent?.(previewRootFrame)) {
+    // Held scrubs already have a dedicated exact/fallback bitmap scheduler.
+    // Consult it before waiting for a DOM video seek; otherwise the native
+    // element can occupy the render pump long enough that the sub-100ms proxy
+    // frame is ready but never becomes visible.
+    const drewActiveBitmap = await tryDrawWorkerPredecodedBitmap(
+      ctx,
+      item,
+      transform,
+      canvasSettings,
+      rctx,
+      frame,
+      sourceTime,
+      tier2ToleranceSeconds,
+    )
+    if (drewActiveBitmap) return true
+  }
+  if (isPreviewMode && nonBlockingToleranceSeconds !== undefined) {
+    // Reverse playback has a decoded-frame runway prepared off-thread. Prefer
+    // its nearest display-cadence frame before consulting an asynchronously
+    // seeking DOM video. Mixing the two sources makes nested compounds visibly
+    // jump when a late browser seek lands between monotonic worker frames.
+    const drewNearbyWorkerBitmap = await tryDrawWorkerPredecodedBitmap(
+      ctx,
+      item,
+      transform,
+      canvasSettings,
+      rctx,
+      frame,
+      sourceTime,
+      nonBlockingToleranceSeconds,
+      true,
+    )
+    if (drewNearbyWorkerBitmap) {
+      rctx.markActivePreviewFallbackUsed?.()
+      return true
+    }
+
+    if (scrubbingCache && extractor) {
+      const dims = extractor.getDimensions()
+      const cachedEntry = scrubbingCache.getVideoFrameEntry(
+        item.id,
+        sourceTime,
+        nonBlockingToleranceSeconds,
+      )
+      if (
+        cachedEntry &&
+        drawTier2VideoFrame(
+          ctx,
+          cachedEntry.frame,
+          dims.width,
+          dims.height,
+          transform,
+          canvasSettings,
+          item.crop,
+          rctx.canvasPool,
+        )
+      ) {
+        rctx.markActivePreviewFallbackUsed?.()
+        return true
+      }
+    }
+  }
   const domVideoElementProvider = rctx.domVideoElementProvider
   // During transitions, frame can lie outside item's natural span (the
   // participant's renderSpan is extended to cover the transition zone), and
@@ -222,12 +419,29 @@ export async function renderVideoItem(
     !hasActiveRamp &&
     isFrameInsideItemTimelineSpan(effectiveRenderSpan, frame)
   const domVideo = canUseDomVideoElement ? domVideoElementProvider(item.id) : null
-  const domVideoDecision = resolvePreviewDomVideoDrawDecision({
+  const domVideoDecisionOptions = {
     domVideo,
     sourceTime,
     speed,
     isRenderingTransition: !!rctx.isRenderingTransition,
-  })
+    maxDriftSeconds: rctx.isActivePreviewFrameCurrent?.(previewRootFrame)
+      ? 0.5 / sourceFps
+      : undefined,
+  }
+  let domVideoDecision = resolvePreviewDomVideoDrawDecision(domVideoDecisionOptions)
+  if (domVideoDecision.hasReadyDomVideo && !domVideoDecision.shouldDraw) {
+    if (nonBlockingToleranceSeconds === undefined) {
+      domVideoDecision = await waitForPreviewDomVideoDrawDecision(domVideoDecisionOptions)
+    } else {
+      // Reverse shuttle must not serialize the render pump behind a browser
+      // seek. Mark a stale DOM frame unavailable so worker/proxy delivery can
+      // continue immediately while the coalesced seek settles.
+      domVideoDecision = {
+        ...domVideoDecision,
+        hasReadyDomVideo: false,
+      }
+    }
+  }
   const hasDomVideo = domVideoDecision.hasReadyDomVideo
 
   // DEV diagnostics: record which transition participants the renderer actually
@@ -256,6 +470,7 @@ export async function renderVideoItem(
   // keyframe seek (400ms+) is worse than DOM video's timing drift. Only skip DOM
   // video for 1x speed clips when mediabunny is available (frame-accurate, fast).
   if (domVideo && domVideoDecision.shouldDraw) {
+    recordPreviewVideoSource({ frame, itemId: item.id, path: 'dom-video', sourceTime })
     // Variable-speed clips naturally drift from their DOM video element
     // because the browser plays at 1x while sourceTime advances at speed.
     // Use a wider threshold proportional to speed to avoid falling back
@@ -285,7 +500,7 @@ export async function renderVideoItem(
     // entire playback session. Mediabunny init + keyframe seek takes
     // 400-500ms on the main thread, causing visible frame drops.
     // DOM video has slight timing drift at speed != 1, but no freezes.
-    return
+    return true
   }
 
   const mediabunnyInitAction = resolvePreviewMediabunnyInitAction({
@@ -295,21 +510,19 @@ export async function renderVideoItem(
     hasEnsureVideoItemReady: !!rctx.ensureVideoItemReady,
     speed,
   })
+  let mediabunnyReadyPromise: Promise<boolean> | null = null
   if (mediabunnyInitAction !== 'none' && rctx.ensureVideoItemReady) {
     // For variable-speed clips during playback, don't block on mediabunny init.
     // The init triggers a keyframe seek that blocks the main thread for 400ms+.
     // Instead, skip this frame (DOM video already drew it or it's invisible).
+    mediabunnyReadyPromise = rctx.ensureVideoItemReady(item.id)
     if (mediabunnyInitAction === 'warm-background-and-skip') {
-      void rctx.ensureVideoItemReady(item.id)
-      return
+      void mediabunnyReadyPromise
+      holdPreviewFrontBuffer()
+      return false
     }
-    if (mediabunnyInitAction === 'await-ready') {
-      try {
-        await rctx.ensureVideoItemReady(item.id)
-      } catch {
-        // Best effort in preview path; fallback behavior handled below.
-      }
-    }
+    // A cold main-thread MediaBunny init can take hundreds of milliseconds.
+    // Continue through worker bitmap and cached-frame fallbacks while it warms.
   }
 
   // Preview fast-scrub runs in strict decode mode (no HTML video fallbacks).
@@ -339,12 +552,16 @@ export async function renderVideoItem(
           rctx.canvasPool,
         )
       ) {
-        return
+        return true
       }
     }
 
     if (
-      shouldTryPreviewWorkerBitmap({ renderMode: rctx.renderMode, hasReadyDomVideo: hasDomVideo })
+      shouldTryPreviewWorkerBitmap({
+        renderMode: rctx.renderMode,
+        hasReadyDomVideo: hasDomVideo,
+        allowPredecodedVideoFrames: rctx.allowPredecodedVideoFrames,
+      })
     ) {
       const drewWorkerBitmap = await tryDrawWorkerPredecodedBitmap(
         ctx,
@@ -352,18 +569,69 @@ export async function renderVideoItem(
         transform,
         canvasSettings,
         rctx,
+        frame,
         sourceTime,
         tier2ToleranceSeconds,
       )
       if (drewWorkerBitmap) {
-        if (rctx.ensureVideoItemReady) {
+        if (rctx.ensureVideoItemReady && !mediabunnyReadyPromise) {
           void rctx.ensureVideoItemReady(item.id)
         }
-        return
+        return true
       }
     }
 
-    return
+    if (
+      mediabunnyInitAction === 'warm-background-and-continue' &&
+      mediabunnyReadyPromise &&
+      extractor
+    ) {
+      let ready = false
+      try {
+        ready = await mediabunnyReadyPromise
+      } catch {
+        // Best effort in preview; a failed initializer leaves this frame undrawn.
+      }
+      if (ready && useMediabunny.has(item.id) && !mediabunnyDisabledItems.has(item.id)) {
+        // Cached and worker-backed paths stay non-blocking. Only retry after every
+        // fallback missed, where returning now would otherwise expose a blank frame.
+        return renderVideoItem(
+          ctx,
+          item,
+          transform,
+          frame,
+          rctx,
+          sourceFrameOffset,
+          effectiveRenderSpan,
+        )
+      }
+    }
+
+    const pendingWorkerSource =
+      rctx.getResolvedVideoSource?.(item, sourceTime, tier2ToleranceSeconds) ?? item.src
+    if (domVideo) {
+      // A nested/compound DOM video can briefly fall below drawable readiness
+      // while rapid Play/Pause seeks it. This happens on both pause and resume;
+      // the element is still the authoritative source, so committing the
+      // freshly-cleared composition canvas would replace the front buffer with black.
+      holdPreviewFrontBuffer()
+      return false
+    }
+    const isPendingOrSupersededSource =
+      pendingWorkerSource &&
+      (rctx.isActivePreviewSourceTarget?.(pendingWorkerSource, sourceTime, tier2ToleranceSeconds) ||
+        rctx.isActivePreviewTargetSuperseded?.(
+          pendingWorkerSource,
+          sourceTime,
+          tier2ToleranceSeconds,
+        ))
+    if (rctx.isActivePreviewFrameCurrent?.(previewRootFrame) || isPendingOrSupersededSource) {
+      // Direction changes can cancel the old source request before the new
+      // one is registered. The root frame is still active, so returning it as
+      // complete would commit a partially rendered (usually black) canvas.
+      holdPreviewFrontBuffer()
+    }
+    return false
   }
 
   // === TRY PRE-DECODED BITMAP (from background Web Worker) ===
@@ -371,7 +639,11 @@ export async function renderVideoItem(
   // This keeps large-jump and transition-entry stalls off the main thread while
   // preserving the same exact-frame preview path once the extractor is warm.
   if (
-    shouldTryPreviewWorkerBitmap({ renderMode: rctx.renderMode, hasReadyDomVideo: hasDomVideo })
+    shouldTryPreviewWorkerBitmap({
+      renderMode: rctx.renderMode,
+      hasReadyDomVideo: hasDomVideo,
+      allowPredecodedVideoFrames: rctx.allowPredecodedVideoFrames,
+    })
   ) {
     const drewWorkerBitmap = await tryDrawWorkerPredecodedBitmap(
       ctx,
@@ -379,6 +651,7 @@ export async function renderVideoItem(
       transform,
       canvasSettings,
       rctx,
+      frame,
       sourceTime,
       tier2ToleranceSeconds,
     )
@@ -386,8 +659,40 @@ export async function renderVideoItem(
       if (!useMediabunny.has(item.id) && rctx.ensureVideoItemReady) {
         void rctx.ensureVideoItemReady(item.id)
       }
-      return
+      return true
     }
+  }
+
+  if (isPreviewMode && nonBlockingToleranceSeconds !== undefined) {
+    // The display keeps its last valid pixels while the cancellable worker
+    // lane decodes the newest reverse target. Never fall through to a
+    // main-thread MediaBunny seek for this transient transport mode.
+    holdPreviewFrontBuffer()
+    return false
+  }
+
+  const resolvedWorkerSource =
+    rctx.getResolvedVideoSource?.(item, sourceTime, tier2ToleranceSeconds) ?? item.src
+  const rootFrameSuperseded = rctx.isActivePreviewFrameSuperseded?.(previewRootFrame) === true
+  const sourceTargetSuperseded = Boolean(
+    resolvedWorkerSource &&
+    rctx.isActivePreviewTargetSuperseded?.(resolvedWorkerSource, sourceTime, tier2ToleranceSeconds),
+  )
+  if (rootFrameSuperseded || sourceTargetSuperseded) {
+    // The pointer has already moved and the active worker cancelled this exact
+    // frame. Do not replace that cancellation with a blocking main-thread
+    // MediaBunny seek; the render pump will immediately pick up the latest
+    // target and stale-frame presentation guards keep this canvas hidden.
+    holdPreviewFrontBuffer()
+    return false
+  }
+
+  if (rctx.isActivePreviewFrameCurrent?.(previewRootFrame)) {
+    // Keep the last valid preview visible while the isolated worker finishes
+    // this exact target. The worker-ready subscription wakes the render pump;
+    // avoiding MediaBunny here keeps pointer input and cancellation responsive.
+    rctx.markActivePreviewFramePending?.()
+    return false
   }
 
   // === TRY MEDIABUNNY FIRST (fast, precise frame access) ===
@@ -424,7 +729,7 @@ export async function renderVideoItem(
           rctx.canvasPool,
         )
       ) {
-        return
+        return true
       }
     }
 
@@ -461,7 +766,7 @@ export async function renderVideoItem(
         )
       ) {
         mediabunnyFailureCountByItem.set(item.id, 0)
-        return
+        return true
       }
     }
 
@@ -471,7 +776,7 @@ export async function renderVideoItem(
     const drawExtractorFrame = async (
       targetCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
     ) =>
-      isPreviewMode && scrubbingCache
+      isPreviewMode && scrubbingCache && rctx.captureDecodedVideoFrames !== false
         ? await extractor.drawFrameWithCapture(
             targetCtx,
             clampedTime,
@@ -528,11 +833,21 @@ export async function renderVideoItem(
     }
 
     if (success) {
+      recordPreviewVideoSource({
+        frame,
+        itemId: item.id,
+        path: 'mediabunny',
+        sourceTime: clampedTime,
+        canUseDom: canUseDomVideoElement,
+        domAvailable: Boolean(domVideo),
+        domReady: domVideoDecision.hasReadyDomVideo,
+        domDrift: domVideoDecision.drift,
+      })
       mediabunnyFailureCountByItem.set(item.id, 0)
       if (scrubbingCache && capturedFrame) {
         scrubbingCache.putVideoFrame(item.id, capturedFrame, capturedSourceTime ?? clampedTime)
       }
-      return
+      return true
     }
     mediabunnyFailedThisFrame = true
 
@@ -553,7 +868,7 @@ export async function renderVideoItem(
           rctx.canvasPool,
         )
       ) {
-        return
+        return true
       }
     }
     if (failureKind === 'no-sample') {
@@ -599,13 +914,15 @@ export async function renderVideoItem(
     mediabunnyFailedThisFrame,
   })
   if (!allowVideoElementFallback && !allowPreviewFallback) {
-    return
+    holdPreviewFrontBuffer()
+    return false
   }
 
   const video = videoElements.get(item.id)
   if (!video) {
     log.warn('Video element not found', { itemId: item.id, frame })
-    return
+    holdPreviewFrontBuffer()
+    return false
   }
 
   const clampedTime = Math.max(0, Math.min(sourceTime, video.duration - 0.01))
@@ -635,7 +952,10 @@ export async function renderVideoItem(
 
   // Wait for video to have enough data to draw
   if (video.readyState < 2) {
-    if (isPreviewMode) return
+    if (isPreviewMode) {
+      holdPreviewFrontBuffer()
+      return false
+    }
 
     await new Promise<void>((resolve) => {
       const checkReady = () => {
@@ -659,7 +979,7 @@ export async function renderVideoItem(
   if (video.readyState < 2) {
     if (import.meta.env.DEV && frame < 5)
       log.warn(`Video not ready after waiting: frame=${frame} readyState=${video.readyState}`)
-    return
+    return false
   }
 
   if (import.meta.env.DEV && (frame < 5 || frame % 30 === 0)) {
@@ -679,6 +999,7 @@ export async function renderVideoItem(
     undefined,
     rctx.canvasPool,
   )
+  return true
 }
 
 export function resolveVideoParticipantSourceTime(

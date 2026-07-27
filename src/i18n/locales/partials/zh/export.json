@@ -84,6 +84,18 @@
       "selectFormat": "选择格式",
       "selectQuality": "选择画质",
       "selectResolution": "选择分辨率",
+      "sequence": "序列",
+      "subtitleMode": {
+        "off": "关闭",
+        "burn": "烧录",
+        "sidecar": "独立 .srt",
+        "embedded": "内嵌轨道",
+        "offDescription": "导出的视频中不含字幕。",
+        "burnDescription": "字幕烧录进视频，任何播放器都能显示。",
+        "sidecarDescription": "干净的视频加一个独立的 .srt 字幕文件。",
+        "embeddedDescription": "可开关的软字幕轨道（WebM/MKV）。"
+      },
+      "subtitles": "字幕",
       "video": "视频"
     },
     "videoContainer": {
@@ -126,6 +138,15 @@
         "video-codec-supported": {
           "title": "支持视频编解码器",
           "detail": "{{codec}} 可在此浏览器中编码为 {{container}}。"
+        },
+        "audio-codec-supported": {
+          "title": "支持音频编解码器",
+          "detail": "此浏览器可将 {{codec}} 音频编码到 {{container}}。"
+        },
+        "audio-codec-unavailable": {
+          "title": "音频编解码器不可用",
+          "detail": "此浏览器无法为 {{container}} 编码 {{codec}} 音频。",
+          "fix": "请选择 WebM 或 MKV 以使用 Opus 音频，或更新到受支持的浏览器。"
         },
         "worker-unavailable-fallback": {
           "title": "Worker 导出不可用",

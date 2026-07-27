@@ -13,7 +13,10 @@ import {
   resolveAnimatedTransform,
   hasKeyframeAnimation,
   resolveAnimatedTextItem,
+  applyMotionAnimationLayers,
+  applyMotionModifiers,
 } from '../deps/keyframes'
+import type { LinkedPropertyEvaluationContext } from '../deps/keyframes'
 import { resolveTransitionFrameState, type TransitionFrameState } from './transition-scene'
 import {
   hasFrameInvalidation,
@@ -21,6 +24,7 @@ import {
   type FrameInvalidationRequest,
 } from '@/shared/utils/frame-invalidation'
 import { hasCornerPin } from './corner-pin'
+import { resolveTransformHierarchy } from '@/shared/utils/transform-parenting'
 
 export type TransformOverride = Partial<ResolvedTransform> | undefined
 
@@ -50,11 +54,23 @@ export function applyTransformOverride(
 ): ResolvedTransform {
   if (!override) return baseTransform
 
+  const hasAnchorX = Object.prototype.hasOwnProperty.call(override, 'anchorX')
+  const hasAnchorY = Object.prototype.hasOwnProperty.call(override, 'anchorY')
+
   return {
     ...baseTransform,
     ...override,
-    anchorX: override.anchorX ?? baseTransform.anchorX,
-    anchorY: override.anchorY ?? baseTransform.anchorY,
+    // An explicitly present undefined anchor is the gizmo's signal that this
+    // axis is authored implicitly. Recenter it against the preview dimensions
+    // instead of retaining the resolved center from drag start.
+    anchorX:
+      hasAnchorX && override.anchorX === undefined
+        ? (override.width ?? baseTransform.width) / 2
+        : (override.anchorX ?? baseTransform.anchorX),
+    anchorY:
+      hasAnchorY && override.anchorY === undefined
+        ? (override.height ?? baseTransform.height) / 2
+        : (override.anchorY ?? baseTransform.anchorY),
     opacity: override.opacity ?? baseTransform.opacity,
     cornerRadius: override.cornerRadius ?? baseTransform.cornerRadius,
   }
@@ -67,20 +83,36 @@ export function resolveItemTransformAtRelativeFrame(
     relativeFrame,
     keyframes,
     previewTransform,
+    expressionContext,
   }: {
     canvas: CanvasSettings
     relativeFrame: number
     keyframes?: ItemKeyframes
     previewTransform?: TransformOverride
+    expressionContext?: LinkedPropertyEvaluationContext
   },
 ): ResolvedTransform {
   const baseResolved = resolveTransform(item, canvas, getSourceDimensions(item))
   const animatedResolved =
     keyframes && hasKeyframeAnimation(keyframes)
-      ? resolveAnimatedTransform(baseResolved, keyframes, relativeFrame)
+      ? resolveAnimatedTransform(baseResolved, keyframes, relativeFrame, expressionContext)
       : baseResolved
 
-  const resolved = applyTransformOverride(animatedResolved, previewTransform)
+  // Named additive animation layers compose after the base lanes; continuous
+  // procedural modifiers then run on that result before preview overrides win.
+  const layeredResolved = applyMotionAnimationLayers(
+    animatedResolved,
+    item.motionLayers,
+    relativeFrame,
+  )
+  const modulatedResolved = applyMotionModifiers(layeredResolved, item.motionModifiers, {
+    frame: relativeFrame,
+    fps: canvas.fps,
+    frameWidth: canvas.width,
+    frameHeight: canvas.height,
+  })
+
+  const resolved = applyTransformOverride(modulatedResolved, previewTransform)
 
   return item.type === 'text' && !hasCornerPin(item.cornerPin)
     ? expandTextTransformToFitContent(
@@ -97,19 +129,36 @@ export function resolveItemTransformAtFrame(
     frame,
     keyframes,
     previewTransform,
+    getItem,
+    getKeyframes,
+    getPreviewTransform,
   }: {
     canvas: CanvasSettings
     frame: number
     keyframes?: ItemKeyframes
     previewTransform?: TransformOverride
+    getItem?: (itemId: string) => TimelineItem | undefined
+    getKeyframes?: (itemId: string) => ItemKeyframes | undefined
+    getPreviewTransform?: (itemId: string) => TransformOverride
   },
 ): ResolvedTransform {
-  return resolveItemTransformAtRelativeFrame(item, {
-    canvas,
-    relativeFrame: frame - item.from,
-    keyframes,
-    previewTransform,
-  })
+  const resolveLocal = (candidate: TimelineItem) =>
+    resolveItemTransformAtRelativeFrame(candidate, {
+      canvas,
+      relativeFrame: frame - candidate.from,
+      keyframes: candidate.id === item.id ? keyframes : getKeyframes?.(candidate.id),
+      previewTransform:
+        candidate.id === item.id
+          ? (previewTransform ?? getPreviewTransform?.(candidate.id))
+          : getPreviewTransform?.(candidate.id),
+      expressionContext:
+        getItem && getKeyframes
+          ? { globalFrame: frame, canvas, getItem, getKeyframes, getPreviewTransform }
+          : undefined,
+    })
+
+  if (!getItem) return resolveLocal(item)
+  return resolveTransformHierarchy(item, { getItem, resolveLocal })
 }
 
 export function resolveActiveShapeMasksAtFrame(
@@ -118,12 +167,14 @@ export function resolveActiveShapeMasksAtFrame(
     canvas,
     frame,
     getKeyframes,
+    getItem,
     getPreviewTransform,
     getPreviewPathVertices,
   }: {
     canvas: CanvasSettings
     frame: number
     getKeyframes?: (itemId: string) => ItemKeyframes | undefined
+    getItem?: (itemId: string) => TimelineItem | undefined
     getPreviewTransform?: (itemId: string) => TransformOverride
     getPreviewPathVertices?: PreviewPathVerticesOverride
   },
@@ -148,6 +199,9 @@ export function resolveActiveShapeMasksAtFrame(
           frame,
           keyframes: getKeyframes?.(mask.id),
           previewTransform: getPreviewTransform?.(mask.id),
+          getItem,
+          getKeyframes,
+          getPreviewTransform,
         }),
       }
     })
@@ -158,6 +212,7 @@ export function resolveFrameCompositionScene({
   frame,
   canvas,
   getKeyframes,
+  getItem,
   getPreviewTransform,
   getPreviewPathVertices,
 }: {
@@ -165,6 +220,7 @@ export function resolveFrameCompositionScene({
   frame: number
   canvas: CanvasSettings
   getKeyframes?: (itemId: string) => ItemKeyframes | undefined
+  getItem?: (itemId: string) => TimelineItem | undefined
   getPreviewTransform?: (itemId: string) => TransformOverride
   getPreviewPathVertices?: PreviewPathVerticesOverride
 }): FrameCompositionScene {
@@ -174,6 +230,7 @@ export function resolveFrameCompositionScene({
       canvas,
       frame,
       getKeyframes,
+      getItem,
       getPreviewTransform,
       getPreviewPathVertices,
     }),
@@ -198,6 +255,7 @@ export function createFrameCompositionSceneCache(): FrameCompositionSceneCache {
   let cachedCanvasHeight = -1
   let cachedCanvasFps = -1
   let cachedGetKeyframes: ((itemId: string) => ItemKeyframes | undefined) | undefined
+  let cachedGetItem: ((itemId: string) => TimelineItem | undefined) | undefined
   let cachedGetPreviewTransform: ((itemId: string) => TransformOverride) | undefined
   let cachedGetPreviewPathVertices: PreviewPathVerticesOverride | undefined
 
@@ -209,6 +267,7 @@ export function createFrameCompositionSceneCache(): FrameCompositionSceneCache {
         cachedCanvasFps === params.canvas.fps
       const callbacksMatch =
         cachedGetKeyframes === params.getKeyframes &&
+        cachedGetItem === params.getItem &&
         cachedGetPreviewTransform === params.getPreviewTransform &&
         cachedGetPreviewPathVertices === params.getPreviewPathVertices
 
@@ -231,6 +290,7 @@ export function createFrameCompositionSceneCache(): FrameCompositionSceneCache {
       cachedCanvasHeight = params.canvas.height
       cachedCanvasFps = params.canvas.fps
       cachedGetKeyframes = params.getKeyframes
+      cachedGetItem = params.getItem
       cachedGetPreviewTransform = params.getPreviewTransform
       cachedGetPreviewPathVertices = params.getPreviewPathVertices
       return cachedScene
@@ -254,6 +314,7 @@ export function createFrameCompositionSceneCache(): FrameCompositionSceneCache {
       cachedCanvasHeight = -1
       cachedCanvasFps = -1
       cachedGetKeyframes = undefined
+      cachedGetItem = undefined
       cachedGetPreviewTransform = undefined
       cachedGetPreviewPathVertices = undefined
     },

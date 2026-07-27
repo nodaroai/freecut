@@ -84,6 +84,18 @@
       "selectFormat": "Selecione um formato",
       "selectQuality": "Selecione uma qualidade",
       "selectResolution": "Selecione uma resolução",
+      "sequence": "Sequência",
+      "subtitleMode": {
+        "off": "Desativado",
+        "burn": "Embutir",
+        "sidecar": "Arquivo .srt",
+        "embedded": "Faixa incorporada",
+        "offDescription": "Sem legendas no vídeo exportado.",
+        "burnDescription": "As legendas são gravadas no vídeo — visíveis em qualquer player.",
+        "sidecarDescription": "Vídeo limpo mais um arquivo de legendas .srt separado.",
+        "embeddedDescription": "Uma faixa de legendas alternável (WebM/MKV)."
+      },
+      "subtitles": "Legendas",
       "video": "Vídeo"
     },
     "videoContainer": {
@@ -126,6 +138,15 @@
         "video-codec-supported": {
           "title": "Codec de vídeo compatível",
           "detail": "{{codec}} pode ser codificado como {{container}} neste navegador."
+        },
+        "audio-codec-supported": {
+          "title": "Codec de áudio compatível",
+          "detail": "O áudio {{codec}} pode ser codificado em {{container}} neste navegador."
+        },
+        "audio-codec-unavailable": {
+          "title": "Codec de áudio indisponível",
+          "detail": "Este navegador não pode codificar áudio {{codec}} para {{container}}.",
+          "fix": "Escolha WebM ou MKV para usar áudio Opus ou atualize para um navegador compatível."
         },
         "worker-unavailable-fallback": {
           "title": "Exportação por worker indisponível",

@@ -1,16 +1,13 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
-import {
-  DEFAULT_TRACK_HEIGHT,
-  TRACK_SECTION_DIVIDER_HEIGHT,
-  MAX_TRACK_HEIGHT,
-  MIN_TRACK_HEIGHT,
-} from '../constants'
+import { TRACK_SECTION_DIVIDER_HEIGHT, MAX_TRACK_HEIGHT, MIN_TRACK_HEIGHT } from '../constants'
 import {
   clampSectionDividerPosition,
   clampTrackHeight,
+  getBottomAnchoredSectionScrollTop,
   getMinimumTrackSectionSpacerHeight,
   getTrackSectionLayout,
-  resetAllTrackHeights,
   resizeAllTracksInList,
   resizeTrackInList,
 } from './track-resize'
@@ -63,21 +60,14 @@ describe('track-resize', () => {
     expect(resizeAllTracksInList(resizedTracks, 88)).toBe(resizedTracks)
   })
 
-  it('can reset every track back to the default height', () => {
-    const tracks = [createTrack('v1', 'video', 72), createTrack('a1', 'audio', 120)]
-
-    const resizedTracks = resetAllTrackHeights(tracks)
-
-    expect(resizedTracks.map((track) => track.height)).toEqual([
-      DEFAULT_TRACK_HEIGHT,
-      DEFAULT_TRACK_HEIGHT,
-    ])
-    expect(resetAllTrackHeights(resizedTracks)).toBe(resizedTracks)
-  })
-
   it('keeps the A/V spacer slightly taller than the title bar', () => {
     expect(getMinimumTrackSectionSpacerHeight(24)).toBe(36)
     expect(getMinimumTrackSectionSpacerHeight(26)).toBe(39)
+  })
+
+  it('computes the live bottom anchor without reading pane layout', () => {
+    expect(getBottomAnchoredSectionScrollTop(180, 240, 24)).toBe(84)
+    expect(getBottomAnchoredSectionScrollTop(280, 240, 40)).toBe(0)
   })
 
   it('keeps a buffer when manual divider drags reach either edge', () => {

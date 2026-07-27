@@ -1,12 +1,16 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import {
   getVideoSyncTargetContext,
+  isVideoSyncTargetDiscontinuity,
   planLayoutVideoSync,
   planPausedVideoFrameSync,
   planPlayingVideoDriftCorrection,
   planPlayingVideoInitialSync,
   planPremountedVideoSync,
   planVideoFrameCallbackCorrection,
+  shouldUpdateVideoPlaybackRate,
   shouldReactOwnPlaybackRate,
 } from './video-sync-plan'
 
@@ -163,20 +167,19 @@ describe('planPausedVideoFrameSync', () => {
 })
 
 describe('planVideoFrameCallbackCorrection', () => {
-  it('hard seeks for large drift', () => {
-    expect(
-      planVideoFrameCallbackCorrection({
-        currentTime: 1.5,
-        targetTime: 1,
-        nominalRate: 1,
-        readyState: 4,
-      }),
-    ).toEqual({
-      kind: 'seek',
-      seekTo: 1,
-      playbackRate: 1,
-      shouldUpdateLastSyncTime: true,
+  it('rate-corrects moderate drift instead of repeatedly re-decoding a GOP', () => {
+    const plan = planVideoFrameCallbackCorrection({
+      currentTime: 1.5,
+      targetTime: 1,
+      nominalRate: 1,
+      readyState: 4,
     })
+
+    expect(plan.kind).toBe('adjust_rate')
+    if (plan.kind !== 'adjust_rate') {
+      throw new Error('Expected rate adjustment plan')
+    }
+    expect(plan.playbackRate).toBeLessThan(1)
   })
 
   it('adjusts playback rate for small drift', () => {
@@ -207,5 +210,68 @@ describe('planVideoFrameCallbackCorrection', () => {
       throw new Error('Expected nominal_rate plan')
     }
     expect(plan.playbackRate).toBe(1)
+  })
+
+  it('rate-corrects instead of re-seeking continuous-playback decoder drift', () => {
+    const plan = planVideoFrameCallbackCorrection({
+      currentTime: 1.5,
+      targetTime: 1,
+      nominalRate: 1,
+      readyState: 4,
+      targetDiscontinuity: false,
+    })
+
+    expect(plan.kind).toBe('adjust_rate')
+    if (plan.kind !== 'adjust_rate') {
+      throw new Error('Expected rate adjustment plan')
+    }
+    // video ahead of target -> slow down
+    expect(plan.playbackRate).toBeLessThan(1)
+  })
+
+  it('hard seeks when drift follows a real transport discontinuity', () => {
+    expect(
+      planVideoFrameCallbackCorrection({
+        currentTime: 2,
+        targetTime: 1,
+        nominalRate: 1,
+        readyState: 4,
+        targetDiscontinuity: true,
+      }),
+    ).toEqual({
+      kind: 'seek',
+      seekTo: 1,
+      playbackRate: 1,
+      shouldUpdateLastSyncTime: true,
+    })
+  })
+})
+
+describe('isVideoSyncTargetDiscontinuity', () => {
+  it('distinguishes delayed frame delivery from a transport seek', () => {
+    expect(
+      isVideoSyncTargetDiscontinuity({
+        previousTargetTime: 10,
+        targetTime: 10.5,
+        elapsedMs: 500,
+        nominalRate: 1,
+      }),
+    ).toBe(false)
+    expect(
+      isVideoSyncTargetDiscontinuity({
+        previousTargetTime: 10,
+        targetTime: 25,
+        elapsedMs: 33,
+        nominalRate: 1,
+      }),
+    ).toBe(true)
+  })
+})
+
+describe('shouldUpdateVideoPlaybackRate', () => {
+  it('skips tiny repeated playback-rate writes from frame callbacks', () => {
+    expect(shouldUpdateVideoPlaybackRate(1, 1.003)).toBe(false)
+    expect(shouldUpdateVideoPlaybackRate(1, 1.01)).toBe(false)
+    expect(shouldUpdateVideoPlaybackRate(1, 1.02)).toBe(true)
   })
 })

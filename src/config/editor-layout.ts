@@ -5,6 +5,8 @@
  *
  * Prefer changing presets here before editing one-off component sizes.
  */
+const EDIT_DOPESHEET_COLUMN_WIDTH = 288
+
 const EDITOR_DENSITY_PRESETS = {
   compact: {
     toolbarHeight: 48,
@@ -18,7 +20,6 @@ const EDITOR_DENSITY_PRESETS = {
     rightSidebarDefaultWidth: 288,
     rightSidebarMinWidth: 280,
     rightSidebarMaxWidth: 420,
-    sidebarRevealToggleHeight: 72,
     previewPadding: 32,
     previewSplitHeaderHeight: 32,
     previewControlsHeight: 32,
@@ -32,7 +33,9 @@ const EDITOR_DENSITY_PRESETS = {
     // sides. The ruler now hosts a top IO lane (12px) + a shorter tick ruler.
     timelineTracksHeaderHeight: 34,
     timelineRulerHeight: 34,
-    timelineSidebarWidth: 176,
+    // The Edit track header follows the classic dopesheet property column so
+    // both timeline surfaces share the same ruler and playhead origin.
+    timelineSidebarWidth: EDIT_DOPESHEET_COLUMN_WIDTH,
     timelineMeterWidth: 84,
     timelineMixerWidth: 260,
     timelineTrackHeight: 100,
@@ -64,7 +67,6 @@ const EDITOR_LAYOUT_CSS_VAR_NAMES = {
   sidebarHeaderHeight: '--editor-sidebar-header-height',
   sidebarHeaderButtonSize: '--editor-sidebar-header-button-size',
   toolbarButtonSize: '--editor-toolbar-button-size',
-  sidebarRevealToggleHeight: '--editor-sidebar-reveal-toggle-height',
   previewPadding: '--editor-preview-padding',
   previewSplitHeaderHeight: '--editor-preview-split-header-height',
   previewControlsHeight: '--editor-preview-controls-height',
@@ -86,7 +88,6 @@ export const EDITOR_LAYOUT_CSS_VALUES = {
   sidebarHeaderHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.sidebarHeaderHeight})`,
   sidebarHeaderButtonSize: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.sidebarHeaderButtonSize})`,
   toolbarButtonSize: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.toolbarButtonSize})`,
-  sidebarRevealToggleHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.sidebarRevealToggleHeight})`,
   previewPadding: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.previewPadding})`,
   previewSplitHeaderHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.previewSplitHeaderHeight})`,
   previewControlsHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.previewControlsHeight})`,
@@ -109,7 +110,6 @@ export function getEditorLayoutCssVars(layout = EDITOR_LAYOUT): Record<string, s
     [EDITOR_LAYOUT_CSS_VAR_NAMES.sidebarHeaderHeight]: `${layout.sidebarHeaderHeight}px`,
     [EDITOR_LAYOUT_CSS_VAR_NAMES.sidebarHeaderButtonSize]: `${layout.sidebarHeaderButtonSize}px`,
     [EDITOR_LAYOUT_CSS_VAR_NAMES.toolbarButtonSize]: `${layout.toolbarButtonSize}px`,
-    [EDITOR_LAYOUT_CSS_VAR_NAMES.sidebarRevealToggleHeight]: `${layout.sidebarRevealToggleHeight}px`,
     [EDITOR_LAYOUT_CSS_VAR_NAMES.previewPadding]: `${layout.previewPadding}px`,
     [EDITOR_LAYOUT_CSS_VAR_NAMES.previewSplitHeaderHeight]: `${layout.previewSplitHeaderHeight}px`,
     [EDITOR_LAYOUT_CSS_VAR_NAMES.previewControlsHeight]: `${layout.previewControlsHeight}px`,

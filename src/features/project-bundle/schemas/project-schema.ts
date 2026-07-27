@@ -20,6 +20,7 @@ const easingTypeSchema = z.enum([
   'ease-in',
   'ease-out',
   'ease-in-out',
+  'hold',
   'cubic-bezier',
   'spring',
 ])
@@ -45,12 +46,20 @@ const easingConfigSchema = z.object({
 
 const audioEqCutSlopeSchema = z.union([z.literal(6), z.literal(12), z.literal(18), z.literal(24)])
 
+const animationKeyframeSourceSchema = z.object({
+  applicationId: z.string().min(1),
+  kind: z.enum(['built-in-preset', 'saved-preset']),
+  presetId: z.string().min(1),
+  presetName: z.string().min(1),
+})
+
 const keyframeSchema = z.object({
   id: z.string().min(1),
   frame: z.number().int().min(0),
   value: z.number(),
   easing: easingTypeSchema,
   easingConfig: easingConfigSchema.optional(),
+  source: animationKeyframeSourceSchema.optional(),
 })
 
 const propertyKeyframesSchema = z.object({
@@ -58,9 +67,78 @@ const propertyKeyframesSchema = z.object({
   keyframes: z.array(keyframeSchema),
 })
 
+const vector2Schema = z.object({
+  x: z.number(),
+  y: z.number(),
+})
+
+const temporalEaseHandleSchema = z.object({
+  speed: z.number().min(0),
+  influence: z.number().min(0).max(100),
+})
+
+const temporalEaseSchema = z.object({
+  in: temporalEaseHandleSchema.optional(),
+  out: temporalEaseHandleSchema.optional(),
+})
+
+const spatialBezierTangentsSchema = z.object({
+  inTangent: vector2Schema,
+  outTangent: vector2Schema,
+  continuous: z.boolean().optional(),
+})
+
+const vectorKeyframeSchema = z.object({
+  id: z.string().min(1),
+  frame: z.number().int().min(0),
+  value: vector2Schema,
+  easing: easingTypeSchema,
+  easingConfig: easingConfigSchema.optional(),
+  temporalEase: temporalEaseSchema.optional(),
+  spatial: spatialBezierTangentsSchema.optional(),
+  source: animationKeyframeSourceSchema.optional(),
+})
+
+const vectorPropertyKeyframesSchema = z.object({
+  property: z.enum(['position', 'scale', 'anchor']),
+  keyframes: z.array(vectorKeyframeSchema),
+})
+
+const linkedPropertyExpressionSchema = z.object({
+  type: z.literal('link'),
+  targetProperty: z.union([
+    animatablePropertySchema,
+    z.enum(['position', 'scale', 'anchor']),
+  ]),
+  sourceItemId: z.string().min(1),
+  sourceProperty: z.union([
+    animatablePropertySchema,
+    z.enum(['position', 'scale', 'anchor']),
+  ]),
+  enabled: z.boolean(),
+  timeOffsetFrames: z.number(),
+})
+
+const propertyExpressionSchema = z.object({
+  type: z.literal('expression'),
+  targetProperty: z.union([
+    animatablePropertySchema,
+    z.enum(['position', 'scale', 'anchor']),
+  ]),
+  source: z.string(),
+  enabled: z.boolean(),
+})
+
 const itemKeyframesSchema = z.object({
   itemId: z.string().min(1),
+  animationVersion: z.literal(2).optional(),
   properties: z.array(propertyKeyframesSchema),
+  vectorProperties: z.array(vectorPropertyKeyframesSchema).optional(),
+  separatedVectorProperties: z.array(z.enum(['position', 'scale', 'anchor'])).optional(),
+  propertyLinks: z.array(linkedPropertyExpressionSchema).optional(),
+  expressions: z
+    .array(z.union([propertyExpressionSchema, linkedPropertyExpressionSchema]))
+    .optional(),
 })
 
 // ============================================================================
@@ -75,6 +153,7 @@ const itemTypeSchema = z.enum([
   'shape',
   'composition',
   'adjustment',
+  'controller',
   'subtitle',
 ])
 
@@ -154,6 +233,7 @@ const maskVertexSchema = z.object({
   position: z.tuple([z.number(), z.number()]),
   inHandle: z.tuple([z.number(), z.number()]),
   outHandle: z.tuple([z.number(), z.number()]),
+  tangentMode: z.enum(['corner', 'smooth', 'continuous', 'broken']).optional(),
 })
 
 // ============================================================================
@@ -319,6 +399,21 @@ const transformSchema = z.object({
   aspectRatioLocked: z.boolean().optional(),
 })
 
+const transformReferenceSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  rotation: z.number(),
+})
+
+const transformParentSchema = z.object({
+  parentItemId: z.string().min(1).optional(),
+  parentReference: transformReferenceSchema.optional(),
+  childLocalReference: transformReferenceSchema,
+  childWorldReference: transformReferenceSchema,
+})
+
 const cropSchema = z.object({
   left: z.number().min(0).max(1).optional(),
   right: z.number().min(0).max(1).optional(),
@@ -334,6 +429,25 @@ const cornerPinSchema = z.object({
   bottomLeft: z.tuple([z.number(), z.number()]),
   referenceWidth: z.number().positive().optional(),
   referenceHeight: z.number().positive().optional(),
+})
+
+const compositionControlSchema = z.object({
+  version: z.literal(1),
+  controls: z.array(
+    z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      targetItemId: z.string().min(1),
+      property: z.enum([
+        'text.text',
+        'text.color',
+        'shape.fillColor',
+        'shape.strokeColor',
+      ]),
+      kind: z.enum(['text', 'color']),
+      defaultValue: z.string(),
+    }),
+  ),
 })
 
 const timelineItemSchema = z
@@ -385,16 +499,34 @@ const timelineItemSchema = z
     // Shape fields
     shapeType: shapeTypeSchema.optional(),
     fillColor: z.string().optional(),
+    fillEnabled: z.boolean().optional(),
+    fillType: z.enum(['solid', 'linear']).optional(),
+    gradientStartColor: z.string().optional(),
+    gradientEndColor: z.string().optional(),
+    gradientAngle: z.number().optional(),
     strokeColor: z.string().optional(),
     strokeWidth: z.number().optional(),
+    strokeEnabled: z.boolean().optional(),
+    strokeLineCap: z.enum(['butt', 'round', 'square']).optional(),
+    strokeLineJoin: z.enum(['miter', 'round', 'bevel']).optional(),
+    strokeMiterLimit: z.number().positive().optional(),
+    trimPathStart: z.number().min(0).max(100).optional(),
+    trimPathEnd: z.number().min(0).max(100).optional(),
+    trimPathOffset: z.number().optional(),
+    taperStartWidth: z.number().min(0).max(200).optional(),
+    taperEndWidth: z.number().min(0).max(200).optional(),
+    taperStartLength: z.number().min(0).max(100).optional(),
+    taperEndLength: z.number().min(0).max(100).optional(),
     direction: directionSchema.optional(),
     points: z.number().optional(),
     innerRadius: z.number().optional(),
     pathVertices: z.array(maskVertexSchema).optional(),
+    pathClosed: z.boolean().optional(),
     // Mask fields
     isMask: z.boolean().optional(),
     maskType: maskTypeSchema.optional(),
     maskFeather: z.number().min(0).max(100).optional(),
+    maskOpacity: z.number().min(0).max(100).optional(),
     maskInvert: z.boolean().optional(),
     // Speed
     speed: z.number().min(0.1).max(10).optional(),
@@ -403,6 +535,8 @@ const timelineItemSchema = z
     sourceHeight: z.number().optional(),
     // Transform
     transform: transformSchema.optional(),
+    transformParent: transformParentSchema.optional(),
+    controllerKind: z.literal('null').optional(),
     crop: cropSchema.optional(),
     // Audio properties
     volume: z.number().min(-60).max(12).optional(),
@@ -464,6 +598,7 @@ const timelineItemSchema = z
     // Composition item fields
     compositionWidth: z.number().optional(),
     compositionHeight: z.number().optional(),
+    compositionControlOverrides: z.record(z.string(), z.string()).optional(),
     // Layer compositing
     blendMode: z.string().optional(),
     cornerPin: cornerPinSchema.optional(),
@@ -535,6 +670,7 @@ const compositionSchema = z
   .object({
     id: z.string().min(1),
     name: z.string(),
+    editorKind: z.enum(['sequence', 'composite-2d']).optional(),
     items: z.array(timelineItemSchema),
     tracks: z.array(trackSchema),
     transitions: z.array(transitionSchema).optional(),
@@ -544,6 +680,10 @@ const compositionSchema = z
     height: z.number().int().min(1).max(4320),
     durationInFrames: z.number().int().min(1),
     backgroundColor: z.string().optional(),
+    compositionControls: compositionControlSchema.optional(),
+    markers: z.array(markerSchema).optional(),
+    inPoint: z.number().int().min(0).optional(),
+    outPoint: z.number().int().min(0).optional(),
   })
   .passthrough()
 
@@ -558,6 +698,7 @@ const timelineSchema = z
     outPoint: z.number().int().min(0).optional(),
     markers: z.array(markerSchema).optional(),
     transitions: z.array(transitionSchema).optional(),
+    topLevelSequenceIds: z.array(z.string()).optional(),
     compositions: z.array(compositionSchema).optional(),
     keyframes: z.array(itemKeyframesSchema).optional(),
   })
@@ -592,10 +733,11 @@ const projectSchema = z
     schemaVersion: z.number().int().optional(),
     thumbnail: z.string().optional(),
     thumbnailId: z.string().optional(),
+    rootFolderName: z.string().optional(),
     metadata: projectResolutionSchema,
     timeline: timelineSchema.optional(),
   })
-  .passthrough()
+  .strict()
 
 // ============================================================================
 // Media Reference Schema
@@ -639,6 +781,7 @@ const animationPresetSchema = z
     name: z.string(),
     sourceItemType: itemTypeSchema,
     properties: z.array(animationPresetPropertySchema),
+    vectorProperties: z.array(vectorPropertyKeyframesSchema).optional(),
     effects: z.array(gpuEffectSchema).optional(),
     sourceDurationInFrames: z.number().optional(),
     createdAt: z.number().optional(),
@@ -648,7 +791,7 @@ const animationPresetSchema = z
 /** The animation presets sidecar file (`animation-presets.json`). */
 const animationPresetsFileSchema = z
   .object({
-    version: z.literal(1),
+    version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     presets: z.array(animationPresetSchema),
   })
   .passthrough()

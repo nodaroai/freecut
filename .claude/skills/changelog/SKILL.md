@@ -34,7 +34,7 @@ Separate packages (future CLI/API) get their own semver and their own changelog 
 
 ## Preconditions (run before any mode)
 
-Two checks block all other work. Both must pass before drafting, appending, or rolling up.
+Three checks block all other work. All must pass before drafting, appending, or rolling up.
 
 ### 1. Current must not span past weeks
 
@@ -42,11 +42,17 @@ Two checks block all other work. Both must pass before drafting, appending, or r
 
 Compute this week's Monday from today (in repo-local time): `monday = today - ((today.getDay() + 6) % 7)`. If `current.date` is not in `[monday, monday+6]`, **stop and run rollup mode first**, even if the user asked for append. Do not append into a stale `current` — it merges this week's bullets with last week's and corrupts both.
 
-If `current` spans multiple closed weeks (the bullets were appended across several Mondays without rollup), do **partitioning rollup**: walk the git log per week and re-split the bullets into the correct `[YYYY.MM.DD]` releases, then start a fresh `current` for this week.
+If `current` spans multiple closed weeks (the bullets were appended across several Mondays without rollup), do **partitioning rollup**. Do **not** merely re-split the bullets already in `current` — those bullets are only what someone happened to append, and a skipped week means they are incomplete (this is how the 2026-06-15 transcription and Color-workspace launches were nearly lost: they landed after the last append and were absent from `current` entirely). Instead, **re-derive each week from git**: walk `git log <branch> --no-merges` per Monday–Sunday window from the last release forward, curate each week's commits independently, then reconcile that against the existing `current` bullets (the existing bullets are a hint, not the source of truth). Emit one `[YYYY.MM.DD]` release per closed week and start a fresh `current` for this week.
 
 ### 2. CHANGELOG.md heading must match `current.date`
 
 The markdown header `## [Current] — week of YYYY-MM-DD` is a literal string and does not auto-derive from JSON. Any time you write `current` (append, rollup, partition), recompute the heading as `## [Current] — week of <Monday-of-current.date>` and update it. Never leave the heading frozen at an old Monday — that is the bug that caused the 2026-04-13→2026-05-02 drift.
+
+### 3. `current` + releases must fully cover the git log since the last release
+
+The skill's default mode is incremental *append*, which trusts `current` to already hold everything prior and only adds newly-mentioned commits. That trust breaks silently when a week (or an append) is skipped: those commits never enter the changelog and nothing flags them — the outcome then depends on how often someone remembers to run the skill. Close that gap by reconciling against git on **every** run, so infrequent triggering is lossless instead of lossy.
+
+Before drafting/appending/rolling up, walk `git log <branch> --no-merges --since=<date-of-last-release>` and confirm every user-facing commit (after curation rules) is represented in either `current` or an existing release. Surface anything missing to the user and fold it in — do not assume `current` is complete just because it has bullets. This is the check that would have caught the missing 2026-06-15 launches at append time instead of three weeks later. The reconciliation is against the curated git log, not a raw commit count: dropped noise (chore/ci/test/refactor, same-week regressions, follow-ups) is expected to be absent and is not a gap.
 
 ## Modes
 
@@ -62,8 +68,9 @@ The user asks "draft changelog bullets for this week" or similar. Produce bullet
 2. `git log <branch> --no-merges --pretty=format:"%H|%ad|%s" --date=short --since=<week-start> --until=<week-end>` — `--no-merges` filters out PR merge commits, which carry no useful subject. Range is usually `<last-rollup>..HEAD` or explicit `--since`/`--until`.
 3. Sanity-check: if the user just mentioned a specific commit you don't see in the output, you're on the wrong branch. Re-query.
 4. Apply curation rules (below). Drop noise, rewrite dev-speak into user language, dedupe revisits.
-5. Group into Added / Fixed / Improved.
-6. Show the result. Wait for approval before touching files.
+5. **Verify net state.** Before locking bullets, run the added-then-removed check ([Verify the net state, not the commit stream](#verify-the-net-state-not-the-commit-stream)): drop any Added/Improved bullet whose feature was torn out again before HEAD. This is a distinct pass from step 4 — the `feat` commit passes curation on its own; only cross-checking it against later teardown commits reveals it should go.
+6. Group into Added / Fixed / Improved.
+7. Show the result. Wait for approval before touching files.
 
 ### Append mode
 
@@ -141,6 +148,21 @@ When you spot a launch:
 - List the supporting facets only if they're not obviously implied (a language picker is implied by "translated UI"; ASS subtitle support inside subtitle editing might be worth its own bullet).
 - Resist the urge to itemize every commit just because they're all in the Added group.
 
+## Verify the net state, not the commit stream
+
+Commits are a *stream of deltas*; the changelog describes the *net difference* between the last release and HEAD. A feature added on Tuesday and ripped back out on Thursday is, to the user, as if it never shipped — there is nothing to announce. But the naive draft still emits an "Added" bullet, because the `feat(...)` commit is sitting right there in the log and nothing downstream cancels it *in the text*. The removal happened in the code, not in the commit subject you're reading.
+
+Before finalizing any **Added** or **Improved** bullet, confirm the thing it describes still exists at HEAD:
+
+1. **Find the teardown commits in the window.** Scan subjects for `/\b(remove|delete|drop|revert|roll ?back|back out|undo|kill|rip out|disable)\b/i`, and list file deletions with `git log <branch> --no-merges --diff-filter=D --since=<week-start> --until=<week-end> --name-only`.
+2. **Pair each candidate Added bullet against them by feature area, not literal path.** A feature can be dismantled by deleting a route, a menu entry, a flag, or a registry line without deleting the file that introduced it. Match on what the user would touch, not the filename.
+3. **Added and removed within the same window → drop the bullet entirely.** Not Added, not Fixed, not Removed. It nets to zero for the user; announcing it and then never shipping it is worse than silence.
+4. **When unsure whether it survived, verify against HEAD directly** — don't trust the `feat` commit alone. `git cat-file -e HEAD:<path>` for a file's existence, or grep HEAD for the symbol / route / UI label the feature exposes. If it's gone from HEAD, it's gone from the changelog.
+
+This generalizes the "reverts paired with a re-fix" rule below. It also catches the cases that rule misses: an add later removed with **no** replacement, an add superseded by a **differently-named** replacement (log only the survivor, worded as the survivor), and an experiment merged in one PR then reverted in another.
+
+**The one exception — removing something that already shipped.** If the removed feature was in a *prior release*, the user has been using it, so its removal is itself a user-facing change: they had it yesterday, it's gone today. That is worth announcing (and any migration note that comes with it). The JSON schema has no `Removed` group, so **surface it to the user** and let them decide wording and placement rather than silently dropping it or inventing a group. The added-then-removed-same-window case above is the opposite: the user never had it, so nothing is announced.
+
 ## Curation rules
 
 ### Drop
@@ -157,6 +179,7 @@ When you spot a launch:
 - **Hit-zone / drop-zone / ghost-position adjustments** — fold into the parent drag/drop feature. Never their own bullet.
 - **Internal perf on this week's new work** — perf commits that optimize code shipped earlier in the same week. The user experiences the feature once, smoothly. No separate "Improved" bullet.
 - Reverts paired with a subsequent re-fix in the same week — skip both, keep only the final correct implementation.
+- **Added-then-removed within the window** — any feature introduced and then torn out before HEAD (with or without a replacement). See [Verify the net state](#verify-the-net-state-not-the-commit-stream): it nets to zero, so drop the Added bullet. The exception is a feature that shipped in a *prior* release and is removed this week — that removal is user-facing; surface it.
 - "Update src/..." auto-subject merges (GitHub web-edit artifacts)
 - Revisits: if the same feature is improved multiple times in one week, dedupe to one bullet describing the final state.
 - Duplicates worded differently — drag overlays sticking, drag overlays hijacking lanes, stale drop overlays are all "dragging works better now." One bullet, not three.

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { TimelineTrack } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
@@ -16,6 +18,7 @@ import {
   groupTransitionsByTrackOrder,
   deriveCompositionAudioScene,
   resolveCompositionRenderPlan,
+  resolveLiveTransitionRenderPlan,
   resolveTransitionWindowsForItems,
   resolveFrameRenderScene,
   resolveTrackRenderState,
@@ -412,6 +415,16 @@ describe('scene assembly', () => {
             label: 'Adjustment',
             effects: [],
           },
+          {
+            id: 'controller-1',
+            type: 'controller',
+            controllerKind: 'null',
+            trackId: 'track-1',
+            from: 0,
+            durationInFrames: 30,
+            label: 'Controller',
+            transform: { x: 0, y: 0, width: 100, height: 100 },
+          },
         ],
       } as TimelineTrack,
       {
@@ -643,6 +656,76 @@ describe('scene assembly', () => {
     expect(plan.visibleShapeMasks.map(({ mask }) => mask.id)).toEqual(['mask-1'])
     expect(plan.visibleTextFontFamilies).toEqual(['Sora'])
     expect([...plan.transitionClipMap.keys()]).toEqual(['video-1', 'image-1'])
+  })
+
+  it('refreshes transition windows from live clip positions after a slide edit', () => {
+    const transition: Transition = {
+      id: 'transition-1',
+      type: 'crossfade',
+      leftClipId: 'left',
+      rightClipId: 'right',
+      trackId: 'track-1',
+      durationInFrames: 108,
+      timing: 'linear',
+      presentation: 'clockWipe',
+    }
+    const renderPlan = resolveCompositionRenderPlan({
+      tracks: [
+        {
+          id: 'track-1',
+          name: 'Track 1',
+          height: 60,
+          locked: false,
+          visible: true,
+          muted: false,
+          solo: false,
+          order: 0,
+          items: [
+            {
+              id: 'left',
+              type: 'video',
+              trackId: 'track-1',
+              from: 200,
+              durationInFrames: 200,
+              src: 'left.mp4',
+              label: 'Left',
+            },
+            {
+              id: 'right',
+              type: 'video',
+              trackId: 'track-1',
+              from: 400,
+              durationInFrames: 300,
+              src: 'right.mp4',
+              label: 'Right',
+            },
+          ],
+        },
+      ],
+      transitions: [transition],
+    })
+    const liveItems = new Map(
+      renderPlan.transitionClipItems.map((item) => [item.id, { ...item, from: item.from + 518 }]),
+    )
+
+    const refreshedPlan = resolveLiveTransitionRenderPlan({
+      renderPlan,
+      transitions: [transition],
+      getCurrentItem: (item) => (liveItems.get(item.id) ?? item) as typeof item,
+    })
+
+    expect(renderPlan.transitionWindows[0]).toEqual(
+      expect.objectContaining({ startFrame: 346, endFrame: 454 }),
+    )
+    expect(refreshedPlan.transitionWindows[0]).toEqual(
+      expect.objectContaining({
+        startFrame: 864,
+        endFrame: 972,
+        leftClip: expect.objectContaining({ from: 718 }),
+        rightClip: expect.objectContaining({ from: 918 }),
+      }),
+    )
+    expect(refreshedPlan.transitionClipMap.get('right')?.from).toBe(918)
   })
 
   it('builds frame render tasks in track z-order with transitions appended to their track', () => {

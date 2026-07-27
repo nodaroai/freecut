@@ -24,8 +24,14 @@ import {
   getMaxTransitionDurationForHandles,
 } from './transition-utils'
 
-/** Clip types that can have transitions */
-const VALID_TRANSITION_TYPES = new Set(['video', 'image'])
+/**
+ * Clip types that can have transitions.
+ * Must stay in sync with `canAddTransition()` in transition-utils.ts — otherwise
+ * a transition that was legitimately created (e.g. between composition clips) gets
+ * flagged `invalid_type` and removed by the repair pass on the next clip change
+ * (a false positive, e.g. when reordering whole tracks).
+ */
+const VALID_TRANSITION_TYPES = new Set(['video', 'image', 'composition'])
 
 /**
  * Repair transitions after clip changes.
@@ -36,6 +42,7 @@ export function repairTransitions(
   currentItems: TimelineItem[],
   currentTransitions: Transition[],
   deletedClipIds: Set<string> = new Set(),
+  timelineFps: number = 30,
 ): TransitionRepairResult {
   const valid: Transition[] = []
   const repaired: TransitionRepairResult['repaired'] = []
@@ -70,7 +77,13 @@ export function repairTransitions(
       continue
     }
 
-    const result = tryRepairTransition(transition, itemsById, deletedClipIds, trackItems)
+    const result = tryRepairTransition(
+      transition,
+      itemsById,
+      deletedClipIds,
+      trackItems,
+      timelineFps,
+    )
 
     if (result.status === 'valid') {
       valid.push(transition)
@@ -100,6 +113,7 @@ function tryRepairTransition(
   itemsById: Map<string, TimelineItem>,
   deletedClipIds: Set<string>,
   trackItems: Map<string, TimelineItem[]>,
+  timelineFps: number,
 ): RepairAttemptResult {
   const leftClip = itemsById.get(transition.leftClipId)
   const rightClip = itemsById.get(transition.rightClipId)
@@ -178,6 +192,7 @@ function tryRepairTransition(
       leftClip,
       rightClip,
       transition.alignment,
+      timelineFps,
     )
     if (maxDuration <= 0) {
       return {

@@ -5,7 +5,7 @@ import { Pipette, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { KeyframeToggle } from '@/features/effects/deps/keyframes-contract'
-import { PropertyRow, SliderInput } from '@/shared/ui/property-controls'
+import { AppEyedropperOverlay, PropertyRow, SliderInput } from '@/shared/ui/property-controls'
 import { cn } from '@/shared/ui/cn'
 import { getEffectDefinitionName, getEffectParamLabel } from '@/features/effects/utils/effect-i18n'
 import {
@@ -22,6 +22,7 @@ import {
   whitePointFromPick,
 } from '@/features/effects/utils/wheel-pickers'
 import { EffectPanelHeaderRow } from './effect-panel-header-actions'
+import { ParamResetButton } from './param-reset-button'
 import type { GpuKeyframePanelProps, GpuParamUpdates } from './panel-props'
 import type { GpuEffectDefinition } from '@/infrastructure/gpu-effects'
 
@@ -33,28 +34,6 @@ interface GpuWheelsPanelProps extends GpuKeyframePanelProps {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
-}
-
-// Chrome's EyeDropper API (no lib.dom types yet) — used by the white
-// balance and black/white point pickers to sample the graded preview.
-interface EyeDropperApi {
-  open: () => Promise<{ sRGBHex: string }>
-}
-
-function getEyeDropperCtor(): (new () => EyeDropperApi) | null {
-  if (typeof window === 'undefined' || !('EyeDropper' in window)) return null
-  return (window as unknown as { EyeDropper: new () => EyeDropperApi }).EyeDropper
-}
-
-async function pickScreenColor(): Promise<{ r: number; g: number; b: number } | null> {
-  const EyeDropperCtor = getEyeDropperCtor()
-  if (!EyeDropperCtor) return null
-  try {
-    const { sRGBHex } = await new EyeDropperCtor().open()
-    return hexToRgb01(sRGBHex)
-  } catch {
-    return null // user cancelled the picker
-  }
 }
 
 const MAX_WHEEL_SIZE = 100
@@ -448,9 +427,9 @@ const WheelControl = memo(function WheelControl({
 })
 
 const WHEEL_DESCRIPTORS = [
-  { labelKey: 'effects.wheels.shadows', hueKey: 'shadowsHue', amountKey: 'shadowsAmount' },
-  { labelKey: 'effects.wheels.midtones', hueKey: 'midtonesHue', amountKey: 'midtonesAmount' },
-  { labelKey: 'effects.wheels.highlights', hueKey: 'highlightsHue', amountKey: 'highlightsAmount' },
+  { labelKey: 'effects.params.lift', hueKey: 'shadowsHue', amountKey: 'shadowsAmount' },
+  { labelKey: 'effects.params.gamma', hueKey: 'midtonesHue', amountKey: 'midtonesAmount' },
+  { labelKey: 'effects.params.gain', hueKey: 'highlightsHue', amountKey: 'highlightsAmount' },
 ] as const
 
 /**
@@ -926,9 +905,24 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
   }
 
   // Resolve-style primaries pickers. The eyedropper ones sample the graded
-  // preview straight off the screen; auto balance reads frame statistics
-  // from the preview capture bridge.
-  const eyeDropperSupported = getEyeDropperCtor() !== null
+  // preview via the in-app color sampler (the native EyeDropper freezes the tab
+  // on Chrome/Windows); auto balance reads frame statistics from the bridge.
+  const [picking, setPicking] = useState(false)
+  const pickResolverRef = useRef<((hex: string | null) => void) | null>(null)
+  const handlePicked = useCallback((hex: string | null) => {
+    setPicking(false)
+    const resolve = pickResolverRef.current
+    pickResolverRef.current = null
+    resolve?.(hex)
+  }, [])
+  const pickScreenColor = useCallback(
+    () =>
+      new Promise<{ r: number; g: number; b: number } | null>((resolve) => {
+        pickResolverRef.current = (hex) => resolve(hex ? hexToRgb01(hex) : null)
+        setPicking(true)
+      }),
+    [],
+  )
   const readCurrent = (key: string) => readNumberParam(definition, displayParams, key)
 
   const handlePickWhiteBalance = async () => {
@@ -985,13 +979,20 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
     const display = DOCK_PARAM_DISPLAY[key] ?? { scale: 1, bias: 0, step: param.step ?? 1 }
     const value = (displayParams[key] as number) ?? param.default
     const label = getEffectParamLabel(t, definition, key)
+    const resetLabel = t('effects.panel.resetParameterToDefault', {
+      parameter: label,
+      defaultValue: `Reset ${label} to default`,
+    })
 
     return (
-      <label
+      <div
         key={key}
-        className="grid min-w-0 grid-cols-[minmax(0,1fr)_4.75rem] items-center gap-2"
+        className="grid min-w-0 grid-cols-[minmax(3.75rem,1fr)_3.75rem_1rem] items-center gap-x-0.5"
       >
-        <span className="min-w-0 truncate text-right text-[11px] text-muted-foreground">
+        <span
+          className="min-w-0 whitespace-nowrap text-right text-[10px] text-muted-foreground"
+          title={label}
+        >
           {label}
         </span>
         <span className="flex min-w-0 flex-col items-center">
@@ -1016,7 +1017,19 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
             )}
           />
         </span>
-      </label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-4 w-4 flex-shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={() => emitCommitParam(key, param.default)}
+          disabled={!effect.enabled || Object.is(value, param.default)}
+          title={resetLabel}
+          aria-label={resetLabel}
+        >
+          <RotateCcw className="h-2.5 w-2.5" />
+        </Button>
+      </div>
     )
   }
 
@@ -1137,12 +1150,9 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
       if (!param) return null
       const value = (displayParams[key] as number) ?? param.default
       const keyframeProperty = getKeyframeProperty(effect.id, key)
+      const label = getEffectParamLabel(t, definition, key)
       return (
-        <PropertyRow
-          key={key}
-          label={getEffectParamLabel(t, definition, key)}
-          className={tonalRowClass}
-        >
+        <PropertyRow key={key} label={label} className={tonalRowClass}>
           <div className="flex items-center gap-1 min-w-0 w-full">
             <SliderInput
               value={value}
@@ -1162,6 +1172,14 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
                 disabled={!effect.enabled}
               />
             ) : null}
+            <ParamResetButton
+              effectId={effect.id}
+              paramKey={key}
+              label={label}
+              value={value}
+              defaultValue={param.default}
+              onParamChange={onParamChange}
+            />
           </div>
         </PropertyRow>
       )
@@ -1169,6 +1187,7 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
 
   return (
     <div className={cn('space-y-0', isDock && 'flex h-full min-h-0 flex-col overflow-hidden')}>
+      {picking && <AppEyedropperOverlay onResolve={handlePicked} previewOnly />}
       <EffectPanelHeaderRow
         label={
           isDock ? t('effects.wheels.primariesColorWheels') : getEffectDefinitionName(definition)
@@ -1214,7 +1233,7 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                  disabled={!effect.enabled || !eyeDropperSupported}
+                  disabled={!effect.enabled}
                   onClick={() => void handlePickWhiteBalance()}
                   title={t('effects.wheels.pickWhiteBalance')}
                   aria-label={t('effects.wheels.pickWhiteBalance')}
@@ -1225,7 +1244,7 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                  disabled={!effect.enabled || !eyeDropperSupported}
+                  disabled={!effect.enabled}
                   onClick={() => void handlePickBlackPoint()}
                   title={t('effects.wheels.pickBlackPoint')}
                   aria-label={t('effects.wheels.pickBlackPoint')}
@@ -1242,7 +1261,7 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                  disabled={!effect.enabled || !eyeDropperSupported}
+                  disabled={!effect.enabled}
                   onClick={() => void handlePickWhitePoint()}
                   title={t('effects.wheels.pickWhitePoint')}
                   aria-label={t('effects.wheels.pickWhitePoint')}
@@ -1287,8 +1306,8 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
                     onReset={() => {
                       // Reset the whole wheel: color push and its master level.
                       emitCommitBatch({
-                        [desc.hueKey]: 0,
-                        [desc.amountKey]: 0,
+                        [desc.hueKey]: definition.params[desc.hueKey]?.default ?? 0,
+                        [desc.amountKey]: definition.params[desc.amountKey]?.default ?? 0,
                         [desc.levelKey]: (definition.params[desc.levelKey]?.default as number) ?? 0,
                       })
                     }}
@@ -1330,8 +1349,8 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
                   }}
                   onReset={() => {
                     emitCommitBatch({
-                      [desc.hueKey]: 0,
-                      [desc.amountKey]: 0,
+                      [desc.hueKey]: definition.params[desc.hueKey]?.default ?? 0,
+                      [desc.amountKey]: definition.params[desc.amountKey]?.default ?? 0,
                     })
                   }}
                 />

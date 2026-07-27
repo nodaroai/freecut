@@ -7,13 +7,19 @@ import type { TimelineItem } from '@/types/timeline'
 import type { ItemEffect, GpuEffect, VisualEffect } from '@/types/effects'
 import { EFFECT_PRESETS } from '@/types/effects'
 import { useTimelineStore } from '@/features/effects/deps/timeline-contract'
-import { useGizmoStore, useThrottledFrame } from '@/features/effects/deps/preview-contract'
+import {
+  useGizmoStore,
+  usePowerWindowEditorStore,
+  useSpatialEffectEditorStore,
+  useThrottledFrame,
+} from '@/features/effects/deps/preview-contract'
 import { PropertySection } from '@/shared/ui/property-controls'
 import {
   GpuEffectPanel,
   GpuWheelsPanel,
   GpuCurvesPanel,
   GpuLutPanel,
+  GpuGradientMapPanel,
   GpuPowerWindowPanel,
   GpuSecondaryQualifierPanel,
 } from './panels'
@@ -30,6 +36,7 @@ import {
 } from '@/features/effects/utils/effect-i18n'
 import {
   getGpuEffectKeyframeProperty,
+  getGpuEffectKeyframeValue,
   getResolvedGpuEffectForFrame,
 } from '@/features/effects/utils/effect-keyframes'
 import { useKeyframesByItemId } from '../hooks/use-keyframes-by-item-id'
@@ -78,6 +85,8 @@ export const EffectsSection = memo(function EffectsSection({
   // Gizmo store for live effect preview
   const setEffectsPreviewNew = useGizmoStore((s) => s.setEffectsPreviewNew)
   const clearPreview = useGizmoStore((s) => s.clearPreview)
+  const startPowerWindowEditing = usePowerWindowEditorStore((s) => s.startEditing)
+  const stopSpatialEffectEditing = useSpatialEffectEditorStore((s) => s.stopEditing)
   const currentFrame = useThrottledFrame({ updateDuringScrub: !isDock })
 
   // Items are already filtered by parent - use directly
@@ -149,8 +158,21 @@ export const EffectsSection = memo(function EffectsSection({
           params: defaults,
         } as GpuEffect)
       })
+
+      if (gpuEffectId === 'gpu-power-window' && itemIds.length === 1) {
+        const itemId = itemIds[0]!
+        const item = useTimelineStore.getState().items.find((candidate) => candidate.id === itemId)
+        const addedEffect = item?.effects?.at(-1)
+        if (
+          addedEffect?.effect.type === 'gpu-effect' &&
+          addedEffect.effect.gpuEffectType === 'gpu-power-window'
+        ) {
+          stopSpatialEffectEditing()
+          startPowerWindowEditing(itemId, addedEffect.id)
+        }
+      }
     },
-    [itemIds, addEffect],
+    [addEffect, itemIds, startPowerWindowEditing, stopSpatialEffectEditing],
   )
 
   const { gpuCategories, triggerPreviews } = useGpuEffectPreviewData()
@@ -163,28 +185,27 @@ export const EffectsSection = memo(function EffectsSection({
       const effect = effects.find((e) => e.id === effectId)
       if (!effect || effect.effect.type !== 'gpu-effect') return
 
-      const gpuEff = effect.effect as GpuEffect
-      const definition = getGpuEffect(gpuEff.gpuEffectType)
-      const param = definition?.params[paramKey]
+      const displayKeyframeValue = getGpuEffectKeyframeValue(effect, paramKey, value)
       const autoOperations =
-        typeof value === 'number' && definition && param?.type === 'number' && param.animatable
+        displayKeyframeValue !== null
           ? visualItems.flatMap((item) => {
               const targetEffect = getMappedEffectEntry(item, effectId)
               if (!targetEffect || targetEffect.effect.type !== 'gpu-effect') {
                 return []
               }
 
+              const keyframeValue = getGpuEffectKeyframeValue(targetEffect, paramKey, value)
+              const property = getGpuEffectKeyframeProperty(targetEffect, paramKey)
+              if (keyframeValue === null || !property) {
+                return []
+              }
+
               const itemKeyframeState = keyframesByItemId.get(item.id) ?? undefined
-              const property = buildEffectAnimatableProperty(
-                targetEffect.effect.gpuEffectType,
-                targetEffect.id,
-                paramKey,
-              )
               const operation = getAutoKeyframeOperation(
                 item,
                 itemKeyframeState ?? undefined,
                 property,
-                value,
+                keyframeValue,
                 currentFrame,
               )
               return operation ? [operation] : []
@@ -207,7 +228,7 @@ export const EffectsSection = memo(function EffectsSection({
           paramKey,
         )
         const autoHandled =
-          typeof value === 'number' &&
+          displayKeyframeValue !== null &&
           autoOperations.some(
             (operation) => operation.itemId === item.id && operation.property === property,
           )
@@ -242,8 +263,6 @@ export const EffectsSection = memo(function EffectsSection({
       const effect = effects.find((e) => e.id === effectId)
       if (!effect || effect.effect.type !== 'gpu-effect') return
 
-      const gpuEff = effect.effect as GpuEffect
-      const definition = getGpuEffect(gpuEff.gpuEffectType)
       const autoOperations = visualItems.flatMap((item) => {
         const targetEffect = getMappedEffectEntry(item, effectId)
         if (!targetEffect || targetEffect.effect.type !== 'gpu-effect') {
@@ -253,26 +272,17 @@ export const EffectsSection = memo(function EffectsSection({
         const itemKeyframeState = keyframesByItemId.get(item.id) ?? undefined
 
         return Object.entries(updates).flatMap(([paramKey, paramValue]) => {
-          const param = definition?.params[paramKey]
-          if (
-            typeof paramValue !== 'number' ||
-            !definition ||
-            param?.type !== 'number' ||
-            !param.animatable
-          ) {
+          const keyframeValue = getGpuEffectKeyframeValue(targetEffect, paramKey, paramValue)
+          const property = getGpuEffectKeyframeProperty(targetEffect, paramKey)
+          if (keyframeValue === null || !property) {
             return []
           }
 
-          const property = buildEffectAnimatableProperty(
-            targetEffect.effect.gpuEffectType,
-            targetEffect.id,
-            paramKey,
-          )
           const operation = getAutoKeyframeOperation(
             item,
             itemKeyframeState ?? undefined,
             property,
-            paramValue,
+            keyframeValue,
             currentFrame,
           )
           return operation ? [operation] : []
@@ -297,7 +307,7 @@ export const EffectsSection = memo(function EffectsSection({
             paramKey,
           )
           const autoHandled =
-            typeof paramValue === 'number' &&
+            getGpuEffectKeyframeValue(targetEffect, paramKey, paramValue) !== null &&
             autoOperations.some(
               (operation) => operation.itemId === item.id && operation.property === property,
             )
@@ -647,7 +657,7 @@ export const EffectsSection = memo(function EffectsSection({
             </div>
 
             {/* Scrollable effect list */}
-            <div className="max-h-[280px] overflow-y-auto overflow-x-hidden p-1">
+            <div className="max-h-[420px] overflow-y-auto overflow-x-hidden p-1">
               {/* GPU Shader Effects */}
               {filteredCategories.map(({ category, effects: catEffects }, index) => (
                 <div key={category}>
@@ -841,6 +851,27 @@ export const EffectsSection = memo(function EffectsSection({
                 onParamLiveChange={handleGpuParamLiveChange}
                 onParamsBatchChange={handleGpuParamsBatchChange}
                 onParamsBatchLiveChange={handleGpuParamsBatchLiveChange}
+                onReset={handleResetGpuEffect}
+                onToggle={handleToggle}
+                onRemove={handleRemove}
+                onMove={handleMoveEffect}
+                canMoveUp={effectIndex > 0}
+                canMoveDown={effectIndex < effects.length - 1}
+              />
+            )
+          }
+
+          if (gpuEff.gpuEffectType === 'gpu-gradient-map') {
+            return (
+              <GpuGradientMapPanel
+                key={effect.id}
+                itemIds={itemIds}
+                effect={effect}
+                gpuEffect={displayGpuEffect}
+                definition={def}
+                getKeyframeProperty={getKeyframeProperty}
+                onParamChange={handleGpuParamChange}
+                onParamLiveChange={handleGpuParamLiveChange}
                 onReset={handleResetGpuEffect}
                 onToggle={handleToggle}
                 onRemove={handleRemove}

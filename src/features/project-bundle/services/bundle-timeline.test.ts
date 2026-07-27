@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { ProjectTimeline } from '@/types/project'
 import type { BundleProject } from '../types/bundle'
@@ -35,6 +37,29 @@ function makeTransition(): NonNullable<ProjectTimeline['transitions']>[number] {
     properties: { feather: 0.4 },
     createdAt: 100,
     lastModifiedAt: 200,
+  }
+}
+
+function makeTextItem(): ProjectTimeline['items'][number] {
+  return {
+    id: 'text-item-1',
+    trackId: 'track-1',
+    from: 0,
+    durationInFrames: 60,
+    label: 'Title',
+    type: 'text',
+    text: 'Hello',
+    textMotion: {
+      in: {
+        presetId: 'fade-up',
+        durationFrames: 12,
+        staggerFrames: 2,
+        intensity: 1,
+        order: 'forward',
+        easing: 'ease-out',
+        seed: 7,
+      },
+    },
   }
 }
 
@@ -127,6 +152,7 @@ function makeProjectTimelineFixture(): ProjectTimeline {
         src: 'blob:clip-1',
         thumbnailUrl: 'blob:thumb-1',
       },
+      makeTextItem(),
     ],
     scrollPosition: 144,
     markers: makeMarkers(),
@@ -149,6 +175,7 @@ function makeBundleTimelineFixture(): BundleTimeline {
         type: 'video',
         mediaRef: 'original-media-1',
       },
+      makeTextItem(),
     ],
     scrollPosition: 144,
     markers: makeMarkers(),
@@ -175,6 +202,7 @@ describe('bundle-timeline', () => {
     expect(bundleTimeline.items[0]).not.toHaveProperty('mediaId')
     expect(bundleTimeline.items[0]).not.toHaveProperty('src')
     expect(bundleTimeline.items[0]).not.toHaveProperty('thumbnailUrl')
+    expect(bundleTimeline.items[1]?.textMotion).toEqual(makeTextItem().textMotion)
     expect(bundleTimeline.compositions?.[0]?.items[0]).toMatchObject({ mediaRef: 'media-2' })
   })
 
@@ -203,6 +231,48 @@ describe('bundle-timeline', () => {
     expect(restored?.items[0]).not.toHaveProperty('mediaRef')
     expect(restored?.items[0]).toHaveProperty('src', undefined)
     expect(restored?.items[0]).toHaveProperty('thumbnailUrl', undefined)
+    expect(restored?.items[1]?.textMotion).toEqual(makeTextItem().textMotion)
     expect(restored?.compositions?.[0]?.items[0]).toMatchObject({ mediaId: 'imported-media-2' })
+  })
+
+  it('round-trips null controllers and transform hierarchy bindings', () => {
+    const reference = { x: 0, y: 0, width: 100, height: 100, rotation: 0 }
+    const timeline: ProjectTimeline = {
+      tracks: [makeTrack()],
+      items: [
+        {
+          id: 'controller-1',
+          type: 'controller',
+          controllerKind: 'null',
+          trackId: 'track-1',
+          from: 0,
+          durationInFrames: 90,
+          label: 'Controller',
+          transform: { ...reference, opacity: 1 },
+        },
+        {
+          id: 'child-1',
+          type: 'shape',
+          shapeType: 'rectangle',
+          fillColor: '#ffffff',
+          trackId: 'track-1',
+          from: 0,
+          durationInFrames: 90,
+          label: 'Child',
+          transformParent: {
+            parentItemId: 'controller-1',
+            parentReference: reference,
+            childLocalReference: { ...reference, x: 20 },
+            childWorldReference: { ...reference, x: 20 },
+          },
+        },
+      ],
+    }
+
+    const bundled = convertTimelineForBundle(timeline)
+    const restored = restoreTimelineFromBundle(bundled, new Map())
+
+    expect(restored?.items[0]).toMatchObject({ type: 'controller', controllerKind: 'null' })
+    expect(restored?.items[1]?.transformParent).toEqual(timeline.items[1]?.transformParent)
   })
 })

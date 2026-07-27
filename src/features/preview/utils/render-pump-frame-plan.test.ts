@@ -1,12 +1,23 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import {
   isAtomicPreviewTarget,
+  resolveActivePreviewPresentationTarget,
   resolveBackwardScrubFlags,
   resolveBackwardScrubFramePlan,
   resolveRenderPumpTargetFrame,
+  resolveReleasedScrubSnapshotGuardUntilMs,
   resolveScrubDirectionPlan,
   selectBoundaryPrewarmFrames,
   selectBoundarySourcePrewarmSources,
+  shouldDropStalePausedPreviewRender,
+  shouldPreservePausedTransportPresentation,
+  shouldRejectBlankReleasedScrubHandoff,
+  shouldRejectBlankTransportHandoff,
+  shouldRecoverFailedActivePreseekSchedule,
+  shouldRestoreCommittedPreviewSnapshot,
+  shouldUseRenderedPlaybackOverlay,
   type RenderPumpFrameState,
 } from './render-pump-frame-plan'
 
@@ -21,6 +32,264 @@ function makeState(overrides: Partial<RenderPumpFrameState> = {}): RenderPumpFra
 }
 
 describe('render pump frame plan', () => {
+  it('routes reverse shuttle through the rendered playback overlay', () => {
+    expect(
+      shouldUseRenderedPlaybackOverlay(
+        {
+          isPlaying: true,
+          playbackRate: -4,
+        },
+        false,
+      ),
+    ).toBe(true)
+    expect(
+      shouldUseRenderedPlaybackOverlay(
+        {
+          isPlaying: true,
+          playbackRate: 4,
+        },
+        false,
+      ),
+    ).toBe(false)
+    expect(
+      shouldUseRenderedPlaybackOverlay(
+        {
+          isPlaying: false,
+          playbackRate: -1,
+        },
+        true,
+      ),
+    ).toBe(false)
+  })
+
+  it('preserves the authoritative paused transport frame from delayed repaint', () => {
+    expect(
+      shouldPreservePausedTransportPresentation({
+        holdActive: true,
+        heldFrame: 100,
+        renderedFrame: 100,
+        displayedFrame: 100,
+        currentFrame: 100,
+        previewFrame: null,
+        isPlaying: false,
+      }),
+    ).toBe(true)
+
+    expect(
+      shouldPreservePausedTransportPresentation({
+        holdActive: true,
+        heldFrame: 100,
+        renderedFrame: 100,
+        displayedFrame: 100,
+        currentFrame: 100,
+        previewFrame: 101,
+        isPlaying: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('drops superseded hover renders after the ruler target changes or clears', () => {
+    expect(
+      shouldDropStalePausedPreviewRender({
+        renderedFrame: 120,
+        currentFrame: 100,
+        previewFrame: null,
+        isPlaying: false,
+      }),
+    ).toBe(true)
+    expect(
+      shouldDropStalePausedPreviewRender({
+        renderedFrame: 120,
+        currentFrame: 100,
+        previewFrame: 121,
+        isPlaying: false,
+      }),
+    ).toBe(true)
+    expect(
+      shouldDropStalePausedPreviewRender({
+        renderedFrame: 121,
+        currentFrame: 100,
+        previewFrame: 121,
+        isPlaying: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('restores the committed snapshot when hover skimming leaves the ruler', () => {
+    expect(
+      shouldRestoreCommittedPreviewSnapshot({
+        previewFrame: null,
+        previousPreviewFrame: 120,
+        currentFrame: 100,
+        snapshotFrame: 100,
+      }),
+    ).toBe(true)
+    expect(
+      shouldRestoreCommittedPreviewSnapshot({
+        previewFrame: null,
+        previousPreviewFrame: 120,
+        currentFrame: 100,
+        snapshotFrame: 99,
+      }),
+    ).toBe(false)
+  })
+
+  it('keeps a nonblank front buffer when a same-frame transport handoff renders blank', () => {
+    expect(
+      shouldRejectBlankTransportHandoff({
+        isTransportSettling: true,
+        renderedFrame: 100,
+        displayedFrame: 100,
+        renderedFrameBlank: true,
+        displayedFrameBlank: false,
+      }),
+    ).toBe(true)
+
+    expect(
+      shouldRejectBlankTransportHandoff({
+        isTransportSettling: true,
+        renderedFrame: 101,
+        displayedFrame: 100,
+        renderedFrameBlank: true,
+        displayedFrameBlank: false,
+      }),
+    ).toBe(true)
+  })
+
+  it('does not reject ordinary, different-frame, or intentionally blank renders', () => {
+    const base = {
+      isTransportSettling: true,
+      renderedFrame: 100,
+      displayedFrame: 100,
+      renderedFrameBlank: true,
+      displayedFrameBlank: false,
+    }
+
+    expect(shouldRejectBlankTransportHandoff({ ...base, isTransportSettling: false })).toBe(false)
+    expect(shouldRejectBlankTransportHandoff({ ...base, displayedFrame: 98 })).toBe(false)
+    expect(shouldRejectBlankTransportHandoff({ ...base, renderedFrameBlank: false })).toBe(false)
+    expect(shouldRejectBlankTransportHandoff({ ...base, displayedFrameBlank: true })).toBe(false)
+  })
+
+  it('keeps a known-good committed frame when a delayed scrub-release render is blank', () => {
+    const base = {
+      releaseGuardFrame: 100,
+      renderedFrame: 100,
+      currentFrame: 100,
+      previewFrame: null,
+      isPlaying: false,
+      snapshotFrame: 100,
+      renderedFrameBlank: true,
+      snapshotFrameBlank: false,
+    }
+
+    expect(shouldRejectBlankReleasedScrubHandoff(base)).toBe(true)
+    expect(shouldRejectBlankReleasedScrubHandoff({ ...base, releaseGuardFrame: null })).toBe(false)
+    expect(shouldRejectBlankReleasedScrubHandoff({ ...base, renderedFrame: 101 })).toBe(false)
+    expect(shouldRejectBlankReleasedScrubHandoff({ ...base, previewFrame: 101 })).toBe(false)
+    expect(shouldRejectBlankReleasedScrubHandoff({ ...base, renderedFrameBlank: false })).toBe(
+      false,
+    )
+    expect(shouldRejectBlankReleasedScrubHandoff({ ...base, snapshotFrameBlank: true })).toBe(false)
+  })
+
+  it('bounds committed snapshot ownership so later same-frame edits can take over', () => {
+    expect(
+      resolveReleasedScrubSnapshotGuardUntilMs({
+        nowMs: 2_500,
+      }),
+    ).toBe(32_500)
+  })
+
+  it('does not let a disposed render-pump generation release a newer active preseek gate', () => {
+    const currentSchedule = {
+      effectDisposed: false,
+      recoveredFailedSchedule: false,
+      scheduleVersion: 2,
+      activeScheduleVersion: 2,
+      mounted: true,
+      isPlaying: false,
+      currentTarget: 120,
+      targetFrame: 120,
+    }
+
+    expect(shouldRecoverFailedActivePreseekSchedule(currentSchedule)).toBe(true)
+    expect(
+      shouldRecoverFailedActivePreseekSchedule({
+        ...currentSchedule,
+        // Models an old promise settling after the replacement effect has set
+        // the shared mounted ref back to true.
+        effectDisposed: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldRecoverFailedActivePreseekSchedule({
+        ...currentSchedule,
+        scheduleVersion: 1,
+      }),
+    ).toBe(false)
+  })
+
+  it('pins the current rendered frame across forced-overlay play and pause handoffs', () => {
+    expect(
+      resolveActivePreviewPresentationTarget({
+        state: { currentFrame: 100, previewFrame: null, isPlaying: true },
+        prev: { currentFrame: 100, previewFrame: null, isPlaying: false },
+        settlingReleasedScrubFrame: null,
+        forceFastScrubOverlay: true,
+      }),
+    ).toBe(100)
+
+    expect(
+      resolveActivePreviewPresentationTarget({
+        state: { currentFrame: 112, previewFrame: null, isPlaying: false },
+        prev: { currentFrame: 112, previewFrame: null, isPlaying: true },
+        settlingReleasedScrubFrame: null,
+        forceFastScrubOverlay: true,
+      }),
+    ).toBe(112)
+  })
+
+  it('does not pin ordinary playback ticks or player-only play state changes', () => {
+    expect(
+      resolveActivePreviewPresentationTarget({
+        state: { currentFrame: 101, previewFrame: null, isPlaying: true },
+        prev: { currentFrame: 100, previewFrame: null, isPlaying: true },
+        settlingReleasedScrubFrame: null,
+        forceFastScrubOverlay: true,
+      }),
+    ).toBeNull()
+
+    expect(
+      resolveActivePreviewPresentationTarget({
+        state: { currentFrame: 100, previewFrame: null, isPlaying: true },
+        prev: { currentFrame: 100, previewFrame: null, isPlaying: false },
+        settlingReleasedScrubFrame: null,
+        forceFastScrubOverlay: false,
+      }),
+    ).toBeNull()
+  })
+
+  it('keeps scrub and released-scrub targets ahead of play state handoffs', () => {
+    expect(
+      resolveActivePreviewPresentationTarget({
+        state: { currentFrame: 100, previewFrame: 124, isPlaying: false },
+        prev: { currentFrame: 99, previewFrame: 123, isPlaying: false },
+        settlingReleasedScrubFrame: null,
+        forceFastScrubOverlay: true,
+      }),
+    ).toBe(124)
+
+    expect(
+      resolveActivePreviewPresentationTarget({
+        state: { currentFrame: 125, previewFrame: null, isPlaying: false },
+        prev: { currentFrame: 124, previewFrame: 125, isPlaying: false },
+        settlingReleasedScrubFrame: 125,
+        forceFastScrubOverlay: true,
+      }),
+    ).toBe(125)
+  })
+
   it('prefers preview frame over current frame', () => {
     const target = resolveRenderPumpTargetFrame({
       state: makeState({ previewFrame: 124 }),
@@ -29,6 +298,17 @@ describe('render pump frame plan', () => {
     })
 
     expect(target).toBe(124)
+  })
+
+  it('routes an ordinary ruler release back through the exact current-frame renderer', () => {
+    const target = resolveRenderPumpTargetFrame({
+      state: makeState({ previewFrame: null, currentFrame: 142 }),
+      forceFastScrubOverlay: false,
+      isPausedInsideTransition: false,
+      settlingReleasedScrubFrame: 142,
+    })
+
+    expect(target).toBe(142)
   })
 
   it('uses current frame when overlay is forced', () => {

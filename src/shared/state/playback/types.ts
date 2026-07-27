@@ -22,6 +22,7 @@ export interface CaptureOptions {
 }
 
 export type PreviewQuality = 1 | 0.5 | 0.33 | 0.25
+export type PlaybackTransportMode = 'normal' | 'shuttle'
 
 export interface PlaybackState {
   currentFrame: number
@@ -29,6 +30,8 @@ export interface PlaybackState {
   currentFrameEpoch: number
   isPlaying: boolean
   playbackRate: number
+  /** Transient transport intent used to distinguish L at 1x from normal playback. */
+  transportMode: PlaybackTransportMode
   loop: boolean
   /**
    * Per-device monitor gain (linear, 1 = unity). Persisted to localStorage,
@@ -73,13 +76,18 @@ export interface PlaybackActions {
   setCurrentFrame: (frame: number) => void
   /** Update the authoritative playhead and transient scrub preview atomically. */
   setScrubFrame: (frame: number, itemId?: string | null) => void
+  /** Commit a transient scrub and clear its preview/freeze in one store write. */
+  finishScrub: (frame: number) => void
   play: () => void
   pause: () => void
   togglePlayPause: () => void
+  shuttleForward: () => void
+  shuttleReverse: () => void
   setPlaybackRate: (rate: number) => void
   toggleLoop: () => void
   setVolume: (volume: number) => void
   toggleMute: () => void
+  setMuted: (muted: boolean) => void
   setMasterBusDb: (db: number) => void
   setBusAudioEq: (eq: AudioEqSettings | undefined) => void
   setZoom: (zoom: number) => void

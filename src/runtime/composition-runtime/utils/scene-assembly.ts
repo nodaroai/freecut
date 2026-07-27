@@ -2,6 +2,7 @@ import type {
   AdjustmentItem,
   AudioItem,
   CompositionItem,
+  ControllerItem,
   ImageItem,
   ShapeItem,
   TextItem,
@@ -186,6 +187,25 @@ export function resolveCompositionRenderPlan<TTrack extends TimelineTrack>({
   }
 }
 
+export function resolveLiveTransitionRenderPlan<TTrack extends TimelineTrack>({
+  renderPlan,
+  transitions,
+  getCurrentItem,
+}: {
+  renderPlan: CompositionRenderPlan<TTrack>
+  transitions: Transition[]
+  getCurrentItem: <TItem extends TransitionClipItem>(item: TItem) => TItem
+}): CompositionRenderPlan<TTrack> {
+  const transitionClipItems = renderPlan.transitionClipItems.map((item) => getCurrentItem(item))
+
+  return {
+    ...renderPlan,
+    transitionClipItems,
+    transitionClipMap: buildItemIdMap(transitionClipItems),
+    transitionWindows: resolveTransitionWindowsForItems(transitions, transitionClipItems),
+  }
+}
+
 export function collectVisibleShapeMasks(
   visibleTracks: TimelineTrack[],
 ): ShapeMaskWithTrackOrder[] {
@@ -360,8 +380,18 @@ export function buildStableDomTracks({
     ...track,
     trackVisible: visibleTrackIds.has(track.id),
     items: track.items.filter(
-      (item): item is Exclude<TimelineItem, VideoItem | AudioItem | AdjustmentItem> => {
-        if (item.type === 'video' || item.type === 'audio' || item.type === 'adjustment') {
+      (
+        item,
+      ): item is Exclude<
+        TimelineItem,
+        VideoItem | AudioItem | AdjustmentItem | ControllerItem
+      > => {
+        if (
+          item.type === 'video' ||
+          item.type === 'audio' ||
+          item.type === 'adjustment' ||
+          item.type === 'controller'
+        ) {
           return false
         }
         if (item.type === 'shape' && item.isMask) {

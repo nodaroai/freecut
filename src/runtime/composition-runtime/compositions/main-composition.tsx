@@ -10,7 +10,7 @@ import { PitchCorrectedAudio } from '../components/pitch-corrected-audio'
 import { CustomDecoderAudio } from '../components/custom-decoder-audio'
 import { getSharedPreviewAudioContext } from '../utils/preview-audio-graph'
 import { useMediaLibraryStore } from '@/runtime/composition-runtime/deps/stores'
-import { needsCustomAudioDecoder } from '../utils/audio-codec-detection'
+import { isNonNativeAudioContainer, needsCustomAudioDecoder } from '../utils/audio-codec-detection'
 import {
   StableVideoSequence,
   type StableVideoSequenceItem,
@@ -24,6 +24,11 @@ import {
 import { KeyframesProvider } from '../contexts/keyframes-context'
 import { CompositionSpaceProvider } from '../contexts/composition-space-context'
 import { NestedMediaResolutionProvider } from '../contexts/nested-media-resolution-context'
+import {
+  type LiveItemTransformSource,
+  useLiveTransformDependencySignatureForItems,
+} from '../contexts/live-item-transform-context'
+import { LiveItemTransformProvider } from '../contexts/live-item-transform-provider'
 import {
   buildCompoundAudioTransitionSegments,
   buildStandaloneAudioSegments,
@@ -59,6 +64,13 @@ import { getAudioPitchShiftSemitones } from '@/shared/utils/audio-pitch'
 
 const TRANSITION_AUDIO_PREMOUNT_SECONDS = 0.5
 const STANDALONE_AUDIO_PREMOUNT_SECONDS = 2
+// Frames the incoming video clip mounts + seeks to its in-point before it
+// becomes visible, so its pooled <video> reaches readyState >= 2 before the
+// playhead crosses the boundary (avoids the dom-video-not-ready stall at clip
+// entry). The source URL is already kept warm ~8s ahead; this only governs the
+// DOM element/decoder. Well within the pool's element cap (40) since it adds at
+// most ~1 extra mounted element per video track.
+const VIDEO_CLIP_PREMOUNT_SECONDS = 2
 
 const ActiveMasksContext = React.createContext<MaskInfo[]>(EMPTY_MASK_INFOS)
 
@@ -72,8 +84,15 @@ const FrameActiveMasksProvider: React.FC<{
   const { fps } = useVideoConfig()
   const keyframesCtx = React.useContext(KeyframesContext)
   const previousMasksRef = React.useRef<MaskInfo[]>(EMPTY_MASK_INFOS)
+  const maskItems = useMemo(() => masks.map(({ mask }) => mask), [masks])
+  const liveMaskDependencySignature =
+    useLiveTransformDependencySignatureForItems(
+      maskItems,
+      keyframesCtx?.getItemKeyframes,
+    )
 
   const activeMasks = useMemo<MaskInfo[]>(() => {
+    void liveMaskDependencySignature
     if (masks.length === 0) {
       previousMasksRef.current = EMPTY_MASK_INFOS
       return EMPTY_MASK_INFOS
@@ -84,12 +103,21 @@ const FrameActiveMasksProvider: React.FC<{
         canvas: { width: canvasWidth, height: canvasHeight, fps },
         frame,
         getKeyframes: keyframesCtx?.getItemKeyframes,
+        getItem: keyframesCtx?.getItem,
       }),
     )
     const stableMasks = reuseStableMaskInfos(previousMasksRef.current, nextMasks)
     previousMasksRef.current = stableMasks
     return stableMasks
-  }, [masks, canvasWidth, canvasHeight, fps, frame, keyframesCtx])
+  }, [
+    masks,
+    canvasWidth,
+    canvasHeight,
+    fps,
+    frame,
+    keyframesCtx,
+    liveMaskDependencySignature,
+  ])
 
   return <ActiveMasksContext.Provider value={activeMasks}>{children}</ActiveMasksContext.Provider>
 }
@@ -141,6 +169,8 @@ const MaskedItem: React.FC<{
  */
 type MainCompositionProps = CompositionInputProps & {
   useProxyMedia?: boolean
+  transparentBackground?: boolean
+  liveItemTransformSource?: LiveItemTransformSource
 }
 
 export const MainComposition: React.FC<MainCompositionProps> = ({
@@ -152,6 +182,8 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
   width: compositionWidth,
   height: compositionHeight,
   useProxyMedia = false,
+  transparentBackground = false,
+  liveItemTransformSource,
 }) => {
   const { fps, width: renderWidth, height: renderHeight } = useVideoConfig()
 
@@ -167,6 +199,10 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
 
   const projectWidth = compositionWidth ?? renderWidth
   const projectHeight = compositionHeight ?? renderHeight
+  const expressionCanvas = useMemo(
+    () => ({ width: projectWidth, height: projectHeight, fps }),
+    [fps, projectHeight, projectWidth],
+  )
   const canvasWidth = renderWidth
   const canvasHeight = renderHeight
   // NOTE: useCurrentFrame() removed from here to prevent per-frame re-renders.
@@ -175,12 +211,15 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
   // Read preview color directly from store to avoid inputProps changes during color picker drag
   // This prevents Player from seeking/refreshing when user scrubs the color picker
   const canvasBackgroundPreview = useGizmoStore((s) => s.canvasBackgroundPreview)
-  const effectiveBackgroundColor = canvasBackgroundPreview ?? backgroundColor
+  const effectiveBackgroundColor = transparentBackground
+    ? 'transparent'
+    : (canvasBackgroundPreview ?? backgroundColor)
 
   const renderPlan = useMemo(
     () => resolveCompositionRenderPlan({ tracks, transitions }),
     [tracks, transitions],
   )
+  const expressionItems = useMemo(() => tracks.flatMap((track) => track.items), [tracks])
   const { trackRenderState } = renderPlan
   const { maxOrder } = trackRenderState
 
@@ -307,6 +346,11 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
         return true
       }
 
+      // Containers the browser can't natively demux (e.g. Matroska/.mkv) must
+      // go through mediabunny even when the audio codec is browser-friendly,
+      // otherwise the native element opens nothing and the clip plays silently.
+      if (isNonNativeAudioContainer(media.mimeType, media.fileName)) return true
+
       // Video assets usually expose audio codec in media.audioCodec.
       // Audio-only assets persist their codec in media.codec.
       return needsCustomAudioDecoder(media.audioCodec ?? media.codec)
@@ -371,15 +415,16 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
   )
 
   return (
-    <NestedMediaResolutionProvider value={useProxyMedia ? 'proxy' : 'source'}>
-      <KeyframesProvider keyframes={keyframes}>
-        <CompositionSpaceProvider
-          projectWidth={projectWidth}
-          projectHeight={projectHeight}
-          renderWidth={renderWidth}
-          renderHeight={renderHeight}
-        >
-          <AbsoluteFill>
+    <LiveItemTransformProvider source={liveItemTransformSource}>
+      <NestedMediaResolutionProvider value={useProxyMedia ? 'proxy' : 'source'}>
+        <KeyframesProvider keyframes={keyframes} items={expressionItems} canvas={expressionCanvas}>
+          <CompositionSpaceProvider
+            projectWidth={projectWidth}
+            projectHeight={projectHeight}
+            renderWidth={renderWidth}
+            renderHeight={renderHeight}
+          >
+            <AbsoluteFill>
             {/* SVG MASK DEFINITIONS - kept for backward compat with feather/invert that need SVG mask */}
             {/* Shape mask animation is now handled per-item via ActiveMasksProvider + MaskedItem */}
 
@@ -613,7 +658,7 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
                 <StableVideoSequence
                   items={videoItems}
                   transitionWindows={renderPlan.transitionWindows}
-                  premountFor={Math.round(fps * 1)}
+                  premountFor={Math.round(fps * VIDEO_CLIP_PREMOUNT_SECONDS)}
                   renderItem={renderVideoItem}
                 />
 
@@ -668,9 +713,10 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
                   })}
               </AbsoluteFill>
             </FrameActiveMasksProvider>
-          </AbsoluteFill>
-        </CompositionSpaceProvider>
-      </KeyframesProvider>
-    </NestedMediaResolutionProvider>
+            </AbsoluteFill>
+          </CompositionSpaceProvider>
+        </KeyframesProvider>
+      </NestedMediaResolutionProvider>
+    </LiveItemTransformProvider>
   )
 }

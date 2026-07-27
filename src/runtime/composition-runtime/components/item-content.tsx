@@ -1,5 +1,8 @@
 import React from 'react'
-import { AbsoluteFill } from '@/runtime/composition-runtime/deps/player'
+import {
+  AbsoluteFill,
+  useClockPlaybackRate,
+} from '@/runtime/composition-runtime/deps/player'
 import { useDebugStore, useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import type { AudioItem, CompositionItem, TimelineItem, ShapeItem } from '@/types/timeline'
 import type { ResolvedAudioEqSettings } from '@/types/audio'
@@ -9,7 +12,10 @@ import { CustomDecoderAudio } from './custom-decoder-audio'
 import { PitchCorrectedAudio } from './pitch-corrected-audio'
 import type { AudioPlaybackProps } from './audio-playback-props'
 import { GifPlayer } from './gif-player'
+import { LottiePlayer } from './lottie-player'
+import { MediaOfflinePlaceholder } from './media-offline-placeholder'
 import { ItemVisualWrapper } from './item-visual-wrapper'
+import { isRenderableLottieSrc } from '@/infrastructure/lottie/lottie-frame-provider'
 import { TextContent } from './text-content'
 import { SubtitleSegmentContent } from './subtitle-segment-content'
 import { ShapeContent } from './shape-content'
@@ -35,6 +41,8 @@ import {
 import { needsCustomAudioDecoder } from '../utils/audio-codec-detection'
 import { resolveReverseConformedVideoItem } from '@/shared/utils/reverse-conform-item'
 import { useNestedMediaResolutionMode } from '../contexts/nested-media-resolution-context'
+import { useLiveItemContentTransform } from '../contexts/live-item-transform-context'
+import { shouldRenderExternalVideoAudio } from '../utils/audio-playback-routing'
 
 function getLogger() {
   return createLogger('CompositionItem')
@@ -161,15 +169,23 @@ export const ItemContent = React.memo<ItemProps>(
     audioPitchShiftSemitones = 0,
     renderCompositionContent,
   }) => {
+    item = useLiveItemContentTransform(item)
+
     // Use muted prop directly - MainComposition already passes track.muted
     // Avoiding store subscription here prevents re-render issues with @legacy-video/media Audio
 
     // Debug overlay toggle (always false in production via store)
     const showDebugOverlay = useDebugStore((s) => s.showVideoDebugOverlay)
     const { fps: timelineFps } = useVideoConfig()
+    const isReverseShuttle = useClockPlaybackRate() < 0
     const nestedMediaResolutionMode = useNestedMediaResolutionMode()
     const mediaItem = useMediaLibraryStore((s) =>
       item.mediaId ? s.mediaById[item.mediaId] : undefined,
+    )
+    // Boolean selector (not the array) so this only re-renders when THIS item's
+    // broken state flips — never per-frame during playback.
+    const isMediaOffline = useMediaLibraryStore((s) =>
+      item.mediaId ? s.brokenMediaIds.includes(item.mediaId) : false,
     )
     const mediaSourceFps = mediaItem?.fps
     const itemAudioEqStages = React.useMemo(
@@ -195,25 +211,20 @@ export const ItemContent = React.memo<ItemProps>(
       [item.audioPitchSemitones, item.audioPitchCents, itemPreviewProperties],
     )
 
+    // Null Objects participate in transform hierarchy and canvas gizmo
+    // interactions, but intentionally contribute no pixels of their own.
+    if (item.type === 'controller') {
+      return null
+    }
+
     if (item.type === 'video') {
       item = resolveReverseConformedVideoItem(item, timelineFps, {
         useProxy: nestedMediaResolutionMode === 'proxy',
       })
       const mediaSource = getSourceDimensions(item)
-      // Guard against missing src (media resolution failed)
+      // Guard against missing src (media resolution failed / media deleted)
       if (!item.src) {
-        return (
-          <AbsoluteFill
-            style={{
-              backgroundColor: '#1a1a1a',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <p style={{ color: '#666', fontSize: 14 }}>Media not loaded</p>
-          </AbsoluteFill>
-        )
+        return <MediaOfflinePlaceholder offline={isMediaOffline} label={item.label} />
       }
       // Use sourceStart for trimBefore (absolute position in source)
       // Fall back to trimStart or offset for backward compatibility
@@ -335,10 +346,14 @@ export const ItemContent = React.memo<ItemProps>(
       )
       const shouldUseCustomDecodedVideoAudio =
         !muted && needsCustomAudioDecoder(mediaItem?.audioCodec ?? mediaItem?.codec)
-      const shouldRenderExternalVideoAudio =
-        !muted &&
-        !!videoAudioSrc &&
-        (isReversed || requiresPitchShiftedVideoAudio || shouldUseCustomDecodedVideoAudio)
+      const renderExternalVideoAudio = shouldRenderExternalVideoAudio({
+        muted,
+        hasAudioSource: !!videoAudioSrc,
+        authoredReversed: isReversed,
+        reverseShuttle: isReverseShuttle,
+        requiresPitchShift: requiresPitchShiftedVideoAudio,
+        requiresCustomDecoder: shouldUseCustomDecodedVideoAudio,
+      })
       const videoAudioPlaybackProps = getItemAudioPlaybackProps({
         item,
         trimBefore: safeTrimBefore,
@@ -353,7 +368,7 @@ export const ItemContent = React.memo<ItemProps>(
         liveGainItemIds: audioGainLiveItemIds,
         volumeMultiplier: audioGainMultiplier,
       })
-      const externalVideoAudio = shouldRenderExternalVideoAudio ? (
+      const externalVideoAudio = renderExternalVideoAudio ? (
         shouldUseCustomDecodedVideoAudio ? (
           <CustomDecoderAudio
             {...videoAudioPlaybackProps}
@@ -373,7 +388,7 @@ export const ItemContent = React.memo<ItemProps>(
         <>
           <VideoContent
             item={item}
-            muted={muted || shouldRenderExternalVideoAudio}
+            muted={muted || renderExternalVideoAudio}
             safeTrimBefore={safeTrimBefore}
             playbackRate={playbackRate}
             sourceFps={sourceFps}
@@ -481,20 +496,9 @@ export const ItemContent = React.memo<ItemProps>(
 
     if (item.type === 'image') {
       const mediaSource = getSourceDimensions(item)
-      // Guard against missing src (media resolution failed)
+      // Guard against missing src (media resolution failed / media deleted)
       if (!item.src) {
-        return (
-          <AbsoluteFill
-            style={{
-              backgroundColor: '#1a1a1a',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <p style={{ color: '#666', fontSize: 14 }}>Image not loaded</p>
-          </AbsoluteFill>
-        )
+        return <MediaOfflinePlaceholder offline={isMediaOffline} label={item.label} />
       }
 
       // Use GifPlayer for animated images (GIF and WebP).
@@ -564,6 +568,29 @@ export const ItemContent = React.memo<ItemProps>(
       )
     }
 
+    if (item.type === 'lottie') {
+      const mediaSource = getSourceDimensions(item)
+      // A stale `blob:` src (persisted or left over after the media was deleted)
+      // is treated as missing so dotlottie is never handed a dead URL to fetch.
+      if (!isRenderableLottieSrc(item.src)) {
+        return <MediaOfflinePlaceholder offline={isMediaOffline} label={item.label} />
+      }
+      return (
+        <ItemVisualWrapper
+          item={item}
+          masks={masks}
+          mediaContent={{
+            fitMode: 'contain',
+            sourceWidth: mediaSource?.width,
+            sourceHeight: mediaSource?.height,
+            crop: item.crop,
+          }}
+        >
+          <LottiePlayer item={item} />
+        </ItemVisualWrapper>
+      )
+    }
+
     if (item.type === 'text') {
       // Use new ItemVisualWrapper for consolidated state and fixed DOM structure
       return (
@@ -591,7 +618,16 @@ export const ItemContent = React.memo<ItemProps>(
       // Render sub-composition contents inline
       // Pass parent muted so muting the track silences all sub-comp audio
       return (
-        <ItemVisualWrapper item={item} masks={masks}>
+        <ItemVisualWrapper
+          item={item}
+          masks={masks}
+          mediaContent={{
+            fitMode: 'fill',
+            sourceWidth: item.compositionWidth,
+            sourceHeight: item.compositionHeight,
+            crop: item.crop,
+          }}
+        >
           {renderCompositionContent({
             item,
             parentMuted: muted,

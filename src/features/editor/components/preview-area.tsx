@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo, lazy, Suspense } from 'react'
 import { Columns2 } from 'lucide-react'
 import {
-  ColorVideoPreview,
   VideoPreview,
   PlaybackControls,
   AlignmentToolbar,
@@ -20,13 +19,19 @@ import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/config/editor-layou
 import { InteractionLockRegion } from './interaction-lock-region'
 import { Button } from '@/components/ui/button'
 import { ErrorBoundary } from '@/app/error-boundary'
+import { useTranslation } from 'react-i18next'
+import { usePlaybackStore } from '@/shared/state/playback'
+import { ShuttleIndicator } from '@/shared/ui/shuttle-indicator'
 
 interface PreviewAreaProps {
   project: {
     width: number
     height: number
     fps: number
+    backgroundColor?: string
   }
+  durationInFrames?: number
+  preferProjectStoreMetadata?: boolean
 }
 
 type PreviewChrome = 'edit' | 'color'
@@ -35,6 +40,19 @@ const DEFAULT_EMPTY_TIMELINE_SECONDS = 10
 const PREVIEW_RESIZE_MIN_UPDATE_MS = 33
 const SPLIT_DRAG_MIN_UPDATE_MS = 33
 const PREVIEW_SOURCE_SPLIT_DEFAULT_PERCENT = 50
+
+function ProgramShuttleIndicator() {
+  const isPlaying = usePlaybackStore((state) => state.isPlaying)
+  const playbackRate = usePlaybackStore((state) => state.playbackRate)
+  const transportMode = usePlaybackStore((state) => state.transportMode)
+
+  return (
+    <ShuttleIndicator
+      active={isPlaying && transportMode === 'shuttle'}
+      playbackRate={playbackRate}
+    />
+  )
+}
 const PREVIEW_SCOPES_SPLIT_DEFAULT_PERCENT = 32
 const PREVIEW_SIDE_PANEL_MIN_PERCENT = 22
 const PREVIEW_SIDE_PANEL_MAX_PERCENT = 55
@@ -129,15 +147,14 @@ const ProgramPreviewSurface = memo(function ProgramPreviewSurface({
     </Suspense>
   ) : null
 
-  const PreviewComponent = chrome === 'color' ? ColorVideoPreview : VideoPreview
-
   return (
     <ErrorBoundary level="component">
       <div className="relative w-full h-full">
-        <PreviewComponent
+        <VideoPreview
           project={project}
           containerSize={containerSize}
           suspendOverlay={suspendOverlay}
+          chrome={chrome}
         />
         {skimPreviewOverlay && (
           <div className="absolute inset-0 z-40 bg-video-preview-background">
@@ -160,7 +177,12 @@ const ProgramPreviewSurface = memo(function ProgramPreviewSurface({
  *
  * Uses granular Zustand selectors in child components
  */
-export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaProps) {
+export const PreviewArea = memo(function PreviewArea({
+  project,
+  durationInFrames,
+  preferProjectStoreMetadata = true,
+}: PreviewAreaProps) {
+  const { t } = useTranslation()
   const previewContainerRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   const editorDensity = useSettingsStore((s) => s.editorDensity)
@@ -197,22 +219,29 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
   const projectFps = useProjectStore((s) => s.currentProject?.metadata.fps)
   const projectBgColor = useProjectStore((s) => s.currentProject?.metadata.backgroundColor)
 
-  const width = projectWidth ?? project.width
-  const height = projectHeight ?? project.height
-  const fps = projectFps ?? project.fps
-  const backgroundColor = projectBgColor ?? '#000000'
+  const width = preferProjectStoreMetadata ? (projectWidth ?? project.width) : project.width
+  const height = preferProjectStoreMetadata ? (projectHeight ?? project.height) : project.height
+  const fps = preferProjectStoreMetadata ? (projectFps ?? project.fps) : project.fps
+  const backgroundColor = preferProjectStoreMetadata
+    ? (projectBgColor ?? project.backgroundColor ?? '#000000')
+    : (project.backgroundColor ?? '#000000')
 
   // Use the precomputed index from items-store; returns 0 when there are no items.
   const maxItemEndFrame = useItemsStore((s) => s.maxItemEndFrame)
-  const totalFrames = maxItemEndFrame > 0 ? maxItemEndFrame : fps * DEFAULT_EMPTY_TIMELINE_SECONDS
+  const totalFrames =
+    durationInFrames !== undefined
+      ? Math.max(1, Math.round(durationInFrames))
+      : maxItemEndFrame > 0
+        ? maxItemEndFrame
+        : fps * DEFAULT_EMPTY_TIMELINE_SECONDS
   const isPathEditModeActive = isMaskEditingActive && !isPenModeActive
-  const canFinishPenPath = isShapePenModeActive && penVertexCount >= 3
+  const canFinishPenPath = isShapePenModeActive && penVertexCount >= 2
   const selectedVertexCount = selectedVertexIndices.length
   const hasSelectedVertex = selectedVertexCount > 0
-  const remainingPenPoints = Math.max(0, 3 - penVertexCount)
+  const remainingPenPoints = Math.max(0, 2 - penVertexCount)
   const displayedEditVertexCount = previewVertexCount || editVertexCount
   const penModeHint = canFinishPenPath
-    ? 'Close the path from here, or click the first node.'
+    ? t('editor.shapeSection.penFinishHint')
     : penVertexCount === 0
       ? 'Click in the preview to place your first point.'
       : `Add ${remainingPenPoints} more ${remainingPenPoints === 1 ? 'point' : 'points'} to finish.`
@@ -583,7 +612,7 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
                   disabled={!canFinishPenPath}
                   onClick={requestFinishPenMode}
                 >
-                  Finish Shape
+                  {t('editor.shapeSection.finishOpenPath')}
                 </Button>
                 <Button
                   type="button"
@@ -671,8 +700,9 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
                   className="@container border-t border-border panel-header relative flex items-center px-3 overflow-hidden"
                   style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
                 >
-                  <div className="flex-shrink-0">
+                  <div className="flex flex-shrink-0 items-center gap-2">
                     <TimecodeDisplay fps={fps} totalFrames={totalFrames} />
+                    <ProgramShuttleIndicator />
                   </div>
 
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

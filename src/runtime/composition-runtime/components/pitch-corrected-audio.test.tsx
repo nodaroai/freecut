@@ -6,6 +6,12 @@ const audioDecodeMocks = vi.hoisted(() => ({
   getOrDecodeAudio: vi.fn(),
   getOrDecodeAudioSliceForPlayback: vi.fn(),
 }))
+const clockRateMocks = vi.hoisted(() => ({ current: 1 }))
+
+vi.mock('@/runtime/composition-runtime/deps/player', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/runtime/composition-runtime/deps/player')>()),
+  useClockPlaybackRate: () => clockRateMocks.current,
+}))
 
 const playbackStateMocks = vi.hoisted(() => ({
   current: {
@@ -15,6 +21,15 @@ const playbackStateMocks = vi.hoisted(() => ({
     resolvedVolume: 1,
     resolvedPitchShiftSemitones: 0,
     resolvedAudioEqStages: [] as (typeof DEFAULT_AUDIO_EQ_SETTINGS)[],
+  } as {
+    frame: number
+    fps: number
+    playing: boolean
+    transportPlaybackRate?: number
+    isPreviewScrubbing?: boolean
+    resolvedVolume: number
+    resolvedPitchShiftSemitones: number
+    resolvedAudioEqStages: (typeof DEFAULT_AUDIO_EQ_SETTINGS)[]
   },
 }))
 
@@ -144,6 +159,7 @@ function makeAudioBuffer(durationSeconds = 8): AudioBuffer {
 describe('PitchCorrectedAudio', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clockRateMocks.current = 1
     playbackStateMocks.current = {
       frame: 0,
       fps: 30,
@@ -260,6 +276,47 @@ describe('PitchCorrectedAudio', () => {
     expect(audioDecodeMocks.getOrDecodeAudio).toHaveBeenCalledWith('media-1', 'blob:audio')
   })
 
+  it('defers decoded pitch audio until an active preview scrub settles', async () => {
+    playbackStateMocks.current.isPreviewScrubbing = true
+    audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mockResolvedValue({
+      buffer: makeAudioBuffer(2),
+      startTime: 0,
+      isComplete: false,
+    })
+    audioDecodeMocks.getOrDecodeAudio.mockReturnValue(new Promise<AudioBuffer>(() => {}))
+
+    const { rerender } = render(
+      <PitchCorrectedAudio
+        src="blob:audio"
+        mediaId="media-1"
+        itemId="item-1"
+        durationInFrames={240}
+        playbackRate={1.5}
+      />,
+    )
+
+    await Promise.resolve()
+    expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).not.toHaveBeenCalled()
+    expect(audioDecodeMocks.getOrDecodeAudio).not.toHaveBeenCalled()
+
+    playbackStateMocks.current.isPreviewScrubbing = false
+    rerender(
+      <PitchCorrectedAudio
+        src="blob:audio"
+        mediaId="media-1"
+        itemId="item-1"
+        durationInFrames={240}
+        playbackRate={1.5}
+        volumeMultiplier={1.01}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
+      expect(audioDecodeMocks.getOrDecodeAudio).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('uses a synthetic decode key when pitch correction is needed without a media id', async () => {
     audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mockResolvedValue({
       buffer: makeAudioBuffer(2),
@@ -314,6 +371,41 @@ describe('PitchCorrectedAudio', () => {
       expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
     })
 
+    expect(document.querySelector('[data-testid="pitch"]')).toBeInTheDocument()
+  })
+
+  it('uses a reverse-ready decoded window for transient reverse shuttle', async () => {
+    clockRateMocks.current = -4
+    playbackStateMocks.current = {
+      ...playbackStateMocks.current,
+      frame: 300,
+      playing: true,
+      transportPlaybackRate: -4,
+    }
+    audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mockResolvedValue({
+      buffer: makeAudioBuffer(6),
+      startTime: 6,
+      isComplete: false,
+    })
+    audioDecodeMocks.getOrDecodeAudio.mockReturnValue(new Promise<AudioBuffer>(() => {}))
+
+    render(
+      <PitchCorrectedAudio
+        src="blob:audio"
+        mediaId="media-1"
+        itemId="nested-audio-1"
+        durationInFrames={600}
+        playbackRate={1}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
+    })
+    const reverseOptions =
+      audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[0]?.[2]
+    expect(reverseOptions?.targetTimeSeconds).toBeCloseTo(10, 4)
+    expect(reverseOptions?.preRollSeconds).toBe(4)
     expect(document.querySelector('[data-testid="pitch"]')).toBeInTheDocument()
   })
 })

@@ -7,6 +7,7 @@
 import type {
   CompositionItem,
   ImageItem,
+  LottieItem,
   ShapeItem,
   SubtitleSegmentItem,
   TextItem,
@@ -22,7 +23,7 @@ import {
   resolveCornerPinForSize,
   resolveCornerPinTargetRect,
 } from '@/features/export/deps/composition-runtime'
-import { resolveAnimatedTextItem } from '@/features/export/deps/keyframes'
+import { resolveAnimatedShapeItem, resolveAnimatedTextItem } from '@/features/export/deps/keyframes'
 import type { EffectSourceMask } from '../canvas-effects'
 import { applyMasks } from '../canvas-masks'
 import { renderShape } from '../canvas-shapes'
@@ -35,7 +36,9 @@ import {
 } from './shared'
 import { renderVideoItem } from './video'
 import { renderImageItem } from './image'
+import { renderLottieItem } from './lottie'
 import { getTextRasterCacheKey, renderSubtitleSegmentItem, renderTextItem } from './text'
+import { isTextMotionActive } from '@/shared/typography/text-motion'
 import { renderCompositionItem } from './composition'
 import type { CornerPinWarpCacheEntry } from './types'
 
@@ -70,13 +73,24 @@ export async function renderItem(
   preCornerPinMasks: EffectSourceMask[] = [],
 ): Promise<void> {
   const itemKeyframes = rctx.getCurrentKeyframes?.(item.id) ?? rctx.keyframesMap.get(item.id)
+  const shapeExpressionContext =
+    rctx.canvasSettings.getExpressionItem && rctx.canvasSettings.getExpressionKeyframes
+      ? {
+          globalFrame: frame,
+          canvas: rctx.canvasSettings,
+          getItem: rctx.canvasSettings.getExpressionItem,
+          getKeyframes: rctx.canvasSettings.getExpressionKeyframes,
+        }
+      : undefined
   const animatedTextItem =
     item.type === 'text'
       ? {
           ...resolveAnimatedTextItem(item, itemKeyframes, frame - item.from, rctx.canvasSettings),
           cornerPin: item.cornerPin,
         }
-      : item
+      : item.type === 'shape'
+        ? resolveAnimatedShapeItem(item, itemKeyframes, frame - item.from, shapeExpressionContext)
+        : item
   const frameResolvedItem = applyAnimatedCropToItem(animatedTextItem, frame, rctx, renderSpan)
   const resolvedTransform = resolveItemTransform(transform)
   const frameResolvedTransform =
@@ -156,8 +170,8 @@ async function renderItemContent(
       : item
 
   switch (effectiveItem.type) {
-    case 'video':
-      await renderVideoItem(
+    case 'video': {
+      const videoFrameDrawn = await renderVideoItem(
         ctx,
         effectiveItem as VideoItem,
         transform,
@@ -166,21 +180,62 @@ async function renderItemContent(
         sourceFrameOffset,
         renderSpan,
       )
+      if (!videoFrameDrawn) {
+        // Preview canvases are cleared before item rendering. A video item is
+        // complete only after one of its real frame sources was drawn; every
+        // other outcome must preserve the previous front buffer.
+        if (rctx.renderMode === 'preview') rctx.markActivePreviewFramePending?.()
+      }
       break
+    }
     case 'image':
+      await rctx.ensureImageItemReady?.(effectiveItem as ImageItem)
       renderImageItem(ctx, effectiveItem as ImageItem, transform, rctx, frame)
       break
-    case 'text':
-      renderTextItem(ctx, effectiveItem as TextItem, transform, rctx)
+    case 'lottie':
+      await rctx.ensureLottieItemReady?.(effectiveItem as LottieItem)
+      renderLottieItem(ctx, effectiveItem as LottieItem, transform, rctx, frame)
       break
+    case 'text': {
+      const textItem = effectiveItem as TextItem
+      // Motion text: while a per-unit window is active, paint glyph-by-glyph
+      // (bypasses the raster cache). Settled frames pass no motion → cached path.
+      const relativeFrame = frame - textItem.from
+      const motion =
+        textItem.textMotion &&
+        isTextMotionActive(
+          textItem.textMotion,
+          relativeFrame,
+          rctx.canvasSettings.fps,
+          textItem.durationInFrames,
+        )
+          ? {
+              relativeFrame,
+              fps: rctx.canvasSettings.fps,
+              durationInFrames: textItem.durationInFrames,
+            }
+          : undefined
+      renderTextItem(ctx, textItem, transform, rctx, motion)
+      break
+    }
     case 'subtitle':
       renderSubtitleSegmentItem(ctx, effectiveItem as SubtitleSegmentItem, transform, frame, rctx)
       break
     case 'shape':
-      renderShape(ctx, effectiveItem as ShapeItem, resolveItemTransform(transform), {
-        width: rctx.canvasSettings.width,
-        height: rctx.canvasSettings.height,
-      })
+      renderShape(
+        ctx,
+        effectiveItem as ShapeItem,
+        {
+          ...resolveItemTransform(transform),
+          // The item renderer already rotated the canvas context above. Keep the
+          // standalone renderShape rotation contract without applying it twice here.
+          rotation: 0,
+        },
+        {
+          width: rctx.canvasSettings.width,
+          height: rctx.canvasSettings.height,
+        },
+      )
       break
     case 'composition':
       await renderCompositionItem(
@@ -286,15 +341,14 @@ async function renderItemWithCornerPin(
   const cornerPinTargetRect = resolveCornerPinTargetRect(
     itemW,
     itemH,
-    preCornerPinMasks.length > 0
-      ? undefined
-      : item.type === 'video' || item.type === 'image'
-        ? {
-            sourceWidth: item.sourceWidth,
-            sourceHeight: item.sourceHeight,
-            crop: item.crop,
-          }
-        : undefined,
+    item.type === 'video' || item.type === 'image' || item.type === 'composition'
+      ? {
+          sourceWidth: item.type === 'composition' ? item.compositionWidth : item.sourceWidth,
+          sourceHeight: item.type === 'composition' ? item.compositionHeight : item.sourceHeight,
+          crop: item.crop,
+          fitMode: item.type === 'composition' ? ('fill' as const) : ('contain' as const),
+        }
+      : undefined,
   )
   const pinSourceWidth = Math.max(1, Math.round(cornerPinTargetRect.width))
   const pinSourceHeight = Math.max(1, Math.round(cornerPinTargetRect.height))

@@ -1,6 +1,7 @@
 export {
   useTimelineStore,
   useCompositionNavigationStore,
+  useSequencesStore,
   useCompositionsStore,
   type SubComposition,
   wouldCreateCompositionCycle,
@@ -9,6 +10,8 @@ export {
   deleteCompoundClips,
   getCompoundClipDeletionImpact,
   getMediaDeletionImpact,
+  openComposition,
+  openCompositionAsTab,
   removeTimelineItemsExact,
   removeProjectItems,
   renameCompoundClip,

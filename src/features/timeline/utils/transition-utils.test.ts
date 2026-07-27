@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { VideoItem, ImageItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
@@ -86,6 +88,20 @@ describe('transition-utils', () => {
 
     const result = canAddTransition(left, right, 30)
     expect(result.canAdd).toBe(true)
+  })
+
+  it('converts source handles into timeline frames using both frame rates', () => {
+    const left = {
+      ...createVideoClip('A', 0, 100, 0, 100, 115),
+      sourceFps: 60,
+    }
+    const right = {
+      ...createVideoClip('B', 100, 100, 15, 115, 300),
+      sourceFps: 60,
+    }
+
+    expect(canAddTransition(left, right, 30, 0.5, 30).canAdd).toBe(false)
+    expect(getMaxTransitionDurationForHandles(left, right, 0.5, 30)).toBe(14)
   })
 
   it('rejects transition when adjacent clips have no spare handle', () => {

@@ -4,6 +4,20 @@ import { getGpuEffect, getGpuEffectDefaultParams } from '@/infrastructure/gpu-ef
 import type { GpuEffect, ItemEffect } from '@/types/effects'
 import { GpuWheelsPanel } from './gpu-wheels-panel'
 
+// Drive the in-app sampler deterministically: the overlay resolves a fixed
+// colour on mount, so the panel's real hex→rgb→param conversion still runs.
+vi.mock('@/shared/ui/property-controls', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/ui/property-controls')>()
+  const { useEffect } = await import('react')
+  return {
+    ...actual,
+    AppEyedropperOverlay: ({ onResolve }: { onResolve: (hex: string | null) => void }) => {
+      useEffect(() => onResolve('#808080'), [onResolve])
+      return null
+    },
+  }
+})
+
 const definition = getGpuEffect('gpu-color-wheels')!
 
 function makeProps(params: Record<string, number | boolean | string> = {}) {
@@ -30,6 +44,15 @@ function makeProps(params: Record<string, number | boolean | string> = {}) {
 }
 
 describe('GpuWheelsPanel', () => {
+  it('uses Lift, Gamma, and Gain names in the compact sidebar wheels', () => {
+    render(<GpuWheelsPanel {...makeProps()} layout="sidebar" />)
+
+    expect(screen.getByRole('button', { name: 'Adjust Lift wheel' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Adjust Gamma wheel' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Adjust Gain wheel' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Adjust Shadows wheel' })).not.toBeInTheDocument()
+  })
+
   it('renders a Resolve-style four-wheel primaries dock', () => {
     render(<GpuWheelsPanel {...makeProps()} layout="dock" />)
 
@@ -54,6 +77,47 @@ describe('GpuWheelsPanel', () => {
     ]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument()
     }
+  })
+
+  it('keeps reset controls beside every top and bottom dock parameter', () => {
+    const props = makeProps({ temperature: 25 })
+    render(<GpuWheelsPanel {...props} layout="dock" />)
+
+    for (const label of [
+      'Temperature',
+      'Tint',
+      'Contrast',
+      'Pivot',
+      'Mid/Detail',
+      'Color Boost',
+      'Shadows',
+      'Highlights',
+      'Saturation',
+      'Hue',
+      'Lum Mix',
+    ]) {
+      expect(screen.getByRole('button', { name: `Reset ${label} to default` })).toBeInTheDocument()
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Temperature to default' }))
+    expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'temperature', 0)
+    expect(screen.getByRole('button', { name: 'Reset Tint to default' })).toBeDisabled()
+    expect(screen.getByText('Temperature')).toHaveClass('whitespace-nowrap', 'text-right')
+    expect(screen.getByText('Mid/Detail')).toHaveAttribute('title', 'Mid/Detail')
+  })
+
+  it('keeps definition-driven resets beside sidebar numeric parameters', () => {
+    const props = makeProps({ exposure: 1.2 })
+    render(<GpuWheelsPanel {...props} layout="sidebar" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /reset to defaults: exposure/i }))
+
+    expect(props.onParamChange).toHaveBeenCalledWith(
+      'fx-wheels',
+      'exposure',
+      definition.params.exposure?.default,
+    )
+    expect(screen.getByRole('button', { name: /reset to defaults: temperature/i })).toBeDisabled()
   })
 
   it('previews numeric wheel value edits live and commits once on blur', () => {
@@ -167,28 +231,17 @@ describe('GpuWheelsPanel', () => {
     expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'temperature', -50)
   })
 
-  it('picks a black point with the eyedropper and commits the lift', async () => {
-    const windowWithEyeDropper = window as unknown as {
-      EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> }
-    }
-    windowWithEyeDropper.EyeDropper = class {
-      open() {
-        return Promise.resolve({ sRGBHex: '#808080' })
-      }
-    }
-    try {
-      const props = makeProps({ lift: 0 })
-      render(<GpuWheelsPanel {...props} layout="dock" />)
+  it('picks a black point via the in-app sampler and commits the lift', async () => {
+    const props = makeProps({ lift: 0 })
+    render(<GpuWheelsPanel {...props} layout="dock" />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Pick black point' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pick black point' }))
 
-      // 50% gray luma is ~0.502 — lift drops by that to map it to black
-      await waitFor(() => {
-        expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'lift', -0.502)
-      })
-    } finally {
-      delete windowWithEyeDropper.EyeDropper
-    }
+    // The sampler resolves #808080 (50% gray, luma ~0.502) — lift drops by that
+    // to map it to black.
+    await waitFor(() => {
+      expect(props.onParamChange).toHaveBeenCalledWith('fx-wheels', 'lift', -0.502)
+    })
   })
 
   it('omits the master chip on the Offset wheel like Resolve', () => {

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { TimelineItem } from '@/types/timeline'
 import { getAnimatablePropertiesForItem } from './animatable-properties'
@@ -22,11 +24,11 @@ describe('getAnimatablePropertiesForItem', () => {
       'y',
       'width',
       'height',
+      'anchorX',
+      'anchorY',
       'rotation',
       'opacity',
       'cornerRadius',
-      'anchorX',
-      'anchorY',
       'cropLeft',
       'cropRight',
       'cropTop',
@@ -36,7 +38,7 @@ describe('getAnimatablePropertiesForItem', () => {
     ])
   })
 
-  it('includes anchor properties for composition items', () => {
+  it('includes anchor and crop properties for composition items', () => {
     expect(
       getAnimatablePropertiesForItem({
         ...createItem('composition'),
@@ -49,25 +51,42 @@ describe('getAnimatablePropertiesForItem', () => {
       'y',
       'width',
       'height',
+      'anchorX',
+      'anchorY',
       'rotation',
       'opacity',
       'cornerRadius',
-      'anchorX',
-      'anchorY',
+      'cropLeft',
+      'cropRight',
+      'cropTop',
+      'cropBottom',
+      'cropSoftness',
       'volume',
     ])
   })
 
-  it('does not expose anchor properties for non-video visual items', () => {
+  it('exposes anchor properties for every visual item', () => {
     expect(getAnimatablePropertiesForItem(createItem('image'))).toEqual([
       'x',
       'y',
       'width',
       'height',
+      'anchorX',
+      'anchorY',
       'rotation',
       'opacity',
       'cornerRadius',
     ])
+  })
+
+  it('exposes only hierarchy-driving transforms for null controllers', () => {
+    expect(
+      getAnimatablePropertiesForItem({
+        ...createItem('controller'),
+        controllerKind: 'null',
+        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 },
+      }),
+    ).toEqual(['x', 'y', 'width', 'height', 'rotation'])
   })
 
   it('includes text-specific properties for text items', () => {
@@ -82,6 +101,8 @@ describe('getAnimatablePropertiesForItem', () => {
       'y',
       'width',
       'height',
+      'anchorX',
+      'anchorY',
       'rotation',
       'opacity',
       'cornerRadius',
@@ -95,5 +116,30 @@ describe('getAnimatablePropertiesForItem', () => {
       'textShadowBlur',
       'strokeWidth',
     ])
+  })
+
+  it('exposes stable path geometry channels for custom path shapes', () => {
+    const properties = getAnimatablePropertiesForItem({
+      ...createItem('shape'),
+      shapeType: 'path',
+      pathVertices: [
+        {
+          position: [0, 0],
+          inHandle: [0, 0],
+          outHandle: [0.25, 0],
+        },
+      ],
+    })
+
+    expect(properties).toEqual(
+      expect.arrayContaining([
+        'pathVertex:0:positionX',
+        'pathVertex:0:positionY',
+        'pathVertex:0:inX',
+        'pathVertex:0:inY',
+        'pathVertex:0:outX',
+        'pathVertex:0:outY',
+      ]),
+    )
   })
 })

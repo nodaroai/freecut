@@ -461,7 +461,6 @@
           "zoomTo100": "100%にズーム",
           "toggleSnap": "スナップを切り替え",
           "toggleCanvasSnap": "キャンバス（ギズモ）スナップを切り替え",
-          "toggleKeyframeEditorPanel": "キーフレームエディターパネルを切り替え",
           "editWorkspace": "編集ワークスペースに切り替え",
           "colorWorkspace": "カラーワークスペースに切り替え",
           "copy": "選択した項目またはキーフレームをコピー",
@@ -474,6 +473,12 @@
           "clearKeyframes": "選択した項目のすべてのキーフレームをクリア",
           "keyframeEditorGraph": "キーフレームエディターをグラフビューに切り替え",
           "keyframeEditorDopesheet": "キーフレームエディターをドープシートビューに切り替え",
+          "keyframeEditorSplit": "キーフレームエディターを分割ビューに切り替え",
+          "editKeyframeAdd": "選択した編集レイヤーの再生ヘッド位置にキーフレームを追加",
+          "keyframePrevious": "前のプロパティキーフレームへ移動",
+          "keyframeNext": "次のプロパティキーフレームへ移動",
+          "keyframeToggleAuto": "アクティブなプロパティの自動キーを切り替え",
+          "keyframeFit": "選択したキーフレームをビューに合わせる",
           "markIn": "イン点をマーク",
           "markOut": "アウト点をマーク",
           "clearInOut": "イン/アウト点をクリア",
@@ -481,7 +486,8 @@
           "overwriteEdit": "上書き編集",
           "saveProject": "プロジェクトを保存",
           "exportVideo": "動画をエクスポート",
-          "openSceneBrowser": "シーンブラウザを開く（AIキャプションを検索）"
+          "openSceneBrowser": "シーンブラウザを開く（AIキャプションを検索）",
+          "animateWorkspace": "アニメートワークスペースに切り替え"
         },
         "searchPlaceholder": "コマンドまたはショートカットを検索",
         "searchResults": "ショートカット検索結果",
@@ -491,7 +497,35 @@
         "resetAllConfirmAction": "すべてリセット",
         "resetAllToast": "ショートカットを既定値にリセットしました",
         "searchResultCount_one": "{{count}} 件の結果",
-        "searchResultCount_other": "{{count}} 件の結果"
+        "searchResultCount_other": "{{count}} 件の結果",
+        "filters": {
+          "custom": "カスタム",
+          "conflicts": "競合",
+          "unassigned": "未割り当て"
+        },
+        "scopes": {
+          "keyframes": "キーフレームエディターにフォーカスがあるときに有効",
+          "sourceMonitor": "ソースモニターにフォーカスがあるときに有効"
+        },
+        "scopedBadge": "限定",
+        "addAlternate": "代替を追加",
+        "removeBinding": "ショートカットを削除",
+        "keyboardLabel": "オンスクリーンキーボード",
+        "keyNoCommand": "{{key}} キー、ショートカットなし",
+        "layoutFallbackNote": "US キーボードレイアウトを表示しています。実際のキーと異なる場合があります。",
+        "undo": "元に戻す",
+        "reassignedToast": "ショートカットを再割り当てしました",
+        "importNoChanges": "このプリセットは現在のショートカットと同じです。",
+        "importReviewTitle": "ショートカットのインポートを確認",
+        "importReviewDescription": "このプリセットを適用すると、現在のカスタムショートカットが置き換えられます。",
+        "importApply": "プリセットを適用",
+        "importChangeCount_one": "{{count}} 個のショートカットが変更されます",
+        "importChangeCount_other": "{{count}} 個のショートカットが変更されます",
+        "importReplaceCount_one": "{{count}} 個のカスタムショートカットを置き換えます",
+        "importReplaceCount_other": "{{count}} 個のカスタムショートカットを置き換えます",
+        "announceRecording": "{{command}} のショートカットを記録中です。キーの組み合わせを押してください。",
+        "announceCaptured": "{{binding}} を取得しました",
+        "announceConflict": "{{binding}} は {{action}} と競合します"
       }
     }
   },
@@ -503,6 +537,20 @@
       "unexpectedError": "予期しないエラーが発生しました",
       "tryAgain": "再試行",
       "reloadPage": "ページを再読み込み"
+    },
+    "routeError": {
+      "title": "問題が発生しました",
+      "description": "FreeCut はこのページの読み込みを完了できませんでした。",
+      "projectNotFoundTitle": "このプロジェクトが見つかりません",
+      "projectNotFoundDescription": "移動または削除されたか、古いリンクから開かれた可能性があります。他のプロジェクトは引き続きワークスペースで利用できます。",
+      "backToProjects": "プロジェクト一覧に戻る",
+      "supportHint": "サポートが必要な場合は、エラーの詳細をコピーして開発者に送ってください。",
+      "copyDetails": "エラーの詳細をコピー",
+      "detailsCopied": "エラーの詳細をコピーしました",
+      "copyFailed": "詳細をコピーできませんでした",
+      "causePermission": "FreeCut はワークスペースフォルダーを使用する権限を失いました。再接続するか、別のフォルダーを選択してください。",
+      "causeMissing": "ワークスペースフォルダーが見つかりません。移動、名前の変更、または削除された可能性があります。",
+      "causeUnsupported": "ワークスペースフォルダーは、FreeCut に必要な機能をすべてサポートしていないドライブ上にあります。クラウド同期フォルダーやネットワークフォルダーではよくあることです。ローカルディスク上のフォルダーを選ぶと、たいていは解決します。"
     }
   }
 }

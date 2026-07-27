@@ -4,6 +4,7 @@
       "aiCaptionsCount": "{{count}} subtítulos con IA",
       "analyzeWithAI": "Analizar con IA",
       "analyzingWithAI": "Analizando con IA",
+      "cancelInterpolation": "Cancelar interpolación",
       "chooseMkvOrWebm": "Elige MKV o WebM",
       "deleteProxy": "Eliminar proxy",
       "deleteTranscript": "Eliminar transcripción",
@@ -11,10 +12,13 @@
       "generateProxy": "Generar proxy",
       "generateTranscript": "Generar transcripción",
       "importing": "Importando",
+      "interpolateFactor": "{{factor}}x fotogramas",
+      "interpolateFrames": "Interpolar fotogramas",
       "preparing": "Preparando",
       "menuAi": "IA",
       "menuCaptions": "Subtítulos incrustados",
       "menuFile": "Archivo",
+      "menuInterpolation": "Interpolación de fotogramas",
       "menuProxy": "Proxy",
       "menuTranscript": "Transcripción",
       "playAudio": "Reproducir audio",
@@ -37,17 +41,32 @@
       "transcriptReadyFor": "Transcripción lista para \"{{name}}\"",
       "transcriptionFailedFor": "Falló la transcripción de \"{{name}}\"",
       "transcriptsDeleted": "Transcripciones eliminadas",
-      "transcriptsReady": "Transcripciones listas"
+      "transcriptsReady": "Transcripciones listas",
+      "menuUpscale": "Escalar",
+      "upscaleVideo": "Escalar 2x",
+      "cancelUpscale": "Cancelar escalado",
+      "upscaleVariant": {
+        "liveAction": "Imagen real",
+        "animation": "Anime",
+        "threeD": "Render 3D"
+      }
     },
     "compositions": {
+      "compositionsGroup": "Composiciones",
+      "compoundClipsGroup": "Clips compuestos",
       "deleteBody": "¿Eliminar el clip compuesto \"{{name}}\"? Esta acción no se puede deshacer.",
       "deleteInstancesDetail": "También se eliminarán {{count}} instancias de la línea de tiempo que usan este clip compuesto.",
       "deleteInstancesTitle": "Se eliminarán las instancias vinculadas",
+      "deleteSequenceBody": "¿Eliminar la secuencia \"{{name}}\"? Esta acción no se puede deshacer.",
+      "deleteSequenceInstancesDetail": "También se eliminarán {{count}} instancias de la línea de tiempo que usan esta secuencia.",
+      "deleteSequenceTitle": "Eliminar secuencia",
       "deleteTitle": "Eliminar clip compuesto",
       "enter": "Entrar",
       "itemCount": "{{count}} elementos",
+      "openAsTab": "Abrir como pestaña",
       "rename": "Renombrar",
-      "sectionTitle": "Clips compuestos"
+      "sectionTitle": "Composiciones",
+      "sequencesGroup": "Secuencias"
     },
     "deleteDialog": {
       "bodyMultiple": "Esto eliminará permanentemente {{count}} elementos de medios de este proyecto. Esta acción no se puede deshacer.",
@@ -123,14 +142,19 @@
       "dragDropUnsupported": "Arrastrar y soltar no es compatible aquí.",
       "dropFilesHere": "Suelta archivos aquí",
       "filesRejected": "Algunos archivos no se pudieron añadir.",
+      "downloadingInterpolationModel": "Descargando modelo de interpolación",
       "generateProxiesForSelected": "Generar proxies para {{count}} elementos seleccionados",
       "generatingProxies": "Generando proxies…",
       "generatingTranscripts": "Generando transcripciones…",
+      "interpolatingFrames": "Interpolando fotogramas…",
+      "interpolationProgress": "Progreso de la interpolación de fotogramas",
+      "timeRemaining": "quedan {{time}}",
       "gridItemSize": "Tamaño de miniatura",
-      "groupAudio": "Grupo audio",
-      "groupGifs": "Grupo GIF",
-      "groupImages": "Grupo imagenes",
-      "groupVideos": "Grupo videos",
+      "groupAudio": "Audio",
+      "groupGifs": "GIF",
+      "groupImages": "Imagenes",
+      "groupLottie": "Lottie",
+      "groupVideos": "Videos",
       "import": "Importar",
       "importFromUrlDescription": "Importa un archivo multimedia desde una URL directa.",
       "importFromUrlHint": "Pega un enlace directo a un archivo de video, audio, imagen o GIF.",
@@ -155,6 +179,9 @@
       "selectedAssetsCount": "{{count}} recursos seleccionados",
       "selectedAssetsCount_one": "{{count}} recurso seleccionado",
       "selectedAssetsCount_other": "{{count}} recursos seleccionados",
+      "sequencesCount": "{{count}} secuencias",
+      "sequencesCount_one": "{{count}} secuencia",
+      "sequencesCount_other": "{{count}} secuencias",
       "showMediaLibrary": "Mostrar biblioteca de medios",
       "sortDate": "Ordenar por fecha",
       "sortName": "Ordenar por nombre",
@@ -168,7 +195,8 @@
       "typeShort": {
         "video": "VIDEO",
         "audio": "AUDIO",
-        "image": "IMAGEN"
+        "image": "IMAGEN",
+        "lottie": "LOTTIE"
       },
       "sortShort": {
         "name": "NOMBRE",
@@ -194,7 +222,9 @@
         "waveform": "Forma de onda"
       },
       "importFailed_one": "{{count}} archivo no se pudo importar. Revisa el archivo e inténtalo de nuevo.",
-      "importFailed_other": "{{count}} archivos no se pudieron importar. Revisa los archivos e inténtalo de nuevo."
+      "importFailed_other": "{{count}} archivos no se pudieron importar. Revisa los archivos e inténtalo de nuevo.",
+      "upscalingVideo": "Escalando vídeo",
+      "upscaleProgress": "Progreso del escalado"
     },
     "missingMedia": {
       "title": "Medios faltantes",
@@ -247,16 +277,20 @@
       "language": "Idioma",
       "model": "Modelo",
       "noLanguages": "No hay idiomas disponibles.",
+      "parakeetAutoDetects": "Detecta automáticamente {{count}} idiomas europeos.",
+      "parakeetChooseWhisper": "Para chino, japonés, coreano y otros idiomas, elige un modelo Whisper.",
       "progressAria": "Progreso de la transcripción",
       "quantization": "Cuantización",
       "refreshTitle": "Actualizar transcripción",
       "searchLanguages": "Buscar idiomas",
       "start": "Iniciar",
-      "stop": "Detener"
+      "stop": "Detener",
+      "whisperLanguageHint": "Elige el idioma hablado para mejorar la precisión o usa la detección automática."
     },
     "type": {
       "audio": "Audio",
       "image": "Imagen",
+      "lottie": "Lottie",
       "video": "Video"
     },
     "unsupportedCodec": {

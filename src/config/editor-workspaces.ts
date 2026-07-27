@@ -7,7 +7,7 @@
  * panel inside a workspace, and their per-workspace tweaks are persisted
  * by the editor store (`editor:workspaceLayout:<id>` in localStorage).
  */
-export type EditorWorkspaceId = 'edit' | 'color' | 'animate'
+export type EditorWorkspaceId = 'edit' | 'color' | 'motion'
 
 export type EditorSidebarTab =
   | 'media'
@@ -15,9 +15,10 @@ export type EditorSidebarTab =
   | 'shapes'
   | 'effects'
   | 'transitions'
+  | 'lottie'
   | 'transcript'
   | 'ai'
-export type EditorClipInspectorTab = 'video' | 'audio' | 'effects'
+export type EditorClipInspectorTab = 'video' | 'motion' | 'audio' | 'effects'
 
 /** The slice of editor UI state that a workspace controls. */
 export interface EditorWorkspaceLayout {
@@ -42,10 +43,7 @@ const EDITOR_WORKSPACE_PRESETS: Record<EditorWorkspaceId, EditorWorkspaceLayout>
     // the full column height by default.
     propertiesFullColumn: true,
   },
-  animate: {
-    // Animate renders its own imperative layout (small preview + thin strip +
-    // dopesheet + graph) and hides the media sidebar, so these panel hints are
-    // mostly vestigial — keep edit-like defaults for when the user leaves.
+  motion: {
     colorScopesOpen: false,
     clipInspectorTab: 'video',
     activeTab: 'media',
@@ -61,17 +59,18 @@ const EDITOR_WORKSPACE_PRESETS: Record<EditorWorkspaceId, EditorWorkspaceLayout>
 export const EDITOR_WORKSPACE_TIMELINE_SIZE: Record<EditorWorkspaceId, number | null> = {
   edit: null,
   color: 18,
-  // Animate replaces the resizable preview/timeline split with its own fixed
-  // layout (small preview + thin strip + keyframe editors), so the resizable
-  // timeline panel is never mounted — the density default is unused here.
-  animate: null,
+  // Motion reuses the standard split and swaps only the timeline surface.
+  motion: null,
 }
 
 const DEFAULT_EDITOR_WORKSPACE: EditorWorkspaceId = 'edit'
 
 export function normalizeEditorWorkspaceId(value: unknown): EditorWorkspaceId {
   if (value === 'color') return 'color'
-  if (value === 'animate') return 'animate'
+  // Animate and Compose were separate historical surfaces. Both now migrate
+  // into the single Motion workspace so persisted sessions cannot reopen the
+  // disconnected legacy editor.
+  if (value === 'animate' || value === 'motion' || value === 'compose') return 'motion'
   return DEFAULT_EDITOR_WORKSPACE
 }
 
@@ -81,10 +80,16 @@ const SIDEBAR_TABS: readonly EditorSidebarTab[] = [
   'shapes',
   'effects',
   'transitions',
+  'lottie',
   'transcript',
   'ai',
 ]
-const CLIP_INSPECTOR_TABS: readonly EditorClipInspectorTab[] = ['video', 'audio', 'effects']
+const CLIP_INSPECTOR_TABS: readonly EditorClipInspectorTab[] = [
+  'video',
+  'motion',
+  'audio',
+  'effects',
+]
 
 function isSidebarTab(value: unknown): value is EditorSidebarTab {
   return SIDEBAR_TABS.includes(value as EditorSidebarTab)

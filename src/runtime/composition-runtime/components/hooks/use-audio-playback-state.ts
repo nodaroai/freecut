@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo } from 'react'
-import { useSequenceContext } from '@/runtime/composition-runtime/deps/player'
+import {
+  useClockPlaybackRate,
+  useSequenceContext,
+} from '@/runtime/composition-runtime/deps/player'
 import { useVideoConfig, useIsPlaying } from '../../hooks/use-player-compat'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
@@ -20,6 +23,8 @@ interface AudioPlaybackState {
   frame: number
   fps: number
   playing: boolean
+  transportPlaybackRate: number
+  isPreviewScrubbing: boolean
   resolvedVolume: number
   resolvedPitchShiftSemitones: number
   resolvedAudioEqStages: ResolvedAudioEqSettings[]
@@ -54,6 +59,13 @@ export function useAudioPlaybackState({
   const frame = sequenceContext?.localFrame ?? 0
   const { fps } = useVideoConfig()
   const playing = useIsPlaying()
+  const transportPlaybackRate = useClockPlaybackRate()
+  // Subscribe to the scrub lifecycle, not the changing preview frame itself.
+  // Audio is silent while the pointer is down, so adapters can defer decode and
+  // graph allocation until the scrub settles on its final frame.
+  const hasPreviewFrame = usePlaybackStore((state) => state.previewFrame !== null)
+  const hasActiveGizmo = useGizmoStore((state) => state.activeGizmo !== null)
+  const isPreviewScrubbing = !playing && hasPreviewFrame && !hasActiveGizmo
 
   const itemPreview = useGizmoStore(useCallback((state) => state.preview?.[itemId], [itemId]))
   const preview = itemPreview?.properties
@@ -137,6 +149,8 @@ export function useAudioPlaybackState({
     frame,
     fps,
     playing,
+    transportPlaybackRate,
+    isPreviewScrubbing,
     resolvedVolume:
       itemVolume *
       masterBusGain *

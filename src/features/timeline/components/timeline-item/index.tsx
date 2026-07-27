@@ -95,6 +95,7 @@ interface TimelineItemProps {
   timelineDuration?: number
   trackLocked?: boolean
   trackHidden?: boolean
+  onHoverChange?: (itemId: string, hovered: boolean) => void
 }
 
 /**
@@ -115,11 +116,15 @@ export const TimelineItem = memo(function TimelineItem({
   timelineDuration = 30,
   trackLocked = false,
   trackHidden = false,
+  onHoverChange,
 }: TimelineItemProps) {
   perfMarkRender('TimelineItem')
   // Granular selector: only re-render when THIS item's selection state changes
   const isSelected = useSelectionStore(
     useCallback((s) => s.selectedItemIdSet.has(item.id), [item.id]),
+  )
+  const keyframesExpanded = useSelectionStore(
+    useCallback((s) => s.expandedKeyframeLanes.has(item.id), [item.id]),
   )
 
   // Granular selector: check if this item's media is broken (missing/permission denied)
@@ -149,7 +154,9 @@ export const TimelineItem = memo(function TimelineItem({
       (s) => {
         const captionClipIds = selectReplaceableCaptionClipIds(s)
         if (captionClipIds.has(item.id)) return true
-        return linkedItemsForCaptionOwnership.some((linkedItem) => captionClipIds.has(linkedItem.id))
+        return linkedItemsForCaptionOwnership.some((linkedItem) =>
+          captionClipIds.has(linkedItem.id),
+        )
       },
       [item.id, linkedItemsForCaptionOwnership],
     ),
@@ -168,7 +175,16 @@ export const TimelineItem = memo(function TimelineItem({
     () => itemKeyframes?.properties.filter((p) => p.keyframes.length > 0) ?? [],
     [itemKeyframes],
   )
-  const hasKeyframes = keyframedProperties.length > 0
+  const hasKeyframes =
+    keyframedProperties.length > 0 ||
+    (itemKeyframes?.vectorProperties?.some((property) => property.keyframes.length > 0) ?? false)
+  const hasMotion =
+    (item.motionModifiers?.some((modifier) => modifier.enabled) ?? false) ||
+    (item.motionLayers?.some((layer) => layer.enabled) ?? false) ||
+    (item.effects?.some((effect) => effect.audioPulse?.enabled) ?? false) ||
+    (item.type === 'text' &&
+      item.textMotion !== undefined &&
+      Object.values(item.textMotion).some((effect) => effect !== undefined))
   const caption = useCaptionDialogState({
     item,
     isBroken,
@@ -193,7 +209,6 @@ export const TimelineItem = memo(function TimelineItem({
 
   // Use refs for actions to avoid selector re-renders - read from store in callbacks
   const activeTool = useSelectionStore((s) => s.activeTool)
-  const isAnyGestureActive = useSelectionStore((s) => !!s.dragState?.isDragging)
 
   // Use ref for activeTool to avoid callback recreation on mode changes (prevents playback lag)
   const activeToolRef = useRef(activeTool)
@@ -652,7 +667,6 @@ export const TimelineItem = memo(function TimelineItem({
     handleDetectScenes,
     handleRemoveSilence,
     handleRemoveFillers,
-    isRemovingSilence,
     isRemovingFillers,
   } = useTimelineItemActions({
     item,
@@ -874,7 +888,6 @@ export const TimelineItem = memo(function TimelineItem({
           onGenerateAudioFromText: handleGenerateAudioFromText,
           canRemoveSilence:
             (item.type === 'video' || item.type === 'audio') && !!item.mediaId && !isBroken,
-          isRemovingSilence,
           onRemoveSilence: handleRemoveSilence,
           canRemoveFillers:
             (item.type === 'video' || item.type === 'audio') && !!item.mediaId && !isBroken,
@@ -913,6 +926,7 @@ export const TimelineItem = memo(function TimelineItem({
         <div
           ref={transformRef}
           data-item-id={item.id}
+          data-selected={isSelected ? 'true' : undefined}
           data-compact-clip={useCompactClipShell ? 'true' : undefined}
           className={cn(
             'absolute inset-y-px rounded overflow-visible group/timeline-item',
@@ -960,17 +974,21 @@ export const TimelineItem = memo(function TimelineItem({
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
           onMouseDown={handleMouseDown}
+          onMouseEnter={() => onHoverChange?.(item.id, true)}
           onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
+          onMouseLeave={() => {
+            handleMouseLeave()
+            onHoverChange?.(item.id, false)
+          }}
           onContextMenu={handleContextMenu}
           onDragEnter={handleEffectDragEnter}
           onDragOver={handleEffectDragOver}
           onDragLeave={handleEffectDragLeave}
           onDrop={handleEffectDrop}
         >
-          {/* Selection indicator - hidden during active gestures to reduce clutter */}
-          {isSelected && !trackLocked && !isAnyGestureActive && (
-            <div className="absolute inset-0 rounded pointer-events-none z-20 border border-primary" />
+          {/* Keep selection visible throughout drag so the moving cohort stays legible. */}
+          {isSelected && !trackLocked && (
+            <div className="timeline-selection-indicator absolute inset-0 rounded pointer-events-none z-20 border border-primary" />
           )}
 
           {isEffectDropTarget && (
@@ -1056,6 +1074,8 @@ export const TimelineItem = memo(function TimelineItem({
               /* Status indicators */
               <ClipIndicators
                 hasKeyframes={hasKeyframes}
+                keyframesExpanded={keyframesExpanded}
+                hasMotion={hasMotion}
                 currentSpeed={currentSpeed}
                 isReversed={item.isReversed === true}
                 reverseConformStatus={item.reverseConformStatus}
@@ -1065,6 +1085,14 @@ export const TimelineItem = memo(function TimelineItem({
                 hasMediaId={!!item.mediaId}
                 isMask={item.type === 'shape' ? (item.isMask ?? false) : false}
                 isShape={item.type === 'shape'}
+                onKeyframesToggle={() => {
+                  useSelectionStore.getState().toggleKeyframeLanes(item.id)
+                }}
+                onMotionOpen={() => {
+                  useSelectionStore.getState().selectItems([item.id])
+                  useEditorStore.getState().setRightSidebarOpen(true)
+                  useEditorStore.getState().setClipInspectorTab('motion')
+                }}
               />
             )}
           </div>
@@ -1262,8 +1290,6 @@ export const TimelineItem = memo(function TimelineItem({
         toolOperationOverlay={toolOperationOverlay}
         activeEdges={activeEdges}
         transitionDropGhost={transitionDropGhost}
-        isAltDrag={isAltDrag}
-        isDragging={isDragging}
         left={left}
         width={width}
         pointerHint={pointerHint}

@@ -5,11 +5,13 @@ import { useKeyframesStore } from '../keyframes-store'
 import { useMarkersStore } from '../markers-store'
 import { useTimelineSettingsStore } from '../timeline-settings-store'
 import { useCompositionsStore } from '../compositions-store'
+import { useSequencesStore } from '../sequences-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useProjectStore } from '@/features/timeline/deps/projects'
 import { updateProject } from '@/infrastructure/storage'
 import { createLogger } from '@/shared/logging/logger'
-import { getEffectiveTimelineMaxFrame, sanitizeInOutPoints } from '../../utils/in-out-points'
+import { sanitizeInOutPoints } from '../../utils/in-out-points'
+import { getActiveInOutMaxFrame } from '../in-out-bound'
 
 const logger = createLogger('TimelineSnapshot')
 
@@ -101,6 +103,7 @@ export function captureSnapshot(): TimelineSnapshot {
     keyframes: keyframesState.keyframes,
     markers: markersState.markers,
     compositions: compositionsState.compositions,
+    topLevelSequenceIds: useSequencesStore.getState().topLevelSequenceIds,
     inPoint: markersState.inPoint,
     outPoint: markersState.outPoint,
     fps: settingsState.fps,
@@ -130,18 +133,22 @@ export function restoreSnapshot(snapshot: TimelineSnapshot): void {
   // Restore keyframes
   useKeyframesStore.getState().setKeyframes(snapshot.keyframes)
 
+  // Restore compositions + their standalone-timeline tab membership together,
+  // so undoing a sequence creation removes the tab id instead of dangling it.
+  // Ahead of the in/out sanitize below: inside a composition the range is bounded
+  // by that comp's canvas, so its restored duration has to be in place first.
+  useCompositionsStore.getState().setCompositions(snapshot.compositions)
+  useSequencesStore.getState().setTopLevelSequenceIds(snapshot.topLevelSequenceIds)
+
   // Restore markers and in/out points
   useMarkersStore.getState().setMarkers(snapshot.markers)
   const sanitizedInOutPoints = sanitizeInOutPoints({
     inPoint: snapshot.inPoint,
     outPoint: snapshot.outPoint,
-    maxFrame: getEffectiveTimelineMaxFrame(snapshot.items, snapshot.fps),
+    maxFrame: getActiveInOutMaxFrame(snapshot.items, snapshot.fps),
   })
   useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint)
   useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint)
-
-  // Restore compositions
-  useCompositionsStore.getState().setCompositions(snapshot.compositions)
 
   // Restore settings
   useTimelineSettingsStore.getState().setFps(snapshot.fps)
@@ -170,6 +177,7 @@ export function snapshotsEqual(a: TimelineSnapshot, b: TimelineSnapshot): boolea
     a.keyframes === b.keyframes &&
     a.markers === b.markers &&
     a.compositions === b.compositions &&
+    a.topLevelSequenceIds === b.topLevelSequenceIds &&
     a.inPoint === b.inPoint &&
     a.outPoint === b.outPoint &&
     a.fps === b.fps &&

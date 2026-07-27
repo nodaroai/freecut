@@ -19,11 +19,13 @@ import { applyMasks, buildPreparedMask, type MaskCanvasSettings } from '../canva
 import {
   getItemRenderTimelineSpan,
   getRenderTimelineSourceStart,
+  resolveCompositionSourceFrame,
   type RenderTimelineSpan,
 } from '../render-span'
 import type { CanvasSettings, ItemRenderContext, ItemTransform, SubCompRenderData } from './types'
 import { log } from './shared'
-import { calculateMediaDrawDimensions } from './media-draw'
+import { drawContainedMediaSource } from './media-draw'
+import { resolveSubCompRenderDataForInstance } from './composition-instance'
 
 /**
  * Render a CompositionItem by rendering all its sub-composition items to an
@@ -40,7 +42,7 @@ export async function renderCompositionItem(
   rctx: ItemRenderContext,
   renderSpan?: RenderTimelineSpan,
 ): Promise<void> {
-  const subData = rctx.subCompRenderData.get(item.compositionId)
+  const subData = resolveSubCompRenderDataForInstance(item, rctx)
   if (!subData) {
     if (frame === 0) {
       log.warn('renderCompositionItem: no subCompRenderData found', {
@@ -57,7 +59,13 @@ export async function renderCompositionItem(
   // it tells us how many frames into the sub-comp to start playing.
   const effectiveRenderSpan = renderSpan ?? getItemRenderTimelineSpan(item)
   const sourceOffset = getRenderTimelineSourceStart(item, effectiveRenderSpan)
-  const localFrame = frame - effectiveRenderSpan.from + sourceOffset
+  const localFrame = resolveCompositionSourceFrame(
+    item,
+    frame,
+    rctx.fps,
+    subData.fps,
+    effectiveRenderSpan,
+  )
   if (localFrame < 0 || localFrame >= subData.durationInFrames) {
     if (frame < 5) {
       log.warn('renderCompositionItem: localFrame out of range', {
@@ -99,11 +107,7 @@ export async function renderCompositionItem(
     // Use a scoped render context with sub-canvas settings so that
     // rotation centers, clipping, and draw dimensions are relative to the
     // sub-composition canvas, not the main canvas.
-    const subRctx: ItemRenderContext = {
-      ...rctx,
-      fps: subData.fps,
-      canvasSettings: subCanvasSettings,
-    }
+    const subRctx = createSubCompositionRenderContext(rctx, subData, subCanvasSettings)
 
     // Resolve all active masks up front so each item can be masked only by
     // shapes on higher tracks.
@@ -112,6 +116,7 @@ export async function renderCompositionItem(
       bitmapMask?: OffscreenCanvas
       inverted: boolean
       feather: number
+      opacity: number
       maskType: 'clip' | 'alpha'
       trackOrder: number
     }> = []
@@ -173,7 +178,7 @@ export async function renderCompositionItem(
         }
         // Adjustment layers are applied via getAdjustmentLayerEffects; they
         // are not renderable visible content themselves.
-        if (subItem.type === 'adjustment') {
+        if (subItem.type === 'adjustment' || subItem.type === 'controller') {
           continue
         }
 
@@ -286,24 +291,50 @@ export async function renderCompositionItem(
 
     subCtx.drawImage(subContentCanvas, 0, 0)
 
-    // Draw the sub-composition result onto the main canvas at the CompositionItem's position
-    const drawDimensions = calculateMediaDrawDimensions(
+    // Crop the flattened sub-composition in wrapper space before parent-level
+    // effects, masks, and corner pinning are applied.
+    drawContainedMediaSource(
+      ctx,
+      subCanvas,
       subCanvas.width,
       subCanvas.height,
       transform,
       rctx.canvasSettings,
-    )
-
-    ctx.drawImage(
-      subCanvas,
-      drawDimensions.x,
-      drawDimensions.y,
-      drawDimensions.width,
-      drawDimensions.height,
+      item.crop,
+      undefined,
+      rctx.canvasPool,
+      'fill',
     )
   } finally {
     rctx.canvasPool.release(subContentCanvas)
     rctx.canvasPool.release(subCanvas)
+  }
+}
+
+/**
+ * Scope item-property animation lookups to the composition currently being
+ * rendered. Root preview keyframes do not contain the keyframes authored on
+ * items inside a compound clip.
+ */
+export function createSubCompositionRenderContext(
+  rctx: ItemRenderContext,
+  subData: SubCompRenderData,
+  canvasSettings: CanvasSettings,
+): ItemRenderContext {
+  const itemsById =
+    subData.itemsById ??
+    new Map(
+      subData.sortedTracks.flatMap((track) => track.items.map((item) => [item.id, item] as const)),
+    )
+  canvasSettings.getExpressionItem = (itemId) => itemsById.get(itemId)
+  canvasSettings.getExpressionKeyframes = (itemId) => subData.keyframesMap.get(itemId)
+  return {
+    ...rctx,
+    fps: subData.fps,
+    canvasSettings,
+    keyframesMap: subData.keyframesMap,
+    getCurrentKeyframes: (itemId) =>
+      subData.keyframesMap.get(itemId) ?? rctx.getCurrentKeyframes?.(itemId),
   }
 }
 
@@ -351,6 +382,7 @@ export function getActiveSubCompMasks(
   bitmapMask?: OffscreenCanvas
   inverted: boolean
   feather: number
+  opacity: number
   maskType: 'clip' | 'alpha'
   trackOrder: number
 }> {
@@ -366,6 +398,7 @@ export function getActiveSubCompMasks(
     bitmapMask?: OffscreenCanvas
     inverted: boolean
     feather: number
+    opacity: number
     maskType: 'clip' | 'alpha'
     trackOrder: number
   }> = []

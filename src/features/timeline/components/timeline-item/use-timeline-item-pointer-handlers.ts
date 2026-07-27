@@ -8,7 +8,7 @@ import { useSelectionStore } from '@/shared/state/selection'
 import { useTimelineStore } from '../../stores/timeline-store'
 import { useTransitionsStore } from '../../stores/transitions-store'
 import { useMarkersStore } from '../../stores/markers-store'
-import { useCompositionNavigationStore } from '../../stores/composition-navigation-store'
+import { openComposition } from '../../stores/actions/composition-actions'
 import { frameToPixelsNow, pixelsToFrameNow } from '../../utils/zoom-conversions'
 import { getVisibleTrackIds } from '../../utils/group-utils'
 import { getFilteredItemSnapEdges } from '../../utils/timeline-snap-utils'
@@ -32,6 +32,7 @@ import {
 import { isRateStretchableItem } from '../../hooks/use-rate-stretch'
 import { getTimelineClipLabelRowHeightPx } from './hover-layout'
 import { shouldSuppressTimelineItemClickAfterDrag } from './post-drag-click-guard'
+import { emitUiSound } from '@/shared/ui/ui-sound'
 import type { useTimelineDrag } from '../../hooks/use-timeline-drag'
 import type { useTimelineTrim } from '../../hooks/use-timeline-trim'
 import type { useRateStretch } from '../../hooks/use-rate-stretch'
@@ -104,7 +105,10 @@ export function useTimelineItemPointerHandlers({
     (e: React.MouseEvent) => {
       e.stopPropagation()
 
-      if (trackLocked) return
+      if (trackLocked) {
+        emitUiSound('error')
+        return
+      }
       if (shouldSuppressTimelineItemClickAfterDrag(activeToolRef.current, dragWasActiveRef.current))
         return
 
@@ -168,6 +172,7 @@ export function useTimelineItemPointerHandlers({
       }
 
       // Selection tool: handle item selection
+      emitUiSound('select')
       const { selectedItemIds, selectItems } = useSelectionStore.getState()
       const items = useTimelineStore.getState().items
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
@@ -199,14 +204,13 @@ export function useTimelineItemPointerHandlers({
       if (trackLocked) return
       if (activeToolRef.current === 'razor') return
 
-      // Compound clip wrappers: enter the sub-composition
+      // Compound clip wrappers: open the sub-composition. A sequence tab
+      // switches to its tab (its own root); a plain compound clip drills in.
       if (
         (item.type === 'composition' || (item.type === 'audio' && item.compositionId)) &&
         item.compositionId
       ) {
-        useCompositionNavigationStore
-          .getState()
-          .enterComposition(item.compositionId, item.label, item.id)
+        openComposition(item.compositionId, item.label, item.id)
         return
       }
 

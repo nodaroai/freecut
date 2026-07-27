@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, memo } from 'react'
+import { useEffect, useCallback, memo, useLayoutEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,24 +27,21 @@ import {
   FlagOff,
   Link2,
   Volume2,
+  Diamond,
 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { formatHotkeyBinding } from '@/config/hotkeys'
 import { useTimelineZoom } from '../hooks/use-timeline-zoom'
 import { useTimelineStore } from '../stores/timeline-store'
 import { useTimelineCommandStore } from '../stores/timeline-command-store'
+import { useZoomStore } from '../stores/zoom-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
-import {
-  ZOOM_FRICTION,
-  ZOOM_MIN_VELOCITY,
-  ZOOM_MIN,
-  ZOOM_MAX,
-  SLIP_SLIDE_TOOLS_ENABLED,
-} from '../constants'
+import { ZOOM_MIN, ZOOM_MAX, SLIP_SLIDE_TOOLS_ENABLED } from '../constants'
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 import { useResolvedHotkeys } from '@/features/timeline/deps/settings'
+import { MicRecordControl } from './mic-record-control'
 
 interface TimelineHeaderProps {
   onZoomChange?: (newZoom: number) => void
@@ -63,6 +60,263 @@ function TrimEditIcon({ className }: { className?: string }) {
   )
 }
 
+const InlineKeyframesToggle = memo(function InlineKeyframesToggle({
+  isOpen,
+  onToggle,
+}: {
+  isOpen: boolean
+  onToggle: () => void
+}) {
+  const { t } = useTranslation()
+  const label = t(
+    isOpen ? 'timeline.keyframeEditor.editLane.hide' : 'timeline.keyframeEditor.editLane.show',
+    { defaultValue: isOpen ? 'Hide keyframe panel' : 'Show keyframe panel' },
+  )
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      style={{
+        width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+        height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+      }}
+      className={isOpen ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}
+      onClick={onToggle}
+      aria-label={label}
+      aria-pressed={isOpen}
+      data-tooltip={label}
+    >
+      <Diamond className="h-3.5 w-3.5" />
+    </Button>
+  )
+})
+
+function isDifferentSliderValue(previousValue: number | null, nextValue: number): boolean {
+  return previousValue === null || Math.abs(previousValue - nextValue) > 0.000001
+}
+
+function isSameZoomLevel(left: number, right: number): boolean {
+  const tolerance = Math.max(0.000001, Math.max(Math.abs(left), Math.abs(right)) * 0.0001)
+  return Math.abs(left - right) <= tolerance
+}
+
+function blurActiveElement(): void {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+}
+
+const TimelineZoomControls = memo(function TimelineZoomControls({
+  onZoomChange,
+  onZoomIn,
+  onZoomOut,
+  onZoomToFit,
+}: TimelineHeaderProps) {
+  const { t } = useTranslation()
+  const { zoomLevel, zoomIn, zoomOut, setZoomImmediate } = useTimelineZoom()
+  const sliderRef = useRef<HTMLSpanElement>(null)
+  const sliderRafRef = useRef<number | null>(null)
+  const pendingSliderValueRef = useRef<number | null>(null)
+  const latestSliderValueRef = useRef<number | null>(null)
+  const sliderInteractionRef = useRef<'idle' | 'dragging' | 'awaiting-zoom'>('idle')
+  const sliderCommitBaseZoomRef = useRef<number | null>(null)
+  const btnSize = {
+    width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+    height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
+  } as const
+
+  const applyZoom = useCallback(
+    (newZoom: number) => {
+      const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom))
+      if (onZoomChange) {
+        onZoomChange(clampedZoom)
+      } else {
+        setZoomImmediate(clampedZoom)
+      }
+    },
+    [onZoomChange, setZoomImmediate],
+  )
+
+  const sliderToZoom = useCallback(
+    (sliderValue: number) => ZOOM_MIN * Math.pow(ZOOM_MAX / ZOOM_MIN, sliderValue),
+    [],
+  )
+
+  const zoomToSlider = useCallback(
+    (zoom: number) => Math.log(zoom / ZOOM_MIN) / Math.log(ZOOM_MAX / ZOOM_MIN),
+    [],
+  )
+
+  const renderSliderPreview = useCallback((sliderValue: number) => {
+    const root = sliderRef.current
+    const thumb = root?.querySelector<HTMLElement>('[role="slider"]')
+    const thumbPositioner = thumb?.parentElement
+    const track = root?.firstElementChild as HTMLElement | null
+    const range = track?.firstElementChild as HTMLElement | null
+    if (!thumb || !thumbPositioner || !range) return
+
+    const value = Math.max(0, Math.min(1, sliderValue))
+    const percentage = value * 100
+    const thumbOffset = 8 - value * 16
+    thumbPositioner.style.left = `calc(${percentage}% + ${thumbOffset}px)`
+    range.style.left = '0%'
+    range.style.right = `${100 - percentage}%`
+    thumb.setAttribute('aria-valuenow', String(value))
+  }, [])
+
+  const flushSliderChange = useCallback(() => {
+    sliderRafRef.current = null
+    const sliderValue = pendingSliderValueRef.current
+    pendingSliderValueRef.current = null
+    if (sliderValue === null) return
+    applyZoom(sliderToZoom(sliderValue))
+  }, [applyZoom, sliderToZoom])
+
+  useLayoutEffect(() => {
+    const sliderPreviewValue = latestSliderValueRef.current
+    if (sliderPreviewValue === null) return
+    if (sliderInteractionRef.current === 'dragging') return
+
+    const commitBaseZoom = sliderCommitBaseZoomRef.current
+    if (commitBaseZoom !== null && isSameZoomLevel(zoomLevel, commitBaseZoom)) return
+
+    // The first store update after release owns the controlled value even when
+    // another zoom gesture superseded the slider's queued target.
+    latestSliderValueRef.current = null
+    sliderCommitBaseZoomRef.current = null
+    sliderInteractionRef.current = 'idle'
+  }, [zoomLevel])
+
+  useEffect(() => {
+    return () => {
+      if (sliderRafRef.current !== null) {
+        cancelAnimationFrame(sliderRafRef.current)
+      }
+    }
+  }, [])
+
+  const handleSliderChange = useCallback(
+    (values: number[]) => {
+      const sliderValue = values[0] ?? 0.5
+      sliderInteractionRef.current = 'dragging'
+      sliderCommitBaseZoomRef.current = null
+      latestSliderValueRef.current = sliderValue
+      renderSliderPreview(sliderValue)
+      if (onZoomChange) {
+        applyZoom(sliderToZoom(sliderValue))
+        return
+      }
+
+      pendingSliderValueRef.current = sliderValue
+      if (sliderRafRef.current === null) {
+        sliderRafRef.current = requestAnimationFrame(flushSliderChange)
+      }
+    },
+    [applyZoom, flushSliderChange, onZoomChange, renderSliderPreview, sliderToZoom],
+  )
+
+  const commitSliderZoom = useCallback(
+    (sliderValue: number, previousSliderValue: number | null) => {
+      if (onZoomChange) {
+        if (isDifferentSliderValue(previousSliderValue, sliderValue)) {
+          applyZoom(sliderToZoom(sliderValue))
+        }
+        return
+      }
+
+      if (
+        pendingSliderValueRef.current === null &&
+        isDifferentSliderValue(previousSliderValue, sliderValue)
+      ) {
+        pendingSliderValueRef.current = sliderValue
+      }
+      if (sliderRafRef.current !== null) {
+        cancelAnimationFrame(sliderRafRef.current)
+        sliderRafRef.current = null
+      }
+      flushSliderChange()
+    },
+    [applyZoom, flushSliderChange, onZoomChange, sliderToZoom],
+  )
+
+  const handleSliderCommit = useCallback(
+    (values: number[]) => {
+      const sliderValue = values[0] ?? 0.5
+      const latestSliderValue = latestSliderValueRef.current
+      sliderInteractionRef.current = 'awaiting-zoom'
+      sliderCommitBaseZoomRef.current = useZoomStore.getState().level
+      latestSliderValueRef.current = sliderValue
+      renderSliderPreview(sliderValue)
+      commitSliderZoom(sliderValue, latestSliderValue)
+      blurActiveElement()
+    },
+    [commitSliderZoom, renderSliderPreview],
+  )
+
+  const controlledSliderValue = zoomToSlider(zoomLevel)
+  const sliderCommitBaseZoom = sliderCommitBaseZoomRef.current
+  const shouldRenderSliderPreview =
+    latestSliderValueRef.current !== null &&
+    (sliderInteractionRef.current === 'dragging' ||
+      (sliderInteractionRef.current === 'awaiting-zoom' &&
+        sliderCommitBaseZoom !== null &&
+        isSameZoomLevel(zoomLevel, sliderCommitBaseZoom)))
+
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        style={btnSize}
+        onClick={onZoomOut ?? zoomOut}
+        aria-label={t('timeline.header.zoomOut')}
+        data-tooltip={t('timeline.header.zoomOutTooltip')}
+      >
+        <ZoomOut className="w-3.5 h-3.5" />
+      </Button>
+
+      <Slider
+        ref={sliderRef}
+        value={[
+          shouldRenderSliderPreview
+            ? (latestSliderValueRef.current ?? controlledSliderValue)
+            : controlledSliderValue,
+        ]}
+        onValueChange={handleSliderChange}
+        onValueCommit={handleSliderCommit}
+        min={0}
+        max={1}
+        step={0.005}
+        className="w-24"
+        aria-label={t('timeline.header.zoomSlider')}
+      />
+
+      <Button
+        variant="ghost"
+        size="icon"
+        style={btnSize}
+        onClick={onZoomIn ?? zoomIn}
+        aria-label={t('timeline.header.zoomIn')}
+        data-tooltip={t('timeline.header.zoomInTooltip')}
+      >
+        <ZoomIn className="w-3.5 h-3.5" />
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        style={btnSize}
+        onClick={onZoomToFit}
+        aria-label={t('timeline.header.zoomToFit')}
+        data-tooltip={t('timeline.header.zoomToFitTooltip')}
+      >
+        <Maximize2 className="w-3.5 h-3.5" />
+      </Button>
+    </div>
+  )
+})
+
 /**
  * Timeline Toolbar Component
  *
@@ -80,7 +334,6 @@ export const TimelineHeader = memo(function TimelineHeader({
 }: TimelineHeaderProps) {
   const { t } = useTranslation()
   const hotkeys = useResolvedHotkeys()
-  const { zoomLevel, zoomIn, zoomOut, setZoomImmediate } = useTimelineZoom()
   const snapEnabled = useTimelineStore((s) => s.snapEnabled)
   const toggleSnap = useTimelineStore((s) => s.toggleSnap)
   const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
@@ -100,6 +353,8 @@ export const TimelineHeader = memo(function TimelineHeader({
   const activeTool = useSelectionStore((s) => s.activeTool)
   const setActiveTool = useSelectionStore((s) => s.setActiveTool)
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId)
+  const inlineKeyframesOpen = useSelectionStore((s) => s.editKeyframePanelOpen)
+  const toggleEditKeyframePanel = useSelectionStore((s) => s.toggleEditKeyframePanel)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
   const linkedSelectionEnabled = useEditorStore((s) => s.linkedSelectionEnabled)
   const setLinkedSelectionEnabled = useEditorStore((s) => s.setLinkedSelectionEnabled)
@@ -107,128 +362,12 @@ export const TimelineHeader = memo(function TimelineHeader({
   const canRedo = useTimelineCommandStore((s) => s.canRedo)
   const undoLabel = useTimelineCommandStore((s) => s.getUndoLabel())
   const redoLabel = useTimelineCommandStore((s) => s.getRedoLabel())
-
   const SlipSlideFlyoutIcon = activeTool === 'slide' ? BetweenHorizontalEnd : ArrowRightLeft
 
   const btnSize = {
     width: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
     height: EDITOR_LAYOUT_CSS_VALUES.toolbarButtonSize,
   } as const
-
-  // Momentum state for zoom slider
-  const zoomVelocityRef = useRef(0)
-  const lastZoomValueRef = useRef(zoomLevel)
-  const lastZoomTimeRef = useRef(0)
-  const momentumIdRef = useRef<number | null>(null)
-  const isDraggingRef = useRef(false)
-  const zoomLevelRef = useRef(zoomLevel)
-  zoomLevelRef.current = zoomLevel
-
-  // Apply zoom with bounds checking
-  const applyZoom = useCallback(
-    (newZoom: number) => {
-      const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom))
-      if (onZoomChange) {
-        onZoomChange(clampedZoom)
-      } else {
-        // Fallback when timeline-content's anchored RAF path isn't wired up
-        // (mainly tests). Use immediate so slider drag doesn't sit behind the
-        // 120ms throttle that setZoom imposes.
-        setZoomImmediate(clampedZoom)
-      }
-      return clampedZoom
-    },
-    [onZoomChange, setZoomImmediate],
-  )
-
-  // Momentum loop for zoom slider
-  const startZoomMomentum = useCallback(() => {
-    if (momentumIdRef.current !== null) {
-      cancelAnimationFrame(momentumIdRef.current)
-    }
-
-    const momentumLoop = () => {
-      if (Math.abs(zoomVelocityRef.current) > ZOOM_MIN_VELOCITY) {
-        const newZoom = zoomLevelRef.current + zoomVelocityRef.current
-        const clampedZoom = applyZoom(newZoom)
-
-        // Stop momentum if we hit bounds
-        if (clampedZoom <= ZOOM_MIN || clampedZoom >= ZOOM_MAX) {
-          zoomVelocityRef.current = 0
-          momentumIdRef.current = null
-          return
-        }
-
-        zoomVelocityRef.current *= ZOOM_FRICTION
-        momentumIdRef.current = requestAnimationFrame(momentumLoop)
-      } else {
-        zoomVelocityRef.current = 0
-        momentumIdRef.current = null
-      }
-    }
-
-    momentumIdRef.current = requestAnimationFrame(momentumLoop)
-  }, [applyZoom])
-
-  // Convert between linear slider position (0-1) and logarithmic zoom level
-  // This gives finer control at low zoom levels
-  const sliderToZoom = useCallback((sliderValue: number) => {
-    // Map 0-1 to log scale: ZOOM_MIN to ZOOM_MAX
-    // Using exponential: zoom = min * (max/min)^slider
-    return ZOOM_MIN * Math.pow(ZOOM_MAX / ZOOM_MIN, sliderValue)
-  }, [])
-
-  const zoomToSlider = useCallback((zoom: number) => {
-    // Inverse of sliderToZoom: slider = log(zoom/min) / log(max/min)
-    return Math.log(zoom / ZOOM_MIN) / Math.log(ZOOM_MAX / ZOOM_MIN)
-  }, [])
-
-  // Handle slider value change (while dragging)
-  const handleSliderChange = useCallback(
-    (values: number[]) => {
-      const sliderValue = values[0] ?? 0.5
-      const newZoom = sliderToZoom(sliderValue)
-      const now = performance.now()
-      const timeDelta = now - lastZoomTimeRef.current
-
-      // Calculate velocity based on change over time (in zoom space, not slider space)
-      if (timeDelta > 0 && timeDelta < 100) {
-        const valueDelta = newZoom - lastZoomValueRef.current
-        zoomVelocityRef.current = (valueDelta / timeDelta) * 16 // Normalize to ~60fps
-      }
-
-      lastZoomValueRef.current = newZoom
-      lastZoomTimeRef.current = now
-      isDraggingRef.current = true
-      // Downstream scheduleZoomApply (timeline-content) already RAF-coalesces
-      // writes to the zoom store, so a second RAF here would only add a frame
-      // of input latency without preventing extra work.
-      applyZoom(newZoom)
-    },
-    [applyZoom, sliderToZoom],
-  )
-
-  // Handle slider release - start momentum
-  const handleSliderCommit = useCallback(() => {
-    isDraggingRef.current = false
-    // Only start momentum if there's meaningful velocity
-    if (Math.abs(zoomVelocityRef.current) > ZOOM_MIN_VELOCITY) {
-      startZoomMomentum()
-    }
-    // Blur slider to release focus for keyboard shortcuts (play/pause)
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur()
-    }
-  }, [startZoomMomentum])
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (momentumIdRef.current !== null) {
-        cancelAnimationFrame(momentumIdRef.current)
-      }
-    }
-  }, [])
 
   const handleUndo = () => {
     useTimelineStore.temporal.getState().undo()
@@ -505,6 +644,11 @@ export const TimelineHeader = memo(function TimelineHeader({
 
           <Separator orientation="vertical" className="h-5 mx-1.5" />
 
+          {/* Microphone voiceover */}
+          <MicRecordControl />
+
+          <Separator orientation="vertical" className="h-5 mx-1.5" />
+
           {/* Snap Toggle */}
           <Button
             variant="ghost"
@@ -549,6 +693,8 @@ export const TimelineHeader = memo(function TimelineHeader({
 
           <Separator orientation="vertical" className="h-5 mx-1.5" />
 
+          <InlineKeyframesToggle isOpen={inlineKeyframesOpen} onToggle={toggleEditKeyframePanel} />
+
           <Button
             variant="ghost"
             size="icon"
@@ -575,64 +721,12 @@ export const TimelineHeader = memo(function TimelineHeader({
         </div>
       </div>
 
-      {/* Right: Zoom Controls */}
-      <div className="flex items-center justify-end gap-1.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          style={btnSize}
-          onClick={() => {
-            if (onZoomOut) {
-              onZoomOut()
-            } else {
-              zoomOut()
-            }
-          }}
-          aria-label={t('timeline.header.zoomOut')}
-          data-tooltip={t('timeline.header.zoomOutTooltip')}
-        >
-          <ZoomOut className="w-3.5 h-3.5" />
-        </Button>
-
-        <Slider
-          value={[zoomToSlider(zoomLevel)]}
-          onValueChange={handleSliderChange}
-          onValueCommit={handleSliderCommit}
-          min={0}
-          max={1}
-          step={0.005}
-          className="w-24"
-          aria-label={t('timeline.header.zoomSlider')}
-        />
-
-        <Button
-          variant="ghost"
-          size="icon"
-          style={btnSize}
-          onClick={() => {
-            if (onZoomIn) {
-              onZoomIn()
-            } else {
-              zoomIn()
-            }
-          }}
-          aria-label={t('timeline.header.zoomIn')}
-          data-tooltip={t('timeline.header.zoomInTooltip')}
-        >
-          <ZoomIn className="w-3.5 h-3.5" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          style={btnSize}
-          onClick={onZoomToFit}
-          aria-label={t('timeline.header.zoomToFit')}
-          data-tooltip={t('timeline.header.zoomToFitTooltip')}
-        >
-          <Maximize2 className="w-3.5 h-3.5" />
-        </Button>
-      </div>
+      <TimelineZoomControls
+        onZoomChange={onZoomChange}
+        onZoomIn={onZoomIn}
+        onZoomOut={onZoomOut}
+        onZoomToFit={onZoomToFit}
+      />
     </div>
   )
 })

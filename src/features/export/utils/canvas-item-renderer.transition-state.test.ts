@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { LottieExportProvider } from '@/infrastructure/lottie/lottie-frame-provider'
 import '@/shared/timeline/transitions'
 import type { ItemEffect } from '@/types/effects'
 import type { ItemKeyframes } from '@/types/keyframe'
@@ -891,6 +892,7 @@ describe('renderTransitionToGpuTexture', () => {
       mediabunnyFailureCountByItem: new Map(),
       imageElements: new Map(),
       gifFramesMap: new Map(),
+      lottieProvider: new LottieExportProvider(),
       keyframesMap: new Map(),
       adjustmentLayers: [],
       subCompRenderData: new Map(),
@@ -1571,6 +1573,7 @@ describe('renderTransitionToGpuTexture', () => {
     } as ShapeItem
     const rightClip = createSubCompositionTransitionClip({
       compositionId: 'sub-comp-1',
+      crop: { left: 0.25 },
     })
     const activeTransition = createActiveTransition({ leftClip, rightClip, progress: 0.5 })
     const leftTexture = createMockGpuTexture()
@@ -1731,6 +1734,7 @@ describe('renderTransitionToGpuTexture', () => {
         ],
       ]),
       gifFramesMap: new Map(),
+      lottieProvider: new LottieExportProvider(),
       keyframesMap: new Map(),
       adjustmentLayers: [],
       subCompRenderData: new Map([
@@ -1930,7 +1934,8 @@ describe('renderTransitionToGpuTexture', () => {
       expect.objectContaining({
         sourceWidth: 640,
         sourceHeight: 360,
-        destRect: { x: 640, y: 360, width: 640, height: 360 },
+        sourceRect: { x: 160, y: 0, width: 480, height: 360 },
+        destRect: { x: 800, y: 360, width: 480, height: 360 },
       }),
     )
     expect(atlasTextTexture.destroy).not.toHaveBeenCalled()
@@ -2406,8 +2411,10 @@ describe('renderTransitionToGpuTexture', () => {
     expect(pathParams?.pathVertices).toEqual(expect.any(Array))
     expect(pathParams?.pathVertices?.length).toBeGreaterThan(3)
     expect(pathParams?.pathVertices?.length).toBeLessThanOrEqual(MAX_GPU_SHAPE_PATH_VERTICES)
-    expect(pathParams?.pathVertices?.[0]).toEqual([-320, -180])
-    expect(pathParams?.pathVertices?.at(-1)).toEqual([0, 180])
+    expect(pathParams?.pathVertices?.[0]).toEqual([-320, -180, 0])
+    expect(pathParams?.pathVertices?.at(-1)?.slice(0, 2)).toEqual([0, 180])
+    expect(pathParams?.pathVertices?.at(-1)?.[2]).toBeGreaterThan(0)
+    expect(pathParams?.pathVertices?.at(-1)?.[2]).toBeLessThan(1)
     expect(gpuTransitionPipeline.renderTexturesToTexture).toHaveBeenCalledWith(
       'iris',
       leftTexture,

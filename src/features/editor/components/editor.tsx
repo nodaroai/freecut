@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, memo, lazy, Suspense } from 'react'
-import { useNavigate, useRouter } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { createLogger } from '@/shared/logging/logger'
+import { createLogger, createOperationId } from '@/shared/logging/logger'
 import { i18n } from '@/i18n'
 import type { ImperativePanelHandle } from 'react-resizable-panels'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -10,13 +10,11 @@ import { Toolbar } from './toolbar'
 import { MediaSidebar } from './media-sidebar'
 import { PropertiesSidebar } from './properties-sidebar'
 import { PreviewArea } from './preview-area'
-import { ColorGradingDock } from './color-grading-dock'
-import { ColorTimelineNavigator } from './color-timeline-navigator'
-import { AnimateLayout } from './animate-workspace/animate-layout'
+import { MotionPreviewArea, MotionTimelineDock } from './compose-workspace/compose-layout'
 import { InteractionLockRegion } from './interaction-lock-region'
 import { AudioMeterPanel } from './audio-meter-panel'
 import {
-  Timeline,
+  importTimeline,
   importBentoLayoutDialog,
   importFillerRemovalDialog,
   importReverseConformDialog,
@@ -56,7 +54,6 @@ import {
   createProjectUpgradeBackup,
   formatProjectUpgradeBackupName,
 } from '@/features/editor/deps/projects'
-import { ProjectUpgradeDialog } from './project-upgrade-dialog'
 import { useClearKeyframesDialogStore } from '@/shared/state/clear-keyframes-dialog'
 import { useTtsGenerateDialogStore } from '@/shared/state/tts-generate-dialog'
 import { useProjectMediaMatchDialogStore } from '@/shared/state/project-media-match-dialog'
@@ -67,7 +64,17 @@ import {
   useEmbeddedSubtitlePickerStore,
   useSubtitleScanProgressStore,
 } from '@/features/editor/deps/media-library'
+import { IoDragReadout } from '@/shared/timeline/io-range'
 const logger = createLogger('Editor')
+const LazyTimeline = lazy(() => importTimeline().then(({ Timeline }) => ({ default: Timeline })))
+const LazyColorGradingDock = lazy(() =>
+  import('./color-grading-dock').then(({ ColorGradingDock }) => ({ default: ColorGradingDock })),
+)
+const LazyColorTimelineNavigator = lazy(() =>
+  import('./color-timeline-navigator').then(({ ColorTimelineNavigator }) => ({
+    default: ColorTimelineNavigator,
+  })),
+)
 const EDITOR_PROJECT_ROUTE_ID = '/editor/$projectId'
 
 function workspaceTimelineSizeStorageKey(workspace: EditorWorkspaceId): string {
@@ -179,64 +186,104 @@ interface EditorProps {
 }
 
 /**
+ * Tracks the in-flight (or completed) upgrade-backup job per project. Module-
+ * scoped so it survives StrictMode's double effect invocation and any remount —
+ * the async create can't be cancelled once started, so without this the
+ * auto-backup would run twice and create duplicate backups. Keyed by projectId
+ * so a re-running effect for the same still-pending project reuses the existing
+ * job and can transition out of the pending state, instead of a one-shot guard
+ * that would leave the project stuck on the "upgrading" placeholder forever.
+ */
+const startedUpgradeBackups = new Map<string, Promise<void>>()
+
+/**
  * Video Editor entrypoint.
- * Shows an explicit backup-and-upgrade prompt for legacy projects before loading editor state.
+ * Legacy projects are upgraded automatically: a backup on the original schema is
+ * snapshotted first (best-effort safety net), then the editor loads. No prompt.
  */
 export const Editor = memo(function Editor({ projectId, project, migration }: EditorProps) {
-  const navigate = useNavigate()
+  const { t } = useTranslation()
   const [upgradeApproved, setUpgradeApproved] = useState(!migration.requiresUpgrade)
-  const [isPreparingUpgrade, setIsPreparingUpgrade] = useState(false)
   const backupName = formatProjectUpgradeBackupName(
     project.name,
     migration.storedSchemaVersion,
     migration.currentSchemaVersion,
   )
 
+  // Latest projectId, so a backup that finishes after the user navigated away
+  // only approves the project it was actually started for.
+  const currentProjectIdRef = useRef(projectId)
+  currentProjectIdRef.current = projectId
+
   useEffect(() => {
     setUpgradeApproved(!migration.requiresUpgrade)
-    setIsPreparingUpgrade(false)
   }, [migration.requiresUpgrade, projectId])
 
-  const handleCancelUpgrade = useCallback(() => {
-    navigate({ to: '/projects' })
-  }, [navigate])
+  // Auto-backup then auto-upgrade. The backup keeps the pre-upgrade project on its
+  // original schema; loading proceeds regardless so the user is never blocked.
+  useEffect(() => {
+    if (!migration.requiresUpgrade || upgradeApproved) return
 
-  const handleConfirmUpgrade = useCallback(async () => {
-    setIsPreparingUpgrade(true)
-
-    try {
-      const backup = await createProjectUpgradeBackup(projectId, {
-        fromVersion: migration.storedSchemaVersion,
-        toVersion: migration.currentSchemaVersion,
-        backupName,
-      })
-      toast.success(i18n.t('editor.editor.backupCreated'), {
-        description: backup.name,
-      })
-      setUpgradeApproved(true)
-    } catch (error) {
-      logger.error('Failed to create upgrade backup:', error)
-      toast.error(i18n.t('editor.editor.backupFailed'), {
-        description: error instanceof Error ? error.message : i18n.t('editor.editor.tryAgain'),
-      })
-    } finally {
-      setIsPreparingUpgrade(false)
+    // Reuse this project's in-flight job (StrictMode re-invokes effects, and the
+    // async create can't be cancelled once started) rather than bailing out
+    // permanently — re-running the effect for the same still-pending project
+    // must still be able to transition out of the placeholder state.
+    const jobProjectId = projectId
+    let job = startedUpgradeBackups.get(jobProjectId)
+    if (!job) {
+      job = (async () => {
+        const opId = createOperationId()
+        const event = logger.startEvent('project.upgradeBackup', opId)
+        event.merge({
+          projectId: jobProjectId,
+          fromVersion: migration.storedSchemaVersion,
+          toVersion: migration.currentSchemaVersion,
+        })
+        try {
+          const backup = await createProjectUpgradeBackup(jobProjectId, {
+            fromVersion: migration.storedSchemaVersion,
+            toVersion: migration.currentSchemaVersion,
+            backupName,
+          })
+          event.success({ status: 'created', backupName: backup.name })
+          toast.success(t('editor.editor.backupCreated'), { description: backup.name })
+        } catch (error) {
+          event.failure(error, { status: 'failed' })
+          toast.error(t('editor.editor.backupFailed'), {
+            description: error instanceof Error ? error.message : t('editor.editor.tryAgain'),
+          })
+        }
+      })()
+      startedUpgradeBackups.set(jobProjectId, job)
     }
-  }, [backupName, migration.currentSchemaVersion, migration.storedSchemaVersion, projectId])
+
+    let active = true
+    void job.then(() => {
+      // Only approve the upgrade for the project this job was started for; a late
+      // completion after navigation must not unblock a different project.
+      if (active && currentProjectIdRef.current === jobProjectId) {
+        setUpgradeApproved(true)
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [
+    migration.requiresUpgrade,
+    migration.storedSchemaVersion,
+    migration.currentSchemaVersion,
+    upgradeApproved,
+    projectId,
+    backupName,
+    t,
+  ])
 
   if (!upgradeApproved) {
     return (
-      <div className="min-h-screen bg-background">
-        <ProjectUpgradeDialog
-          open
-          projectName={project.name}
-          storedSchemaVersion={migration.storedSchemaVersion}
-          currentSchemaVersion={migration.currentSchemaVersion}
-          backupName={backupName}
-          isUpgrading={isPreparingUpgrade}
-          onCancel={handleCancelUpgrade}
-          onConfirm={handleConfirmUpgrade}
-        />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-sm text-muted-foreground">
+          {t('editor.editor.upgrading', { defaultValue: 'Upgrading project…' })}
+        </div>
       </div>
     )
   }
@@ -314,6 +361,21 @@ const TimelineDialogHost = memo(function TimelineDialogHost() {
       )}
     </>
   )
+})
+
+const AutoSaveController = memo(function AutoSaveController({
+  onSave,
+}: {
+  onSave: () => Promise<void>
+}) {
+  const isDirty = useTimelineStore((s: { isDirty: boolean }) => s.isDirty)
+  useAutoSave({ isDirty, onSave })
+  return null
+})
+
+const TimelineShortcutsController = memo(function TimelineShortcutsController() {
+  useTimelineShortcuts()
+  return null
 })
 
 export const LoadedEditor = memo(function LoadedEditor({
@@ -485,9 +547,6 @@ export const LoadedEditor = memo(function LoadedEditor({
     router,
   ])
 
-  // Track unsaved changes
-  const isDirty = useTimelineStore((s: { isDirty: boolean }) => s.isDirty)
-
   useEffect(() => {
     syncSidebarLayout(editorLayout)
   }, [editorLayout, syncSidebarLayout])
@@ -607,24 +666,15 @@ export const LoadedEditor = memo(function LoadedEditor({
     onExport: handleExport,
   })
 
-  // Enable auto-save based on settings interval
-  useAutoSave({
-    isDirty,
-    onSave: handleSave,
-  })
-
-  // Enable timeline shortcuts (space, cut tool, rate tool, etc.)
-  useTimelineShortcuts()
-
   // Enable transition breakage notifications
   useTransitionBreakageNotifications()
 
   const timelineDuration = 30
   const isColorWorkspace = workspace === 'color'
-  const isAnimateWorkspace = workspace === 'animate'
-  // Both the Color and Animate workspaces replace the default split layout and
-  // hide the inline media/properties sidebars.
-  const hidesDefaultSidebars = isColorWorkspace || isAnimateWorkspace
+  const isMotionWorkspace = workspace === 'motion'
+  // Color replaces the default editor shell. Motion deliberately keeps it and
+  // swaps the preview/timeline surfaces while retaining the shared sidebars.
+  const hidesDefaultSidebars = isColorWorkspace
 
   return (
     <div
@@ -633,12 +683,14 @@ export const LoadedEditor = memo(function LoadedEditor({
       role="application"
       aria-label={t('editor.editor.appLabel')}
     >
+      <AutoSaveController onSave={handleSave} />
+      <TimelineShortcutsController />
+
       {/* Top Toolbar */}
       <InteractionLockRegion locked={isMaskEditingActive}>
         <Toolbar
           projectId={projectId}
           project={project}
-          isDirty={isDirty}
           onSave={handleSave}
           onExport={handleExport}
           onExportBundle={handleExportBundle}
@@ -659,22 +711,24 @@ export const LoadedEditor = memo(function LoadedEditor({
         )}
 
         {/* Right side: Preview/Properties + Timeline */}
-        {isAnimateWorkspace ? (
-          <AnimateLayout project={project} />
-        ) : isColorWorkspace ? (
+        {isColorWorkspace ? (
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <ErrorBoundary level="feature">
                 <PreviewArea project={project} />
               </ErrorBoundary>
             </div>
-            <ColorTimelineNavigator />
+            <Suspense fallback={null}>
+              <LazyColorTimelineNavigator />
+            </Suspense>
             <InteractionLockRegion
               locked={isMaskEditingActive}
               className="h-[37%] min-h-[288px] max-h-[39vh] shrink-0"
             >
               <ErrorBoundary level="feature">
-                <ColorGradingDock />
+                <Suspense fallback={null}>
+                  <LazyColorGradingDock />
+                </Suspense>
               </ErrorBoundary>
             </InteractionLockRegion>
           </div>
@@ -702,7 +756,11 @@ export const LoadedEditor = memo(function LoadedEditor({
 
                 {/* Center - Preview */}
                 <ErrorBoundary level="feature">
-                  <PreviewArea project={project} />
+                  {isMotionWorkspace ? (
+                    <MotionPreviewArea project={project} />
+                  ) : (
+                    <PreviewArea project={project} />
+                  )}
                 </ErrorBoundary>
 
                 {/* Right Sidebar - Properties (inline with preview) */}
@@ -732,7 +790,13 @@ export const LoadedEditor = memo(function LoadedEditor({
                 <ErrorBoundary level="feature">
                   <div className="h-full flex overflow-hidden">
                     <div className="min-w-0 flex-1">
-                      <Timeline duration={timelineDuration} />
+                      {isMotionWorkspace ? (
+                        <MotionTimelineDock project={project} />
+                      ) : (
+                        <Suspense fallback={null}>
+                          <LazyTimeline duration={timelineDuration} />
+                        </Suspense>
+                      )}
                     </div>
                     <AudioMeterPanel />
                   </div>
@@ -792,6 +856,9 @@ export const LoadedEditor = memo(function LoadedEditor({
 
       <EditorDialogHost projectId={projectId} />
       <TimelineDialogHost />
+
+      {/* Single global cursor-readout for IO (in/out) drags across all surfaces. */}
+      <IoDragReadout />
     </div>
   )
 })
