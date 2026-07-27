@@ -117,6 +117,10 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   maxFrameRef.current = maxFrame
 
   const dragCleanupRef = useRef<(() => void) | null>(null)
+  // Timestamp of the last clean tap (press without drag) on either flag — two
+  // within the window make a double-click, which clears the range. Real drags
+  // reset it, so quick successive drags can never wipe the selection.
+  const lastTapAtRef = useRef(0)
   const isDocked = inPoint === null && outPoint === null
 
   // Docked mode follows the playhead without re-rendering (same pattern as
@@ -157,10 +161,19 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
       const anchorFrame =
         side === 'in' ? (timeline.outPoint ?? playheadFrame) : (timeline.inPoint ?? playheadFrame)
 
+      const startClientX = event.clientX
+      let moved = false
       let lastFrame = playheadFrame
       const cleanup = beginIoPointerDrag(
         event,
         (clientX) => {
+          // A press only becomes a drag once the pointer actually travels;
+          // clean taps feed the double-click-to-clear below instead.
+          if (!moved && Math.abs(clientX - startClientX) < 3) {
+            return
+          }
+          moved = true
+
           const rect = ruler.getBoundingClientRect()
           let frame = Math.max(0, Math.round(pixelsToFrameNow(clientX - rect.left)))
           if (maxFrameRef.current !== undefined) {
@@ -181,7 +194,18 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
         },
         () => {
           document.body.style.cursor = ''
-          usePlaybackStore.getState().finishScrub(lastFrame)
+          if (moved) {
+            usePlaybackStore.getState().finishScrub(lastFrame)
+            lastTapAtRef.current = 0
+          } else {
+            const now = performance.now()
+            if (now - lastTapAtRef.current < 400) {
+              lastTapAtRef.current = 0
+              useTimelineStore.getState().clearInOutPoints()
+            } else {
+              lastTapAtRef.current = now
+            }
+          }
           setDraggingSide(null)
           dragCleanupRef.current = null
         },
