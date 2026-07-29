@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
+import { Pencil } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useProjectStore } from '../deps/projects'
@@ -41,14 +42,24 @@ export const ProjectNameEditor = memo(function ProjectNameEditor({
 
   if (draft === null) {
     return (
-      <h1
-        className="cursor-text truncate text-sm font-medium leading-none"
-        data-tooltip={t('toolbar.renameProject')}
-        data-tooltip-side="bottom"
-        onDoubleClick={() => setDraft(displayName)}
-      >
-        {displayName}
-      </h1>
+      <div className="group flex min-w-0 items-center gap-1">
+        <h1
+          className="cursor-text truncate text-sm font-medium leading-none"
+          onDoubleClick={() => setDraft(displayName)}
+        >
+          {displayName}
+        </h1>
+        <button
+          type="button"
+          className="shrink-0 text-muted-foreground/60 transition-colors hover:text-foreground group-hover:text-muted-foreground"
+          data-tooltip={t('toolbar.renameProject')}
+          data-tooltip-side="bottom"
+          aria-label={t('toolbar.renameProject')}
+          onClick={() => setDraft(displayName)}
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+      </div>
     )
   }
 

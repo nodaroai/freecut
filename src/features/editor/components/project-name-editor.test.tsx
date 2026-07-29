@@ -38,6 +38,14 @@ describe('ProjectNameEditor', () => {
     expect(screen.getByRole('textbox')).toHaveValue('TEST2')
   })
 
+  it('enters edit mode when the pencil button is clicked', () => {
+    render(<ProjectNameEditor project={{ id: 'p1', name: 'TEST2' }} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'toolbar.renameProject' }))
+
+    expect(screen.getByRole('textbox')).toHaveValue('TEST2')
+  })
+
   it('commits a new name on Enter through the project store', () => {
     render(<ProjectNameEditor project={{ id: 'p1', name: 'TEST2' }} />)
 

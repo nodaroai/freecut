@@ -3,7 +3,6 @@ import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
-  BookOpen,
   Bug,
   Check,
   ChevronDown,
@@ -36,6 +35,7 @@ import { SettingsDialog } from './settings-dialog'
 import { ShortcutsDialog } from './shortcuts-dialog'
 import { UnsavedChangesDialog } from './unsaved-changes-dialog'
 import { ProjectNameEditor } from './project-name-editor'
+import { ToolbarDocsLink } from './toolbar-docs-link'
 import { WorkspaceSwitcher } from './workspace-switcher'
 import { WhatsNewDialog } from './whats-new-dialog'
 import { hasUnseenChangelog } from './whats-new-seen'
@@ -297,18 +297,7 @@ export const Toolbar = memo(function Toolbar({
             <Separator orientation="vertical" className="h-5" />
 
             {/* Utility */}
-            <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-              <a
-                href="/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-tooltip="User Guide"
-                data-tooltip-side="bottom"
-                aria-label="User Guide"
-              >
-                <BookOpen className="h-4 w-4" />
-              </a>
-            </Button>
+            <ToolbarDocsLink />
             <Button
               variant="outline"
               size="icon"
@@ -414,6 +403,7 @@ export const Toolbar = memo(function Toolbar({
 
         {embedded && (
           <>
+            <ToolbarDocsLink />
             <LanguageSwitcher size="sm" align="end" side="bottom" />
             <SendBackButton />
           </>
