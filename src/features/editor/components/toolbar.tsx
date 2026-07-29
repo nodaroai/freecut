@@ -251,7 +251,7 @@ export const Toolbar = memo(function Toolbar({
       </div>
 
       <div className="flex flex-1 items-center justify-center">
-        {!embedded && <WorkspaceSwitcher />}
+        <WorkspaceSwitcher />
       </div>
 
       <LocalInferenceStatusPill />
