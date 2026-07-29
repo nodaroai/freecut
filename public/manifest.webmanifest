@@ -1,6 +1,6 @@
 {
-  "name": "FreeCut",
-  "short_name": "FreeCut",
+  "name": "Nodaro Editor",
+  "short_name": "Nodaro",
   "id": "/",
   "description": "A browser-based video editor.",
   "start_url": "/",
@@ -36,7 +36,7 @@
       "sizes": "2048x1536",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "FreeCut video editor timeline"
+      "label": "Nodaro video editor timeline"
     }
   ]
 }
