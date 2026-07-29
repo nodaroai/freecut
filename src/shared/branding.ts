@@ -2,12 +2,12 @@
  * Brand configuration for this deployment.
  *
  * Upstream ships as "FreeCut"; every user-visible surface here is rebranded to
- * Nodaro at runtime so upstream syncs never conflict with hand-edited strings.
+ * NodarCut at runtime so upstream syncs never conflict with hand-edited strings.
  * Functional identifiers (storage keys, the on-disk `FreeCutProjects` folder)
  * must keep their upstream names — the pattern below deliberately skips them.
  */
 
-export const BRAND_NAME = 'Nodaro'
+export const BRAND_NAME = 'NodarCut'
 
 const UPSTREAM_BRAND_PATTERN = /FreeCut(?!Projects)/g
 
