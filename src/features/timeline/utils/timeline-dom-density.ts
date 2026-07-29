@@ -6,8 +6,8 @@
 export const DENSE_TIMELINE_TRACK_ITEM_THRESHOLD = 80
 
 export const DEFAULT_TIMELINE_ITEM_CULL_BUFFER_PX = 2000
-export const DENSE_TIMELINE_ITEM_CULL_BUFFER_PX = 600
-export const COMPACT_TIMELINE_ITEM_MAX_WIDTH_PX = 36
+const DENSE_TIMELINE_ITEM_CULL_BUFFER_PX = 600
+const COMPACT_TIMELINE_ITEM_MAX_WIDTH_PX = 36
 
 export function getTimelineItemCullBufferPx(trackItemCount: number): number {
   return trackItemCount >= DENSE_TIMELINE_TRACK_ITEM_THRESHOLD
