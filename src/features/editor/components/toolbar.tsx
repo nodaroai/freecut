@@ -3,7 +3,6 @@ import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
-  BookOpen,
   Bug,
   Check,
   ChevronDown,
@@ -35,6 +34,8 @@ import { ProjectDebugPanel } from './project-debug-panel'
 import { SettingsDialog } from './settings-dialog'
 import { ShortcutsDialog } from './shortcuts-dialog'
 import { UnsavedChangesDialog } from './unsaved-changes-dialog'
+import { ProjectNameEditor } from './project-name-editor'
+import { ToolbarDocsLink } from './toolbar-docs-link'
 import { WorkspaceSwitcher } from './workspace-switcher'
 import { WhatsNewDialog } from './whats-new-dialog'
 import { hasUnseenChangelog } from './whats-new-seen'
@@ -233,9 +234,7 @@ export const Toolbar = memo(function Toolbar({
         <Separator orientation="vertical" className="h-5" />
 
         <div className="flex flex-col -space-y-0.5">
-          <h1 className="text-sm font-medium leading-none">
-            {project?.name || t('common.untitledProject')}
-          </h1>
+          <ProjectNameEditor project={project} />
           <span className="font-mono text-[11px] text-muted-foreground">
             {t('toolbar.specsDetailed', {
               width: project?.width,
@@ -298,18 +297,7 @@ export const Toolbar = memo(function Toolbar({
             <Separator orientation="vertical" className="h-5" />
 
             {/* Utility */}
-            <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-              <a
-                href="/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-tooltip="User Guide"
-                data-tooltip-side="bottom"
-                aria-label="User Guide"
-              >
-                <BookOpen className="h-4 w-4" />
-              </a>
-            </Button>
+            <ToolbarDocsLink />
             <Button
               variant="outline"
               size="icon"
@@ -413,7 +401,13 @@ export const Toolbar = memo(function Toolbar({
           </>
         )}
 
-        {embedded && <SendBackButton />}
+        {embedded && (
+          <>
+            <ToolbarDocsLink />
+            <LanguageSwitcher size="sm" align="end" side="bottom" />
+            <SendBackButton />
+          </>
+        )}
       </div>
     </div>
   )

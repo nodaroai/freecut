@@ -39,6 +39,17 @@ export function resolvePrimaryVideoName(videoName: unknown): string {
   return typeof videoName === 'string' && videoName.trim() ? videoName.trim() : 'nodaro-edit.mp4'
 }
 
+// A NODARO_LOAD_VIDEO with no primary video is the EMPTY-BOOT request
+// (standalone hosts like Studio's /editor): open a fresh empty project and let
+// the parent-bridged Import fill the media bin. Kept as a pure predicate so the
+// contract is pinned by a test.
+export function isEmptyBootPayload(payload: {
+  videoUrl?: unknown
+  videoBuffer?: unknown
+}): boolean {
+  return !payload.videoUrl && !payload.videoBuffer
+}
+
 // Use pre-fetched buffer if provided (avoids CORS), otherwise fetch URL
 async function fetchPrimaryBlob(
   videoUrl: string,
@@ -187,8 +198,26 @@ async function handleLoadVideo(event: MessageEvent) {
     store.setParentOrigin(event.origin)
 
     const { videoUrl, videoBuffer, videoName } = event.data.payload
-    if (!videoUrl && !videoBuffer) {
-      throw new Error('Missing videoUrl or videoBuffer in NODARO_LOAD_VIDEO payload')
+    if (isEmptyBootPayload(event.data.payload)) {
+      // EMPTY BOOT — no primary video: a standalone host opens the editor on a
+      // fresh empty project (media bin fills via the parent-bridged Import).
+      // Was a hard error before standalone hosts existed.
+      const project = await useProjectStore.getState().createProject({
+        name: 'Nodaro Edit',
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        backgroundColor: '#000000',
+      })
+      await importAdditionalAssets(event, project.id)
+      router.navigate({
+        to: '/editor/$projectId',
+        params: { projectId: project.id },
+      })
+      log.info('Empty-boot: opened a fresh project with no primary video', {
+        projectId: project.id,
+      })
+      return
     }
 
     const primaryName = resolvePrimaryVideoName(videoName)
@@ -197,7 +226,7 @@ async function handleLoadVideo(event: MessageEvent) {
 
     // Always create fresh project and import media first
     const project = await useProjectStore.getState().createProject({
-      name: 'Nodaro Edit',
+      name: 'NodarCut Edit',
       width,
       height,
       fps,

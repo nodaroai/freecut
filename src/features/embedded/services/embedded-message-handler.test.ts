@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { isAllowedOrigin, resolvePrimaryVideoName } from './embedded-message-handler'
+import {
+  isAllowedOrigin,
+  isEmptyBootPayload,
+  resolvePrimaryVideoName,
+} from './embedded-message-handler'
 
 describe('isAllowedOrigin', () => {
   it('allows studio.nodaro.ai, app/next, localhost and railway; rejects others', () => {
@@ -8,6 +12,15 @@ describe('isAllowedOrigin', () => {
     expect(isAllowedOrigin('http://localhost:5173')).toBe(true)
     expect(isAllowedOrigin('https://foo.up.railway.app')).toBe(true)
     expect(isAllowedOrigin('https://evil.example.com')).toBe(false)
+  })
+})
+
+describe('isEmptyBootPayload', () => {
+  it('a NODARO_LOAD_VIDEO with no primary video is the empty-boot request; any primary defeats it', () => {
+    expect(isEmptyBootPayload({})).toBe(true)
+    expect(isEmptyBootPayload({ videoUrl: undefined, videoBuffer: undefined })).toBe(true)
+    expect(isEmptyBootPayload({ videoUrl: 'https://cdn/x.mp4' })).toBe(false)
+    expect(isEmptyBootPayload({ videoBuffer: new ArrayBuffer(1) })).toBe(false)
   })
 })
 
