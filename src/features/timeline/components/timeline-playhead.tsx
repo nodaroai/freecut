@@ -1,14 +1,20 @@
 // React and external libraries
-import { useState, useCallback, useEffect, useRef, useLayoutEffect, type RefObject } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 
 // Stores and selectors
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useMicRecordingStore, isMicRecordingActive } from '@/shared/state/mic-recording-store'
 import { useSelectionStore } from '@/shared/state/selection'
+import { useZoomStore } from '../stores/zoom-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 
 // Utilities and hooks
-import { useTimelineZoomContext } from '../contexts/timeline-zoom-context'
 import { createScrubThrottleState, shouldCommitScrubFrame } from '../utils/scrub-throttle'
+import {
+  frameToPixelsNow,
+  getPixelsPerSecondNow,
+  pixelsToFrameNow,
+} from '../utils/zoom-conversions'
 import { withPerfMeasure, perfMarkRender } from '@/shared/logging/perf-marks'
 import { PlayheadMarks } from '@/shared/ui/playhead-marks'
 import {
@@ -23,10 +29,7 @@ import {
   notifyTimelineScrubVisualFrame,
   type TimelineScrubVisualFrameDetail,
 } from '@/shared/timeline/live-scroll-sync'
-import {
-  getEdgeScrollDelta,
-  getPlayheadEdgeScrollVelocity,
-} from '../utils/playhead-edge-scroll'
+import { getEdgeScrollDelta, getPlayheadEdgeScrollVelocity } from '../utils/playhead-edge-scroll'
 
 interface TimelinePlayheadProps {
   inRuler?: boolean // If true, shows diamond indicator for ruler
@@ -39,6 +42,11 @@ interface TimelinePlayheadProps {
 function setTranslateXIfChanged(element: HTMLElement, left: number): void {
   const transform = `translate3d(${left}px, 0, 0)`
   if (element.style.transform !== transform) element.style.transform = transform
+}
+
+function updatePlayheadPosition(element: HTMLElement | null, frame: number): void {
+  if (!element) return
+  setTranslateXIfChanged(element, Math.round(frameToPixelsNow(frame)))
 }
 
 function getPlayheadDragSurfaces({
@@ -103,7 +111,6 @@ export function TimelinePlayhead({
   perfMarkRender('TimelinePlayhead')
   // Don't subscribe to currentFrame - use ref + manual subscription instead
   const setScrubFrame = usePlaybackStore((s) => s.setScrubFrame)
-  const { frameToPixels, pixelsToFrame, pixelsPerSecond } = useTimelineZoomContext()
 
   const [isDragging, setIsDragging] = useState(false)
   const [isExternalDrag, setIsExternalDrag] = useState(false)
@@ -120,11 +127,11 @@ export function TimelinePlayhead({
   }, [])
 
   // Use refs to avoid stale closures
-  const pixelsToFrameRef = useRef(pixelsToFrame)
+  const pixelsToFrameRef = useRef(pixelsToFrameNow)
   const setScrubFrameRef = useRef(setScrubFrame)
   const maxFrameRef = useRef(maxFrame)
-  const frameToPixelsRef = useRef(frameToPixels)
-  const pixelsPerSecondRef = useRef(pixelsPerSecond)
+  const frameToPixelsRef = useRef(frameToPixelsNow)
+  const pixelsPerSecondRef = useRef(getPixelsPerSecondNow())
 
   // RAF throttling refs for smooth scrubbing without excessive state updates
   const rafIdRef = useRef<number | null>(null)
@@ -133,6 +140,7 @@ export function TimelinePlayhead({
   const scrubScrollContainerRef = useRef<HTMLDivElement | null>(null)
   const scrubCoordinateSurfaceRef = useRef<HTMLDivElement | null>(null)
   const scrubPlayheadElementsRef = useRef<HTMLElement[]>([])
+  const resumePlaybackRafRef = useRef<number | null>(null)
   const skimmerScrubOwnerRef = useRef({})
   const scrubThrottleStateRef = useRef(
     createScrubThrottleState({
@@ -147,54 +155,77 @@ export function TimelinePlayhead({
     })
   }, [])
 
-  // Update refs when functions change
+  // Update prop/action refs without subscribing the component to live zoom.
   useEffect(() => {
-    pixelsToFrameRef.current = pixelsToFrame
     setScrubFrameRef.current = setScrubFrame
     maxFrameRef.current = maxFrame
-    frameToPixelsRef.current = frameToPixels
-    pixelsPerSecondRef.current = pixelsPerSecond
-  }, [pixelsToFrame, setScrubFrame, maxFrame, frameToPixels, pixelsPerSecond])
+  }, [setScrubFrame, maxFrame])
 
   useEffect(() => {
     isDraggingRef.current = isDragging
+    const playbackState = usePlaybackStore.getState()
+    updatePlayheadPosition(
+      playheadRef.current,
+      isDragging && playbackState.previewFrame !== null
+        ? playbackState.previewFrame
+        : playbackState.currentFrame,
+    )
   }, [isDragging])
+
+  useEffect(() => {
+    return () => {
+      if (resumePlaybackRafRef.current !== null) {
+        cancelAnimationFrame(resumePlaybackRafRef.current)
+        usePlaybackStore.getState().cancelPlaybackScrubResume()
+      }
+    }
+  }, [])
 
   // Subscribe to playback frame changes and update position directly.
   // During playhead drags, use the same atomic scrub state as the main ruler
   // so the fast-scrub overlay hands back to the player consistently.
-  useEffect(() => {
-    const updatePosition = (frame: number) => {
-      if (!playheadRef.current) return
-      const leftPosition = Math.round(frameToPixelsRef.current(frame))
-      // Use transform (compositor-only) instead of style.left (triggers layout).
-      setTranslateXIfChanged(playheadRef.current, leftPosition)
+  useLayoutEffect(() => {
+    const updateCurrentPosition = () => {
+      const playbackState = usePlaybackStore.getState()
+      updatePlayheadPosition(
+        playheadRef.current,
+        isDraggingRef.current && playbackState.previewFrame !== null
+          ? playbackState.previewFrame
+          : playbackState.currentFrame,
+      )
     }
 
     // Initial update
-    updatePosition(usePlaybackStore.getState().currentFrame)
+    updateCurrentPosition()
 
-    // Subscribe to store changes
-    return usePlaybackStore.subscribe((state) => {
-      updatePosition(
+    const unsubscribePlayback = usePlaybackStore.subscribe((state) => {
+      updatePlayheadPosition(
+        playheadRef.current,
         isDraggingRef.current && state.previewFrame !== null
           ? state.previewFrame
           : state.currentFrame,
       )
     })
-  }, [])
+    const unsubscribeZoom = useZoomStore.subscribe((state, previousState) => {
+      pixelsPerSecondRef.current = state.pixelsPerSecond
+      if (state.pixelsPerSecond !== previousState.pixelsPerSecond) {
+        updateCurrentPosition()
+      }
+    })
+    const unsubscribeTimelineSettings = useTimelineSettingsStore.subscribe(
+      (state, previousState) => {
+        if (state.fps !== previousState.fps) {
+          updateCurrentPosition()
+        }
+      },
+    )
 
-  // Also update position when frameToPixels changes (zoom changes)
-  useLayoutEffect(() => {
-    if (!playheadRef.current) return
-    const playbackState = usePlaybackStore.getState()
-    const frame =
-      isDraggingRef.current && playbackState.previewFrame !== null
-        ? playbackState.previewFrame
-        : playbackState.currentFrame
-    const leftPosition = Math.round(frameToPixels(frame))
-    setTranslateXIfChanged(playheadRef.current, leftPosition)
-  }, [frameToPixels, isDragging])
+    return () => {
+      unsubscribePlayback()
+      unsubscribeZoom()
+      unsubscribeTimelineSettings()
+    }
+  }, [])
 
   useEffect(() => {
     const scrollContainer = playheadRef.current?.closest<HTMLDivElement>('.timeline-container')
@@ -237,6 +268,15 @@ export function TimelinePlayhead({
       e.stopPropagation()
       // Seeking is disabled during a voiceover take (see timeline-markers).
       if (isMicRecordingActive(useMicRecordingStore.getState().status)) return
+      const playbackState = usePlaybackStore.getState()
+      if (resumePlaybackRafRef.current !== null) {
+        cancelAnimationFrame(resumePlaybackRafRef.current)
+        resumePlaybackRafRef.current = null
+        playbackState.cancelPlaybackScrubResume()
+      }
+      // Match ruler scrubbing: grabbing the playhead takes transport ownership
+      // immediately so the playback clock cannot overwrite the drag.
+      playbackState.beginPlaybackScrub()
       const { scrollContainer, coordinateSurface } = getPlayheadDragSurfaces({
         playhead: playheadRef.current,
         explicitCoordinateSurface: coordinateSurfaceRef?.current ?? null,
@@ -246,7 +286,7 @@ export function TimelinePlayhead({
         coordinateSurface,
         scrollContainer,
         e.clientX,
-        frameToPixelsRef.current(usePlaybackStore.getState().currentFrame),
+        frameToPixelsRef.current(playbackState.currentFrame),
       )
       scrubClientXRef.current = e.clientX
       scrubAnimationTimeRef.current = null
@@ -259,7 +299,7 @@ export function TimelinePlayhead({
           : []
       scrubThrottleStateRef.current = createScrubThrottleState({
         pointerX,
-        frame: usePlaybackStore.getState().currentFrame,
+        frame: playbackState.currentFrame,
         nowMs: performance.now(),
       })
       isDraggingRef.current = true
@@ -365,7 +405,7 @@ export function TimelinePlayhead({
       scrubClientXRef.current = e.clientX
     }
 
-    const handleMouseUp = () => {
+    const finishDrag = (resumePlayback: boolean) => {
       // Cancel any pending RAF before clearing preview to prevent resurrection
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
@@ -397,17 +437,31 @@ export function TimelinePlayhead({
       mainTimelineScrubActiveRef.current = false
       endTimelineSkimmerScrub(skimmerScrubOwner)
       setIsDragging(false)
+
+      if (resumePlayback) {
+        // Give the paused seek one paint boundary to settle before restarting.
+        // Resuming in the mouseup event lets React batch pause + resume and the
+        // previous playback clock can overwrite the released frame.
+        resumePlaybackRafRef.current = requestAnimationFrame(() => {
+          resumePlaybackRafRef.current = null
+          usePlaybackStore.getState().resumePlaybackAfterScrub()
+        })
+      } else {
+        usePlaybackStore.getState().cancelPlaybackScrubResume()
+      }
     }
+    const handleMouseUp = () => finishDrag(true)
+    const handleWindowBlur = () => finishDrag(false)
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('blur', handleMouseUp)
+    window.addEventListener('blur', handleWindowBlur)
     rafIdRef.current = requestAnimationFrame(runScrubLoop)
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
-      window.removeEventListener('blur', handleMouseUp)
+      window.removeEventListener('blur', handleWindowBlur)
       // Restore original cursor
       document.body.style.cursor = originalCursor
       // Cancel any pending RAF to prevent memory leaks
@@ -419,7 +473,7 @@ export function TimelinePlayhead({
       mainTimelineScrubActiveRef.current = false
       endTimelineSkimmerScrub(skimmerScrubOwner)
     }
-  }, [isDragging]) // Stable dependencies - no stale closures
+  }, [isDragging])
 
   return (
     <div

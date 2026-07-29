@@ -12,6 +12,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { FreeCutLogo } from '@/components/brand/freecut-logo'
+import { UpstreamCredit } from '@/components/brand/upstream-credit'
 import { DiscordIcon } from '@/components/brand/discord-icon'
 import { Button } from '@/components/ui/button'
 import { DISCORD_INVITE_URL } from '@/config/community'
@@ -390,7 +391,7 @@ function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-border px-6 py-8">
         <div className="mx-auto max-w-5xl text-center text-sm text-muted-foreground">
-          {t('projects.landing.footer', { year: new Date().getFullYear() })}
+          <UpstreamCredit year={new Date().getFullYear()} />
         </div>
       </footer>
     </div>

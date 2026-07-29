@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BRAND_NAME } from '@/shared/branding'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { useTimelineStore } from '../../stores/timeline-store'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
@@ -129,7 +130,7 @@ export function useCaptionDialogState({
         if (!granted) {
           mediaStore.showNotification?.({
             type: 'error',
-            message: `FreeCut needs permission to read "${mediaForItem.fileName}" before extracting subtitles.`,
+            message: `${BRAND_NAME} needs permission to read "${mediaForItem.fileName}" before extracting subtitles.`,
           })
           return
         }
@@ -142,7 +143,7 @@ export function useCaptionDialogState({
       if (!blob) {
         mediaStore.showNotification?.({
           type: 'error',
-          message: `FreeCut could not load "${mediaForItem.fileName}".`,
+          message: `${BRAND_NAME} could not load "${mediaForItem.fileName}".`,
         })
         return
       }

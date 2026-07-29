@@ -2,6 +2,7 @@ import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { createLogger } from '@/shared/logging/logger'
+import { rebrandDeep } from '@/shared/branding'
 import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGE_CODES, resolveSupportedLanguage } from './languages'
 import en from './locales/en.json'
 import es from './locales/es.json'
@@ -74,7 +75,9 @@ const resources = Object.fromEntries(
   SUPPORTED_LANGUAGE_CODES.map((lang) => [
     lang,
     {
-      translation: lang === DEFAULT_LANGUAGE ? enMerged : structuredClone(baseLocales[lang] ?? {}),
+      translation: rebrandDeep(
+        lang === DEFAULT_LANGUAGE ? enMerged : structuredClone(baseLocales[lang] ?? {}),
+      ),
     },
   ]),
 )
@@ -126,7 +129,7 @@ export async function loadLanguageResources(lang: string): Promise<void> {
     const mod = await loader()
     deepMerge(tree, normalizePartialSlice(path, mod.default ?? {}))
   }
-  i18n.addResourceBundle(resolved, 'translation', tree, false, true)
+  i18n.addResourceBundle(resolved, 'translation', rebrandDeep(tree), false, true)
   loadedLanguages.add(resolved)
 }
 
@@ -142,9 +145,7 @@ export const i18nReady: Promise<void> = (async () => {
   const persistedLanguage =
     typeof localStorage === 'undefined' ? null : localStorage.getItem(I18N_STORAGE_KEY)
   const detectedLanguage = typeof navigator === 'undefined' ? DEFAULT_LANGUAGE : navigator.language
-  const initial = resolveSupportedLanguage(
-    persistedLanguage ?? detectedLanguage,
-  )
+  const initial = resolveSupportedLanguage(persistedLanguage ?? detectedLanguage)
   if (initial !== DEFAULT_LANGUAGE) await loadLanguageResources(initial)
 })().catch((err) => {
   log.error('Failed to preload language resources', err)
