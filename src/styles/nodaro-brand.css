@@ -1,0 +1,34 @@
+/**
+ * Nodaro brand layer.
+ *
+ * Overrides the upstream FreeCut orange accent with the Nodaro studio magenta
+ * (#ff0073, white foreground — same pair the studio uses). Imported from
+ * main.tsx right after index.css; rules are deliberately UNLAYERED so they win
+ * over upstream's `@layer base` / `@theme` tokens without editing any upstream
+ * file, keeping upstream syncs conflict-free.
+ */
+:root {
+  /* Core accent tokens (upstream: vibrant orange with dark foreground) */
+  --primary: #ff0073;
+  --primary-foreground: #ffffff;
+  --ring: #ff0073;
+  --sidebar-primary: #ff0073;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #ff0073;
+
+  /* Timeline accent tokens (upstream src/features/timeline/theme.css) */
+  --color-timeline-shape: #ff0073;
+  --color-timeline-playhead: #ff0073;
+  --color-timeline-snap: #ff2e8b;
+  --color-timeline-join: #ff5ca8;
+
+  /* Upstream components use Tailwind orange utilities as accent colors in
+     deep panels (mini-timeline selection, keyframe editors, status pills).
+     Remapping the palette variables restyles them all without touching the
+     component files. */
+  --color-orange-200: #ffb3d4;
+  --color-orange-300: #ff80b8;
+  --color-orange-400: #ff4d9c;
+  --color-orange-500: #ff0073;
+  --color-orange-600: #d60061;
+}

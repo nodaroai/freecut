@@ -9,6 +9,7 @@ import {
   rememberLastEditorProjectId,
 } from '@/shared/projects/last-editor-project'
 import './index.css'
+import './styles/nodaro-brand.css'
 
 const log = createLogger('App')
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000
