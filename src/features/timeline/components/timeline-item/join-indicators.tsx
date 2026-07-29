@@ -46,7 +46,7 @@ export const ZoomGatedJoinIndicators = memo(function ZoomGatedJoinIndicators(
  * Join indicators for timeline items
  * Shows glowing edges when clips can be joined with neighbors
  */
-export const JoinIndicators = memo(function JoinIndicators({
+const JoinIndicators = memo(function JoinIndicators({
   hasJoinableLeft,
   hasJoinableRight,
   trackLocked,
