@@ -24,7 +24,12 @@ export interface TransformProperties {
   flipVertical?: boolean
   /** Opacity from 0 (transparent) to 1 (opaque). Default: 1 */
   opacity?: number
-  /** Border radius in pixels. Default: 0 */
+  /**
+   * Border radius in pixels, applied by CLIPPING the item's rendered bounding
+   * box (video/image content). Default: 0. For shape items use
+   * `ShapeItem.cornerRadius` instead — that one rounds the path geometry
+   * itself; clipping a shape's box here cuts through its stroke.
+   */
   cornerRadius?: number
   /** UI state: aspect ratio lock for resize operations. Default: true */
   aspectRatioLocked?: boolean
@@ -35,6 +40,18 @@ export interface TransformProperties {
  * Example: left=0.1 crops 10% of the source width from the left edge.
  * Softness is normalized against the smaller source dimension.
  * Negative values soften inward, positive values fade outward.
+ *
+ * Default semantics (refit off): the FULL source is contain-fitted into
+ * `transform.width/height` first, then crop cuts INSIDE that fitted rect and
+ * the remainder STAYS IN PLACE — the container is not re-filled. (The
+ * interactive crop gizmo depends on this: dragging a handle must not shift the
+ * image.) To make a cropped window fill the container manually, size the
+ * container to the full source and offset it: container = window / (1 - cut
+ * ratios), position derived from which source region should be visible.
+ *
+ * `refit: true` (opt-in, programmatic builds): crop applies to the SOURCE and
+ * the cropped region is contain-fitted into `transform.width/height` — crop
+ * and transform become independent (Premiere/Resolve semantics).
  */
 export interface CropSettings {
   left?: number
@@ -42,6 +59,7 @@ export interface CropSettings {
   top?: number
   bottom?: number
   softness?: number
+  refit?: boolean
 }
 
 /**
@@ -81,10 +99,7 @@ export interface TransformParentBinding {
 }
 
 /** User-facing behavior used when attaching, detaching, or reparenting layers. */
-export type TransformParentingBehavior =
-  | 'preserve-world'
-  | 'snap-to-parent'
-  | 'restore-local'
+export type TransformParentingBehavior = 'preserve-world' | 'snap-to-parent' | 'restore-local'
 
 /**
  * Source dimensions for media items (intrinsic size).

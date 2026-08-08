@@ -106,25 +106,16 @@ const vectorPropertyKeyframesSchema = z.object({
 
 const linkedPropertyExpressionSchema = z.object({
   type: z.literal('link'),
-  targetProperty: z.union([
-    animatablePropertySchema,
-    z.enum(['position', 'scale', 'anchor']),
-  ]),
+  targetProperty: z.union([animatablePropertySchema, z.enum(['position', 'scale', 'anchor'])]),
   sourceItemId: z.string().min(1),
-  sourceProperty: z.union([
-    animatablePropertySchema,
-    z.enum(['position', 'scale', 'anchor']),
-  ]),
+  sourceProperty: z.union([animatablePropertySchema, z.enum(['position', 'scale', 'anchor'])]),
   enabled: z.boolean(),
   timeOffsetFrames: z.number(),
 })
 
 const propertyExpressionSchema = z.object({
   type: z.literal('expression'),
-  targetProperty: z.union([
-    animatablePropertySchema,
-    z.enum(['position', 'scale', 'anchor']),
-  ]),
+  targetProperty: z.union([animatablePropertySchema, z.enum(['position', 'scale', 'anchor'])]),
   source: z.string(),
   enabled: z.boolean(),
 })
@@ -420,6 +411,7 @@ const cropSchema = z.object({
   top: z.number().min(0).max(1).optional(),
   bottom: z.number().min(0).max(1).optional(),
   softness: z.number().min(-1).max(1).optional(),
+  refit: z.boolean().optional(),
 })
 
 const cornerPinSchema = z.object({
@@ -438,12 +430,7 @@ const compositionControlSchema = z.object({
       id: z.string().min(1),
       name: z.string().min(1),
       targetItemId: z.string().min(1),
-      property: z.enum([
-        'text.text',
-        'text.color',
-        'shape.fillColor',
-        'shape.strokeColor',
-      ]),
+      property: z.enum(['text.text', 'text.color', 'shape.fillColor', 'shape.strokeColor']),
       kind: z.enum(['text', 'color']),
       defaultValue: z.string(),
     }),
@@ -476,6 +463,7 @@ const timelineItemSchema = z
     // Text fields
     text: z.string().optional(),
     textSpans: z.array(textSpanSchema).optional(),
+    spanLayout: z.enum(['stack', 'inline']).optional(),
     textLayoutDrafts: textLayoutDraftsSchema.optional(),
     textRole: z.literal('caption').optional(),
     captionSource: captionSourceSchema.optional(),
@@ -588,6 +576,14 @@ const timelineItemSchema = z
     audioEqHighCutEnabled: z.boolean().optional(),
     audioEqHighCutFrequencyHz: z.number().min(1400).max(22000).optional(),
     audioEqHighCutSlopeDbPerOct: audioEqCutSlopeSchema.optional(),
+    audioDucking: z
+      .object({
+        duckOthersDb: z.number().min(-60).max(0),
+        attackSec: z.number().min(0).max(5).optional(),
+        releaseSec: z.number().min(0).max(5).optional(),
+        targetTrackIds: z.array(z.string().min(1)).optional(),
+      })
+      .optional(),
     // Video properties
     fadeIn: z.number().min(0).optional(),
     fadeOut: z.number().min(0).optional(),

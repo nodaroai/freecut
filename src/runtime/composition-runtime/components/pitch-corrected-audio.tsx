@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createLogger } from '@/shared/logging/logger'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
-import { getOrDecodeAudio, getOrDecodeAudioSliceForPlayback } from '../utils/audio-decode-cache'
+import { getOrDecodeAudioSliceForPlayback } from '../utils/audio-decode-cache'
 import { audioBufferToWavBlob } from '../utils/audio-buffer-wav'
 import { createReversedAudioBuffer } from '../utils/audio-buffer-utils'
 import { getAudioTargetTimeSeconds } from '../utils/video-timing'
@@ -54,6 +54,8 @@ interface DecodedPitchSource {
 type DecodedPitchFallbackAudioProps = PitchCorrectedAudioProps & {
   audioBuffer: AudioBuffer
   sourceStartOffsetSec: number
+  isComplete: boolean
+  timelineFps: number
 }
 
 function shouldReplaceDecodedPitchSource(
@@ -85,17 +87,36 @@ function shouldReplaceDecodedPitchSource(
 const DecodedPitchFallbackAudio: React.FC<DecodedPitchFallbackAudioProps> = ({
   audioBuffer,
   sourceStartOffsetSec,
+  isComplete,
+  timelineFps,
+  isReversed = false,
+  reverseSourceEnd,
+  trimBefore = 0,
+  sourceFps,
   ...props
 }) => {
   const [decodedSrc, setDecodedSrc] = useState<string | null>(null)
+  const reversedPlayback = React.useMemo(() => {
+    if (!isComplete || !isReversed) return null
+    const effectiveSourceFps = sourceFps ?? timelineFps
+    const sourceEndSeconds = (reverseSourceEnd ?? trimBefore) / effectiveSourceFps
+    return {
+      buffer: createReversedAudioBuffer(audioBuffer),
+      trimBefore: Math.max(
+        0,
+        Math.round((audioBuffer.duration - sourceEndSeconds) * effectiveSourceFps),
+      ),
+    }
+  }, [audioBuffer, isComplete, isReversed, reverseSourceEnd, sourceFps, timelineFps, trimBefore])
+  const fallbackBuffer = reversedPlayback?.buffer ?? audioBuffer
 
   useEffect(() => {
-    const url = URL.createObjectURL(audioBufferToWavBlob(audioBuffer))
+    const url = URL.createObjectURL(audioBufferToWavBlob(fallbackBuffer))
     setDecodedSrc(url)
     return () => {
       URL.revokeObjectURL(url)
     }
-  }, [audioBuffer])
+  }, [fallbackBuffer])
 
   if (!decodedSrc) {
     return null
@@ -105,7 +126,11 @@ const DecodedPitchFallbackAudio: React.FC<DecodedPitchFallbackAudioProps> = ({
     <NativePitchCorrectedAudio
       {...props}
       src={decodedSrc}
-      sourceStartOffsetSec={sourceStartOffsetSec}
+      trimBefore={reversedPlayback?.trimBefore ?? trimBefore}
+      sourceFps={sourceFps}
+      sourceStartOffsetSec={reversedPlayback ? 0 : sourceStartOffsetSec}
+      isReversed={isReversed && !reversedPlayback}
+      reverseSourceEnd={reversedPlayback ? undefined : reverseSourceEnd}
     />
   )
 }
@@ -550,25 +575,6 @@ const DecodedPitchCorrectedAudio: React.FC<DecodedPitchCorrectedAudioProps> = Re
           }
         })
 
-      getOrDecodeAudio(mediaId, src)
-        .then((buffer) => {
-          if (cancelled) return
-          setDecodedSource({
-            buffer,
-            sourceStartOffsetSec: 0,
-            coverageEndSec: Number.POSITIVE_INFINITY,
-            isComplete: true,
-          })
-        })
-        .catch((error) => {
-          if (!cancelled) {
-            log.warn('Failed to prepare full pitch-corrected preview buffer', {
-              mediaId,
-              error,
-            })
-          }
-        })
-
       return () => {
         cancelled = true
       }
@@ -679,56 +685,35 @@ const DecodedPitchCorrectedAudio: React.FC<DecodedPitchCorrectedAudioProps> = Re
       trimBefore,
     ])
 
-    const reversedPlayback = React.useMemo(() => {
-      if (!decodedSource || !isReversed || !decodedSource.isComplete) {
-        return null
-      }
-      const effectiveSourceFps = sourceFps ?? fps
-      const sourceEndSeconds = (reverseSourceEnd ?? trimBefore) / effectiveSourceFps
-      const reversedTrimBefore = Math.max(
-        0,
-        Math.round((decodedSource.buffer.duration - sourceEndSeconds) * effectiveSourceFps),
-      )
-      return {
-        buffer: createReversedAudioBuffer(decodedSource.buffer),
-        trimBefore: reversedTrimBefore,
-      }
-    }, [decodedSource, fps, isReversed, reverseSourceEnd, sourceFps, trimBefore])
-
     if (!decodedSource) {
       return nativeFallback
     }
 
-    const playbackBuffer = reversedPlayback?.buffer ?? decodedSource.buffer
-    const playbackTrimBefore = reversedPlayback?.trimBefore ?? trimBefore
-    const playbackSourceStartOffsetSec = reversedPlayback
-      ? 0
-      : sourceStartOffsetSec + decodedSource.sourceStartOffsetSec
+    const playbackSourceStartOffsetSec = sourceStartOffsetSec + decodedSource.sourceStartOffsetSec
     const decodedFallback = (
       <DecodedPitchFallbackAudio
         {...props}
         src={src}
-        audioBuffer={playbackBuffer}
-        trimBefore={playbackTrimBefore}
+        audioBuffer={decodedSource.buffer}
         sourceStartOffsetSec={playbackSourceStartOffsetSec}
-        isReversed={isReversed && !reversedPlayback}
-        reverseSourceEnd={reversedPlayback ? undefined : reverseSourceEnd}
+        isComplete={decodedSource.isComplete}
+        timelineFps={fps}
       />
     )
 
     return (
       <SoundTouchWorkletAudio
-        audioBuffer={playbackBuffer}
+        audioBuffer={decodedSource.buffer}
         fallback={decodedFallback}
         itemId={itemId}
-        trimBefore={playbackTrimBefore}
+        trimBefore={trimBefore}
         sourceFps={sourceFps}
         sourceStartOffsetSec={playbackSourceStartOffsetSec}
         isComplete={decodedSource.isComplete}
         volume={volume}
         playbackRate={playbackRate}
-        isReversed={isReversed && !reversedPlayback}
-        reverseSourceEnd={reversedPlayback ? undefined : reverseSourceEnd}
+        isReversed={isReversed}
+        reverseSourceEnd={reverseSourceEnd}
         audioPitchSemitones={props.audioPitchSemitones}
         audioPitchCents={props.audioPitchCents}
         audioPitchShiftSemitones={props.audioPitchShiftSemitones}

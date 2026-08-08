@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { AudioItem, TimelineTrack, VideoItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 
-import { useVisibleItems } from './use-visible-items'
+import { useVisibleItemDetailRange, useVisibleItems } from './use-visible-items'
 import { useItemsStore } from '../stores/items-store'
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useTimelineViewportStore, _resetViewportThrottle } from '../stores/timeline-viewport-store'
@@ -68,6 +68,17 @@ function VisibleItemsProbe({ onRender }: { onRender: (itemIds: string[]) => void
   const itemIds = visibleItems.map((item) => item.id)
   onRender(itemIds)
   return createElement('div', { 'data-testid': 'visible-items' }, itemIds.join(','))
+}
+
+function DetailRangeProbe() {
+  const { visibleItems } = useVisibleItems('track-1')
+  const detailRange = useVisibleItemDetailRange('track-1')
+  return createElement('div', {
+    'data-testid': 'detail-range',
+    'data-detail-start': String(detailRange.start),
+    'data-detail-end': String(detailRange.end),
+    'data-visible-items': visibleItems.map((item) => item.id).join(','),
+  })
 }
 
 function VisibleTransitionsProbe({
@@ -274,6 +285,61 @@ describe('useVisibleItems filtering logic', () => {
     vi.useRealTimers()
   })
 
+  it('shrinks the live detail range before the retained root cohort is pruned', () => {
+    vi.useFakeTimers()
+
+    useItemsStore.getState().setItems([makeItem('a', 0, 30), makeItem('b', 500, 30)])
+
+    render(createElement(DetailRangeProbe))
+    const probe = screen.getByTestId('detail-range')
+    expect(probe).toHaveAttribute('data-visible-items', 'a,b')
+    expect(Number(probe.getAttribute('data-detail-end'))).toBeGreaterThan(500)
+
+    act(() => {
+      useZoomStore.getState().setZoomLevelImmediate(2)
+    })
+
+    expect(probe).toHaveAttribute('data-visible-items', 'a,b')
+    expect(Number(probe.getAttribute('data-detail-end'))).toBeLessThan(500)
+
+    act(() => {
+      vi.advanceTimersByTime(200)
+    })
+
+    // The rich-detail window is already narrow at content settle, while the
+    // offscreen root remains mounted for a quick slider reversal.
+    expect(probe).toHaveAttribute('data-visible-items', 'a,b')
+    expect(Number(probe.getAttribute('data-detail-end'))).toBeLessThan(500)
+
+    vi.useRealTimers()
+  })
+
+  it('defers a disjoint live-zoom range until anchored scroll is synchronized', () => {
+    useTimelineViewportStore.setState({
+      scrollLeft: 10_000,
+      viewportWidth: 1_000,
+    })
+    useItemsStore.getState().setItems([makeItem('anchored', 3_000, 30)])
+
+    render(createElement(VisibleItemsProbe, { onRender: vi.fn() }))
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('anchored')
+
+    act(() => {
+      useZoomStore.getState().setZoomLevelImmediate(5)
+    })
+
+    // The zoom notification arrives before TimelineContent writes its matching
+    // playhead-anchored scroll offset. Keep the old root through that transient.
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('anchored')
+
+    useTimelineViewportStore.setState({
+      scrollLeft: 0,
+      scrollTop: 0,
+      viewportWidth: 1_000,
+      viewportHeight: 120,
+    })
+  })
+
   it('retires a dense zoom-in surplus under the shared per-frame budget', () => {
     vi.useFakeTimers()
 
@@ -294,12 +360,12 @@ describe('useVisibleItems filtering logic', () => {
       vi.advanceTimersByTime(200)
     })
 
-    // Content zoom has settled, but culling is still in its independent quiet
-    // window so the wheel task does not also tear down eight rich clip trees.
+    // Content zoom has settled, but dense culling still gets a short independent
+    // quiet window so the commit task does not also tear down rich clip trees.
     expect(getVisibleIds()).toHaveLength(16)
 
     act(() => {
-      vi.advanceTimersByTime(616)
+      vi.advanceTimersByTime(136)
     })
 
     // One shared animation frame retires at most four clips across all tracks.
@@ -328,7 +394,7 @@ describe('useVisibleItems filtering logic', () => {
     act(() => {
       useZoomStore.getState().setZoomLevelImmediate(2)
       vi.advanceTimersByTime(200)
-      vi.advanceTimersByTime(500)
+      vi.advanceTimersByTime(80)
       useZoomStore.getState().setZoomLevelImmediate(1)
       vi.advanceTimersByTime(200)
     })

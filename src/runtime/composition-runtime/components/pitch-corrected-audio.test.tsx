@@ -273,7 +273,7 @@ describe('PitchCorrectedAudio', () => {
       expect(document.querySelector('[data-testid="pitch"]')).toHaveAttribute('data-offset', '4')
     })
 
-    expect(audioDecodeMocks.getOrDecodeAudio).toHaveBeenCalledWith('media-1', 'blob:audio')
+    expect(audioDecodeMocks.getOrDecodeAudio).not.toHaveBeenCalled()
   })
 
   it('defers decoded pitch audio until an active preview scrub settles', async () => {
@@ -313,7 +313,7 @@ describe('PitchCorrectedAudio', () => {
 
     await waitFor(() => {
       expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
-      expect(audioDecodeMocks.getOrDecodeAudio).toHaveBeenCalledTimes(1)
+      expect(audioDecodeMocks.getOrDecodeAudio).not.toHaveBeenCalled()
     })
   })
 
@@ -402,8 +402,7 @@ describe('PitchCorrectedAudio', () => {
     await waitFor(() => {
       expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback).toHaveBeenCalledTimes(1)
     })
-    const reverseOptions =
-      audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[0]?.[2]
+    const reverseOptions = audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[0]?.[2]
     expect(reverseOptions?.targetTimeSeconds).toBeCloseTo(10, 4)
     expect(reverseOptions?.preRollSeconds).toBe(4)
     expect(document.querySelector('[data-testid="pitch"]')).toBeInTheDocument()

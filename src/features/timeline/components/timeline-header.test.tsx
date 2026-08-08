@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import type { FocusEventHandler, KeyboardEventHandler } from 'react'
+import type { FocusEventHandler, KeyboardEventHandler, PointerEventHandler } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import { ZOOM_MAX, ZOOM_MIN } from '../constants'
@@ -23,12 +23,23 @@ vi.mock('@/components/ui/slider', async () => {
         value?: number[]
         onValueChange?: (value: number[]) => void
         onValueCommit?: (value: number[]) => void
+        onPointerDownCapture?: PointerEventHandler<HTMLSpanElement>
+        onPointerCancelCapture?: PointerEventHandler<HTMLSpanElement>
         onKeyDownCapture?: KeyboardEventHandler<HTMLSpanElement>
         onKeyUpCapture?: KeyboardEventHandler<HTMLSpanElement>
         onBlurCapture?: FocusEventHandler<HTMLSpanElement>
       }
     >(function MockSlider(
-      { value, onValueChange, onValueCommit, onKeyDownCapture, onKeyUpCapture, onBlurCapture },
+      {
+        value,
+        onValueChange,
+        onValueCommit,
+        onPointerDownCapture,
+        onPointerCancelCapture,
+        onKeyDownCapture,
+        onKeyUpCapture,
+        onBlurCapture,
+      },
       ref,
     ) {
       sliderRenderSpy()
@@ -38,6 +49,8 @@ vi.mock('@/components/ui/slider', async () => {
           ref={ref}
           data-testid="zoom-slider"
           data-value={value?.[0]}
+          onPointerDownCapture={onPointerDownCapture}
+          onPointerCancelCapture={onPointerCancelCapture}
           onKeyDownCapture={onKeyDownCapture}
           onKeyUpCapture={onKeyUpCapture}
           onBlurCapture={onBlurCapture}
@@ -175,12 +188,98 @@ describe('TimelineHeader zoom slider', () => {
     }
   })
 
-  it('synchronizes controlled slider state for repeated keyboard steps', () => {
+  it('does not settle or contract content while the slider thumb is held', () => {
+    vi.useFakeTimers()
+    try {
+      sliderInput.value = 0.9
+      const targetZoom = ZOOM_MIN * Math.pow(ZOOM_MAX / ZOOM_MIN, sliderInput.value)
+      render(<TimelineHeader />)
+      const thumb = screen.getByRole('slider')
+
+      fireEvent.pointerDown(thumb)
+      fireEvent.mouseDown(thumb)
+      act(() => vi.advanceTimersByTime(1_000))
+
+      expect(useZoomStore.getState()).toMatchObject({
+        level: targetZoom,
+        contentLevel: 1,
+        isZoomInteracting: true,
+      })
+
+      fireEvent.mouseUp(thumb)
+      expect(useZoomStore.getState()).toMatchObject({
+        contentLevel: targetZoom,
+        isZoomInteracting: false,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('releases slider zoom when pointer-up lands outside the control', () => {
+    vi.useFakeTimers()
+    try {
+      sliderInput.value = 0.85
+      const targetZoom = ZOOM_MIN * Math.pow(ZOOM_MAX / ZOOM_MIN, sliderInput.value)
+      render(<TimelineHeader />)
+
+      fireEvent.pointerDown(screen.getByRole('slider'))
+      fireEvent.mouseDown(screen.getByRole('slider'))
+      act(() => vi.advanceTimersByTime(1_000))
+      expect(useZoomStore.getState()).toMatchObject({
+        level: targetZoom,
+        contentLevel: 1,
+        isZoomInteracting: true,
+      })
+
+      fireEvent.pointerUp(window)
+
+      expect(useZoomStore.getState()).toMatchObject({
+        contentLevel: targetZoom,
+        isZoomInteracting: false,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('releases slider focus after an outside pointer release', async () => {
+    render(<TimelineHeader />)
+    const thumb = screen.getByRole('slider')
+
+    thumb.focus()
+    expect(thumb).toHaveFocus()
+
+    fireEvent.pointerDown(thumb)
+    fireEvent.pointerUp(window)
+    await act(async () => {})
+
+    expect(thumb).not.toHaveFocus()
+  })
+
+  it('releases slider focus after a normal value commit', async () => {
+    render(<TimelineHeader />)
+    const thumb = screen.getByRole('slider')
+
+    thumb.focus()
+    expect(thumb).toHaveFocus()
+
+    fireEvent.pointerDown(thumb)
+    fireEvent.mouseDown(thumb)
+    fireEvent.mouseUp(thumb)
+    await act(async () => {})
+
+    expect(thumb).not.toHaveFocus()
+  })
+
+  it('synchronizes repeated keyboard steps without discarding slider focus', async () => {
     const onZoomChange = vi.fn()
     render(<TimelineHeader onZoomChange={onZoomChange} />)
     const slider = screen.getByTestId('zoom-slider')
     const thumb = screen.getByRole('slider')
     const initialValue = Number(slider.dataset.value)
+
+    thumb.focus()
 
     fireEvent.keyDown(thumb, { key: 'ArrowRight' })
     expect(Number(slider.dataset.value)).toBeCloseTo(initialValue + 0.005)
@@ -193,7 +292,13 @@ describe('TimelineHeader zoom slider', () => {
     expect(useZoomStore.getState().level).toBe(1)
 
     fireEvent.keyUp(thumb, { key: 'ArrowRight' })
+    await act(async () => {})
     expect(onZoomChange).toHaveBeenCalledTimes(2)
+    expect(thumb).toHaveFocus()
+
+    fireEvent.keyDown(thumb, { key: 'ArrowRight' })
+    expect(Number(slider.dataset.value)).toBeCloseTo(initialValue + 0.015)
+    expect(onZoomChange).toHaveBeenCalledTimes(3)
   })
 
   it('toggles the keyframe panel without a selected clip', () => {

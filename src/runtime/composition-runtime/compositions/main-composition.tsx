@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useCallback } from 'react'
-import { AbsoluteFill, Sequence, useClock } from '@/runtime/composition-runtime/deps/player'
+import {
+  AbsoluteFill,
+  Sequence,
+  useClock,
+  useClockFrameSelector,
+} from '@/runtime/composition-runtime/deps/player'
 import { timelineToSourceFrames } from '@/runtime/composition-runtime/deps/timeline'
-import { useCurrentFrame, useVideoConfig } from '../hooks/use-player-compat'
+import { useVideoConfig } from '../hooks/use-player-compat'
 import type { CompositionInputProps } from '@/types/export'
 import type { TimelineItem } from '@/types/timeline'
 import { Item, type MaskInfo } from '../components/item'
@@ -43,7 +48,7 @@ import {
   type AudioTrackItem,
   type ShapeMaskWithTrackOrder,
 } from '../utils/scene-assembly'
-import { resolveActiveShapeMasksAtFrame } from '../utils/frame-scene'
+import { resolveActiveShapeMasksAtFrame, selectMaskRenderFrame } from '../utils/frame-scene'
 import { KeyframesContext } from '../contexts/keyframes-context-core'
 import {
   EMPTY_MASK_INFOS,
@@ -74,22 +79,32 @@ const VIDEO_CLIP_PREMOUNT_SECONDS = 2
 
 const ActiveMasksContext = React.createContext<MaskInfo[]>(EMPTY_MASK_INFOS)
 
-const FrameActiveMasksProvider: React.FC<{
+type ActiveMasksProviderProps = {
   masks: ShapeMaskWithTrackOrder[]
   canvasWidth: number
   canvasHeight: number
   children: React.ReactNode
-}> = ({ masks, canvasWidth, canvasHeight, children }) => {
-  const frame = useCurrentFrame()
+}
+
+const FrameResolvedActiveMasksProvider: React.FC<ActiveMasksProviderProps> = ({
+  masks,
+  canvasWidth,
+  canvasHeight,
+  children,
+}) => {
+  const selectRelevantMaskFrame = useCallback(
+    (frame: number) => selectMaskRenderFrame(masks, frame),
+    [masks],
+  )
+  const frame = useClockFrameSelector(selectRelevantMaskFrame)
   const { fps } = useVideoConfig()
   const keyframesCtx = React.useContext(KeyframesContext)
   const previousMasksRef = React.useRef<MaskInfo[]>(EMPTY_MASK_INFOS)
   const maskItems = useMemo(() => masks.map(({ mask }) => mask), [masks])
-  const liveMaskDependencySignature =
-    useLiveTransformDependencySignatureForItems(
-      maskItems,
-      keyframesCtx?.getItemKeyframes,
-    )
+  const liveMaskDependencySignature = useLiveTransformDependencySignatureForItems(
+    maskItems,
+    keyframesCtx?.getItemKeyframes,
+  )
 
   const activeMasks = useMemo<MaskInfo[]>(() => {
     void liveMaskDependencySignature
@@ -109,17 +124,26 @@ const FrameActiveMasksProvider: React.FC<{
     const stableMasks = reuseStableMaskInfos(previousMasksRef.current, nextMasks)
     previousMasksRef.current = stableMasks
     return stableMasks
-  }, [
-    masks,
-    canvasWidth,
-    canvasHeight,
-    fps,
-    frame,
-    keyframesCtx,
-    liveMaskDependencySignature,
-  ])
+  }, [masks, canvasWidth, canvasHeight, fps, frame, keyframesCtx, liveMaskDependencySignature])
 
   return <ActiveMasksContext.Provider value={activeMasks}>{children}</ActiveMasksContext.Provider>
+}
+
+/**
+ * Avoid subscribing the entire visual layer to the playback clock when the
+ * composition has no masks. The frame-aware provider is mounted only while
+ * masks exist, so ordinary projects keep this boundary stable during playback.
+ */
+const ActiveMasksProvider: React.FC<ActiveMasksProviderProps> = (props) => {
+  if (props.masks.length === 0) {
+    return (
+      <ActiveMasksContext.Provider value={EMPTY_MASK_INFOS}>
+        {props.children}
+      </ActiveMasksContext.Provider>
+    )
+  }
+
+  return <FrameResolvedActiveMasksProvider {...props} />
 }
 
 /**
@@ -425,294 +449,294 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
             renderHeight={renderHeight}
           >
             <AbsoluteFill>
-            {/* SVG MASK DEFINITIONS - kept for backward compat with feather/invert that need SVG mask */}
-            {/* Shape mask animation is now handled per-item via ActiveMasksProvider + MaskedItem */}
+              {/* SVG MASK DEFINITIONS - kept for backward compat with feather/invert that need SVG mask */}
+              {/* Shape mask animation is now handled per-item via ActiveMasksProvider + MaskedItem */}
 
-            {/* BACKGROUND LAYER */}
-            <AbsoluteFill style={{ backgroundColor: effectiveBackgroundColor, zIndex: -1 }} />
+              {/* BACKGROUND LAYER */}
+              <AbsoluteFill style={{ backgroundColor: effectiveBackgroundColor, zIndex: -1 }} />
 
-            {/* AUDIO LAYER - rendered outside visual layers to prevent re-renders from mask/visual changes */}
-            {/* Video audio is decoupled from visual video elements for transition stability */}
-            {/* Custom-decoded segments (AC-3/E-AC-3, Vorbis, PCM endian variants) use mediabunny instead of native <audio>. */}
-            {previewTransitionAudioSegments.map((segment) => {
-              const useCustomDecoder = shouldUseCustomDecoder(segment)
-              const decodeMediaId = segment.mediaId ?? `legacy-src:${segment.src}`
-              return (
-                <Sequence
-                  key={segment.key}
-                  from={segment.from}
-                  durationInFrames={segment.durationInFrames}
-                  premountFor={Math.round(fps * TRANSITION_AUDIO_PREMOUNT_SECONDS)}
-                >
-                  {useCustomDecoder ? (
-                    <CustomDecoderAudio
-                      src={segment.src}
-                      mediaId={decodeMediaId}
-                      itemId={segment.itemId}
-                      trimBefore={segment.trimBefore}
-                      sourceFps={segment.sourceFps}
-                      volume={segment.volumeDb}
-                      playbackRate={segment.playbackRate}
-                      isReversed={segment.isReversed}
-                      reverseSourceEnd={segment.reverseSourceEnd}
-                      audioPitchSemitones={segment.audioPitchSemitones}
-                      audioPitchCents={segment.audioPitchCents}
-                      muted={segment.muted}
-                      durationInFrames={segment.durationInFrames}
-                      audioFadeIn={segment.audioFadeIn}
-                      audioFadeOut={segment.audioFadeOut}
-                      audioFadeInCurve={segment.audioFadeInCurve}
-                      audioFadeOutCurve={segment.audioFadeOutCurve}
-                      audioFadeInCurveX={segment.audioFadeInCurveX}
-                      audioFadeOutCurveX={segment.audioFadeOutCurveX}
-                      audioEqStages={segment.audioEqStages}
-                      clipFadeSpans={segment.clipFadeSpans}
-                      contentStartOffsetFrames={segment.contentStartOffsetFrames}
-                      contentEndOffsetFrames={segment.contentEndOffsetFrames}
-                      fadeInDelayFrames={segment.fadeInDelayFrames}
-                      fadeOutLeadFrames={segment.fadeOutLeadFrames}
-                      crossfadeFadeIn={segment.crossfadeFadeIn}
-                      crossfadeFadeOut={segment.crossfadeFadeOut}
+              {/* AUDIO LAYER - rendered outside visual layers to prevent re-renders from mask/visual changes */}
+              {/* Video audio is decoupled from visual video elements for transition stability */}
+              {/* Custom-decoded segments (AC-3/E-AC-3, Vorbis, PCM endian variants) use mediabunny instead of native <audio>. */}
+              {previewTransitionAudioSegments.map((segment) => {
+                const useCustomDecoder = shouldUseCustomDecoder(segment)
+                const decodeMediaId = segment.mediaId ?? `legacy-src:${segment.src}`
+                return (
+                  <Sequence
+                    key={segment.key}
+                    from={segment.from}
+                    durationInFrames={segment.durationInFrames}
+                    premountFor={Math.round(fps * TRANSITION_AUDIO_PREMOUNT_SECONDS)}
+                  >
+                    {useCustomDecoder ? (
+                      <CustomDecoderAudio
+                        src={segment.src}
+                        mediaId={decodeMediaId}
+                        itemId={segment.itemId}
+                        trimBefore={segment.trimBefore}
+                        sourceFps={segment.sourceFps}
+                        volume={segment.volumeDb}
+                        playbackRate={segment.playbackRate}
+                        isReversed={segment.isReversed}
+                        reverseSourceEnd={segment.reverseSourceEnd}
+                        audioPitchSemitones={segment.audioPitchSemitones}
+                        audioPitchCents={segment.audioPitchCents}
+                        muted={segment.muted}
+                        durationInFrames={segment.durationInFrames}
+                        audioFadeIn={segment.audioFadeIn}
+                        audioFadeOut={segment.audioFadeOut}
+                        audioFadeInCurve={segment.audioFadeInCurve}
+                        audioFadeOutCurve={segment.audioFadeOutCurve}
+                        audioFadeInCurveX={segment.audioFadeInCurveX}
+                        audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                        audioEqStages={segment.audioEqStages}
+                        clipFadeSpans={segment.clipFadeSpans}
+                        contentStartOffsetFrames={segment.contentStartOffsetFrames}
+                        contentEndOffsetFrames={segment.contentEndOffsetFrames}
+                        fadeInDelayFrames={segment.fadeInDelayFrames}
+                        fadeOutLeadFrames={segment.fadeOutLeadFrames}
+                        crossfadeFadeIn={segment.crossfadeFadeIn}
+                        crossfadeFadeOut={segment.crossfadeFadeOut}
+                      />
+                    ) : (
+                      <PitchCorrectedAudio
+                        src={segment.src}
+                        mediaId={decodeMediaId}
+                        itemId={segment.itemId}
+                        trimBefore={segment.trimBefore}
+                        sourceFps={segment.sourceFps}
+                        volume={segment.volumeDb}
+                        playbackRate={segment.playbackRate}
+                        isReversed={segment.isReversed}
+                        reverseSourceEnd={segment.reverseSourceEnd}
+                        audioPitchSemitones={segment.audioPitchSemitones}
+                        audioPitchCents={segment.audioPitchCents}
+                        muted={segment.muted}
+                        durationInFrames={segment.durationInFrames}
+                        audioFadeIn={segment.audioFadeIn}
+                        audioFadeOut={segment.audioFadeOut}
+                        audioFadeInCurve={segment.audioFadeInCurve}
+                        audioFadeOutCurve={segment.audioFadeOutCurve}
+                        audioFadeInCurveX={segment.audioFadeInCurveX}
+                        audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                        audioEqStages={segment.audioEqStages}
+                        clipFadeSpans={segment.clipFadeSpans}
+                        contentStartOffsetFrames={segment.contentStartOffsetFrames}
+                        contentEndOffsetFrames={segment.contentEndOffsetFrames}
+                        fadeInDelayFrames={segment.fadeInDelayFrames}
+                        fadeOutLeadFrames={segment.fadeOutLeadFrames}
+                        crossfadeFadeIn={segment.crossfadeFadeIn}
+                        crossfadeFadeOut={segment.crossfadeFadeOut}
+                      />
+                    )}
+                  </Sequence>
+                )
+              })}
+
+              {/* Standalone audio items - merged across split boundaries for stable playback */}
+              {previewAudioSegments.map((segment) => {
+                const useCustomDecoder = shouldUseCustomDecoder(segment)
+                const decodeMediaId = segment.mediaId ?? `legacy-src:${segment.src}`
+                return (
+                  <Sequence
+                    key={segment.key}
+                    from={segment.from}
+                    durationInFrames={segment.durationInFrames}
+                    premountFor={Math.round(fps * STANDALONE_AUDIO_PREMOUNT_SECONDS)}
+                  >
+                    {useCustomDecoder ? (
+                      <CustomDecoderAudio
+                        src={segment.src}
+                        mediaId={decodeMediaId}
+                        itemId={segment.itemId}
+                        trimBefore={segment.trimBefore}
+                        sourceFps={segment.sourceFps}
+                        volume={segment.volumeDb}
+                        playbackRate={segment.playbackRate}
+                        isReversed={segment.isReversed}
+                        reverseSourceEnd={segment.reverseSourceEnd}
+                        audioPitchSemitones={segment.audioPitchSemitones}
+                        audioPitchCents={segment.audioPitchCents}
+                        muted={segment.muted}
+                        durationInFrames={segment.durationInFrames}
+                        audioFadeIn={segment.audioFadeIn}
+                        audioFadeOut={segment.audioFadeOut}
+                        audioFadeInCurve={segment.audioFadeInCurve}
+                        audioFadeOutCurve={segment.audioFadeOutCurve}
+                        audioFadeInCurveX={segment.audioFadeInCurveX}
+                        audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                        audioEqStages={segment.audioEqStages}
+                        clipFadeSpans={segment.clipFadeSpans}
+                      />
+                    ) : (
+                      <PitchCorrectedAudio
+                        src={segment.src}
+                        mediaId={decodeMediaId}
+                        itemId={segment.itemId}
+                        trimBefore={segment.trimBefore}
+                        sourceFps={segment.sourceFps}
+                        volume={segment.volumeDb}
+                        playbackRate={segment.playbackRate}
+                        isReversed={segment.isReversed}
+                        reverseSourceEnd={segment.reverseSourceEnd}
+                        audioPitchSemitones={segment.audioPitchSemitones}
+                        audioPitchCents={segment.audioPitchCents}
+                        muted={segment.muted}
+                        durationInFrames={segment.durationInFrames}
+                        audioFadeIn={segment.audioFadeIn}
+                        audioFadeOut={segment.audioFadeOut}
+                        audioFadeInCurve={segment.audioFadeInCurve}
+                        audioFadeOutCurve={segment.audioFadeOutCurve}
+                        audioFadeInCurveX={segment.audioFadeInCurveX}
+                        audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                        audioEqStages={segment.audioEqStages}
+                        clipFadeSpans={segment.clipFadeSpans}
+                      />
+                    )}
+                  </Sequence>
+                )
+              })}
+
+              {managedCompoundAudioSegments.map((segment) => {
+                const compoundItem = managedCompoundAudioItemsById.get(segment.itemId)
+                if (!compoundItem) return null
+
+                const segmentItem = {
+                  ...compoundItem,
+                  from: segment.from,
+                  durationInFrames: segment.durationInFrames,
+                  sourceStart: segment.trimBefore,
+                  sourceEnd:
+                    segment.trimBefore +
+                    timelineToSourceFrames(
+                      segment.durationInFrames,
+                      segment.playbackRate ?? 1,
+                      fps,
+                      segment.sourceFps ?? fps,
+                    ),
+                  speed: segment.playbackRate,
+                }
+
+                return (
+                  <Sequence
+                    key={segment.key}
+                    from={segment.from}
+                    durationInFrames={segment.durationInFrames}
+                    premountFor={Math.round(fps * TRANSITION_AUDIO_PREMOUNT_SECONDS)}
+                  >
+                    <CompositionContent
+                      item={segmentItem}
+                      parentMuted={segment.muted}
+                      renderMode="audio-only"
+                      audioGainMultiplier={Math.pow(10, segment.volumeDb / 20)}
+                      audioEqStages={appendResolvedAudioEqSources(
+                        undefined,
+                        busAudioEq,
+                        compoundItem.trackAudioEq,
+                        getAudioEqSettings(compoundItem),
+                      )}
+                      audioPitchShiftSemitones={segment.audioPitchShiftSemitones}
+                      crossfadeFadeInFrames={segment.crossfadeFadeIn}
+                      crossfadeFadeOutFrames={segment.crossfadeFadeOut}
                     />
-                  ) : (
-                    <PitchCorrectedAudio
-                      src={segment.src}
-                      mediaId={decodeMediaId}
-                      itemId={segment.itemId}
-                      trimBefore={segment.trimBefore}
-                      sourceFps={segment.sourceFps}
-                      volume={segment.volumeDb}
-                      playbackRate={segment.playbackRate}
-                      isReversed={segment.isReversed}
-                      reverseSourceEnd={segment.reverseSourceEnd}
-                      audioPitchSemitones={segment.audioPitchSemitones}
-                      audioPitchCents={segment.audioPitchCents}
-                      muted={segment.muted}
-                      durationInFrames={segment.durationInFrames}
-                      audioFadeIn={segment.audioFadeIn}
-                      audioFadeOut={segment.audioFadeOut}
-                      audioFadeInCurve={segment.audioFadeInCurve}
-                      audioFadeOutCurve={segment.audioFadeOutCurve}
-                      audioFadeInCurveX={segment.audioFadeInCurveX}
-                      audioFadeOutCurveX={segment.audioFadeOutCurveX}
-                      audioEqStages={segment.audioEqStages}
-                      clipFadeSpans={segment.clipFadeSpans}
-                      contentStartOffsetFrames={segment.contentStartOffsetFrames}
-                      contentEndOffsetFrames={segment.contentEndOffsetFrames}
-                      fadeInDelayFrames={segment.fadeInDelayFrames}
-                      fadeOutLeadFrames={segment.fadeOutLeadFrames}
-                      crossfadeFadeIn={segment.crossfadeFadeIn}
-                      crossfadeFadeOut={segment.crossfadeFadeOut}
-                    />
-                  )}
-                </Sequence>
-              )
-            })}
+                  </Sequence>
+                )
+              })}
 
-            {/* Standalone audio items - merged across split boundaries for stable playback */}
-            {previewAudioSegments.map((segment) => {
-              const useCustomDecoder = shouldUseCustomDecoder(segment)
-              const decodeMediaId = segment.mediaId ?? `legacy-src:${segment.src}`
-              return (
+              {standaloneCompoundAudioItems.map((item) => (
                 <Sequence
-                  key={segment.key}
-                  from={segment.from}
-                  durationInFrames={segment.durationInFrames}
+                  key={`compound-audio-${item.id}`}
+                  from={item.from}
+                  durationInFrames={item.durationInFrames}
                   premountFor={Math.round(fps * STANDALONE_AUDIO_PREMOUNT_SECONDS)}
                 >
-                  {useCustomDecoder ? (
-                    <CustomDecoderAudio
-                      src={segment.src}
-                      mediaId={decodeMediaId}
-                      itemId={segment.itemId}
-                      trimBefore={segment.trimBefore}
-                      sourceFps={segment.sourceFps}
-                      volume={segment.volumeDb}
-                      playbackRate={segment.playbackRate}
-                      isReversed={segment.isReversed}
-                      reverseSourceEnd={segment.reverseSourceEnd}
-                      audioPitchSemitones={segment.audioPitchSemitones}
-                      audioPitchCents={segment.audioPitchCents}
-                      muted={segment.muted}
-                      durationInFrames={segment.durationInFrames}
-                      audioFadeIn={segment.audioFadeIn}
-                      audioFadeOut={segment.audioFadeOut}
-                      audioFadeInCurve={segment.audioFadeInCurve}
-                      audioFadeOutCurve={segment.audioFadeOutCurve}
-                      audioFadeInCurveX={segment.audioFadeInCurveX}
-                      audioFadeOutCurveX={segment.audioFadeOutCurveX}
-                      audioEqStages={segment.audioEqStages}
-                      clipFadeSpans={segment.clipFadeSpans}
-                    />
-                  ) : (
-                    <PitchCorrectedAudio
-                      src={segment.src}
-                      mediaId={decodeMediaId}
-                      itemId={segment.itemId}
-                      trimBefore={segment.trimBefore}
-                      sourceFps={segment.sourceFps}
-                      volume={segment.volumeDb}
-                      playbackRate={segment.playbackRate}
-                      isReversed={segment.isReversed}
-                      reverseSourceEnd={segment.reverseSourceEnd}
-                      audioPitchSemitones={segment.audioPitchSemitones}
-                      audioPitchCents={segment.audioPitchCents}
-                      muted={segment.muted}
-                      durationInFrames={segment.durationInFrames}
-                      audioFadeIn={segment.audioFadeIn}
-                      audioFadeOut={segment.audioFadeOut}
-                      audioFadeInCurve={segment.audioFadeInCurve}
-                      audioFadeOutCurve={segment.audioFadeOutCurve}
-                      audioFadeInCurveX={segment.audioFadeInCurveX}
-                      audioFadeOutCurveX={segment.audioFadeOutCurveX}
-                      audioEqStages={segment.audioEqStages}
-                      clipFadeSpans={segment.clipFadeSpans}
-                    />
-                  )}
-                </Sequence>
-              )
-            })}
-
-            {managedCompoundAudioSegments.map((segment) => {
-              const compoundItem = managedCompoundAudioItemsById.get(segment.itemId)
-              if (!compoundItem) return null
-
-              const segmentItem = {
-                ...compoundItem,
-                from: segment.from,
-                durationInFrames: segment.durationInFrames,
-                sourceStart: segment.trimBefore,
-                sourceEnd:
-                  segment.trimBefore +
-                  timelineToSourceFrames(
-                    segment.durationInFrames,
-                    segment.playbackRate ?? 1,
-                    fps,
-                    segment.sourceFps ?? fps,
-                  ),
-                speed: segment.playbackRate,
-              }
-
-              return (
-                <Sequence
-                  key={segment.key}
-                  from={segment.from}
-                  durationInFrames={segment.durationInFrames}
-                  premountFor={Math.round(fps * TRANSITION_AUDIO_PREMOUNT_SECONDS)}
-                >
                   <CompositionContent
-                    item={segmentItem}
-                    parentMuted={segment.muted}
+                    item={item}
+                    parentMuted={item.muted || !item.trackVisible}
                     renderMode="audio-only"
-                    audioGainMultiplier={Math.pow(10, segment.volumeDb / 20)}
+                    audioGainMultiplier={Math.pow(
+                      10,
+                      ((item.volume ?? 0) + (item.trackVolumeDb ?? 0)) / 20,
+                    )}
                     audioEqStages={appendResolvedAudioEqSources(
                       undefined,
                       busAudioEq,
-                      compoundItem.trackAudioEq,
-                      getAudioEqSettings(compoundItem),
+                      item.trackAudioEq,
+                      getAudioEqSettings(item),
                     )}
-                    audioPitchShiftSemitones={segment.audioPitchShiftSemitones}
-                    crossfadeFadeInFrames={segment.crossfadeFadeIn}
-                    crossfadeFadeOutFrames={segment.crossfadeFadeOut}
+                    audioPitchShiftSemitones={getAudioPitchShiftSemitones(item)}
                   />
                 </Sequence>
-              )
-            })}
+              ))}
 
-            {standaloneCompoundAudioItems.map((item) => (
-              <Sequence
-                key={`compound-audio-${item.id}`}
-                from={item.from}
-                durationInFrames={item.durationInFrames}
-                premountFor={Math.round(fps * STANDALONE_AUDIO_PREMOUNT_SECONDS)}
+              {/* ALL VISUAL LAYERS - videos and non-media in SINGLE wrapper for proper z-index stacking */}
+              {/* This ensures items from different tracks respect z-index across all types */}
+              <ActiveMasksProvider
+                masks={visibleShapeMasks}
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
               >
-                <CompositionContent
-                  item={item}
-                  parentMuted={item.muted || !item.trackVisible}
-                  renderMode="audio-only"
-                  audioGainMultiplier={Math.pow(
-                    10,
-                    ((item.volume ?? 0) + (item.trackVolumeDb ?? 0)) / 20,
-                  )}
-                  audioEqStages={appendResolvedAudioEqSources(
-                    undefined,
-                    busAudioEq,
-                    item.trackAudioEq,
-                    getAudioEqSettings(item),
-                  )}
-                  audioPitchShiftSemitones={getAudioPitchShiftSemitones(item)}
-                />
-              </Sequence>
-            ))}
+                <AbsoluteFill>
+                  {/* VIDEO LAYER - all videos rendered via StableVideoSequence */}
+                  {/* ALL effects (CSS, glitch, halftone) applied per-item via ItemEffectWrapper */}
+                  <StableVideoSequence
+                    items={videoItems}
+                    transitionWindows={renderPlan.transitionWindows}
+                    premountFor={Math.round(fps * VIDEO_CLIP_PREMOUNT_SECONDS)}
+                    renderItem={renderVideoItem}
+                  />
 
-            {/* ALL VISUAL LAYERS - videos and non-media in SINGLE wrapper for proper z-index stacking */}
-            {/* This ensures items from different tracks respect z-index across all types */}
-            <FrameActiveMasksProvider
-              masks={visibleShapeMasks}
-              canvasWidth={canvasWidth}
-              canvasHeight={canvasHeight}
-            >
-              <AbsoluteFill>
-                {/* VIDEO LAYER - all videos rendered via StableVideoSequence */}
-                {/* ALL effects (CSS, glitch, halftone) applied per-item via ItemEffectWrapper */}
-                <StableVideoSequence
-                  items={videoItems}
-                  transitionWindows={renderPlan.transitionWindows}
-                  premountFor={Math.round(fps * VIDEO_CLIP_PREMOUNT_SECONDS)}
-                  renderItem={renderVideoItem}
-                />
-
-                {/* NON-MEDIA LAYERS - text, shapes, etc. with per-item effects via ItemEffectWrapper */}
-                {/* No more above/below split - items never move between DOM parents */}
-                {nonMediaByTrack
-                  .filter((track) => track.items.length > 0)
-                  .map((track) => {
-                    const trackOrder = track.order ?? 0
-                    return (
-                      <AbsoluteFill
-                        key={track.id}
-                        style={{
-                          // Non-media z-index: base + 100 (videos use base, transitions use base + 200)
-                          zIndex: (maxOrder - trackOrder) * 1000 + 100,
-                          visibility: track.trackVisible ? 'visible' : 'hidden',
-                        }}
-                      >
-                        {track.items.map((item) => (
-                          <Sequence
-                            key={item.id}
-                            from={item.from}
-                            durationInFrames={item.durationInFrames}
-                          >
-                            <ItemEffectWrapper
-                              itemTrackOrder={trackOrder}
-                              adjustmentLayers={visibleAdjustmentLayers}
-                              sequenceFrom={item.from}
+                  {/* NON-MEDIA LAYERS - text, shapes, etc. with per-item effects via ItemEffectWrapper */}
+                  {/* No more above/below split - items never move between DOM parents */}
+                  {nonMediaByTrack
+                    .filter((track) => track.items.length > 0)
+                    .map((track) => {
+                      const trackOrder = track.order ?? 0
+                      return (
+                        <AbsoluteFill
+                          key={track.id}
+                          style={{
+                            // Non-media z-index: base + 100 (videos use base, transitions use base + 200)
+                            zIndex: (maxOrder - trackOrder) * 1000 + 100,
+                            visibility: track.trackVisible ? 'visible' : 'hidden',
+                          }}
+                        >
+                          {track.items.map((item) => (
+                            <Sequence
+                              key={item.id}
+                              from={item.from}
+                              durationInFrames={item.durationInFrames}
                             >
-                              <MaskedItem
-                                item={item}
-                                muted={
-                                  track.muted ||
-                                  !track.trackVisible ||
-                                  (item.type === 'composition' &&
-                                    hasLinkedAudioCompanion(audioItems, item))
-                                }
-                                visible={track.trackVisible}
+                              <ItemEffectWrapper
                                 itemTrackOrder={trackOrder}
-                                compositionRenderMode={
-                                  item.type === 'composition' &&
-                                  hasLinkedAudioCompanion(audioItems, item)
-                                    ? 'visual-only'
-                                    : 'full'
-                                }
-                              />
-                            </ItemEffectWrapper>
-                          </Sequence>
-                        ))}
-                      </AbsoluteFill>
-                    )
-                  })}
-              </AbsoluteFill>
-            </FrameActiveMasksProvider>
+                                adjustmentLayers={visibleAdjustmentLayers}
+                                sequenceFrom={item.from}
+                              >
+                                <MaskedItem
+                                  item={item}
+                                  muted={
+                                    track.muted ||
+                                    !track.trackVisible ||
+                                    (item.type === 'composition' &&
+                                      hasLinkedAudioCompanion(audioItems, item))
+                                  }
+                                  visible={track.trackVisible}
+                                  itemTrackOrder={trackOrder}
+                                  compositionRenderMode={
+                                    item.type === 'composition' &&
+                                    hasLinkedAudioCompanion(audioItems, item)
+                                      ? 'visual-only'
+                                      : 'full'
+                                  }
+                                />
+                              </ItemEffectWrapper>
+                            </Sequence>
+                          ))}
+                        </AbsoluteFill>
+                      )
+                    })}
+                </AbsoluteFill>
+              </ActiveMasksProvider>
             </AbsoluteFill>
           </CompositionSpaceProvider>
         </KeyframesProvider>

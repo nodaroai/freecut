@@ -6,9 +6,13 @@ import { useMarqueeSelection, type Rect } from './use-marquee-selection'
 
 interface MarqueeHarnessProps {
   children?: ReactNode
+  useBatchResolver?: boolean
   onSelectionChange: (ids: string[]) => void
   onPreviewSelectionChange?: (ids: string[]) => void
   onGestureEnd: (event: MouseEvent, wasActualDrag: boolean) => void
+  onGestureCancel?: (wasActualDrag: boolean) => void
+  committedSelectionIds?: readonly string[]
+  liveCommitThrottleMs?: number
 }
 
 function createRect(left: number, top: number, right: number, bottom: number): Rect {
@@ -24,9 +28,13 @@ function createRect(left: number, top: number, right: number, bottom: number): R
 
 function MarqueeHarness({
   children,
+  useBatchResolver = false,
   onSelectionChange,
   onPreviewSelectionChange,
   onGestureEnd,
+  onGestureCancel,
+  committedSelectionIds,
+  liveCommitThrottleMs = 0,
 }: MarqueeHarnessProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const items = useMemo(
@@ -36,18 +44,32 @@ function MarqueeHarness({
     ],
     [],
   )
+  const resolveItems = useMemo(
+    () =>
+      useBatchResolver
+        ? () => [
+            { id: 'clip-1', rect: createRect(120, 120, 140, 140) },
+            { id: 'clip-2', rect: createRect(20, 20, 40, 40) },
+          ]
+        : undefined,
+    [useBatchResolver],
+  )
 
-  useMarqueeSelection({
+  const { isActive } = useMarqueeSelection({
     containerRef: containerRef as React.RefObject<HTMLElement>,
     items,
+    resolveItems,
     onSelectionChange,
     onPreviewSelectionChange,
+    committedSelectionIds,
     onGestureEnd,
+    onGestureCancel,
     commitSelectionOnMouseUp: true,
+    liveCommitThrottleMs,
   })
 
   return (
-    <div ref={containerRef} data-testid="marquee-container">
+    <div ref={containerRef} data-marquee-active={isActive} data-testid="marquee-container">
       {children}
     </div>
   )
@@ -73,6 +95,7 @@ describe('useMarqueeSelection deferred commits', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -195,6 +218,212 @@ describe('useMarqueeSelection deferred commits', () => {
 
     expect(onGestureEnd).not.toHaveBeenCalled()
     expect(onPreviewSelectionChange).not.toHaveBeenCalled()
+    expect(onSelectionChange).not.toHaveBeenCalled()
+  })
+
+  it('cancels an active drag on window blur instead of carrying it into the next gesture', () => {
+    const onSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onPreviewSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onGestureEnd = vi.fn<(event: MouseEvent, wasActualDrag: boolean) => void>()
+    const onGestureCancel = vi.fn<(wasActualDrag: boolean) => void>()
+    const { getByTestId } = render(
+      <MarqueeHarness
+        onSelectionChange={onSelectionChange}
+        onPreviewSelectionChange={onPreviewSelectionChange}
+        onGestureEnd={onGestureEnd}
+        onGestureCancel={onGestureCancel}
+      >
+        <div className="timeline-ruler" data-testid="timeline-ruler" />
+      </MarqueeHarness>,
+    )
+    const container = getByTestId('marquee-container')
+
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 200 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => createRect(0, 0, 200, 200),
+      },
+    })
+
+    fireEvent.mouseDown(container, { button: 0, clientX: 5, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 50, clientY: 50 })
+    flushAnimationFrames()
+
+    expect(container).toHaveAttribute('data-marquee-active', 'true')
+
+    fireEvent.blur(window)
+
+    expect(container).toHaveAttribute('data-marquee-active', 'false')
+    expect(onGestureCancel).toHaveBeenCalledWith(true)
+    expect(onPreviewSelectionChange).toHaveBeenLastCalledWith([])
+    expect(onGestureEnd).not.toHaveBeenCalled()
+    expect(onSelectionChange).not.toHaveBeenCalled()
+
+    fireEvent.mouseDown(getByTestId('timeline-ruler'), { button: 0, clientX: 75, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 120, clientY: 50 })
+    flushAnimationFrames()
+    fireEvent.mouseUp(document, { clientX: 120, clientY: 50 })
+
+    expect(container).toHaveAttribute('data-marquee-active', 'false')
+    expect(onGestureCancel).toHaveBeenCalledTimes(1)
+    expect(onGestureEnd).not.toHaveBeenCalled()
+  })
+
+  it('drops a stale drag before an excluded surface starts a new interaction', () => {
+    const onSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onGestureEnd = vi.fn<(event: MouseEvent, wasActualDrag: boolean) => void>()
+    const onGestureCancel = vi.fn<(wasActualDrag: boolean) => void>()
+    const { getByTestId } = render(
+      <MarqueeHarness
+        onSelectionChange={onSelectionChange}
+        onGestureEnd={onGestureEnd}
+        onGestureCancel={onGestureCancel}
+      >
+        <div className="timeline-ruler" data-testid="timeline-ruler" />
+      </MarqueeHarness>,
+    )
+    const container = getByTestId('marquee-container')
+
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 200 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => createRect(0, 0, 200, 200),
+      },
+    })
+
+    fireEvent.mouseDown(container, { button: 0, clientX: 5, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 50, clientY: 50 })
+    flushAnimationFrames()
+
+    expect(container).toHaveAttribute('data-marquee-active', 'true')
+
+    fireEvent.mouseDown(getByTestId('timeline-ruler'), { button: 0, clientX: 75, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 120, clientY: 50 })
+    flushAnimationFrames()
+    fireEvent.mouseUp(document, { clientX: 120, clientY: 50 })
+
+    expect(container).toHaveAttribute('data-marquee-active', 'false')
+    expect(onGestureCancel).toHaveBeenCalledWith(true)
+    expect(onGestureEnd).not.toHaveBeenCalled()
+    expect(onSelectionChange).not.toHaveBeenCalled()
+  })
+
+  it('never starts marquee from an interaction shield', () => {
+    const onSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onGestureEnd = vi.fn<(event: MouseEvent, wasActualDrag: boolean) => void>()
+    const { getByTestId } = render(
+      <MarqueeHarness onSelectionChange={onSelectionChange} onGestureEnd={onGestureEnd}>
+        <div data-marquee-ignore data-testid="interaction-shield" />
+      </MarqueeHarness>,
+    )
+    const container = getByTestId('marquee-container')
+
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 200 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => createRect(0, 0, 200, 200),
+      },
+    })
+
+    fireEvent.mouseDown(getByTestId('interaction-shield'), {
+      button: 0,
+      clientX: 75,
+      clientY: 75,
+    })
+    fireEvent.mouseMove(document, { clientX: 140, clientY: 140 })
+    flushAnimationFrames()
+    fireEvent.mouseUp(document, { clientX: 140, clientY: 140 })
+
+    expect(container).toHaveAttribute('data-marquee-active', 'false')
+    expect(onGestureEnd).not.toHaveBeenCalled()
+    expect(onSelectionChange).not.toHaveBeenCalled()
+  })
+
+  it('restores the committed selection when cancellation follows a throttled live commit', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(100)
+    const onSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onGestureEnd = vi.fn<(event: MouseEvent, wasActualDrag: boolean) => void>()
+    const { getByTestId } = render(
+      <MarqueeHarness
+        committedSelectionIds={['previous-selection']}
+        liveCommitThrottleMs={66}
+        onSelectionChange={onSelectionChange}
+        onGestureEnd={onGestureEnd}
+      />,
+    )
+    const container = getByTestId('marquee-container')
+
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 200 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => createRect(0, 0, 200, 200),
+      },
+    })
+
+    fireEvent.mouseDown(container, { button: 0, clientX: 5, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 50, clientY: 50 })
+    flushAnimationFrames()
+
+    expect(onSelectionChange).toHaveBeenCalledWith(['clip-1'])
+
+    fireEvent.blur(window)
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['previous-selection'])
+    expect(onSelectionChange).toHaveBeenCalledTimes(2)
+    expect(onGestureEnd).not.toHaveBeenCalled()
+  })
+
+  it('uses a batch geometry resolver for data-driven item surfaces', () => {
+    const onSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onGestureEnd = vi.fn<(event: MouseEvent, wasActualDrag: boolean) => void>()
+    const { getByTestId } = render(
+      <MarqueeHarness
+        useBatchResolver
+        onSelectionChange={onSelectionChange}
+        onGestureEnd={onGestureEnd}
+      />,
+    )
+    const container = getByTestId('marquee-container')
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 200 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => createRect(0, 0, 200, 200),
+      },
+    })
+
+    fireEvent.mouseDown(container, { button: 0, clientX: 5, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 50, clientY: 50 })
+    flushAnimationFrames()
+    fireEvent.mouseUp(document, { clientX: 50, clientY: 50 })
+
+    expect(onSelectionChange).toHaveBeenCalledWith(['clip-2'])
+  })
+
+  it('does not claim a drag that starts on a compact density clip', () => {
+    const onSelectionChange = vi.fn<(ids: string[]) => void>()
+    const onGestureEnd = vi.fn<(event: MouseEvent, wasActualDrag: boolean) => void>()
+    const { getByTestId } = render(
+      <MarqueeHarness onSelectionChange={onSelectionChange} onGestureEnd={onGestureEnd}>
+        <div data-timeline-density-bucket data-testid="density-bucket" />
+      </MarqueeHarness>,
+    )
+
+    fireEvent.mouseDown(getByTestId('density-bucket'), { button: 0, clientX: 5, clientY: 5 })
+    fireEvent.mouseMove(document, { clientX: 100, clientY: 100 })
+    flushAnimationFrames()
+    fireEvent.mouseUp(document, { clientX: 100, clientY: 100 })
+
+    expect(onGestureEnd).not.toHaveBeenCalled()
     expect(onSelectionChange).not.toHaveBeenCalled()
   })
 })

@@ -92,7 +92,6 @@ function evictIfNeeded(): void {
   }
 }
 const DEFAULT_PLAYABLE_PARTIAL_READY_SECONDS = 2
-const PLAYABLE_PARTIAL_TIMEOUT_MS = 8000
 const PLAYABLE_PARTIAL_PREROLL_SECONDS = 0.25
 const STARTUP_PLAYABLE_PARTIAL_READY_SECONDS = 1
 const PENDING_PLAYBACK_SLICE_REUSE_HEADROOM_SECONDS = 1
@@ -107,6 +106,50 @@ export interface PlaybackAudioSlice {
   buffer: AudioBuffer
   startTime: number
   isComplete: boolean
+}
+
+type AudioWindowDecodeMode = 'targeted' | 'sequential'
+
+interface DecodeAudioSampleData {
+  numberOfFrames?: number
+  numberOfChannels?: number
+  sampleRate?: number
+  timestamp?: number
+  duration?: number
+  copyTo: (destination: Float32Array, options: { planeIndex: number; format: 'f32-planar' }) => void
+  close: () => void
+}
+
+function extractDecodeSampleStereoChunk(sample: DecodeAudioSampleData): {
+  left: Float32Array
+  right: Float32Array
+  frameCount: number
+} | null {
+  const frameCount = Math.max(0, sample.numberOfFrames ?? 0)
+  const channelCount = Math.max(1, sample.numberOfChannels ?? 1)
+  if (frameCount === 0) {
+    return null
+  }
+
+  const channels: Float32Array[] = []
+  for (let c = 0; c < channelCount; c++) {
+    const channelData = new Float32Array(frameCount)
+    sample.copyTo(channelData, { planeIndex: c, format: 'f32-planar' })
+    channels.push(channelData)
+  }
+  const { left, right } = downmixToStereo(channels, frameCount)
+  return { left, right, frameCount }
+}
+
+function getDecodeSampleEndTime(sample: DecodeAudioSampleData): number | null {
+  if (
+    !Number.isFinite(sample.timestamp) ||
+    !Number.isFinite(sample.duration) ||
+    Number(sample.duration) <= 0
+  ) {
+    return null
+  }
+  return Number(sample.timestamp) + Number(sample.duration)
 }
 
 function getPlaybackSliceCoverageEnd(slice: PlaybackAudioSlice): number {
@@ -168,12 +211,6 @@ function rememberPlaybackSlice(mediaId: string, slice: PlaybackAudioSlice): void
 
 function binKey(mediaId: string, binIndex: number): string {
   return `${mediaId}:bin:${binIndex}`
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
 }
 
 function createInputSource(mb: Awaited<typeof import('mediabunny')>, src: PreviewAudioSource) {
@@ -353,6 +390,7 @@ async function decodeAudioWindow(
   src: PreviewAudioSource,
   startTime: number,
   durationSeconds: number,
+  mode: AudioWindowDecodeMode = 'targeted',
   ac3RetryAttempted: boolean = false,
 ): Promise<PlaybackAudioSlice> {
   const shouldRegisterAc3 = ac3RetryAttempted || (await shouldPreRegisterAc3Decoder(mediaId))
@@ -376,7 +414,11 @@ async function decodeAudioWindow(
 
       const safeStartTime = Math.max(0, startTime)
       const targetCoverageEndTime = safeStartTime + Math.max(0.5, durationSeconds)
-      const sink = new mb.AudioBufferSink(audioTrack)
+      // Use AudioSampleSink here as well as in the proven full-decode path.
+      // AudioBufferSink can fail for custom codecs even after their decoder is
+      // registered, which used to turn a small playback-window request into a
+      // slow full decode and leave transport advancing without audio.
+      const sink = new mb.AudioSampleSink(audioTrack)
 
       let sliceStartTime: number | null = null
       let coverageEndTime = safeStartTime
@@ -386,61 +428,91 @@ async function decodeAudioWindow(
       const rightChunks: Float32Array[] = []
       const seenBufferKeys = new Set<string>()
 
-      const appendWrappedBuffer = (wrappedBuffer: {
-        buffer: AudioBuffer
-        timestamp: number
-        duration: number
-      }) => {
-        const audioBuffer = wrappedBuffer.buffer
-        const frameCount = audioBuffer.length
-        const channelCount = Math.max(1, audioBuffer.numberOfChannels)
-        if (frameCount === 0) {
+      const appendSample = (sample: DecodeAudioSampleData) => {
+        const chunk = extractDecodeSampleStereoChunk(sample)
+        if (!chunk) {
           return
         }
 
-        const dedupeKey = `${wrappedBuffer.timestamp}:${wrappedBuffer.duration}`
+        const timestamp = Number.isFinite(sample.timestamp)
+          ? Number(sample.timestamp)
+          : coverageEndTime
+        const duration =
+          Number.isFinite(sample.duration) && Number(sample.duration) > 0
+            ? Number(sample.duration)
+            : chunk.frameCount / Math.max(1, sample.sampleRate ?? sampleRate)
+
+        const dedupeKey = `${timestamp}:${duration}`
         if (seenBufferKeys.has(dedupeKey)) {
           return
         }
         seenBufferKeys.add(dedupeKey)
 
         if (sliceStartTime === null) {
-          sliceStartTime = wrappedBuffer.timestamp
+          sliceStartTime = timestamp
         }
-        coverageEndTime = Math.max(
-          coverageEndTime,
-          wrappedBuffer.timestamp + wrappedBuffer.duration,
-        )
-        if (audioBuffer.sampleRate > 0) {
-          sampleRate = audioBuffer.sampleRate
+        coverageEndTime = Math.max(coverageEndTime, timestamp + duration)
+        if (sample.sampleRate && sample.sampleRate > 0) {
+          sampleRate = sample.sampleRate
         }
 
-        const channels: Float32Array[] = []
-        for (let c = 0; c < channelCount; c++) {
-          channels.push(audioBuffer.getChannelData(c))
-        }
-        const { left, right } = downmixToStereo(channels, frameCount)
-        leftChunks.push(left)
-        rightChunks.push(right)
-        totalFrames += frameCount
+        leftChunks.push(chunk.left)
+        rightChunks.push(chunk.right)
+        totalFrames += chunk.frameCount
       }
 
-      const initialWrappedBuffer = await sink.getBuffer(safeStartTime)
-      if (initialWrappedBuffer) {
-        appendWrappedBuffer(initialWrappedBuffer)
-      }
-
-      const iteratorStartTime = initialWrappedBuffer
-        ? Math.max(
-            safeStartTime,
-            initialWrappedBuffer.timestamp + initialWrappedBuffer.duration,
-          )
-        : safeStartTime
-      if (coverageEndTime < targetCoverageEndTime) {
-        for await (const wrappedBuffer of sink.buffers(iteratorStartTime, targetCoverageEndTime)) {
-          appendWrappedBuffer(wrappedBuffer)
+      if (mode === 'sequential') {
+        // A custom decoder may support only forward decoding from the start.
+        // Discard early samples and retain chunks only for the requested window.
+        for await (const sample of sink.samples() as AsyncIterable<DecodeAudioSampleData>) {
+          try {
+            const sampleStartTime = Number.isFinite(sample.timestamp)
+              ? Number(sample.timestamp)
+              : null
+            const sampleEndTime = getDecodeSampleEndTime(sample)
+            if (sampleEndTime !== null && sampleEndTime <= safeStartTime) {
+              continue
+            }
+            if (sampleStartTime !== null && sampleStartTime >= targetCoverageEndTime) {
+              break
+            }
+            appendSample(sample)
+          } finally {
+            sample.close()
+          }
           if (coverageEndTime >= targetCoverageEndTime) {
             break
+          }
+        }
+      } else {
+        const initialSample = (await sink.getSample(safeStartTime)) as DecodeAudioSampleData | null
+        let initialSampleEndTime: number | null = null
+        if (initialSample) {
+          try {
+            appendSample(initialSample)
+            initialSampleEndTime = getDecodeSampleEndTime(initialSample)
+          } finally {
+            initialSample.close()
+          }
+        }
+
+        const iteratorStartTime =
+          initialSampleEndTime === null
+            ? safeStartTime
+            : Math.max(safeStartTime, initialSampleEndTime)
+        if (coverageEndTime < targetCoverageEndTime) {
+          for await (const sample of sink.samples(
+            iteratorStartTime,
+            targetCoverageEndTime,
+          ) as AsyncIterable<DecodeAudioSampleData>) {
+            try {
+              appendSample(sample)
+            } finally {
+              sample.close()
+            }
+            if (coverageEndTime >= targetCoverageEndTime) {
+              break
+            }
           }
         }
       }
@@ -466,7 +538,7 @@ async function decodeAudioWindow(
   } catch (err) {
     if (!ac3RetryAttempted && !shouldRegisterAc3) {
       try {
-        return await decodeAudioWindow(mediaId, src, startTime, durationSeconds, true)
+        return await decodeAudioWindow(mediaId, src, startTime, durationSeconds, mode, true)
       } catch {
         // Keep original error as primary failure.
       }
@@ -477,14 +549,16 @@ async function decodeAudioWindow(
 
 /**
  * Playback-first helper for custom-decoded audio:
- * returns a partial buffer as soon as enough decoded bins are available,
- * while full decode continues in the background.
+ * returns a bounded buffer around the requested playback position. This path
+ * deliberately never starts a whole-file decode: callers retain the returned
+ * AudioBuffer, so a long source would otherwise defeat the shared cache budget.
  */
 export async function getOrDecodeAudioSliceForPlayback(
   mediaId: string,
   src: PreviewAudioSource,
   options?: {
     minReadySeconds?: number
+    /** @deprecated Retained for call-site compatibility; window decoding no longer escalates. */
     waitTimeoutMs?: number
     targetTimeSeconds?: number
     preRollSeconds?: number
@@ -504,10 +578,8 @@ export async function getOrDecodeAudioSliceForPlayback(
     1,
     options?.minReadySeconds ?? DEFAULT_PLAYABLE_PARTIAL_READY_SECONDS,
   )
-  const waitTimeoutMs = Math.max(0, options?.waitTimeoutMs ?? PLAYABLE_PARTIAL_TIMEOUT_MS)
   const targetTimeSeconds = Math.max(0, options?.targetTimeSeconds ?? 0)
   const preRollSeconds = Math.max(0, options?.preRollSeconds ?? PLAYABLE_PARTIAL_PREROLL_SECONDS)
-  const pendingFullDecodePromise = pendingDecodes.get(mediaId) ?? null
 
   const cachedPlaybackSlice = playbackSliceCache.get(mediaId)
   if (
@@ -557,17 +629,30 @@ export async function getOrDecodeAudioSliceForPlayback(
       rememberPlaybackSlice(mediaId, slice)
       return slice
     } catch (windowError) {
-      log.warn('Targeted preview audio window decode failed, falling back to full decode', {
+      log.warn('Targeted preview audio window decode failed, retrying sequentially', {
         mediaId,
         targetTimeSeconds,
         error: windowError,
       })
-    }
-
-    return {
-      buffer: await getOrDecodeAudio(mediaId, src),
-      startTime: 0,
-      isComplete: true,
+      try {
+        const slice = await decodeAudioWindowPreferWorker(
+          mediaId,
+          src,
+          partialStartTime,
+          partialDurationSeconds,
+          'sequential',
+        )
+        rememberPlaybackSlice(mediaId, slice)
+        return slice
+      } catch (sequentialError) {
+        log.warn('Sequential preview audio window decode failed', {
+          mediaId,
+          targetTimeSeconds,
+          targetedError: windowError,
+          error: sequentialError,
+        })
+        throw sequentialError
+      }
     }
   })()
 
@@ -578,19 +663,6 @@ export async function getOrDecodeAudioSliceForPlayback(
   })
 
   try {
-    if (waitTimeoutMs > 0) {
-      return await Promise.race([
-        partialPromise,
-        (async () => {
-          await sleep(waitTimeoutMs)
-          return {
-            buffer: await (pendingFullDecodePromise ?? getOrDecodeAudio(mediaId, src)),
-            startTime: 0,
-            isComplete: true,
-          } satisfies PlaybackAudioSlice
-        })(),
-      ])
-    }
     return await partialPromise
   } finally {
     const pendingSlice = pendingPlaybackSliceDecodes.get(mediaId)
@@ -800,6 +872,7 @@ function decodeAudioWindowViaWorker(
   src: PreviewAudioSource,
   startTime: number,
   durationSeconds: number,
+  mode: AudioWindowDecodeMode = 'targeted',
 ): Promise<PlaybackAudioSlice> {
   return new Promise<PlaybackAudioSlice>((resolve, reject) => {
     const worker = getAudioWindowWorker()
@@ -852,6 +925,7 @@ function decodeAudioWindowViaWorker(
       startTime,
       durationSeconds,
       storageSampleRate: STORAGE_SAMPLE_RATE,
+      mode,
     })
   })
 }
@@ -862,18 +936,20 @@ async function decodeAudioWindowPreferWorker(
   src: PreviewAudioSource,
   startTime: number,
   durationSeconds: number,
+  mode: AudioWindowDecodeMode = 'targeted',
 ): Promise<PlaybackAudioSlice> {
   if (canUseAudioDecodeWorker()) {
     try {
-      return await decodeAudioWindowViaWorker(mediaId, src, startTime, durationSeconds)
+      return await decodeAudioWindowViaWorker(mediaId, src, startTime, durationSeconds, mode)
     } catch (err) {
       log.warn('Worker window decode failed, falling back to main-thread window decode', {
         mediaId,
+        mode,
         err,
       })
     }
   }
-  return decodeAudioWindow(mediaId, src, startTime, durationSeconds)
+  return decodeAudioWindow(mediaId, src, startTime, durationSeconds, mode)
 }
 
 // ---------------------------------------------------------------------------
@@ -1195,37 +1271,19 @@ async function decodeFullAudio(
 
       for await (const sample of sink.samples()) {
         try {
-          const sampleData = sample as {
-            numberOfFrames?: number
-            numberOfChannels?: number
-            sampleRate?: number
-            copyTo: (
-              destination: Float32Array,
-              options: { planeIndex: number; format: 'f32-planar' },
-            ) => void
-          }
-          const frameCount = Math.max(0, sampleData.numberOfFrames ?? 0)
-          const channelCount = Math.max(1, sampleData.numberOfChannels ?? 1)
-          if (frameCount === 0) {
+          const sampleData = sample as DecodeAudioSampleData
+          const chunk = extractDecodeSampleStereoChunk(sampleData)
+          if (!chunk) {
             continue
           }
           if (sampleData.sampleRate && sampleData.sampleRate > 0) {
             sampleRate = sampleData.sampleRate
           }
 
-          // Extract channels and downmix to stereo immediately.
-          const channels: Float32Array[] = []
-          for (let c = 0; c < channelCount; c++) {
-            const channelData = new Float32Array(frameCount)
-            sampleData.copyTo(channelData, { planeIndex: c, format: 'f32-planar' })
-            channels.push(channelData)
-          }
-          const { left, right } = downmixToStereo(channels, frameCount)
-
           // Accumulate for current bin
-          binLeftChunks.push(left)
-          binRightChunks.push(right)
-          binAccumFrames += frameCount
+          binLeftChunks.push(chunk.left)
+          binRightChunks.push(chunk.right)
+          binAccumFrames += chunk.frameCount
 
           // Flush bin when it reaches the target duration
           const binFramesAtSource = BIN_DURATION_SEC * sampleRate

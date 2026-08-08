@@ -71,9 +71,12 @@ import {
 } from '../utils/zoom-anchor'
 import { frameToPixelsNow, pixelsToFrameNow } from '../utils/zoom-conversions'
 import { applyTimelineLiveGeometry } from '../utils/timeline-live-geometry'
+import { resolveTimelineMarqueeItems } from '../utils/timeline-marquee-geometry'
+import { setTimelineDensityMarqueePreview } from '../utils/timeline-density-marquee-preview'
 import { notifyTimelineLiveScroll } from '@/shared/timeline/live-scroll-sync'
 import { getPlaybackFollowScrollLeft } from '../utils/playback-follow-scroll'
 import { TimelineSettledContentZoomProvider } from './timeline-settled-content-zoom-provider'
+import { getTimelineZoomInteractionShieldBounds } from '../utils/timeline-zoom-interaction-shield'
 
 const ACTIVE_TIMELINE_GESTURE_CURSOR_CLASSES = [
   'timeline-cursor-trim-left',
@@ -392,22 +395,29 @@ interface TimelineContentProps {
 interface TimelineMarqueeLayerProps {
   containerRef: React.RefObject<HTMLDivElement | null>
   itemIds: string[]
+  fps: number
+  duration: number
   onSelectionChange: (ids: string[]) => void
   onMarqueeActiveChange: (active: boolean) => void
   onMarqueeGestureEnd: (event: MouseEvent) => void
+  onMarqueeGestureCancel: () => void
 }
 
 const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
   containerRef,
   itemIds,
+  fps,
+  duration,
   onSelectionChange,
   onMarqueeActiveChange,
   onMarqueeGestureEnd,
+  onMarqueeGestureCancel,
 }: TimelineMarqueeLayerProps) {
   const previewItemIdsRef = useRef<string[]>([])
 
   const setPreviewItemIds = useCallback(
     (ids: string[]) => {
+      setTimelineDensityMarqueePreview(ids)
       const container = containerRef.current
       if (!container) {
         previewItemIdsRef.current = ids
@@ -468,12 +478,25 @@ const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
     [containerRef, itemIds],
   )
 
+  const resolveMarqueeItems = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return []
+    return resolveTimelineMarqueeItems(
+      container,
+      itemIds,
+      useItemsStore.getState().itemById,
+      duration * fps,
+    )
+  }, [containerRef, duration, fps, itemIds])
+
   const { marquee, isActive } = useMarqueeSelection({
     containerRef: containerRef as React.RefObject<HTMLElement>,
     items: marqueeItems,
+    resolveItems: resolveMarqueeItems,
     onSelectionChange,
     onPreviewSelectionChange: setPreviewItemIds,
     onGestureEnd: onMarqueeGestureEnd,
+    onGestureCancel: onMarqueeGestureCancel,
     enabled: itemIds.length > 0,
     threshold: 5,
     commitSelectionOnMouseUp: true,
@@ -885,6 +908,10 @@ export const TimelineContent = memo(function TimelineContent({
   // scheduleViewportSync can hand it to syncViewportFromContainer instead of
   // reading container.scrollLeft back (a forced reflow after a width write).
   const scrollLeftRef = useRef(0)
+  // The rendered content width is derived below and changes only with content,
+  // viewport size, or settled zoom. Keep it available to playback follow-scroll
+  // without reading container.scrollWidth on every clock frame.
+  const timelineWidthRef = useRef(0)
 
   // Cached viewport box dimensions. clientWidth/clientHeight are invariant under
   // scroll and horizontal zoom (only the *content* width changes), so reading
@@ -952,10 +979,10 @@ export const TimelineContent = memo(function TimelineContent({
 
       const cachedViewportWidth = viewportDimsRef.current?.width ?? 0
       const viewportWidth = cachedViewportWidth > 0 ? cachedViewportWidth : container.clientWidth
-      const maxScrollLeft = Math.max(0, container.scrollWidth - viewportWidth)
+      const maxScrollLeft = Math.max(0, timelineWidthRef.current - viewportWidth)
       const nextScrollLeft = getPlaybackFollowScrollLeft({
         playheadX: frameToPixelsRef.current(state.currentFrame),
-        scrollLeft: container.scrollLeft,
+        scrollLeft: scrollLeftRef.current,
         viewportWidth,
         maxScrollLeft,
         playbackDirection: state.playbackRate < 0 ? -1 : 1,
@@ -1335,7 +1362,11 @@ export const TimelineContent = memo(function TimelineContent({
     if (e.button !== 0) return
 
     const target = e.target as HTMLElement
-    if (!target.closest('[data-track-id]') || target.closest('[data-item-id]')) {
+    if (
+      !target.closest('[data-track-id]') ||
+      target.closest('[data-item-id]') ||
+      target.closest('[data-timeline-density-bucket]')
+    ) {
       return
     }
 
@@ -1387,6 +1418,20 @@ export const TimelineContent = memo(function TimelineContent({
     } else {
       setPreviewFrameRef.current(null)
     }
+  }, [])
+
+  const cancelMarqueePointerGesture = useCallback(() => {
+    const wasMarqueePointerGesture = marqueePointerDownRef.current
+    marqueePointerDownRef.current = false
+    marqueeStartPreviewFrameRef.current = null
+    marqueeReleasePreviewRef.current = null
+
+    if (!wasMarqueePointerGesture) return
+    if (marqueeReleaseRafRef.current !== null) {
+      cancelAnimationFrame(marqueeReleaseRafRef.current)
+      marqueeReleaseRafRef.current = null
+    }
+    setPreviewFrameRef.current(null)
   }, [])
 
   useEffect(
@@ -1546,6 +1591,7 @@ export const TimelineContent = memo(function TimelineContent({
   }, [furthestItemEndFrame, fps, containerWidth])
 
   actualDurationRef.current = actualDuration
+  timelineWidthRef.current = timelineWidth
 
   useLayoutEffect(() => {
     const container = containerRef.current
@@ -1892,18 +1938,34 @@ export const TimelineContent = memo(function TimelineContent({
 
     const cached = viewportDimsRef.current
     const rect = cached ? null : container.getBoundingClientRect()
-    shield.style.left = `${cached?.left ?? rect?.left ?? 0}px`
-    shield.style.top = `${cached?.top ?? rect?.top ?? 0}px`
-    shield.style.width = `${cached?.width ?? rect?.width ?? container.clientWidth}px`
-    shield.style.height = `${cached?.fullHeight ?? rect?.height ?? container.clientHeight}px`
+    const shieldBounds = getTimelineZoomInteractionShieldBounds({
+      left: cached?.left ?? rect?.left ?? 0,
+      top: cached?.top ?? rect?.top ?? 0,
+      width: cached?.width ?? rect?.width ?? container.clientWidth,
+      height: cached?.fullHeight ?? rect?.height ?? container.clientHeight,
+    })
+    shield.style.left = `${shieldBounds.left}px`
+    // Keep the ruler interactive while content geometry settles. A ruler press
+    // owns transport immediately and must never land on this track-only shield.
+    shield.style.top = `${shieldBounds.top}px`
+    shield.style.width = `${shieldBounds.width}px`
+    shield.style.height = `${shieldBounds.height}px`
     shield.style.display = 'block'
   }, [])
 
   useEffect(() => {
+    const hideShieldIfSettled = (isZoomInteracting: boolean) => {
+      if (isZoomInteracting) return
+      const shield = zoomInteractionShieldRef.current
+      if (shield) shield.style.display = 'none'
+    }
+
+    // HMR or a remount can preserve an imperative `display: block` write after
+    // the zoom store has already settled. Reconcile the DOM immediately.
+    hideShieldIfSettled(useZoomStore.getState().isZoomInteracting)
     return useZoomStore.subscribe((state, previousState) => {
       if (!state.isZoomInteracting && previousState.isZoomInteracting) {
-        const shield = zoomInteractionShieldRef.current
-        if (shield) shield.style.display = 'none'
+        hideShieldIfSettled(state.isZoomInteracting)
       }
     })
   }, [])
@@ -2088,6 +2150,7 @@ export const TimelineContent = memo(function TimelineContent({
         <div
           ref={zoomInteractionShieldRef}
           data-timeline-zoom-interaction-shield
+          data-marquee-ignore
           aria-hidden="true"
           className="fixed z-50"
           style={{ display: 'none' }}
@@ -2096,9 +2159,12 @@ export const TimelineContent = memo(function TimelineContent({
         <TimelineMarqueeLayer
           containerRef={containerRef}
           itemIds={itemIds}
+          fps={fps}
+          duration={actualDuration}
           onSelectionChange={handleMarqueeSelectionChange}
           onMarqueeActiveChange={handleMarqueeActiveChange}
           onMarqueeGestureEnd={finishMarqueePointerGesture}
+          onMarqueeGestureCancel={cancelMarqueePointerGesture}
         />
 
         {itemIds.length === 0 && (

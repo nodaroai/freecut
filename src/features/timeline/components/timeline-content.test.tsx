@@ -12,8 +12,9 @@ import { _resetViewportThrottle, useTimelineViewportStore } from '../stores/time
 import { useTimelineStore } from '../stores/timeline-store'
 import { useItemsStore } from '../stores/items-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
-import { ZOOM_MAX, ZOOM_MIN } from '../constants'
+import { TIMELINE_RULER_HEIGHT, ZOOM_MAX, ZOOM_MIN } from '../constants'
 import { TimelineContent } from './timeline-content'
+import { getTimelineZoomInteractionShieldBounds } from '../utils/timeline-zoom-interaction-shield'
 import { TIMELINE_LIVE_SCROLL_EVENT } from '@/shared/timeline/live-scroll-sync'
 
 const perfMarkMocks = vi.hoisted(() => ({
@@ -242,7 +243,11 @@ describe('TimelineContent playback selection behavior', () => {
     }
 
     Object.defineProperty(scrollContainer, 'clientWidth', { configurable: true, value: 400 })
-    Object.defineProperty(scrollContainer, 'scrollWidth', { configurable: true, value: 3000 })
+    const scrollWidthRead = vi.fn(() => 3000)
+    Object.defineProperty(scrollContainer, 'scrollWidth', {
+      configurable: true,
+      get: scrollWidthRead,
+    })
     const liveScroll = vi.fn()
     scrollContainer.addEventListener(TIMELINE_LIVE_SCROLL_EVENT, liveScroll)
 
@@ -259,6 +264,7 @@ describe('TimelineContent playback selection behavior', () => {
     expect(scrollContainer.scrollLeft).toBeCloseTo((151 / 30) * 100 - 400 * 0.2)
     expect(useTimelineViewportStore.getState().scrollLeft).toBeCloseTo(scrollContainer.scrollLeft)
     expect(liveScroll).toHaveBeenCalledOnce()
+    expect(scrollWidthRead).not.toHaveBeenCalled()
   })
 
   it('does not re-render the full timeline tree for live or settled gesture zoom', () => {
@@ -706,6 +712,15 @@ describe('TimelineContent playback selection behavior', () => {
       deltaY: -120,
     })
     expect(zoomInteractionShield!.style.display).toBe('block')
+    expect(zoomInteractionShield).toHaveAttribute('data-marquee-ignore')
+    expect(
+      getTimelineZoomInteractionShieldBounds({ left: 0, top: 0, width: 400, height: 200 }),
+    ).toEqual({
+      left: 0,
+      top: TIMELINE_RULER_HEIGHT,
+      width: 400,
+      height: 200 - TIMELINE_RULER_HEIGHT,
+    })
     const zoomFrameCount = scheduledFrames.size
     act(() => {
       vi.advanceTimersByTime(150)

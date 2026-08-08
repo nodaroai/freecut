@@ -39,6 +39,7 @@ import { recordPreviewCanvasPool } from '@/shared/logging/preview-scrub-performa
 
 // Import subsystems
 import { buildKeyframesMap } from './canvas-keyframes'
+import { getLogicalCanvasSize } from './canvas-render-scale'
 import { type AdjustmentLayerWithTrackOrder } from './canvas-effects'
 import { GpuPipelineManager } from './gpu-pipeline-manager'
 import { isItemFullyOccluding, type FrameOcclusionContext } from './frame-occlusion'
@@ -109,6 +110,7 @@ import {
   itemHasEnabledGpuEffect,
   isAnimatedImage,
   isGifFormat,
+  shouldRenderResolvedItemAtFrame,
   subCompositionRenderDataHasGpuEffects,
 } from './render-engine-predicates'
 
@@ -192,6 +194,32 @@ export function selectPreviewVideoSource(options: {
     if (activeTarget) return activeTarget
   }
   return candidates[0] ?? null
+}
+
+export function getPreviewVideoSourceCandidates({
+  itemSource,
+  proxySource,
+  registeredSource,
+  cachedSource,
+  useProxyMedia,
+}: {
+  itemSource?: string | null
+  proxySource?: string | null
+  registeredSource?: string | null
+  cachedSource?: string | null
+  useProxyMedia: boolean
+}): Array<string | null | undefined> {
+  if (useProxyMedia) {
+    return [proxySource, itemSource, registeredSource, cachedSource]
+  }
+
+  // blobUrlManager owns the current original-media URL and is also what the
+  // active preseek scheduler uses with proxy playback disabled. Timeline item
+  // src values can lag a proxy-mode toggle, so never let an explicit proxy URL
+  // outrank or masquerade as the original source here.
+  return [cachedSource, registeredSource, itemSource].map((candidate) =>
+    candidate === proxySource ? null : candidate,
+  )
 }
 
 // Predicate helpers (GPU-effect / animated-image classifiers) live in
@@ -684,6 +712,8 @@ export async function createCompositionRenderer(
   const canvasSettings: CanvasSettings = {
     width: canvas.width,
     height: canvas.height,
+    logicalWidth: composition.width,
+    logicalHeight: composition.height,
     fps,
     getPreviewTransform: renderMode === 'preview' ? getPreviewTransformOverride : undefined,
   }
@@ -1225,17 +1255,19 @@ export async function createCompositionRenderer(
           : selectExportVideoSource(item, registeredSource)
       }
       return selectPreviewVideoSource({
-        candidates: [
-          item.src,
-          item.mediaId ? resolveProxyUrl(item.mediaId) : null,
+        candidates: getPreviewVideoSourceCandidates({
+          itemSource: item.src,
+          proxySource: item.mediaId ? resolveProxyUrl(item.mediaId) : null,
           registeredSource,
-          item.mediaId ? blobUrlManager.get(item.mediaId) : null,
-        ],
+          cachedSource: item.mediaId ? blobUrlManager.get(item.mediaId) : null,
+          useProxyMedia,
+        }),
         sourceTime,
         toleranceSeconds,
         getCachedPredecodedBitmap: itemRenderContext.getCachedPredecodedBitmap,
-        getCachedActivePreviewFallbackBitmap:
-          itemRenderContext.getCachedActivePreviewFallbackBitmap,
+        getCachedActivePreviewFallbackBitmap: useProxyMedia
+          ? itemRenderContext.getCachedActivePreviewFallbackBitmap
+          : undefined,
         isActivePreviewSourceTarget: itemRenderContext.isActivePreviewSourceTarget,
       })
     },
@@ -2039,7 +2071,7 @@ export async function createCompositionRenderer(
         {
           renderPlan: getCurrentRenderPlan(),
           frame,
-          canvas: canvasSettings,
+          canvas: getLogicalCanvasSize(canvasSettings),
           getKeyframes: getCurrentKeyframes,
           getItem: canvasSettings.getExpressionItem,
           getPreviewTransform: renderMode === 'preview' ? getPreviewTransformOverride : undefined,
@@ -2188,26 +2220,8 @@ export async function createCompositionRenderer(
       }
 
       // Helper to check if item should be rendered
-      const shouldRenderItem = (baseItem: TimelineItem): boolean => {
-        const item = getCurrentItem(baseItem)
-        // Skip items not visible at this frame
-        if (frame < item.from || frame >= item.from + item.durationInFrames) {
-          return false
-        }
-        // Skip items being handled by transitions
-        if (transitionClipIds.has(item.id)) {
-          return false
-        }
-        // Skip audio items (handled separately)
-        if (item.type === 'audio') return false
-        // Skip adjustment items (they apply effects, not render content)
-        if (item.type === 'adjustment') return false
-        // Null/controller layers drive transforms but never render pixels.
-        if (item.type === 'controller') return false
-        // Skip mask shapes (handled by mask system)
-        if (item.type === 'shape' && (item as ShapeItem).isMask) return false
-        return true
-      }
+      const shouldRenderItem = (baseItem: TimelineItem): boolean =>
+        shouldRenderResolvedItemAtFrame(getCurrentItem(baseItem), frame, transitionClipIds)
       // === OCCLUSION CULLING OPTIMIZATION ===
       // Find the topmost (lowest order) track with a fully occluding item.
       // Skip rendering all tracks below it (higher order) since they'll be fully covered.
@@ -2234,6 +2248,8 @@ export async function createCompositionRenderer(
         getCurrentKeyframes,
         getPreviewEffectsOverride,
         getLiveItemSnapshot,
+        hasTransparentVideoSource: (occItem) =>
+          videoExtractors.get(occItem.id)?.getCanBeTransparent() ?? false,
       }
       const isFullyOccluding = (baseItem: TimelineItem, trackOrder: number): boolean =>
         isItemFullyOccluding(baseItem, trackOrder, occlusionContext)
