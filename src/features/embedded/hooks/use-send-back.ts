@@ -1,122 +1,58 @@
-import { useEffect, useCallback } from 'react'
-import { useClientRender } from '../deps/export-contract'
+import { useCallback } from 'react'
 import { useProjectStore } from '../deps/projects-contract'
 import { exportProjectJson } from '../deps/project-bundle-contract'
 import { useEmbeddedStore } from '../stores/embedded-store'
-import { reverseMapCodec } from '../utils/codec-mapping'
 import { createLogger } from '@/shared/logging/logger'
-import type { ExtendedExportSettings } from '@/types/export'
 
-const log = createLogger('Embedded:SendBack')
+const log = createLogger('Embedded:SaveExit')
 
+/**
+ * Save & Exit for the embedded editor: persists the timeline, hands the
+ * project JSON to the parent studio via FREECUT_SAVE_EXIT, and lets the
+ * parent close the editor. No video is rendered here — explicit exports go
+ * through the export dialog (the toolbar's Export button) instead.
+ */
 export function useSendBack() {
-  const { startExport, progress, status, result, error, isExporting } = useClientRender()
   const parentOrigin = useEmbeddedStore((s) => s.parentOrigin)
-  const inputMetadata = useEmbeddedStore((s) => s.inputMetadata)
   const sendBackStatus = useEmbeddedStore((s) => s.sendBackStatus)
 
-  // Report progress to parent
-  useEffect(() => {
-    if (!parentOrigin) return
-    if (
-      status === 'rendering' ||
-      status === 'encoding' ||
-      status === 'preparing' ||
-      status === 'finalizing'
-    ) {
-      window.parent.postMessage(
-        { type: 'FREECUT_EXPORT_PROGRESS', payload: { percent: progress / 100 } },
-        parentOrigin,
-      )
-      useEmbeddedStore.getState().setExportProgress(progress / 100)
-    }
-  }, [progress, status, parentOrigin])
-
-  // Send completed result to parent
-  useEffect(() => {
-    if (!parentOrigin || status !== 'completed' || !result?.blob) return
-
-    ;(async () => {
-      const buffer = await result.blob.arrayBuffer()
-
-      // Save timeline to IndexedDB first, then export project JSON
-      let projectJson: unknown = null
-      try {
-        const currentProject = useProjectStore.getState().currentProject
-        if (currentProject) {
-          // Force save timeline to DB before exporting (auto-save may not have flushed yet)
-          const { useTimelineStore } = await import('../deps/timeline-contract')
-          const { saveTimeline } = useTimelineStore.getState()
-          await saveTimeline(currentProject.id)
-
-          projectJson = await exportProjectJson(currentProject.id, {
-            includeMediaReferences: true,
-            stripVolatileFields: true,
-            includeChecksum: false,
-          })
-        }
-      } catch (e) {
-        log.warn('Failed to export project JSON for send-back', { error: e })
-      }
-
-      window.parent.postMessage(
-        { type: 'FREECUT_EXPORT_COMPLETE', payload: { videoBuffer: buffer, projectJson } },
-        parentOrigin,
-        [buffer],
-      )
-      log.info('Export result sent to parent', {
-        fileSize: result.fileSize,
-        mimeType: result.mimeType,
-        hasProjectJson: !!projectJson,
-      })
-      useEmbeddedStore.getState().setSendBackStatus('sent')
-      setTimeout(() => {
-        useEmbeddedStore.getState().setSendBackStatus('idle')
-      }, 3000)
-    })()
-  }, [status, result, parentOrigin])
-
-  // Report errors to parent
-  useEffect(() => {
-    if (!parentOrigin || status !== 'failed' || !error) return
-
-    window.parent.postMessage(
-      { type: 'FREECUT_ERROR', payload: { phase: 'export', message: error } },
-      parentOrigin,
-    )
-    log.error('Export failed', { error })
-    useEmbeddedStore.getState().setSendBackStatus('error')
-  }, [status, error, parentOrigin])
-
-  const sendBack = useCallback(async () => {
-    if (!inputMetadata) {
-      log.warn('sendBack called without inputMetadata')
+  const saveExit = useCallback(async () => {
+    if (!parentOrigin) {
+      log.warn('saveExit called before the parent handshake set an origin')
       return
     }
 
-    useEmbeddedStore.getState().setSendBackStatus('exporting')
+    useEmbeddedStore.getState().setSendBackStatus('saving')
 
-    const settings: ExtendedExportSettings = {
-      codec: reverseMapCodec(inputMetadata.codec),
-      quality: 'high',
-      resolution: { width: inputMetadata.width, height: inputMetadata.height },
-      mode: 'video',
-      videoContainer: 'mp4',
-      renderWholeProject: true,
+    // Flush the timeline to storage, then serialize the project. Failures
+    // degrade to exiting without JSON — the parent still closes the editor.
+    let projectJson: unknown = null
+    try {
+      const currentProject = useProjectStore.getState().currentProject
+      if (currentProject) {
+        const { useTimelineStore } = await import('../deps/timeline-contract')
+        await useTimelineStore.getState().saveTimeline(currentProject.id)
+        projectJson = await exportProjectJson(currentProject.id, {
+          includeMediaReferences: true,
+          stripVolatileFields: true,
+          includeChecksum: false,
+        })
+      }
+    } catch (e) {
+      log.warn('Failed to export project JSON for save-exit', { error: e })
     }
 
-    log.info('Starting send-back export', {
-      codec: settings.codec,
-      resolution: `${inputMetadata.width}x${inputMetadata.height}`,
-    })
-
-    await startExport(settings)
-  }, [inputMetadata, startExport])
+    window.parent.postMessage({ type: 'FREECUT_SAVE_EXIT', payload: { projectJson } }, parentOrigin)
+    log.info('Save-exit sent to parent', { hasProjectJson: !!projectJson })
+    useEmbeddedStore.getState().setSendBackStatus('sent')
+    setTimeout(() => {
+      useEmbeddedStore.getState().setSendBackStatus('idle')
+    }, 3000)
+  }, [parentOrigin])
 
   return {
-    sendBack,
-    isExporting,
-    progress,
+    saveExit,
+    isSaving: sendBackStatus === 'saving',
     sendBackStatus,
   }
 }

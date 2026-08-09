@@ -12,10 +12,10 @@ import {
   Keyboard,
   ListVideo,
   Loader2,
+  LogOut,
   Save,
   Settings,
   Sparkles,
-  Upload,
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -82,32 +82,32 @@ interface ToolbarProps {
 }
 
 function SendBackButton() {
-  const { sendBack, isExporting, progress, sendBackStatus } = useSendBack()
+  const { saveExit, isSaving, sendBackStatus } = useSendBack()
 
   const label =
     sendBackStatus === 'sent'
       ? 'Saved!'
-      : sendBackStatus === 'exporting'
-        ? `Saving... ${Math.round(progress)}%`
+      : sendBackStatus === 'saving'
+        ? 'Saving...'
         : sendBackStatus === 'error'
           ? 'Error'
-          : 'Save & Close'
+          : 'Save & Exit'
 
   const icon =
     sendBackStatus === 'sent' ? (
       <Check className="h-4 w-4" />
-    ) : isExporting ? (
+    ) : isSaving ? (
       <Loader2 className="h-4 w-4 animate-spin" />
     ) : (
-      <Upload className="h-4 w-4" />
+      <LogOut className="h-4 w-4" />
     )
 
   return (
     <Button
       size="sm"
       className="gap-1.5 glow-primary-sm"
-      onClick={sendBack}
-      disabled={isExporting || sendBackStatus === 'sent'}
+      onClick={saveExit}
+      disabled={isSaving || sendBackStatus === 'sent'}
     >
       {icon}
       {label}

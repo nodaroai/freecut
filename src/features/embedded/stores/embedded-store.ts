@@ -13,8 +13,7 @@ interface EmbeddedState {
   parentOrigin: string | null
   inputMetadata: InputMetadata | null
   pendingVideoImport: { mediaId: string } | null
-  sendBackStatus: 'idle' | 'exporting' | 'sent' | 'error'
-  exportProgress: number
+  sendBackStatus: 'idle' | 'saving' | 'sent' | 'error'
 }
 
 interface EmbeddedActions {
@@ -23,7 +22,6 @@ interface EmbeddedActions {
   setInputMetadata: (meta: InputMetadata) => void
   setPendingVideoImport: (pending: { mediaId: string } | null) => void
   setSendBackStatus: (status: EmbeddedState['sendBackStatus']) => void
-  setExportProgress: (progress: number) => void
 }
 
 function detectEmbedded(): boolean {
@@ -41,14 +39,12 @@ export const useEmbeddedStore = create<EmbeddedState & EmbeddedActions>((set) =>
   inputMetadata: null,
   pendingVideoImport: null,
   sendBackStatus: 'idle',
-  exportProgress: 0,
 
   setIsImporting: (isImporting) => set({ isImporting }),
   setParentOrigin: (parentOrigin) => set({ parentOrigin }),
   setInputMetadata: (inputMetadata) => set({ inputMetadata }),
   setPendingVideoImport: (pendingVideoImport) => set({ pendingVideoImport }),
   setSendBackStatus: (sendBackStatus) => set({ sendBackStatus }),
-  setExportProgress: (exportProgress) => set({ exportProgress }),
 }))
 
 export function isEmbedded(): boolean {
