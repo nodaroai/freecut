@@ -102,9 +102,10 @@ function isSameZoomLevel(left: number, right: number): boolean {
   return Math.abs(left - right) <= tolerance
 }
 
-function blurActiveElement(): void {
-  if (document.activeElement instanceof HTMLElement) {
-    document.activeElement.blur()
+function blurSliderFocus(root: HTMLElement | null): void {
+  const activeElement = document.activeElement
+  if (activeElement instanceof HTMLElement && root?.contains(activeElement)) {
+    activeElement.blur()
   }
 }
 
@@ -118,6 +119,8 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
   const settledZoomLevel = useZoomStore((state) => state.contentLevel)
   const zoomIn = useZoomStore((state) => state.zoomIn)
   const zoomOut = useZoomStore((state) => state.zoomOut)
+  const beginZoomGesture = useZoomStore((state) => state.beginZoomGesture)
+  const endZoomGesture = useZoomStore((state) => state.endZoomGesture)
   const setZoomImmediate = useZoomStore((state) => state.setZoomLevelImmediate)
   const setZoomSynchronized = useZoomStore((state) => state.setZoomLevelSynchronized)
   const sliderRef = useRef<HTMLSpanElement>(null)
@@ -127,6 +130,7 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
   const sliderInteractionRef = useRef<'idle' | 'dragging' | 'awaiting-zoom'>('idle')
   const sliderCommitBaseZoomRef = useRef<number | null>(null)
   const sliderKeyboardInputRef = useRef(false)
+  const sliderZoomGestureHeldRef = useRef(false)
   const liveZoomLevelRef = useRef(useZoomStore.getState().level)
   const [, forceKeyboardSliderRender] = useReducer((revision: number) => revision + 1, 0)
   const btnSize = {
@@ -174,6 +178,30 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
     range.style.right = `${100 - percentage}%`
     thumb.setAttribute('aria-valuenow', String(value))
   }, [])
+
+  const releaseSliderZoomGesture = useCallback(() => {
+    if (!sliderZoomGestureHeldRef.current) {
+      return
+    }
+    sliderZoomGestureHeldRef.current = false
+    endZoomGesture()
+  }, [endZoomGesture])
+
+  const finishSliderZoomInteraction = useCallback(() => {
+    releaseSliderZoomGesture()
+    // Radix can restore thumb focus after onValueCommit returns. Defer the
+    // blur until the pointer/key event has fully finished so Space immediately
+    // returns to the editor transport.
+    queueMicrotask(() => blurSliderFocus(sliderRef.current))
+  }, [releaseSliderZoomGesture])
+
+  const beginSliderZoomGesture = useCallback(() => {
+    if (sliderZoomGestureHeldRef.current) {
+      return
+    }
+    sliderZoomGestureHeldRef.current = true
+    beginZoomGesture()
+  }, [beginZoomGesture])
 
   const flushSliderChange = useCallback(() => {
     sliderRafRef.current = null
@@ -227,12 +255,18 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
   }, [renderSliderPreview, zoomToSlider])
 
   useEffect(() => {
+    window.addEventListener('pointerup', finishSliderZoomInteraction)
+    window.addEventListener('pointercancel', finishSliderZoomInteraction)
+
     return () => {
+      window.removeEventListener('pointerup', finishSliderZoomInteraction)
+      window.removeEventListener('pointercancel', finishSliderZoomInteraction)
       if (sliderRafRef.current !== null) {
         cancelAnimationFrame(sliderRafRef.current)
       }
+      releaseSliderZoomGesture()
     }
-  }, [])
+  }, [finishSliderZoomInteraction, releaseSliderZoomGesture])
 
   const handleSliderChange = useCallback(
     (values: number[]) => {
@@ -311,9 +345,13 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
       latestSliderValueRef.current = sliderValue
       renderSliderPreview(sliderValue)
       commitSliderZoom(sliderValue, latestSliderValue)
-      blurActiveElement()
+      if (sliderKeyboardInputRef.current) {
+        releaseSliderZoomGesture()
+      } else {
+        finishSliderZoomInteraction()
+      }
     },
-    [commitSliderZoom, renderSliderPreview],
+    [commitSliderZoom, finishSliderZoomInteraction, releaseSliderZoomGesture, renderSliderPreview],
   )
 
   const controlledSliderValue = zoomToSlider(settledZoomLevel)
@@ -347,11 +385,17 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
         ]}
         onValueChange={handleSliderChange}
         onValueCommit={handleSliderCommit}
+        onPointerDownCapture={beginSliderZoomGesture}
+        onPointerCancelCapture={finishSliderZoomInteraction}
         onKeyDownCapture={() => {
           sliderKeyboardInputRef.current = true
         }}
         onKeyUpCapture={() => {
-          sliderKeyboardInputRef.current = false
+          // Keep the keyboard marker set through Radix's onValueCommit, which
+          // runs later in this keyup event. The next microtask ends the input.
+          queueMicrotask(() => {
+            sliderKeyboardInputRef.current = false
+          })
         }}
         onBlurCapture={() => {
           sliderKeyboardInputRef.current = false

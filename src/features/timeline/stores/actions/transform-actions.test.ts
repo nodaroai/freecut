@@ -89,10 +89,8 @@ describe('transform actions', () => {
 
       expect(useItemsStore.getState().items).toBe(itemsBefore)
       expect(
-        useKeyframesStore
-          .getState()
-          .getKeyframesForItem('a')
-          ?.vectorProperties?.[0]?.keyframes[0]?.value,
+        useKeyframesStore.getState().getKeyframesForItem('a')?.vectorProperties?.[0]?.keyframes[0]
+          ?.value,
       ).toEqual({ x: 40, y: 50 })
     })
 
@@ -119,10 +117,8 @@ describe('transform actions', () => {
 
       expect(useTimelineCommandStore.getState().undoStack.length).toBe(undoDepth + 1)
       expect(
-        useKeyframesStore
-          .getState()
-          .getKeyframesForItem('a')
-          ?.vectorProperties?.[0]?.keyframes[0]?.value,
+        useKeyframesStore.getState().getKeyframesForItem('a')?.vectorProperties?.[0]?.keyframes[0]
+          ?.value,
       ).toEqual({ x: 40, y: 50 })
       expect(getTransform('a').rotation).toBe(12)
 
@@ -153,6 +149,29 @@ describe('transform actions', () => {
       expect(getTransform('a').x).toBe(1)
       expect(getTransform('b').x).toBe(2)
       expect(useTimelineCommandStore.getState().undoStack.length).toBe(undoDepth + 1)
+    })
+
+    it('commits accompanying item properties in the same undo entry', () => {
+      const undoDepth = useTimelineCommandStore.getState().undoStack.length
+      let itemStorePublishes = 0
+      const unsubscribe = useItemsStore.subscribe(() => {
+        itemStorePublishes += 1
+      })
+
+      updateItemsTransformMap(new Map([['a', { width: 640, height: 360 }]]), {
+        operation: 'resize',
+        itemUpdates: new Map([['a', { label: 'Scaled title' }]]),
+      })
+      unsubscribe()
+
+      expect(getTransform('a')).toMatchObject({ width: 640, height: 360 })
+      expect(useItemsStore.getState().itemById.a?.label).toBe('Scaled title')
+      expect(itemStorePublishes).toBe(1)
+      expect(useTimelineCommandStore.getState().undoStack.length).toBe(undoDepth + 1)
+
+      useTimelineCommandStore.getState().undo()
+      expect(getTransform('a').width).toBeUndefined()
+      expect(useItemsStore.getState().itemById.a?.label).not.toBe('Scaled title')
     })
 
     it('does not create history or invalidate items for an empty transform map', () => {
@@ -252,9 +271,7 @@ describe('transform actions', () => {
         timeOffsetFrames: 0,
       })
 
-      expect(
-        useKeyframesStore.getState().keyframesByItemId['b']?.propertyLinks,
-      ).toBeUndefined()
+      expect(useKeyframesStore.getState().keyframesByItemId['b']?.propertyLinks).toBeUndefined()
     })
 
     it('blocks parenting when the child already links transform channels to that parent', () => {
@@ -287,9 +304,7 @@ describe('transform actions', () => {
         timeOffsetFrames: 0,
       })
 
-      expect(
-        useKeyframesStore.getState().keyframesByItemId['a']?.propertyLinks,
-      ).toBeUndefined()
+      expect(useKeyframesStore.getState().keyframesByItemId['a']?.propertyLinks).toBeUndefined()
     })
 
     it('allows non-inherited property links to an existing parent', () => {

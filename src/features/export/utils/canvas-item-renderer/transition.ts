@@ -5,6 +5,10 @@
 
 import type { TimelineItem } from '@/types/timeline'
 import { hasCornerPin } from '@/features/export/deps/composition-runtime'
+// Side-effect: populate the registry. Without it every consumer that does not
+// happen to load the editor UI (the headless harness, workers) silently falls
+// back to the built-in switch, turning 38 declared presets into hard cuts.
+import '@/shared/timeline/transitions'
 import { transitionRegistry } from '@/shared/timeline/transitions/registry'
 import type { GpuTexturePool } from '@/infrastructure/gpu-compositor'
 import {
@@ -17,6 +21,7 @@ import {
 import { renderTransition, type ActiveTransition } from '../canvas-transitions'
 import { resolveAATransitionRamps, resolveTransitionRenderTimelineSpan } from '../render-span'
 import { getAnimatedTransform } from '../canvas-keyframes'
+import { scalePartialTransformForCanvas } from '../canvas-render-scale'
 import type {
   ItemRenderContext,
   ResolvedGpuMediaParticipantSource,
@@ -518,10 +523,14 @@ export function resolveTransitionParticipantRenderState<TItem extends TimelineIt
   if (rctx.renderMode === 'preview') {
     const previewOverride = rctx.getPreviewTransformOverride?.(currentClip.id)
     if (previewOverride) {
+      const scaledPreviewOverride = scalePartialTransformForCanvas(
+        previewOverride,
+        rctx.canvasSettings,
+      )
       transform = {
         ...transform,
-        ...previewOverride,
-        cornerRadius: previewOverride.cornerRadius ?? transform.cornerRadius,
+        ...scaledPreviewOverride,
+        cornerRadius: scaledPreviewOverride.cornerRadius ?? transform.cornerRadius,
       }
     }
   }

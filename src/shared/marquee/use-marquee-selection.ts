@@ -31,7 +31,7 @@ export interface MarqueeItem {
   getBoundingRect: () => Rect | null
 }
 
-interface ResolvedMarqueeItem {
+export interface ResolvedMarqueeItem {
   id: string
   rect: Rect | null
 }
@@ -59,14 +59,23 @@ interface UseMarqueeSelectionOptions {
   /** Items that can be selected */
   items: MarqueeItem[]
 
+  /** Optional batch resolver for data-driven surfaces without one DOM node per item. */
+  resolveItems?: () => ResolvedMarqueeItem[]
+
   /** Callback when selection changes */
   onSelectionChange?: (selectedIds: string[]) => void
 
   /** Optional callback for lightweight live preview updates during drag */
   onPreviewSelectionChange?: (selectedIds: string[]) => void
 
+  /** Current committed selection, used to roll back throttled live commits on cancellation. */
+  committedSelectionIds?: readonly string[]
+
   /** Called when an accepted marquee pointer gesture releases. */
   onGestureEnd?: (event: MouseEvent, wasActualDrag: boolean) => void
+
+  /** Called when an accepted marquee gesture loses its release and is cancelled. */
+  onGestureCancel?: (wasActualDrag: boolean) => void
 
   /** Whether marquee selection is enabled */
   enabled?: boolean
@@ -171,9 +180,12 @@ export function useMarqueeSelection({
   containerRef,
   hitAreaRef,
   items,
+  resolveItems,
   onSelectionChange,
   onPreviewSelectionChange,
+  committedSelectionIds,
   onGestureEnd,
+  onGestureCancel,
   enabled = true,
   appendMode = false,
   threshold = 5,
@@ -215,14 +227,18 @@ export function useMarqueeSelection({
   const hasMovedRef = useRef(false)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onPreviewSelectionChangeRef = useRef(onPreviewSelectionChange)
+  const committedSelectionIdsRef = useRef(committedSelectionIds)
   const prevSelectedIdsRef = useRef<string[]>([])
   const rafIdRef = useRef<number | null>(null)
   const itemsRef = useRef(items)
+  const resolveItemsRef = useRef(resolveItems)
   const enabledRef = useRef(enabled)
   const resolvedItemsRef = useRef<ResolvedMarqueeItem[] | null>(null)
   const liveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingLiveCommitIdsRef = useRef<string[] | null>(null)
   const lastLiveCommitTimeRef = useRef(0)
+  const gestureStartSelectionIdsRef = useRef<string[] | null>(null)
+  const hasLiveCommittedRef = useRef(false)
 
   // Keep refs up to date
   useEffect(() => {
@@ -234,18 +250,28 @@ export function useMarqueeSelection({
   }, [onPreviewSelectionChange])
 
   useEffect(() => {
+    committedSelectionIdsRef.current = committedSelectionIds
+  }, [committedSelectionIds])
+
+  useEffect(() => {
     itemsRef.current = items
   }, [items])
+
+  useEffect(() => {
+    resolveItemsRef.current = resolveItems
+  }, [resolveItems])
 
   useEffect(() => {
     enabledRef.current = enabled
   }, [enabled])
 
   const captureResolvedItems = useCallback(() => {
-    resolvedItemsRef.current = itemsRef.current.map((item) => ({
-      id: item.id,
-      rect: item.getBoundingRect(),
-    }))
+    resolvedItemsRef.current =
+      resolveItemsRef.current?.() ??
+      itemsRef.current.map((item) => ({
+        id: item.id,
+        rect: item.getBoundingRect(),
+      }))
   }, [])
 
   const flushLiveCommit = useCallback((ids: string[]) => {
@@ -255,6 +281,7 @@ export function useMarqueeSelection({
     }
     pendingLiveCommitIdsRef.current = null
     lastLiveCommitTimeRef.current = performance.now()
+    hasLiveCommittedRef.current = true
     onSelectionChangeRef.current?.(ids)
   }, [])
 
@@ -337,7 +364,49 @@ export function useMarqueeSelection({
 
   // Handle mouse down - start marquee
   // Using useEffectEvent so changes to enabled, appendMode don't re-register listeners
+  const cancelGesture = useEffectEvent(() => {
+    if (!isDraggingRef.current) return
+
+    const wasActualDrag = hasMovedRef.current
+    const selectionToRestore = hasLiveCommittedRef.current
+      ? gestureStartSelectionIdsRef.current
+      : null
+
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+    if (liveCommitTimeoutRef.current !== null) {
+      clearTimeout(liveCommitTimeoutRef.current)
+      liveCommitTimeoutRef.current = null
+    }
+
+    isDraggingRef.current = false
+    hasMovedRef.current = false
+    marqueeRef.current = { startX: 0, startY: 0, currentX: 0, currentY: 0 }
+    resolvedItemsRef.current = null
+    pendingLiveCommitIdsRef.current = null
+    lastLiveCommitTimeRef.current = 0
+    gestureStartSelectionIdsRef.current = null
+    hasLiveCommittedRef.current = false
+
+    setIsActive(false)
+    publishSnapshot(INACTIVE_SNAPSHOT)
+
+    if (commitSelectionOnMouseUp) {
+      onPreviewSelectionChangeRef.current?.([])
+    }
+    if (selectionToRestore !== null) {
+      onSelectionChangeRef.current?.(selectionToRestore)
+    }
+    onGestureCancel?.(wasActualDrag)
+  })
+
   const onMouseDown = useEffectEvent((e: MouseEvent) => {
+    // A previous drag may have lost its mouseup while the page was unfocused.
+    // Never let that stale gesture compete with a new interaction.
+    cancelGesture()
+
     if (!enabledRef.current || !containerRef.current || !boundsRef.current) return
 
     // Only trigger on left click
@@ -368,12 +437,17 @@ export function useMarqueeSelection({
       target.closest('[role="button"]') ||
       // Don't start marquee if clicking on a draggable timeline item
       target.closest('[data-item-id]') ||
+      // Density buckets represent draggable timeline items without rich roots.
+      target.closest('[data-timeline-density-bucket]') ||
       // Don't start marquee if clicking on a draggable media card
       target.closest('[data-media-id]') ||
       // Don't start marquee if clicking on a draggable composition card
       target.closest('[data-composition-id]') ||
       // Don't start marquee if clicking in the timeline ruler
       target.closest('.timeline-ruler') ||
+      // Transient interaction shields may intentionally own hit testing, but
+      // they are never valid marquee origins.
+      target.closest('[data-marquee-ignore]') ||
       // Don't start marquee if clicking on the playhead handle
       target.closest('[data-playhead-handle]') ||
       // Don't start marquee if clicking on gizmo elements (handles, borders)
@@ -389,6 +463,10 @@ export function useMarqueeSelection({
     }
     isDraggingRef.current = true
     hasMovedRef.current = false
+    gestureStartSelectionIdsRef.current = committedSelectionIdsRef.current
+      ? [...committedSelectionIdsRef.current]
+      : null
+    hasLiveCommittedRef.current = false
     prevSelectedIdsRef.current = [] // Reset accumulated selection for new marquee
     resolvedItemsRef.current = null
     pendingLiveCommitIdsRef.current = null
@@ -538,6 +616,8 @@ export function useMarqueeSelection({
       }
       onPreviewSelectionChangeRef.current?.([])
     }
+    gestureStartSelectionIdsRef.current = null
+    hasLiveCommittedRef.current = false
   })
 
   // Cleanup RAF on unmount
@@ -561,11 +641,21 @@ export function useMarqueeSelection({
     document.addEventListener('mousedown', onMouseDown, true)
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp, true)
+    window.addEventListener('blur', cancelGesture)
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        cancelGesture()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       document.removeEventListener('mousedown', onMouseDown, true)
       document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp, true)
+      window.removeEventListener('blur', cancelGesture)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [])
 

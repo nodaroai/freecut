@@ -26,6 +26,7 @@ import type { CanvasSettings, ItemRenderContext, ItemTransform, SubCompRenderDat
 import { log } from './shared'
 import { drawContainedMediaSource } from './media-draw'
 import { resolveSubCompRenderDataForInstance } from './composition-instance'
+import { getCanvasRenderScale } from '../canvas-render-scale'
 
 /**
  * Render a CompositionItem by rendering all its sub-composition items to an
@@ -84,23 +85,30 @@ export async function renderCompositionItem(
   const { canvas: subContentCanvas, ctx: subContentCtx } = rctx.canvasPool.acquire()
 
   try {
+    const renderScale = getCanvasRenderScale(rctx.canvasSettings)
+    const subRenderWidth = Math.max(2, Math.round(item.compositionWidth * renderScale.x))
+    const subRenderHeight = Math.max(2, Math.round(item.compositionHeight * renderScale.y))
     // Use the sub-composition's authored dimensions for canvas settings
     // so transforms and positioning inside the sub-composition are correct.
     // The pooled canvas may be at main canvas size, so we resize it to match.
-    subCanvas.width = item.compositionWidth
-    subCanvas.height = item.compositionHeight
-    subContentCanvas.width = item.compositionWidth
-    subContentCanvas.height = item.compositionHeight
+    subCanvas.width = subRenderWidth
+    subCanvas.height = subRenderHeight
+    subContentCanvas.width = subRenderWidth
+    subContentCanvas.height = subRenderHeight
     subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height)
     subContentCtx.clearRect(0, 0, subContentCanvas.width, subContentCanvas.height)
     const subCanvasSettings: CanvasSettings = {
-      width: item.compositionWidth,
-      height: item.compositionHeight,
+      width: subRenderWidth,
+      height: subRenderHeight,
+      logicalWidth: item.compositionWidth,
+      logicalHeight: item.compositionHeight,
       fps: subData.fps,
     }
     const subMaskSettings: MaskCanvasSettings = {
-      width: item.compositionWidth,
-      height: item.compositionHeight,
+      width: subRenderWidth,
+      height: subRenderHeight,
+      logicalWidth: item.compositionWidth,
+      logicalHeight: item.compositionHeight,
       fps: subData.fps,
     }
 
@@ -222,8 +230,8 @@ export async function renderCompositionItem(
         } else if (!hasEffects) {
           const { canvas: maskedItemCanvas, ctx: maskedItemCtx } = rctx.canvasPool.acquire()
           try {
-            maskedItemCanvas.width = item.compositionWidth
-            maskedItemCanvas.height = item.compositionHeight
+            maskedItemCanvas.width = subRenderWidth
+            maskedItemCanvas.height = subRenderHeight
             maskedItemCtx.clearRect(0, 0, maskedItemCanvas.width, maskedItemCanvas.height)
             await rctx.renderItem(
               maskedItemCtx,
@@ -245,8 +253,8 @@ export async function renderCompositionItem(
           }
         } else {
           const { canvas: itemCanvas, ctx: itemCtx } = rctx.canvasPool.acquire()
-          itemCanvas.width = item.compositionWidth
-          itemCanvas.height = item.compositionHeight
+          itemCanvas.width = subRenderWidth
+          itemCanvas.height = subRenderHeight
           itemCtx.clearRect(0, 0, itemCanvas.width, itemCanvas.height)
           try {
             await rctx.renderItem(
@@ -389,6 +397,8 @@ export function getActiveSubCompMasks(
   const subMaskSettings: MaskCanvasSettings = {
     width: subCanvasSettings.width,
     height: subCanvasSettings.height,
+    logicalWidth: subCanvasSettings.logicalWidth,
+    logicalHeight: subCanvasSettings.logicalHeight,
     fps: subCanvasSettings.fps,
   }
   const activeMasks: Array<{
@@ -441,6 +451,12 @@ function isSubCompFullyOccludingItem(
 ): boolean {
   if (localFrame < item.from || localFrame >= item.from + item.durationInFrames) return false
   if (item.type !== 'video' && item.type !== 'image') return false
+  // A video whose source can carry alpha is not opaque even at full cover, so it
+  // must not cull the layers beneath it (mirrors the top-level guard in
+  // frame-occlusion.ts). Without this, a full-canvas transparent overlay INSIDE a
+  // pre-composition would reveal the black base fill instead of the clip below.
+  if (item.type === 'video' && rctx.videoExtractors.get(item.id)?.getCanBeTransparent())
+    return false
   if (item.blendMode && item.blendMode !== 'normal') return false
   if (hasCornerPin(item.cornerPin)) return false
   // Use the same preview-override path as the renderer above. Otherwise a

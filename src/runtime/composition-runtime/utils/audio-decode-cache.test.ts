@@ -9,7 +9,13 @@ const decodedPreviewAudioMocks = vi.hoisted(() => ({
 }))
 
 const mediaDbMocks = vi.hoisted(() => ({
-  getMedia: vi.fn(async () => null),
+  getMedia: vi.fn<
+    (_id: string) => Promise<{
+      mimeType: string
+      codec?: string
+      audioCodec?: string
+    } | null>
+  >(async () => null),
 }))
 
 const ac3Mocks = vi.hoisted(() => ({
@@ -29,23 +35,39 @@ const previewAudioConformMocks = vi.hoisted(() => ({
 }))
 
 const mediabunnyMocks = vi.hoisted(() => {
-  let pendingBuffer: Promise<{ buffer: AudioBuffer; timestamp: number; duration: number }> | null =
-    null
+  type MockAudioSample = {
+    numberOfFrames: number
+    numberOfChannels: number
+    sampleRate: number
+    timestamp: number
+    duration: number
+    copyTo: (
+      destination: Float32Array,
+      options: { planeIndex: number; format: 'f32-planar' },
+    ) => void
+    close: () => void
+  }
+
+  let pendingSamplePromise: Promise<MockAudioSample | null> | null = null
   let pendingSamples: Array<{
     numberOfFrames: number
     numberOfChannels: number
     sampleRate: number
+    timestamp: number
+    duration: number
     copyTo: (
       destination: Float32Array,
       options: { planeIndex: number; format: 'f32-planar' },
     ) => void
     close: () => void
   }> = []
+  let rejectTargetedWindows = false
   const stats = {
     inputConstructed: 0,
     sinkConstructed: 0,
     sampleSinkConstructed: 0,
     bufferRangeStarts: [] as number[],
+    sequentialSamplesCalls: 0,
   }
 
   class Input {
@@ -71,34 +93,37 @@ const mediabunnyMocks = vi.hoisted(() => {
     }
   }
 
-  class AudioBufferSink {
-    constructor(track: unknown) {
-      void track
-      stats.sinkConstructed += 1
-    }
-    async getBuffer(startTime: number) {
-      void startTime
-      if (!pendingBuffer) {
-        throw new Error('No pending buffer configured')
-      }
-      return pendingBuffer
-    }
-    buffers(startTime: number, endTime: number) {
-      stats.bufferRangeStarts.push(startTime)
-      void endTime
-      return (async function* emptyBuffers() {
-        yield* []
-      })()
-    }
-  }
-
   class AudioSampleSink {
     constructor(track: unknown) {
       void track
       stats.sampleSinkConstructed += 1
     }
-    samples() {
-      const samples = pendingSamples
+    async getSample(startTime: number) {
+      if (rejectTargetedWindows) {
+        throw new Error('Random-access audio decode is unsupported')
+      }
+      if (pendingSamplePromise) {
+        return pendingSamplePromise
+      }
+      return (
+        pendingSamples.find(
+          (sample) =>
+            sample.timestamp <= startTime && sample.timestamp + sample.duration > startTime,
+        ) ??
+        pendingSamples.find((sample) => sample.timestamp >= startTime) ??
+        null
+      )
+    }
+    samples(startTime?: number, endTime = Number.POSITIVE_INFINITY) {
+      if (startTime === undefined) {
+        stats.sequentialSamplesCalls += 1
+      } else {
+        stats.bufferRangeStarts.push(startTime)
+      }
+      const effectiveStartTime = startTime ?? 0
+      const samples = pendingSamples.filter(
+        (sample) => sample.timestamp >= effectiveStartTime && sample.timestamp < endTime,
+      )
       return (async function* yieldSamples() {
         for (const sample of samples) {
           yield sample
@@ -112,18 +137,14 @@ const mediabunnyMocks = vi.hoisted(() => {
     Input,
     UrlSource,
     BlobSource,
-    AudioBufferSink,
     AudioSampleSink,
-    __setPendingBuffer(
-      promise: Promise<{ buffer: AudioBuffer; timestamp: number; duration: number }>,
-    ) {
-      pendingBuffer = promise
-    },
     __setPendingSamples(
       samples: Array<{
         numberOfFrames: number
         numberOfChannels: number
         sampleRate: number
+        timestamp: number
+        duration: number
         copyTo: (
           destination: Float32Array,
           options: { planeIndex: number; format: 'f32-planar' },
@@ -133,13 +154,21 @@ const mediabunnyMocks = vi.hoisted(() => {
     ) {
       pendingSamples = samples
     },
+    __setPendingSamplePromise(promise: Promise<MockAudioSample | null>) {
+      pendingSamplePromise = promise
+    },
+    __setRejectTargetedWindows(value: boolean) {
+      rejectTargetedWindows = value
+    },
     __reset() {
-      pendingBuffer = null
+      pendingSamplePromise = null
       pendingSamples = []
+      rejectTargetedWindows = false
       stats.inputConstructed = 0
       stats.sinkConstructed = 0
       stats.sampleSinkConstructed = 0
       stats.bufferRangeStarts = []
+      stats.sequentialSamplesCalls = 0
     },
     __stats: stats,
   }
@@ -160,18 +189,6 @@ import {
   startPreviewAudioConform,
 } from './audio-decode-cache'
 
-function makeAudioBuffer(duration: number, sampleRate = 22050): AudioBuffer {
-  const length = Math.max(1, Math.round(duration * sampleRate))
-  const channels = [new Float32Array(length), new Float32Array(length)]
-  return {
-    duration,
-    numberOfChannels: 2,
-    length,
-    sampleRate,
-    getChannelData: (channel: number) => channels[channel] ?? channels[0]!,
-  } as unknown as AudioBuffer
-}
-
 function makeInt16Buffer(length: number): ArrayBuffer {
   return new Int16Array(length).buffer
 }
@@ -184,11 +201,13 @@ function createDeferred<T>() {
   return { promise, resolve }
 }
 
-function makeSample(frameCount: number, sampleRate = 22050) {
+function makeSample(frameCount: number, sampleRate = 22050, timestamp = 0) {
   return {
     numberOfFrames: frameCount,
     numberOfChannels: 2,
     sampleRate,
+    timestamp,
+    duration: frameCount / sampleRate,
     copyTo(destination: Float32Array, options: { planeIndex: number; format: 'f32-planar' }) {
       void options
       destination.fill(options.planeIndex === 0 ? 0.25 : -0.25)
@@ -224,6 +243,11 @@ describe('audio-decode-cache targeted slice reuse', () => {
   beforeEach(() => {
     clearPreviewAudioCache()
     mediabunnyMocks.__reset()
+    mediaDbMocks.getMedia.mockReset()
+    mediaDbMocks.getMedia.mockResolvedValue(null)
+    ac3Mocks.ensureAc3DecoderRegistered.mockClear()
+    ac3Mocks.isAc3AudioCodec.mockReset()
+    ac3Mocks.isAc3AudioCodec.mockReturnValue(false)
     previewAudioConformMocks.persistPreviewAudioConform.mockClear()
     decodedPreviewAudioMocks.saveDecodedPreviewAudio.mockClear()
     decodedPreviewAudioMocks.getDecodedPreviewAudio.mockReset()
@@ -231,13 +255,7 @@ describe('audio-decode-cache targeted slice reuse', () => {
   })
 
   it('reuses a completed targeted slice for the same playback request', async () => {
-    mediabunnyMocks.__setPendingBuffer(
-      Promise.resolve({
-        buffer: makeAudioBuffer(2),
-        timestamp: 0,
-        duration: 2,
-      }),
-    )
+    mediabunnyMocks.__setPendingSamples([makeSample(2 * 22050)])
 
     const firstSlice = await getOrDecodeAudioSliceForPlayback('media-1', 'blob://audio', {
       minReadySeconds: 2,
@@ -253,18 +271,13 @@ describe('audio-decode-cache targeted slice reuse', () => {
 
     expect(firstSlice.buffer).toBe(secondSlice.buffer)
     expect(mediabunnyMocks.__stats.inputConstructed).toBe(1)
-    expect(mediabunnyMocks.__stats.sinkConstructed).toBe(1)
+    expect(mediabunnyMocks.__stats.sinkConstructed).toBe(0)
+    expect(mediabunnyMocks.__stats.sampleSinkConstructed).toBe(1)
     expect(mediabunnyMocks.__stats.bufferRangeStarts).toEqual([2])
   })
 
   it('continues an incomplete targeted slice after the initial decoded buffer', async () => {
-    mediabunnyMocks.__setPendingBuffer(
-      Promise.resolve({
-        buffer: makeAudioBuffer(1),
-        timestamp: 0,
-        duration: 1,
-      }),
-    )
+    mediabunnyMocks.__setPendingSamples([makeSample(22050)])
 
     await getOrDecodeAudioSliceForPlayback('media-range', 'blob://audio', {
       minReadySeconds: 2,
@@ -275,9 +288,55 @@ describe('audio-decode-cache targeted slice reuse', () => {
     expect(mediabunnyMocks.__stats.bufferRangeStarts).toEqual([1])
   })
 
+  it('decodes a custom-codec playback window without falling back to a full decode', async () => {
+    mediaDbMocks.getMedia.mockResolvedValueOnce({ mimeType: 'audio/ac3', codec: 'ac-3' })
+    ac3Mocks.isAc3AudioCodec.mockReturnValue(true)
+    mediabunnyMocks.__setPendingSamples([makeSample(22050, 22050, 25)])
+
+    const slice = await getOrDecodeAudioSliceForPlayback('media-ac3', 'blob://audio', {
+      minReadySeconds: 1,
+      targetTimeSeconds: 25,
+      waitTimeoutMs: 0,
+    })
+
+    expect(slice.startTime).toBe(25)
+    expect(slice.buffer.duration).toBe(1)
+    expect(slice.isComplete).toBe(false)
+    expect(ac3Mocks.ensureAc3DecoderRegistered).toHaveBeenCalledTimes(1)
+    expect(mediabunnyMocks.__stats.sampleSinkConstructed).toBe(1)
+    expect(mediabunnyMocks.__stats.bufferRangeStarts).toEqual([])
+    expect(mediabunnyMocks.__stats.sequentialSamplesCalls).toBe(0)
+  })
+
+  it('falls back to bounded sequential decoding when targeted windows are unsupported', async () => {
+    mediaDbMocks.getMedia.mockResolvedValue({ mimeType: 'audio/ac3', codec: 'ac-3' })
+    ac3Mocks.isAc3AudioCodec.mockReturnValue(true)
+    mediabunnyMocks.__setRejectTargetedWindows(true)
+    mediabunnyMocks.__setPendingSamples([
+      makeSample(22050, 22050, 0),
+      makeSample(22050, 22050, 24),
+      makeSample(22050, 22050, 25),
+      makeSample(22050, 22050, 26),
+    ])
+
+    const slice = await getOrDecodeAudioSliceForPlayback('media-sequential', 'blob://audio', {
+      minReadySeconds: 1,
+      targetTimeSeconds: 25,
+      preRollSeconds: 0,
+      waitTimeoutMs: 0,
+    })
+
+    expect(slice.startTime).toBe(25)
+    expect(slice.buffer.duration).toBe(1)
+    expect(slice.isComplete).toBe(false)
+    expect(mediabunnyMocks.__stats.sampleSinkConstructed).toBe(2)
+    expect(mediabunnyMocks.__stats.sequentialSamplesCalls).toBe(1)
+    expect(mediabunnyMocks.__stats.bufferRangeStarts).toEqual([])
+  })
+
   it('shares an in-flight targeted slice decode for duplicate startup requests', async () => {
-    const deferred = createDeferred<{ buffer: AudioBuffer; timestamp: number; duration: number }>()
-    mediabunnyMocks.__setPendingBuffer(deferred.promise)
+    const deferred = createDeferred<ReturnType<typeof makeSample>>()
+    mediabunnyMocks.__setPendingSamplePromise(deferred.promise)
 
     const firstPromise = getOrDecodeAudioSliceForPlayback('media-2', 'blob://audio', {
       minReadySeconds: 2,
@@ -290,22 +349,18 @@ describe('audio-decode-cache targeted slice reuse', () => {
       waitTimeoutMs: 0,
     })
 
-    deferred.resolve({
-      buffer: makeAudioBuffer(2),
-      timestamp: 0,
-      duration: 2,
-    })
+    deferred.resolve(makeSample(2 * 22050))
 
     const [firstSlice, secondSlice] = await Promise.all([firstPromise, secondPromise])
 
     expect(firstSlice.buffer).toBe(secondSlice.buffer)
     expect(mediabunnyMocks.__stats.inputConstructed).toBe(1)
-    expect(mediabunnyMocks.__stats.sinkConstructed).toBe(1)
+    expect(mediabunnyMocks.__stats.sinkConstructed).toBe(0)
+    expect(mediabunnyMocks.__stats.sampleSinkConstructed).toBe(1)
   })
 
   it('reuses a nearby in-flight targeted slice request while playback advances', async () => {
-    const deferred = createDeferred<{ buffer: AudioBuffer; timestamp: number; duration: number }>()
-    mediabunnyMocks.__setPendingBuffer(deferred.promise)
+    mediabunnyMocks.__setPendingSamples([makeSample(3 * 22050)])
 
     const firstPromise = getOrDecodeAudioSliceForPlayback('media-3', 'blob://audio', {
       minReadySeconds: 3,
@@ -318,17 +373,12 @@ describe('audio-decode-cache targeted slice reuse', () => {
       waitTimeoutMs: 0,
     })
 
-    deferred.resolve({
-      buffer: makeAudioBuffer(3),
-      timestamp: 0,
-      duration: 3,
-    })
-
     const [firstSlice, secondSlice] = await Promise.all([firstPromise, secondPromise])
 
     expect(firstSlice.buffer).toBe(secondSlice.buffer)
     expect(mediabunnyMocks.__stats.inputConstructed).toBe(1)
-    expect(mediabunnyMocks.__stats.sinkConstructed).toBe(1)
+    expect(mediabunnyMocks.__stats.sinkConstructed).toBe(0)
+    expect(mediabunnyMocks.__stats.sampleSinkConstructed).toBe(1)
   })
 
   it('rebuilds an immediate partial slice from persisted bins around the target time', async () => {

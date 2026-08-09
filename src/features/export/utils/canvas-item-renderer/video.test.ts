@@ -80,6 +80,7 @@ describe('renderVideoItem', () => {
       captureFrame: vi.fn(),
       getLastFailureKind: vi.fn(() => 'none' as const),
       getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
       getDuration: vi.fn(() => 1),
       prewarmBatch: vi.fn(async () => 0),
       isBatchPrewarmAvailable: vi.fn(() => true),
@@ -143,6 +144,7 @@ describe('renderVideoItem', () => {
       drawFrameWithCapture,
       getLastFailureKind: vi.fn(() => 'none' as const),
       getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
       getDuration: vi.fn(() => 30),
     }
     const scrubbingCache = {
@@ -172,6 +174,7 @@ describe('renderVideoItem', () => {
       drawFrameWithCapture: vi.fn(),
       getLastFailureKind: vi.fn(() => 'none' as const),
       getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
       getDuration: vi.fn(() => 30),
     }
     const ctx = createCanvasContext()
@@ -202,6 +205,7 @@ describe('renderVideoItem', () => {
       drawFrameWithCapture: vi.fn(),
       getLastFailureKind: vi.fn(() => 'none' as const),
       getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
       getDuration: vi.fn(() => 30),
     }
     const isActivePreviewFrameSuperseded = vi.fn(() => true)
@@ -233,12 +237,10 @@ describe('renderVideoItem', () => {
       drawFrameWithCapture: vi.fn(),
       getLastFailureKind: vi.fn(() => 'none' as const),
       getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
       getDuration: vi.fn(() => 30),
     }
-    const isActivePreviewFrameSuperseded = vi
-      .fn()
-      .mockReturnValueOnce(false)
-      .mockReturnValue(true)
+    const isActivePreviewFrameSuperseded = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
     const markActivePreviewFramePending = vi.fn()
     const renderContext = createRenderContext({
       videoExtractors: new Map([[item.id, extractor]]),
@@ -266,6 +268,7 @@ describe('renderVideoItem', () => {
       drawFrameWithCapture: vi.fn(),
       getLastFailureKind: vi.fn(() => 'none' as const),
       getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
       getDuration: vi.fn(() => 30),
     }
     const markActivePreviewFramePending = vi.fn()
@@ -295,6 +298,7 @@ describe('renderVideoItem', () => {
       drawFrameWithCapture: vi.fn(),
       getLastFailureKind: vi.fn(() => 'none' as const),
       getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
       getDuration: vi.fn(() => 30),
     }
     const markActivePreviewFramePending = vi.fn()
@@ -493,4 +497,39 @@ describe('renderVideoItem', () => {
     expect(markActivePreviewFramePending).toHaveBeenCalledOnce()
   })
 
+  it('holds a paused ramp-owned transition video without blocking on its seek', async () => {
+    const target = new EventTarget()
+    const mutableVideo = Object.assign(target, {
+      currentTime: 0.6,
+      dataset: { transitionHold: '1', transitionSourceRamp: '1' },
+      paused: true,
+      readyState: 1,
+      videoHeight: 1080,
+      videoWidth: 1920,
+    })
+    const domVideo = mutableVideo as unknown as HTMLVideoElement
+    const markActivePreviewFramePending = vi.fn()
+    const ctx = createCanvasContext()
+    const renderContext = createRenderContext({
+      domVideoElementProvider: vi.fn(() => domVideo),
+      isRenderingTransition: true,
+      markActivePreviewFramePending,
+    })
+
+    await expect(
+      renderVideoItem(ctx, item, transform, 12, renderContext, 0, {
+        from: 0,
+        durationInFrames: 30,
+        sourceStart: 0,
+        sourceTimeRamp: {
+          anchor: 'start',
+          rampStart: 0,
+          rampEnd: 20,
+          slope: 0.5,
+        },
+      }),
+    ).resolves.toBe(false)
+    expect(ctx.drawImage).not.toHaveBeenCalled()
+    expect(markActivePreviewFramePending).toHaveBeenCalledOnce()
+  })
 })

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test'
 import {
+  buildContinuousPreviewOverlayIndex,
+  getContinuousPreviewOverlayFrameWindow,
+  shouldForceContinuousPreviewOverlayFromIndex,
   shouldForceContinuousPreviewOverlay,
+  shouldForceContinuousPreviewOverlayInWindow,
   timelineHasContinuousOverlayContent,
 } from './use-gpu-effects-overlay'
 import type { TimelineItem } from '@/types/timeline'
@@ -51,6 +55,45 @@ function createSubComposition(items: TimelineItem[]): SubComposition {
 }
 
 describe('shouldForceContinuousPreviewOverlay', () => {
+  it('indexes only rendered-overlay candidates for per-frame checks', () => {
+    const ordinaryItems = Array.from({ length: 327 }, (_, index) =>
+      createVideoItem({
+        id: `ordinary-${index}`,
+        from: index * 90,
+      }),
+    )
+    const effectedItem = createVideoItem({
+      id: 'effected',
+      from: 30_000,
+      effects: [
+        {
+          id: 'effect-1',
+          enabled: true,
+          effect: {
+            type: 'gpu-effect',
+            gpuEffectType: 'gpu-blur',
+            params: { amount: 0.5 },
+          },
+        },
+      ],
+    })
+    const index = buildContinuousPreviewOverlayIndex([...ordinaryItems, effectedItem], [])
+
+    expect(index.candidateItems.map((item) => item.id)).toEqual(['effected'])
+    expect(
+      shouldForceContinuousPreviewOverlayFromIndex(index, {
+        startFrame: 30_000,
+        endFrameExclusive: 30_001,
+      }),
+    ).toBe(true)
+    expect(
+      shouldForceContinuousPreviewOverlayFromIndex(index, {
+        startFrame: 0,
+        endFrameExclusive: 1,
+      }),
+    ).toBe(false)
+  })
+
   it('keeps numeric transition counts as a non-forcing legacy hint', () => {
     expect(shouldForceContinuousPreviewOverlay([createVideoItem()], 1, 0)).toBe(false)
   })
@@ -481,6 +524,92 @@ describe('shouldForceContinuousPreviewOverlay', () => {
   })
 })
 
+describe('bounded continuous overlay routing', () => {
+  const gpuEffect = {
+    id: 'effect-window',
+    enabled: true,
+    effect: { type: 'gpu-effect' as const, gpuEffectType: 'gpu-blur', params: { amount: 0.5 } },
+  }
+
+  it('uses the exact frame while paused on an ordinary timeline', () => {
+    expect(
+      getContinuousPreviewOverlayFrameWindow({
+        frame: 500,
+        fps: 30,
+        isPlaying: false,
+        isPreviewing: false,
+        playbackRate: 1,
+      }),
+    ).toEqual({ startFrame: 500, endFrameExclusive: 501 })
+  })
+
+  it('pre-arms forward playback and retains a short post-roll', () => {
+    expect(
+      getContinuousPreviewOverlayFrameWindow({
+        frame: 500,
+        fps: 30,
+        isPlaying: true,
+        isPreviewing: false,
+        playbackRate: 1,
+      }),
+    ).toEqual({ startFrame: 497, endFrameExclusive: 509 })
+  })
+
+  it('puts the longer pre-arm window behind the playhead during reverse playback', () => {
+    expect(
+      getContinuousPreviewOverlayFrameWindow({
+        frame: 500,
+        fps: 30,
+        isPlaying: true,
+        isPreviewing: false,
+        playbackRate: -1,
+      }),
+    ).toEqual({ startFrame: 492, endFrameExclusive: 504 })
+  })
+
+  it('activates for a one-frame effect inside the lookahead without routing distant frames', () => {
+    const effected = createVideoItem({
+      from: 508,
+      durationInFrames: 1,
+      effects: [gpuEffect],
+    })
+
+    expect(
+      shouldForceContinuousPreviewOverlayInWindow([effected], 0, {
+        startFrame: 497,
+        endFrameExclusive: 509,
+      }),
+    ).toBe(true)
+    expect(
+      shouldForceContinuousPreviewOverlayInWindow([effected], 0, {
+        startFrame: 0,
+        endFrameExclusive: 9,
+      }),
+    ).toBe(false)
+  })
+
+  it('holds the rendered path across the end boundary, then releases it', () => {
+    const effected = createVideoItem({
+      from: 400,
+      durationInFrames: 100,
+      effects: [gpuEffect],
+    })
+
+    expect(
+      shouldForceContinuousPreviewOverlayInWindow([effected], 0, {
+        startFrame: 499,
+        endFrameExclusive: 511,
+      }),
+    ).toBe(true)
+    expect(
+      shouldForceContinuousPreviewOverlayInWindow([effected], 0, {
+        startFrame: 500,
+        endFrameExclusive: 512,
+      }),
+    ).toBe(false)
+  })
+})
+
 describe('timelineHasContinuousOverlayContent', () => {
   const gpuEffect = {
     id: 'effect-1',
@@ -493,8 +622,6 @@ describe('timelineHasContinuousOverlayContent', () => {
   })
 
   it('is true when any item has an enabled GPU effect, regardless of frame position', () => {
-    // The clip sits far from frame 0, yet the overlay must stay warm the whole
-    // session — this is exactly what the frame-based check misses.
     const effected = createVideoItem({ from: 500, durationInFrames: 60, effects: [gpuEffect] })
     expect(timelineHasContinuousOverlayContent([createVideoItem(), effected])).toBe(true)
   })
