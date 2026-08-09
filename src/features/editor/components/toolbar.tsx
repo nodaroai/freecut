@@ -36,6 +36,7 @@ import { ShortcutsDialog } from './shortcuts-dialog'
 import { UnsavedChangesDialog } from './unsaved-changes-dialog'
 import { ProjectNameEditor } from './project-name-editor'
 import { ToolbarDocsLink } from './toolbar-docs-link'
+import { ToolbarExportButton } from './toolbar-export-button'
 import { WorkspaceSwitcher } from './workspace-switcher'
 import { WhatsNewDialog } from './whats-new-dialog'
 import { hasUnseenChangelog } from './whats-new-seen'
@@ -405,6 +406,8 @@ export const Toolbar = memo(function Toolbar({
           <>
             <ToolbarDocsLink />
             <LanguageSwitcher size="sm" align="end" side="bottom" />
+            <Separator orientation="vertical" className="h-5" />
+            <ToolbarExportButton onExport={onExport} />
             <SendBackButton />
           </>
         )}
