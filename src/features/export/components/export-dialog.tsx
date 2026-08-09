@@ -80,6 +80,7 @@ import {
 } from '../utils/client-renderer'
 import { ExportPreviewPlayer } from './export-preview-player'
 import { useBrokenMediaIds, useMediaMetadataById } from '../deps/media-library'
+import { sendExportToStudio } from '../deps/embedded-contract'
 import { assessSmartCopyEligibility } from '../utils/smart-copy'
 import { resolveVideoBitrate } from '../utils/video-bitrate'
 
@@ -394,8 +395,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     const reversedClipIds = new Set(
       items
         .filter(
-          (item) =>
-            (item.type === 'video' || item.type === 'audio') && item.isReversed === true,
+          (item) => (item.type === 'video' || item.type === 'audio') && item.isReversed === true,
         )
         .map((item) => item.id),
     )
@@ -620,6 +620,19 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
       setView('cancelled')
     }
   }, [status])
+
+  // Embedded (studio iframe) mode: a completed VIDEO export is ALSO handed to
+  // the parent studio, which saves it as a clip variant / production cut
+  // without closing the editor. Audio exports stay local-only. Once per result.
+  const studioHandoffRef = useRef<Blob | null>(null)
+  useEffect(() => {
+    const result = clientRender.result
+    if (status !== 'completed' || !result?.blob) return
+    if (!result.mimeType.startsWith('video/')) return
+    if (studioHandoffRef.current === result.blob) return
+    studioHandoffRef.current = result.blob
+    void sendExportToStudio(result.blob)
+  }, [status, clientRender.result])
 
   // Handle close
   const handleClose = () => {
@@ -1574,8 +1587,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
                 </div>
                 <div className="flex items-center justify-between text-sm gap-2">
                   <span className="text-muted-foreground truncate">
-                    {status === 'preparing' &&
-                      (progressMessage ?? t('export.progress.preparing'))}
+                    {status === 'preparing' && (progressMessage ?? t('export.progress.preparing'))}
                     {status === 'rendering' && t('export.progress.rendering')}
                     {status === 'encoding' && t('export.progress.encoding')}
                     {status === 'finalizing' && t('export.progress.finalizing')}

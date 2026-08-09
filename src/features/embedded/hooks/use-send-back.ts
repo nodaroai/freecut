@@ -1,6 +1,5 @@
 import { useCallback } from 'react'
-import { useProjectStore } from '../deps/projects-contract'
-import { exportProjectJson } from '../deps/project-bundle-contract'
+import { collectProjectJson } from '../services/studio-export-bridge'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { createLogger } from '@/shared/logging/logger'
 
@@ -24,23 +23,9 @@ export function useSendBack() {
 
     useEmbeddedStore.getState().setSendBackStatus('saving')
 
-    // Flush the timeline to storage, then serialize the project. Failures
-    // degrade to exiting without JSON — the parent still closes the editor.
-    let projectJson: unknown = null
-    try {
-      const currentProject = useProjectStore.getState().currentProject
-      if (currentProject) {
-        const { useTimelineStore } = await import('../deps/timeline-contract')
-        await useTimelineStore.getState().saveTimeline(currentProject.id)
-        projectJson = await exportProjectJson(currentProject.id, {
-          includeMediaReferences: true,
-          stripVolatileFields: true,
-          includeChecksum: false,
-        })
-      }
-    } catch (e) {
-      log.warn('Failed to export project JSON for save-exit', { error: e })
-    }
+    // Serialization failures degrade to exiting without JSON — the parent
+    // still closes the editor.
+    const projectJson = await collectProjectJson()
 
     window.parent.postMessage({ type: 'FREECUT_SAVE_EXIT', payload: { projectJson } }, parentOrigin)
     log.info('Save-exit sent to parent', { hasProjectJson: !!projectJson })
