@@ -71,6 +71,15 @@ export interface MediaMetadata {
   width: number
   height: number
   fps: number
+  /**
+   * Timestamp-derived video frame-rate characteristics captured at import.
+   *
+   * `underlyingFrameRate === null` identifies a genuinely variable-frame-rate
+   * source. `frameRateIsConstant` is stricter: it is false for VFR sources and
+   * for otherwise-uniform sources with dropped frames. Optional for media
+   * imported before MediaBunny exposed these metrics.
+   */
+  frameRateMetrics?: VideoFrameRateMetrics
   codec: string
   bitrate: number
   /**
@@ -143,6 +152,17 @@ export interface MediaMetadata {
   }>
   createdAt: number
   updatedAt: number
+}
+
+export interface VideoFrameRateMetrics {
+  underlyingFrameRate: number | null
+  bestGuessFrameRate: number
+  minFrameRate: number
+  maxFrameRate: number
+  averageFrameRate: number
+  medianFrameRate: number
+  frameRateIsConstant: boolean
+  probedPacketCount: number
 }
 
 // Content record for reference counting in content-addressable storage

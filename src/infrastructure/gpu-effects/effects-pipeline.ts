@@ -17,6 +17,19 @@ interface DataTextureCacheEntry {
   height: number
   depth: number
 }
+
+interface SharedEffectPipelineState {
+  pipelines: Map<string, GPURenderPipeline>
+  bindGroupLayouts: Map<string, GPUBindGroupLayout>
+  computePipelines: Map<string, GPUComputePipeline>
+  computeBindGroupLayouts: Map<string, GPUBindGroupLayout>
+  blitPipeline: GPURenderPipeline | null
+  blitBindGroupLayout: GPUBindGroupLayout | null
+  importPipeline: GPURenderPipeline | null
+  importBindGroupLayout: GPUBindGroupLayout | null
+  colorBatchPipeline: GPURenderPipeline | null
+  colorBatchBindGroupLayout: GPUBindGroupLayout | null
+}
 import { GPU_EFFECT_REGISTRY, getGpuEffect } from './registry'
 
 function getLogger() {
@@ -40,6 +53,137 @@ fn blitFragment(input: VertexOutput) -> @location(0) vec4f {
   return vec4f(c.rgb * c.a, c.a);
 }
 `
+
+const MAX_INLINE_COLOR_EFFECTS = 12
+const COLOR_BATCH_UNIFORM_SIZE = 16 + MAX_INLINE_COLOR_EFFECTS * 48
+const INLINE_COLOR_EFFECT_KINDS = new Map<string, number>([
+  ['gpu-brightness', 1],
+  ['gpu-contrast', 2],
+  ['gpu-exposure', 3],
+  ['gpu-hue-shift', 4],
+  ['gpu-invert', 5],
+  ['gpu-levels', 6],
+  ['gpu-saturation', 7],
+  ['gpu-temperature', 8],
+  ['gpu-grayscale', 9],
+  ['gpu-sepia', 10],
+  ['gpu-vibrance', 11],
+  ['gpu-posterize', 12],
+  ['gpu-threshold', 13],
+])
+
+const COLOR_BATCH_SHADER = /* wgsl */ `
+struct ColorOp {
+  header: vec4u,
+  values0: vec4f,
+  values1: vec4f,
+};
+struct ColorBatchParams {
+  header: vec4u,
+  ops: array<ColorOp, ${MAX_INLINE_COLOR_EFFECTS}>,
+};
+@group(0) @binding(0) var colorBatchSampler: sampler;
+@group(0) @binding(1) var colorBatchInput: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> colorBatch: ColorBatchParams;
+
+@fragment
+fn colorBatchFragment(input: VertexOutput) -> @location(0) vec4f {
+  let sampled = textureSample(colorBatchInput, colorBatchSampler, input.uv);
+  var color = sampled.rgb;
+  for (var index = 0u; index < ${MAX_INLINE_COLOR_EFFECTS}u; index += 1u) {
+    if (index < colorBatch.header.x) {
+      let op = colorBatch.ops[index];
+      if (op.header.x == 1u) {
+        color = color + vec3f(op.values0.x);
+      } else if (op.header.x == 2u) {
+        color = (color - vec3f(0.5)) * op.values0.x + vec3f(0.5);
+      } else if (op.header.x == 3u) {
+        color = color * pow(2.0, op.values0.x) + vec3f(op.values0.y);
+        color = pow(max(color, vec3f(0.0)), vec3f(1.0 / op.values0.z));
+      } else if (op.header.x == 4u) {
+        var hsv = rgb2hsv(color);
+        hsv.x = fract(op.values0.x + op.values0.z * op.values0.w + hsv.x * op.values0.y);
+        color = hsv2rgb(hsv);
+      } else if (op.header.x == 5u) {
+        color = vec3f(1.0) - color;
+      } else if (op.header.x == 6u) {
+        color = (color - vec3f(op.values0.x)) / (op.values0.y - op.values0.x);
+        color = clamp(color, vec3f(0.0), vec3f(1.0));
+        color = pow(color, vec3f(1.0 / op.values0.z));
+        color = mix(vec3f(op.values0.w), vec3f(op.values1.x), color);
+      } else if (op.header.x == 7u) {
+        let gray = luminance601(color);
+        color = mix(vec3f(gray), color, op.values0.x);
+      } else if (op.header.x == 8u) {
+        color.r += op.values0.x * 0.1;
+        color.b -= op.values0.x * 0.1;
+        color.g -= op.values0.y * 0.1;
+        color.r += op.values0.y * 0.05;
+        color.b += op.values0.y * 0.05;
+      } else if (op.header.x == 9u) {
+        color = mix(color, vec3f(luminance601(color)), op.values0.x);
+      } else if (op.header.x == 10u) {
+        let sepia = vec3f(
+          dot(color, vec3f(0.393, 0.769, 0.189)),
+          dot(color, vec3f(0.349, 0.686, 0.168)),
+          dot(color, vec3f(0.272, 0.534, 0.131))
+        );
+        color = mix(color, sepia, op.values0.x);
+      } else if (op.header.x == 11u) {
+        let maxChannel = max(max(color.r, color.g), color.b);
+        let minChannel = min(min(color.r, color.g), color.b);
+        let saturation = (maxChannel - minChannel) / (maxChannel + 0.001);
+        let amount = op.values0.x * (1.0 - saturation);
+        color = mix(vec3f(luminance601(color)), color, 1.0 + amount);
+      } else if (op.header.x == 12u) {
+        let levels = max(op.values0.x, 2.0);
+        color = floor(color * levels) / (levels - 1.0);
+      } else if (op.header.x == 13u) {
+        let value = select(0.0, 1.0, luminance(color) > op.values0.x);
+        color = vec3f(value);
+      }
+      // Separate rgba8unorm passes clamp and quantize after every operation.
+      color = round(clamp(color, vec3f(0.0), vec3f(1.0)) * 255.0) / 255.0;
+    }
+  }
+  return vec4f(color, sampled.a);
+}`
+
+type PlannedEffectPass =
+  | { kind: 'color-batch'; effects: GpuEffectInstance[] }
+  | { kind: 'single'; effect: GpuEffectInstance }
+
+function planEffectPasses(
+  effects: GpuEffectInstance[],
+  enableColorBatch: boolean,
+): PlannedEffectPass[] {
+  if (!enableColorBatch) {
+    return effects.map((effect) => ({ kind: 'single', effect }))
+  }
+  const passes: PlannedEffectPass[] = []
+  for (let index = 0; index < effects.length; ) {
+    if (!INLINE_COLOR_EFFECT_KINDS.has(effects[index]!.type)) {
+      passes.push({ kind: 'single', effect: effects[index]! })
+      index++
+      continue
+    }
+    const start = index
+    while (
+      index < effects.length &&
+      index - start < MAX_INLINE_COLOR_EFFECTS &&
+      INLINE_COLOR_EFFECT_KINDS.has(effects[index]!.type)
+    ) {
+      index++
+    }
+    const batch = effects.slice(start, index)
+    if (batch.length > 1) {
+      passes.push({ kind: 'color-batch', effects: batch })
+    } else {
+      passes.push({ kind: 'single', effect: batch[0]! })
+    }
+  }
+  return passes
+}
 
 /**
  * Shader for importing an external video texture (texture_external) into the
@@ -92,6 +236,9 @@ function getExternalImageSourceDimensions(source: GpuExternalImageSource): {
 }
 
 export class EffectsPipeline {
+  /** Immutable shader pipelines are device-owned and safe to share across render sessions. */
+  private static sharedPipelineState = new WeakMap<GPUDevice, SharedEffectPipelineState>()
+
   private device: GPUDevice
   private format: GPUTextureFormat
   private pipelines = new Map<string, GPURenderPipeline>()
@@ -107,6 +254,8 @@ export class EffectsPipeline {
   private importPipeline: GPURenderPipeline | null = null
   private importBindGroupLayout: GPUBindGroupLayout | null = null
   private importUniformBuffer: GPUBuffer | null = null
+  private colorBatchPipeline: GPURenderPipeline | null = null
+  private colorBatchBindGroupLayout: GPUBindGroupLayout | null = null
   private pingTexture: GPUTexture | null = null
   private pongTexture: GPUTexture | null = null
   private texW = 0
@@ -191,9 +340,27 @@ export class EffectsPipeline {
   private async createPipelines(): Promise<void> {
     if (this.initialized) return
 
+    const shared = EffectsPipeline.sharedPipelineState.get(this.device)
+    if (shared) {
+      // Keep per-instance maps so destroy() cannot invalidate another renderer.
+      this.pipelines = new Map(shared.pipelines)
+      this.bindGroupLayouts = new Map(shared.bindGroupLayouts)
+      this.computePipelines = new Map(shared.computePipelines)
+      this.computeBindGroupLayouts = new Map(shared.computeBindGroupLayouts)
+      this.blitPipeline = shared.blitPipeline
+      this.blitBindGroupLayout = shared.blitBindGroupLayout
+      this.importPipeline = shared.importPipeline
+      this.importBindGroupLayout = shared.importBindGroupLayout
+      this.colorBatchPipeline = shared.colorBatchPipeline
+      this.colorBatchBindGroupLayout = shared.colorBatchBindGroupLayout
+      this.initialized = true
+      return
+    }
+
     // Create blit (passthrough) pipeline for final canvas output
     this.createBlitPipeline()
     this.createImportExternalPipeline()
+    this.createColorBatchPipeline()
 
     for (const [id, effect] of GPU_EFFECT_REGISTRY) {
       if (effect.compute) {
@@ -202,6 +369,18 @@ export class EffectsPipeline {
         this.createEffectPipeline(id, effect)
       }
     }
+    EffectsPipeline.sharedPipelineState.set(this.device, {
+      pipelines: new Map(this.pipelines),
+      bindGroupLayouts: new Map(this.bindGroupLayouts),
+      computePipelines: new Map(this.computePipelines),
+      computeBindGroupLayouts: new Map(this.computeBindGroupLayouts),
+      blitPipeline: this.blitPipeline,
+      blitBindGroupLayout: this.blitBindGroupLayout,
+      importPipeline: this.importPipeline,
+      importBindGroupLayout: this.importBindGroupLayout,
+      colorBatchPipeline: this.colorBatchPipeline,
+      colorBatchBindGroupLayout: this.colorBatchBindGroupLayout,
+    })
     this.initialized = true
   }
 
@@ -255,6 +434,41 @@ export class EffectsPipeline {
       this.importPipeline = null
       this.importBindGroupLayout = null
       this.importUniformBuffer = null
+    }
+  }
+
+  private createColorBatchPipeline(): void {
+    try {
+      const module = this.device.createShaderModule({
+        label: 'effect-inline-color-batch',
+        code: `${COMMON_WGSL}\n${COLOR_BATCH_SHADER}`,
+      })
+      this.colorBatchBindGroupLayout = this.device.createBindGroupLayout({
+        label: 'effect-inline-color-batch-layout',
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+          { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+          { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        ],
+      })
+      this.colorBatchPipeline = this.device.createRenderPipeline({
+        label: 'effect-inline-color-batch-pipeline',
+        layout: this.device.createPipelineLayout({
+          bindGroupLayouts: [this.colorBatchBindGroupLayout],
+        }),
+        vertex: { module, entryPoint: 'vertexMain' },
+        fragment: {
+          module,
+          entryPoint: 'colorBatchFragment',
+          targets: [{ format: 'rgba8unorm' }],
+        },
+        primitive: { topology: 'triangle-list' },
+      })
+    } catch (error) {
+      // Keep the established one-pass-per-effect path as a capability fallback.
+      this.colorBatchPipeline = null
+      this.colorBatchBindGroupLayout = null
+      getLogger().warn('Failed to create inline color batch pipeline', error)
     }
   }
 
@@ -487,15 +701,64 @@ export class EffectsPipeline {
     let inputView = inputTex === this.pingTexture ? this.pingView! : this.pongView!
     let outputView = outputTex === this.pingTexture ? this.pingView! : this.pongView!
 
-    for (let effectIndex = 0; effectIndex < effects.length; effectIndex++) {
-      const effect = effects[effectIndex]!
+    const passes = planEffectPasses(
+      effects,
+      this.colorBatchPipeline !== null && this.colorBatchBindGroupLayout !== null,
+    )
+    for (let passIndex = 0; passIndex < passes.length; passIndex++) {
+      const plannedPass = passes[passIndex]!
+      if (plannedPass.kind === 'color-batch') {
+        if (!this.colorBatchPipeline || !this.colorBatchBindGroupLayout) continue
+        const packed = new ArrayBuffer(COLOR_BATCH_UNIFORM_SIZE)
+        new Uint32Array(packed, 0, 4)[0] = plannedPass.effects.length
+        for (let opIndex = 0; opIndex < plannedPass.effects.length; opIndex++) {
+          const effect = plannedPass.effects[opIndex]!
+          const kind = INLINE_COLOR_EFFECT_KINDS.get(effect.type)!
+          const definition = getGpuEffect(effect.type)!
+          const byteOffset = 16 + opIndex * 48
+          new Uint32Array(packed, byteOffset, 4)[0] = kind
+          const values = definition.packUniforms(effect.params, w, h)
+          if (values) {
+            new Float32Array(packed, byteOffset + 16, 8).set(values.subarray(0, 8))
+          }
+        }
+        const uniformBuffer = this.getOrCreateUniformBuffer(passIndex, COLOR_BATCH_UNIFORM_SIZE)
+        this.device.queue.writeBuffer(uniformBuffer, 0, packed)
+        const viewKey = inputView === this.pingView ? 'ping' : 'pong'
+        const cacheKey = `${passIndex}:inline-color-batch:${viewKey}`
+        let bindGroup = this.effectBindGroupCache.get(cacheKey)
+        if (!bindGroup) {
+          bindGroup = this.device.createBindGroup({
+            layout: this.colorBatchBindGroupLayout,
+            entries: [
+              { binding: 0, resource: this.sampler },
+              { binding: 1, resource: inputView },
+              { binding: 2, resource: { buffer: uniformBuffer } },
+            ],
+          })
+          this.effectBindGroupCache.set(cacheKey, bindGroup)
+        }
+        const pass = commandEncoder.beginRenderPass({
+          colorAttachments: [{ view: outputView, loadOp: 'clear', storeOp: 'store' }],
+        })
+        pass.setPipeline(this.colorBatchPipeline)
+        pass.setBindGroup(0, bindGroup)
+        pass.draw(6)
+        pass.end()
+
+        ;[inputTex, outputTex] = [outputTex, inputTex]
+        ;[inputView, outputView] = [outputView, inputView]
+        continue
+      }
+
+      const effect = plannedPass.effect
       const definition = getGpuEffect(effect.type)
       if (!definition) continue
 
       const uniformData = definition.packUniforms(effect.params, w, h)
       let uniformBuffer: GPUBuffer | undefined
       if (uniformData) {
-        uniformBuffer = this.getOrCreateUniformBuffer(effectIndex, uniformData.byteLength)
+        uniformBuffer = this.getOrCreateUniformBuffer(passIndex, uniformData.byteLength)
         this.device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer)
       }
 
@@ -512,7 +775,7 @@ export class EffectsPipeline {
         const computeLayout = this.computeBindGroupLayouts.get(effect.type)
         if (!computePipeline || !computeLayout) continue
 
-        const cacheKey = `${effectIndex}:${effect.type}:compute:${viewKey}`
+        const cacheKey = `${passIndex}:${effect.type}:compute:${viewKey}`
         let bindGroup = this.effectBindGroupCache.get(cacheKey)
         if (!bindGroup) {
           const bindEntries: GPUBindGroupEntry[] = [
@@ -549,11 +812,11 @@ export class EffectsPipeline {
       // Auxiliary data texture (curve/color LUT) — kept current before binding.
       let dataTextureView: GPUTextureView | null = null
       if (definition.dataTexture) {
-        dataTextureView = this.getOrUpdateDataTexture(effectIndex, effect, definition)
+        dataTextureView = this.getOrUpdateDataTexture(passIndex, effect, definition)
         if (!dataTextureView) continue
       }
 
-      const cacheKey = `${effectIndex}:${effect.type}:${viewKey}`
+      const cacheKey = `${passIndex}:${effect.type}:${viewKey}`
       let bindGroup = this.effectBindGroupCache.get(cacheKey)
       if (!bindGroup) {
         const bindEntries: GPUBindGroupEntry[] = [

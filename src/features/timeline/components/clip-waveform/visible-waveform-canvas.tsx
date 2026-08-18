@@ -8,6 +8,12 @@ import {
 } from './visible-waveform-canvas-geometry'
 import { useTimelineViewportStore } from '../../stores/timeline-viewport-store'
 import { useZoomStore } from '../../stores/zoom-store'
+import { TILE_WIDTH as TILED_CANVAS_TILE_WIDTH } from '../clip-filmstrip/tiled-canvas'
+import { getWaveformZoomRedrawIntervalMs } from './adaptive-render-version'
+import {
+  cancelTimelineCanvasUpdate,
+  scheduleTimelineCanvasUpdate,
+} from '../timeline-canvas-update-scheduler'
 
 interface VisibleWaveformCanvasProps {
   /** Total logical width of the clip waveform. */
@@ -138,69 +144,82 @@ interface LiveCanvasRegistration {
 }
 
 const liveCanvasRegistrations = new Set<LiveCanvasRegistration>()
-let liveCanvasPositionUpdateQueued = false
+const liveWaveformCanvasUpdateKey = {}
 let unsubscribeLiveCanvasZoom: (() => void) | null = null
 let unsubscribeLiveCanvasViewport: (() => void) | null = null
 
-function scheduleLiveCanvasPositionUpdate(): void {
-  if (liveCanvasPositionUpdateQueued) return
-  liveCanvasPositionUpdateQueued = true
-  queueMicrotask(() => {
-    liveCanvasPositionUpdateQueued = false
-    const snapshot = getLiveTimelineSnapshot()
-    let viewportRectCache: Map<HTMLElement, DOMRect> | undefined
-    const updates: Array<{
-      registration: LiveCanvasRegistration
-      geometry: VisibleWaveformCanvasGeometry
-      needsRedraw: boolean
-    }> = []
+function flushLiveCanvasPositionUpdate(): void {
+  const snapshot = getLiveTimelineSnapshot()
+  let viewportRectCache: Map<HTMLElement, DOMRect> | undefined
+  const updates: Array<{
+    registration: LiveCanvasRegistration
+    geometry: VisibleWaveformCanvasGeometry
+    needsRedraw: boolean
+  }> = []
 
     // Timeline items use arithmetic from the shared live zoom/viewport snapshot.
     // Only transformed items or legacy/malformed markup fall back to DOM reads.
     // Read every fallback rect before writing any style to avoid layout thrash.
-    for (const registration of liveCanvasRegistrations) {
-      if (!registration.canvas.isConnected) continue
-      let geometry = computeLiveTimelineGeometryFromItem(
-        registration.timelineItem,
-        snapshot,
+  for (const registration of liveCanvasRegistrations) {
+    if (!registration.canvas.isConnected) continue
+    let geometry = computeLiveTimelineGeometryFromItem(
+      registration.timelineItem,
+      snapshot,
+      registration.overscanPx,
+    )
+    if (!geometry) {
+      viewportRectCache ??= new Map<HTMLElement, DOMRect>()
+      geometry = measureLiveTimelineGeometry(
+        registration.canvas,
         registration.overscanPx,
+        registration.timelineViewport,
+        viewportRectCache,
       )
-      if (!geometry) {
-        viewportRectCache ??= new Map<HTMLElement, DOMRect>()
-        geometry = measureLiveTimelineGeometry(
-          registration.canvas,
-          registration.overscanPx,
-          registration.timelineViewport,
-          viewportRectCache,
-        )
-      }
-      if (geometry && geometry.width > 0) {
-        const currentWidth = Number.parseFloat(registration.canvas.style.width) || 0
-        updates.push({
-          registration,
-          geometry,
-          needsRedraw:
-            registration.canvas.style.display === 'none' ||
-            currentWidth + 0.5 < geometry.width ||
-            Math.abs(registration.lastPixelsPerSecond - snapshot.pixelsPerSecond) > 0.001,
-        })
-      }
     }
-    for (const update of updates) {
-      if (update.needsRedraw) {
+    if (geometry && geometry.width > 0) {
+      const currentWidth = Number.parseFloat(registration.canvas.style.width) || 0
+      updates.push({
+        registration,
+        geometry,
+        needsRedraw:
+          registration.canvas.style.display === 'none' ||
+          currentWidth + 0.5 < geometry.width ||
+          Math.abs(registration.lastPixelsPerSecond - snapshot.pixelsPerSecond) > 0.001,
+      })
+    }
+  }
+  for (const update of updates) {
+    if (update.needsRedraw) {
         // A scale change needs real new pixels even when the bounded window is
         // shrinking. Redraw imperatively from the current live store snapshot;
         // React remains on settled geometry and therefore cannot fan out one
         // state update per waveform during the wheel gesture.
-        update.registration.redraw(update.geometry)
-        update.registration.lastPixelsPerSecond = snapshot.pixelsPerSecond
-      } else {
+      update.registration.redraw(update.geometry)
+      update.registration.lastPixelsPerSecond = snapshot.pixelsPerSecond
+    } else {
         // Keep the existing sharp bitmap and backing size; only move it into the
         // new viewport window until the cadence-limited redraw catches up.
-        update.registration.canvas.style.left = `${update.geometry.left}px`
-      }
+      update.registration.canvas.style.left = `${update.geometry.left}px`
     }
-  })
+  }
+}
+
+function getLiveWaveformTileWork(): number {
+  let tileCount = 0
+  for (const registration of liveCanvasRegistrations) {
+    if (!registration.canvas.isConnected) continue
+    const width = Number.parseFloat(registration.canvas.style.width) || 0
+    tileCount += Math.max(1, Math.ceil(width / TILED_CANVAS_TILE_WIDTH))
+  }
+  return tileCount
+}
+
+function scheduleLiveCanvasPositionUpdate(): void {
+  scheduleTimelineCanvasUpdate(
+    liveWaveformCanvasUpdateKey,
+    flushLiveCanvasPositionUpdate,
+    getWaveformZoomRedrawIntervalMs(getLiveWaveformTileWork()),
+  )
 }
 
 function registerLiveCanvasPositionUpdates(
@@ -244,6 +263,9 @@ function registerLiveCanvasPositionUpdates(
     if (liveCanvasRegistrations.size === 0 && unsubscribeLiveCanvasViewport) {
       unsubscribeLiveCanvasViewport()
       unsubscribeLiveCanvasViewport = null
+    }
+    if (liveCanvasRegistrations.size === 0) {
+      cancelTimelineCanvasUpdate(liveWaveformCanvasUpdateKey)
     }
   }
 }

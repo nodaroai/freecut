@@ -5,6 +5,8 @@ import {
   computeFilmstripCanvasGeometry,
   computeFilmstripCanvasTiles,
   computeTimelineFilmstripCanvasWindow,
+  getFilmstripTileStride,
+  MAX_VISIBLE_FILMSTRIP_TILES,
 } from './filmstrip-canvas-geometry'
 
 describe('computeFilmstripCanvasGeometry', () => {
@@ -108,6 +110,34 @@ describe('computeFilmstripCanvasTiles', () => {
         isReversed: true,
       }).map((tile) => tile.frame.index),
     ).toEqual([7, 6, 5, 4])
+  })
+
+  it('combines dense visible slots into at most 64 painted tiles', () => {
+    const tiles = computeFilmstripCanvasTiles({
+      frames,
+      renderWidth: 10_000,
+      visibleStartPx: 0,
+      visibleEndPx: 10_000,
+      tileWidth: 50,
+      pixelsPerSecond: 100,
+      effectiveStart: 0,
+      effectiveEnd: 100,
+      speed: 1,
+      isReversed: false,
+    })
+
+    expect(tiles).toHaveLength(50)
+    expect(tiles.length).toBeLessThanOrEqual(MAX_VISIBLE_FILMSTRIP_TILES)
+    expect(tiles[0]).toMatchObject({ x: 0, width: 200 })
+    expect(tiles.at(-1)).toMatchObject({ x: 9800, width: 200 })
+  })
+})
+
+describe('getFilmstripTileStride', () => {
+  it('retains readable slots and reduces only windows above the paint budget', () => {
+    expect(getFilmstripTileStride(4, 68)).toBe(1)
+    expect(getFilmstripTileStride(4, 69)).toBe(2)
+    expect(getFilmstripTileStride(20, 220)).toBe(4)
   })
 })
 

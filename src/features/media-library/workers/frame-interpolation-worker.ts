@@ -225,9 +225,8 @@ async function interpolate(request: InterpolateRequest): Promise<void> {
     }
   }
 
-  // `sourceFps` from the media library is only a hint — every import path probes with
-  // `fastMetadata: true`, which hard-codes 30. Both the reported output rate and the progress
-  // estimate re-derive it from the decoded timestamps.
+  // `sourceFps` is a timestamp-derived best guess. The output and progress estimate still
+  // re-derive the de facto cadence from decoded timestamps for VFR or dropped-frame sources.
   const gaps: number[] = []
   const progress = new RenderProgress(totalSeconds, sourceFps)
   let sourceFramesSeen = 0

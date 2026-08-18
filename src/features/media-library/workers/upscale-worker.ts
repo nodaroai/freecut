@@ -198,9 +198,8 @@ async function upscale(request: UpscaleRequest): Promise<void> {
   const scratchRgba = new Uint8ClampedArray(out.width * out.height * 4)
   const queue = new EncodeQueue(videoSource)
 
-  // `sourceFps` from the media library is only a hint — every import path probes with
-  // `fastMetadata: true`, which hard-codes 30. The reported rate and the progress estimate both
-  // re-derive it from the decoded timestamps.
+  // `sourceFps` is a timestamp-derived best guess. The reported rate and progress estimate still
+  // re-derive the de facto cadence from decoded timestamps for VFR or dropped-frame sources.
   const gaps: number[] = []
   const progress = new RenderProgress(totalSeconds, sourceFps)
   let prevTimestamp: number | null = null

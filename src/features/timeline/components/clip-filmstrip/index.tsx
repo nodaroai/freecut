@@ -1,6 +1,7 @@
 import { memo, useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { FilmstripSkeleton } from './filmstrip-skeleton'
 import { computeFilmstripRenderWindow } from './render-window'
+import { getFilmstripTileStride } from './filmstrip-canvas-geometry'
 import { VisibleFilmstripCanvas } from './visible-filmstrip-canvas'
 import { useFilmstrip, type FilmstripFrame } from '../../hooks/use-filmstrip'
 import { resolveMediaUrl, resolveProxyUrl } from '@/features/timeline/deps/media-library-resolver'
@@ -162,11 +163,12 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     const tileWidth = thumbnailWidth
     const { startTile, endTile } = filmstripRenderWindow
     if (endTile <= startTile) return undefined
+    const tileStride = getFilmstripTileStride(startTile, endTile)
 
     const totalFrameCount = Math.max(1, Math.ceil(sourceDuration))
     const indices = new Set<number>()
-    for (let slot = startTile; slot < endTile; slot++) {
-      const slotCenterX = slot * tileWidth + tileWidth * 0.5
+    for (let slot = startTile; slot < endTile; slot += tileStride) {
+      const slotCenterX = slot * tileWidth + tileWidth * tileStride * 0.5
       const slotCenterTime = isReversed
         ? effectiveEnd - slotCenterX / pixelsPerSourceSecond
         : effectiveStart + slotCenterX / pixelsPerSourceSecond

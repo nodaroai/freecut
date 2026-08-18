@@ -124,7 +124,51 @@ export function generateGridSnapPoints(
 }
 
 /**
- * Find the nearest snap target within threshold
+ * A gesture builds one snap-target array and reuses it on every mouse move. With
+ * 30k clips that array holds ~2N edges, so a linear scan per move (twice per
+ * move for start+end) is the dominant per-frame cost while dragging. Cache a
+ * frame-sorted copy per array identity so each move is a binary search
+ * (O(log n)) instead of a full scan.
+ */
+const sortedSnapTargetsCache = new WeakMap<readonly SnapTarget[], readonly SnapTarget[]>()
+
+function getSortedSnapTargets(snapTargets: SnapTarget[]): readonly SnapTarget[] {
+  let sorted = sortedSnapTargetsCache.get(snapTargets)
+  if (!sorted) {
+    sorted = [...snapTargets].sort((a, b) => a.frame - b.frame)
+    sortedSnapTargetsCache.set(snapTargets, sorted)
+  }
+  return sorted
+}
+
+/** Index of the rightmost element whose frame is <= targetFrame, or -1. */
+function lowerBoundSnapIndex(sorted: readonly SnapTarget[], targetFrame: number): number {
+  let low = 0
+  let high = sorted.length - 1
+  let position = -1
+  while (low <= high) {
+    const middle = (low + high) >>> 1
+    if (sorted[middle]!.frame <= targetFrame) {
+      position = middle
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  return position
+}
+
+function snapDistance(snapTarget: SnapTarget, targetFrame: number): number {
+  return Math.abs(snapTarget.frame - targetFrame)
+}
+
+/**
+ * Find the nearest snap target within threshold.
+ *
+ * Binary search over a cached frame-sorted copy of `snapTargets` — O(log n) per
+ * query instead of O(n). The snap target is only used for its frame and as an
+ * indicator; when a start and end edge are equidistant either result lands on
+ * the same snapped frame, so the exact tie-break order is not observable.
  *
  * @param targetFrame - Frame position to snap from
  * @param snapTargets - Array of available snap targets
@@ -140,14 +184,92 @@ export function findNearestSnapTarget(
     return null
   }
 
+  const sorted = getSortedSnapTargets(snapTargets)
+  const position = lowerBoundSnapIndex(sorted, targetFrame)
+
   let nearestTarget: SnapTarget | null = null
   let minDistance = thresholdFrames
 
-  for (const target of snapTargets) {
-    const distance = Math.abs(targetFrame - target.frame)
+  const left = position >= 0 ? sorted[position]! : null
+  const right = position + 1 < sorted.length ? sorted[position + 1]! : null
+
+  if (left) {
+    const distance = snapDistance(left, targetFrame)
     if (distance < minDistance) {
-      nearestTarget = target
+      nearestTarget = left
       minDistance = distance
+    }
+  }
+  if (right) {
+    const distance = snapDistance(right, targetFrame)
+    if (distance < minDistance) {
+      nearestTarget = right
+    }
+  }
+
+  return nearestTarget
+}
+
+/**
+ * Nearest snap target within threshold, optionally skipping targets whose
+ * `itemId` is in `excludeItemIds` (e.g. the dragged/trimmed clip itself).
+ *
+ * Binary search finds the closest sorted neighbor, then scans outward while
+ * candidates stay within the threshold. Exclusions are rare and the threshold
+ * is a handful of frames, so the outward scan is effectively O(1); the total is
+ * O(log n + k) where k is the (small) number of in-threshold candidates.
+ */
+export function findNearestSnapTargetExcluding(
+  targetFrame: number,
+  snapTargets: SnapTarget[],
+  thresholdFrames: number,
+  excludeItemIds?: Set<string>,
+): SnapTarget | null {
+  if (snapTargets.length === 0) {
+    return null
+  }
+
+  const sorted = getSortedSnapTargets(snapTargets)
+  const isExcluded = (target: SnapTarget): boolean =>
+    excludeItemIds ? target.itemId !== undefined && excludeItemIds.has(target.itemId) : false
+
+  const position = lowerBoundSnapIndex(sorted, targetFrame)
+
+  let nearestTarget: SnapTarget | null = null
+  let minDistance = thresholdFrames
+
+  // The two closest candidates straddle `position`: `position` (<= targetFrame)
+  // and `position + 1` (> targetFrame). Scan outward from both, stopping each
+  // side once it is beyond the (possibly tightened) best distance so excluded
+  // neighbors can't force a full scan.
+  let left = position
+  let right = position + 1
+  while (left >= 0 || right < sorted.length) {
+    if (left >= 0) {
+      const candidate = sorted[left]!
+      const distance = snapDistance(candidate, targetFrame)
+      if (distance >= minDistance && distance > 0) {
+        left = -1
+      } else {
+        if (!isExcluded(candidate) && distance < minDistance) {
+          nearestTarget = candidate
+          minDistance = distance
+        }
+        left--
+      }
+    }
+    if (right < sorted.length) {
+      const candidate = sorted[right]!
+      const distance = snapDistance(candidate, targetFrame)
+      if (distance >= minDistance && distance > 0) {
+        right = sorted.length
+      } else {
+        if (!isExcluded(candidate) && distance < minDistance) {
+          nearestTarget = candidate
+          minDistance = distance
+        }
+        right++
+      }
     }
   }
 

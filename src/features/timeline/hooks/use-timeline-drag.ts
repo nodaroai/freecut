@@ -11,6 +11,7 @@ import {
 } from '@/features/timeline/utils/zoom-conversions'
 import { useSnapCalculator } from './use-snap-calculator'
 import { findNearestAvailableSpace } from '../utils/collision-utils'
+import { findNearestSnapTarget } from '../utils/timeline-snap-utils'
 import { getTrackKind } from '../utils/classic-tracks'
 import {
   expandItemIdsWithAttachedCaptions,
@@ -701,26 +702,20 @@ export function useTimelineDrag(
       const targetEndFrame = targetStartFrame + itemDurationInFrames
 
       // Find nearest snap for start position
-      let nearestStartTarget: SnapTarget | null = null
-      let startDistance = threshold
-      for (const target of targets) {
-        const distance = Math.abs(targetStartFrame - target.frame)
-        if (distance < startDistance) {
-          nearestStartTarget = target
-          startDistance = distance
-        }
-      }
-
+      const nearestStartTarget = findNearestSnapTarget(
+        targetStartFrame,
+        targets,
+        threshold,
+      )
       // Find nearest snap for end position
-      let nearestEndTarget: SnapTarget | null = null
-      let endDistance = threshold
-      for (const target of targets) {
-        const distance = Math.abs(targetEndFrame - target.frame)
-        if (distance < endDistance) {
-          nearestEndTarget = target
-          endDistance = distance
-        }
-      }
+      const nearestEndTarget = findNearestSnapTarget(targetEndFrame, targets, threshold)
+
+      const startDistance = nearestStartTarget
+        ? Math.abs(targetStartFrame - nearestStartTarget.frame)
+        : Infinity
+      const endDistance = nearestEndTarget
+        ? Math.abs(targetEndFrame - nearestEndTarget.frame)
+        : Infinity
 
       // Use the closer snap
       if (startDistance < endDistance && nearestStartTarget) {
@@ -1401,11 +1396,12 @@ export function useTimelineDrag(
           }
         } else {
           // Normal drag: Apply the snap to ALL items in the group
+          const currentItemsById = new Map(currentItems.map((item) => [item.id, item]))
           const allUpdates = movedItems.map((m) => ({
             id: m.id,
             from: Math.round(m.newFrom + groupSnapDelta),
             trackId:
-              m.newTrackId !== currentItems.find((i) => i.id === m.id)?.trackId
+              m.newTrackId !== currentItemsById.get(m.id)?.trackId
                 ? m.newTrackId
                 : undefined,
           }))

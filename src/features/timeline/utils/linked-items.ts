@@ -1,6 +1,7 @@
 import type { TimelineItem, TimelineTrack } from '@/types/timeline'
 import { applyMovePreview, type PreviewItemUpdate } from './item-edit-preview'
 import { getSourceProperties } from './source-calculations'
+import { useItemsStore } from '../stores/items-store'
 
 function isMediaPair(left: TimelineItem, right: TimelineItem): boolean {
   return (
@@ -17,6 +18,18 @@ function isLegacyLinkedPair(anchor: TimelineItem, candidate: TimelineItem): bool
 }
 
 export function getLinkedItems(items: TimelineItem[], itemId: string): TimelineItem[] {
+  // Fast path: when the caller passes the live store array, use the precomputed
+  // per-item linked index instead of a linear find+filter. The index contains
+  // both explicit linkedGroupId groups and legacy originId/mediaId pairs, which
+  // matches getLinkedItems' semantics exactly for grouped items.
+  if (items === useItemsStore.getState().items) {
+    const storeState = useItemsStore.getState()
+    const indexed = storeState.linkedItemsByItemId[itemId]
+    if (indexed) return indexed
+    const anchor = storeState.itemById[itemId]
+    return anchor ? [anchor] : []
+  }
+
   const anchor = items.find((item) => item.id === itemId)
   if (!anchor) return []
 
@@ -35,6 +48,17 @@ export function getLinkedItemIds(items: TimelineItem[], itemId: string): string[
 }
 
 export function getAttachedCaptionItemIds(items: TimelineItem[], itemId: string): string[] {
+  // Fast path: when the caller passes the live store array, use the precomputed
+  // caption index instead of a linear find+filter.
+  if (items === useItemsStore.getState().items) {
+    const storeState = useItemsStore.getState()
+    const anchor = storeState.itemById[itemId]
+    if (!anchor || anchor.type === 'text') {
+      return []
+    }
+    return storeState.captionIdsByClipId[itemId] ?? []
+  }
+
   const anchor = items.find((item) => item.id === itemId)
   if (!anchor || anchor.type === 'text') {
     return []

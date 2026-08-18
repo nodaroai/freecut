@@ -12,6 +12,14 @@ import { useTimelineViewportStore } from '../../stores/timeline-viewport-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../../stores/zoom-store'
 
 beforeEach(() => {
+  let frameTimestamp = 0
+  let frameId = 0
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    const id = ++frameId
+    queueMicrotask(() => callback((frameTimestamp += 40)))
+    return id
+  })
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
   _resetZoomStoreForTest()
   useTimelineViewportStore.setState({
     scrollLeft: 0,
@@ -22,6 +30,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('computeVisibleWaveformCanvasGeometry', () => {

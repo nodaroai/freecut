@@ -136,6 +136,14 @@ const SHOULD_PROFILE_PREVIEW_SCRUB = import.meta.env.DEV || import.meta.env.MODE
 const MAX_PERF_SAMPLES = 3000
 const PERF_SNAPSHOT_ELEMENT_ID = 'freecut-preview-scrub-performance'
 const PERF_SNAPSHOT_DEBOUNCE_MS = 100
+const PERF_SNAPSHOT_QUERY_PARAM = 'previewScrubPerfSnapshot'
+
+export function shouldPublishPreviewScrubDomSnapshot(search: string): boolean {
+  return new URLSearchParams(search).get(PERF_SNAPSHOT_QUERY_PARAM) === '1'
+}
+
+const SHOULD_PUBLISH_DOM_SNAPSHOT =
+  typeof location !== 'undefined' && shouldPublishPreviewScrubDomSnapshot(location.search)
 
 let requestSequence = 0
 let latestRequest: PendingRequest | null = null
@@ -165,7 +173,9 @@ function resetInternalState(): void {
 }
 
 function scheduleDomSnapshot(state: PreviewScrubPerformanceState): void {
-  if (typeof document === 'undefined' || snapshotTimer !== null) return
+  if (!SHOULD_PUBLISH_DOM_SNAPSHOT || typeof document === 'undefined' || snapshotTimer !== null) {
+    return
+  }
   snapshotTimer = setTimeout(() => {
     snapshotTimer = null
     let snapshot = document.getElementById(PERF_SNAPSHOT_ELEMENT_ID)
