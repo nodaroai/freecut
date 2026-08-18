@@ -248,6 +248,16 @@ describe('MediaLibraryService', () => {
     it('imports a media file via handle and associates with project', async () => {
       const mockFile = new File(['data'], 'video.mp4', { type: 'video/mp4' })
       const mockHandle = makeFileHandle(mockFile)
+      const frameRateMetrics = {
+        underlyingFrameRate: 30000 / 1001,
+        bestGuessFrameRate: 30000 / 1001,
+        minFrameRate: 30000 / 1001,
+        maxFrameRate: 30000 / 1001,
+        averageFrameRate: 30000 / 1001,
+        medianFrameRate: 30000 / 1001,
+        frameRateIsConstant: true,
+        probedPacketCount: 256,
+      }
 
       mediaProcessorMocks.processMedia.mockResolvedValue({
         metadata: {
@@ -255,7 +265,8 @@ describe('MediaLibraryService', () => {
           duration: 10,
           width: 1920,
           height: 1080,
-          fps: 30,
+          fps: 30000 / 1001,
+          frameRateMetrics,
           codec: 'avc1',
           audioCodec: undefined,
           audioCodecSupported: true,
@@ -271,7 +282,19 @@ describe('MediaLibraryService', () => {
 
       expect(result.storageType).toBe('handle')
       expect(result.fileName).toBe('video.mp4')
+      expect(result.fps).toBe(30000 / 1001)
+      expect(result.frameRateMetrics).toEqual(frameRateMetrics)
       expect(result.isDuplicate).toBeUndefined()
+      expect(mediaProcessorMocks.processMedia).toHaveBeenCalledWith(mockFile, 'video/mp4', {
+        thumbnailTimestamp: 1,
+        fastMetadata: true,
+      })
+      expect(indexedDbMocks.createMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fps: 30000 / 1001,
+          frameRateMetrics,
+        }),
+      )
       expect(indexedDbMocks.createMedia).toHaveBeenCalledTimes(1)
       expect(indexedDbMocks.associateMediaWithProject).toHaveBeenCalledWith('project-1', result.id)
       expect(indexedDbMocks.saveThumbnail).toHaveBeenCalledTimes(1)

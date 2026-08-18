@@ -4,19 +4,23 @@ export function observeParentElementHeight(
 ): (() => void) | undefined {
   if (!container) return undefined
 
-  const measure = () => {
-    const parent = container.parentElement
-    if (parent) {
-      setHeight(parent.clientHeight)
-    }
-  }
+  const parent = container.parentElement
+  if (!parent) return undefined
 
-  measure()
+  let lastHeight = parent.clientHeight
+  setHeight(lastHeight)
 
-  const resizeObserver = new ResizeObserver(measure)
-  if (container.parentElement) {
-    resizeObserver.observe(container.parentElement)
-  }
+  const resizeObserver = new ResizeObserver((entries) => {
+    const entry = entries.find(({ target }) => target === parent)
+    if (!entry) return
+
+    const nextHeight = entry.contentRect.height
+    if (!Number.isFinite(nextHeight) || Math.abs(nextHeight - lastHeight) < 0.5) return
+
+    lastHeight = nextHeight
+    setHeight(nextHeight)
+  })
+  resizeObserver.observe(parent)
 
   return () => resizeObserver.disconnect()
 }

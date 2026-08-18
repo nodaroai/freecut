@@ -43,6 +43,15 @@ export interface FilmstripCanvasTilesOptions {
   isReversed: boolean
 }
 
+export const MAX_VISIBLE_FILMSTRIP_TILES = 64
+
+export function getFilmstripTileStride(startTile: number, endTile: number): number {
+  return Math.max(
+    1,
+    Math.ceil(Math.max(0, endTile - startTile) / MAX_VISIBLE_FILMSTRIP_TILES),
+  )
+}
+
 export function computeFilmstripCanvasGeometry(
   renderWidth: number,
   visibleStartPx: number,
@@ -157,6 +166,7 @@ export function computeFilmstripCanvasTiles({
   const tileCount = Math.ceil(renderWidth / safeTileWidth)
   const startTile = Math.max(0, Math.floor(geometry.left / safeTileWidth))
   const endTile = Math.min(tileCount, Math.ceil((geometry.left + geometry.width) / safeTileWidth))
+  const tileStride = getFilmstripTileStride(startTile, endTile)
   const pixelsPerSourceSecond = pixelsPerSecond / Math.max(0.0001, speed)
 
   const findClosestFrame = (targetTime: number): FilmstripFrame | null => {
@@ -179,15 +189,18 @@ export function computeFilmstripCanvasTiles({
   }
 
   const tiles: FilmstripCanvasTile[] = []
-  for (let slot = startTile; slot < endTile; slot++) {
+  for (let slot = startTile; slot < endTile; slot += tileStride) {
     const x = slot * safeTileWidth
-    const centerX = x + safeTileWidth * 0.5
+    // Retain a full logical tile at the clip edge; the bounded canvas clips it.
+    // This preserves cover-crop geometry for short clips and merged dense slots.
+    const width = safeTileWidth * tileStride
+    const centerX = x + width * 0.5
     const targetTime = isReversed
       ? effectiveEnd - centerX / pixelsPerSourceSecond
       : effectiveStart + centerX / pixelsPerSourceSecond
     const frame = findClosestFrame(targetTime)
     if (frame) {
-      tiles.push({ slot, frame, x, width: safeTileWidth })
+      tiles.push({ slot, frame, x, width })
     }
   }
   return tiles

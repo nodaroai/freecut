@@ -21,6 +21,7 @@ import {
   timelineToSourceFrames,
 } from '../utils/source-calculations'
 import { clampTrimAmount, clampToAdjacentItems } from '../utils/trim-utils'
+import { findNearestSnapTargetExcluding } from '../utils/timeline-snap-utils'
 import {
   findEditNeighborsWithTransitions,
   findNearestNeighbors,
@@ -960,24 +961,29 @@ export function useTimelineSlipSlide(
 
           let bestSnap: { frame: number; offset: number } | null = null
 
-          for (const target of targets) {
-            if (target.itemId && excludeIds.has(target.itemId)) continue
+          const snapThreshold = getSnapThresholdFrames()
 
-            // Snap start edge
-            const startDist = Math.abs(newStart - target.frame)
-            if (startDist < getSnapThresholdFrames()) {
-              if (!bestSnap || startDist < Math.abs(bestSnap.offset)) {
-                bestSnap = { frame: target.frame, offset: target.frame - newStart }
-              }
-            }
+          const startTarget = findNearestSnapTargetExcluding(
+            newStart,
+            targets,
+            snapThreshold,
+            excludeIds,
+          )
+          if (startTarget) {
+            bestSnap = { frame: startTarget.frame, offset: startTarget.frame - newStart }
+          }
 
-            // Snap end edge
-            const endDist = Math.abs(newEnd - target.frame)
-            if (endDist < getSnapThresholdFrames()) {
-              if (!bestSnap || endDist < Math.abs(bestSnap.offset)) {
-                bestSnap = { frame: target.frame, offset: target.frame - newEnd }
-              }
-            }
+          const endTarget = findNearestSnapTargetExcluding(
+            newEnd,
+            targets,
+            snapThreshold,
+            excludeIds,
+          )
+          if (
+            endTarget &&
+            (!bestSnap || Math.abs(endTarget.frame - newEnd) < Math.abs(bestSnap.offset))
+          ) {
+            bestSnap = { frame: endTarget.frame, offset: endTarget.frame - newEnd }
           }
 
           if (bestSnap) {

@@ -12,6 +12,10 @@ import {
   type FilmstripCanvasTile,
 } from './filmstrip-canvas-geometry'
 import { getDecodedFilmstripImage, subscribeFilmstripImage } from './filmstrip-image-cache'
+import {
+  cancelTimelineCanvasUpdate,
+  scheduleTimelineCanvasUpdate,
+} from '../timeline-canvas-update-scheduler'
 
 const MAX_FILMSTRIP_CANVAS_DPR = 2
 
@@ -58,9 +62,16 @@ interface LiveTimelineSnapshot {
 }
 
 const liveFilmstripCanvasRegistrations = new Set<LiveFilmstripCanvasRegistration>()
-let liveFilmstripCanvasUpdateQueued = false
+const liveFilmstripCanvasUpdateKey = {}
 let unsubscribeLiveFilmstripZoom: (() => void) | null = null
 let unsubscribeLiveFilmstripViewport: (() => void) | null = null
+
+function getFilmstripCanvasUpdateIntervalMs(visibleTileCount: number): number {
+  if (visibleTileCount <= 2) return 16
+  if (visibleTileCount <= 4) return 20
+  if (visibleTileCount <= 8) return 24
+  return 32
+}
 
 function getLiveTimelineSnapshot(): LiveTimelineSnapshot {
   const { pixelsPerSecond } = useZoomStore.getState()
@@ -154,43 +165,58 @@ function measureLiveFilmstripCanvasWindow(
   }
 }
 
-function scheduleLiveFilmstripCanvasUpdate(): void {
-  if (liveFilmstripCanvasUpdateQueued) return
-  liveFilmstripCanvasUpdateQueued = true
-  queueMicrotask(() => {
-    liveFilmstripCanvasUpdateQueued = false
-    const snapshot = getLiveTimelineSnapshot()
-    let viewportRectCache: Map<HTMLElement, DOMRect> | undefined
-    const updates: Array<{
-      registration: LiveFilmstripCanvasRegistration
-      canvasWindow: LiveFilmstripCanvasWindow
-    }> = []
+function flushLiveFilmstripCanvasUpdate(): void {
+  const snapshot = getLiveTimelineSnapshot()
+  let viewportRectCache: Map<HTMLElement, DOMRect> | undefined
+  const updates: Array<{
+    registration: LiveFilmstripCanvasRegistration
+    canvasWindow: LiveFilmstripCanvasWindow
+  }> = []
 
     // Ordinary timeline items use arithmetic from one shared live snapshot.
     // Only transformed items, compound segments, or malformed legacy markup
     // fall back to rectangles. Resolve every fallback read before painting any
     // canvas so the batch never alternates layout reads and writes.
-    for (const registration of liveFilmstripCanvasRegistrations) {
-      if (!registration.canvas.isConnected) continue
-      let canvasWindow = registration.requiresMeasuredGeometry
-        ? null
-        : computeLiveFilmstripCanvasWindowFromItem(
-            registration.timelineItem,
-            snapshot,
-            registration.overscanPx,
-          )
-      if (!canvasWindow) {
-        viewportRectCache ??= new Map<HTMLElement, DOMRect>()
-        canvasWindow = measureLiveFilmstripCanvasWindow(registration, viewportRectCache)
-      }
-      if (canvasWindow) {
-        updates.push({ registration, canvasWindow })
-      }
+  for (const registration of liveFilmstripCanvasRegistrations) {
+    if (!registration.canvas.isConnected) continue
+    let canvasWindow = registration.requiresMeasuredGeometry
+      ? null
+      : computeLiveFilmstripCanvasWindowFromItem(
+          registration.timelineItem,
+          snapshot,
+          registration.overscanPx,
+        )
+    if (!canvasWindow) {
+      viewportRectCache ??= new Map<HTMLElement, DOMRect>()
+      canvasWindow = measureLiveFilmstripCanvasWindow(registration, viewportRectCache)
     }
-    for (const update of updates) {
-      update.registration.paint(snapshot.pixelsPerSecond, update.canvasWindow)
+    if (canvasWindow) {
+      updates.push({ registration, canvasWindow })
     }
-  })
+  }
+  for (const update of updates) {
+    update.registration.paint(snapshot.pixelsPerSecond, update.canvasWindow)
+  }
+}
+
+function getLiveFilmstripTileWork(): number {
+  let tileCount = 0
+  for (const registration of liveFilmstripCanvasRegistrations) {
+    if (!registration.canvas.isConnected) continue
+    const canvasWidth = Number.parseFloat(registration.canvas.style.width) || 0
+    const canvasHeight = Number.parseFloat(registration.canvas.style.height) || 0
+    const readableTileWidth = Math.max(1, canvasHeight * (16 / 9))
+    tileCount += Math.max(1, Math.ceil(canvasWidth / readableTileWidth))
+  }
+  return tileCount
+}
+
+function scheduleLiveFilmstripCanvasUpdate(): void {
+  scheduleTimelineCanvasUpdate(
+    liveFilmstripCanvasUpdateKey,
+    flushLiveFilmstripCanvasUpdate,
+    getFilmstripCanvasUpdateIntervalMs(getLiveFilmstripTileWork()),
+  )
 }
 
 function registerLiveFilmstripCanvas(
@@ -243,6 +269,9 @@ function registerLiveFilmstripCanvas(
     if (liveFilmstripCanvasRegistrations.size === 0 && unsubscribeLiveFilmstripViewport) {
       unsubscribeLiveFilmstripViewport()
       unsubscribeLiveFilmstripViewport = null
+    }
+    if (liveFilmstripCanvasRegistrations.size === 0) {
+      cancelTimelineCanvasUpdate(liveFilmstripCanvasUpdateKey)
     }
   }
 }

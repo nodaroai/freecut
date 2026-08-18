@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import {
   recordPreviewScrubPresentationQuality,
   recordPreviewScrubRequest,
+  shouldPublishPreviewScrubDomSnapshot,
 } from './preview-scrub-performance'
 
 type PerformanceState = {
@@ -25,6 +26,12 @@ function getState(): PerformanceState {
 beforeEach(() => getState().reset())
 
 describe('preview scrub fallback performance', () => {
+  it('publishes the serialized DOM snapshot only when explicitly requested', () => {
+    expect(shouldPublishPreviewScrubDomSnapshot('')).toBe(false)
+    expect(shouldPublishPreviewScrubDomSnapshot('?previewScrubPerfSnapshot=0')).toBe(false)
+    expect(shouldPublishPreviewScrubDomSnapshot('?previewScrubPerfSnapshot=1')).toBe(true)
+  })
+
   it('tracks first fallback visibility and later exact-frame replacement latency', () => {
     recordPreviewScrubRequest('color', 120, 1)
     recordPreviewScrubPresentationQuality(120, true)

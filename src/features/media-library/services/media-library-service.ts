@@ -304,6 +304,7 @@ function buildGeneratedVideoMetadata(
     width: metadata.width,
     height: metadata.height,
     fps,
+    frameRateMetrics: metadata.frameRateMetrics,
     codec: metadata.codec,
     bitrate: metadata.bitrate ?? 0,
     audioCodec: metadata.audioCodec,
@@ -688,6 +689,7 @@ class MediaLibraryService {
       width: 'width' in metadata ? metadata.width : 0,
       height: 'height' in metadata ? metadata.height : 0,
       fps: metadata.type === 'video' ? metadata.fps : 0,
+      frameRateMetrics: metadata.type === 'video' ? metadata.frameRateMetrics : undefined,
       codec:
         metadata.type === 'video'
           ? metadata.codec
@@ -1122,6 +1124,7 @@ class MediaLibraryService {
       width: 'width' in metadata ? metadata.width : 0,
       height: 'height' in metadata ? metadata.height : 0,
       fps: metadata.type === 'video' ? metadata.fps : 30,
+      frameRateMetrics: metadata.type === 'video' ? metadata.frameRateMetrics : undefined,
       codec:
         metadata.type === 'video'
           ? metadata.codec
@@ -1363,11 +1366,9 @@ class MediaLibraryService {
    * Save a generated video (e.g. a frame-interpolated render) into the project media library
    * as an OPFS-backed asset.
    *
-   * Unlike the regular import paths this probes with `fastMetadata: false`. The fast probe
-   * hard-codes `fps: 30`, which would silently mislabel a 120fps render as 30fps — the
-   * timeline reads `media.fps` as the source frame rate, so every interpolated frame would be
-   * skipped. `options.fps` overrides the probe outright when the caller already knows the
-   * exact rate, which is more reliable than estimating it back off the encoded packets.
+   * Unlike regular imports this also extracts the keyframe index immediately. `options.fps`
+   * overrides the timestamp-derived probe when the caller already knows the exact encoded rate,
+   * which is more reliable than estimating it back off the encoded packets.
    */
   async importGeneratedVideo(
     file: File,

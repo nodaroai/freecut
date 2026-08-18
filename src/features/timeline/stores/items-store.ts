@@ -60,6 +60,7 @@ interface ItemsState {
   itemById: Record<string, TimelineItem>
   itemsByLinkedGroupId: Record<string, TimelineItem[]>
   linkedItemsByItemId: Record<string, TimelineItem[]>
+  captionIdsByClipId: Record<string, string[]>
   maxItemEndFrame: number
   mediaDependencyIds: string[]
   mediaDependencyVersion: number
@@ -145,6 +146,7 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
   itemById: {},
   itemsByLinkedGroupId: {},
   linkedItemsByItemId: {},
+  captionIdsByClipId: {},
   maxItemEndFrame: 0,
   mediaDependencyIds: [],
   mediaDependencyVersion: 0,
@@ -235,7 +237,11 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
       if (itemsToDelete.length === 0) return state
 
       const remainingItems = state.items.filter((i) => !idsToDelete.has(i.id))
-      const shiftByItemId = buildRippleShiftByItemId(remainingItems, itemsToDelete)
+      const shiftByItemId = buildRippleShiftByItemId(
+        remainingItems,
+        itemsToDelete,
+        state.linkedItemsByItemId,
+      )
 
       const newItems = remainingItems.map((item) => {
         const shiftAmount = shiftByItemId.get(item.id) ?? 0

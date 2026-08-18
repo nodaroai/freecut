@@ -8,6 +8,7 @@ import { useSelectionStore } from '@/shared/state/selection'
 import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions'
 import { useSnapCalculator } from './use-snap-calculator'
 import { setActiveSnapTargetIfChanged } from '../utils/snap-target-state'
+import { findNearestSnapTarget } from '../utils/timeline-snap-utils'
 import {
   MIN_SPEED,
   MAX_SPEED,
@@ -313,16 +314,11 @@ export function useRateStretch(
         return { snappedFrame: targetFrame, snapTarget: null }
       }
 
-      let nearestTarget: SnapTarget | null = null
-      let minDistance = getSnapThresholdFrames()
-
-      for (const target of magneticSnapTargets) {
-        const distance = Math.abs(targetFrame - target.frame)
-        if (distance < minDistance) {
-          nearestTarget = target
-          minDistance = distance
-        }
-      }
+      const nearestTarget = findNearestSnapTarget(
+        targetFrame,
+        magneticSnapTargets,
+        getSnapThresholdFrames(),
+      )
 
       if (nearestTarget) {
         return { snappedFrame: nearestTarget.frame, snapTarget: nearestTarget }

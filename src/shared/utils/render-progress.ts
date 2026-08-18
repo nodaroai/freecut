@@ -3,9 +3,9 @@
  *
  * Two things make this less trivial than `seen / total`:
  *
- * 1. The caller's nominal source frame rate is a lie. Every media-library import path probes
- *    with `fastMetadata: true`, which hard-codes 30fps. So the total frame count is re-derived
- *    from the median gap between decoded timestamps as soon as enough frames have arrived.
+ * 1. The caller's nominal source frame rate is a timestamp-derived best guess. It can still
+ *    differ from the de facto cadence of a VFR or dropped-frame source, so the total frame count
+ *    is re-derived from the median decoded timestamp gap as soon as enough frames have arrived.
  * 2. The first frames are not representative. The ONNX session compiles on the first inference
  *    (~500ms) and the JIT warms over the next few, so seeding the rate estimate with them
  *    would badly overstate the time remaining.

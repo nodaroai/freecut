@@ -123,6 +123,14 @@ vi.mock('../../services/filmstrip-cache', () => ({
 describe('ClipFilmstrip', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    let frameTimestamp = 0
+    let frameId = 0
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      const id = ++frameId
+      queueMicrotask(() => callback((frameTimestamp += 40)))
+      return id
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
     vi.stubGlobal(
       'ResizeObserver',
       class {

@@ -74,7 +74,6 @@ import { applyTimelineLiveGeometry } from '../utils/timeline-live-geometry'
 import { resolveTimelineMarqueeItems } from '../utils/timeline-marquee-geometry'
 import { setTimelineDensityMarqueePreview } from '../utils/timeline-density-marquee-preview'
 import { notifyTimelineLiveScroll } from '@/shared/timeline/live-scroll-sync'
-import { getPlaybackFollowScrollLeft } from '../utils/playback-follow-scroll'
 import { TimelineSettledContentZoomProvider } from './timeline-settled-content-zoom-provider'
 import { getTimelineZoomInteractionShieldBounds } from '../utils/timeline-zoom-interaction-shield'
 
@@ -961,39 +960,6 @@ export const TimelineContent = memo(function TimelineContent({
       // so the sync skips a container.scrollLeft read-back, which would force a
       // synchronous reflow when a zoom width write landed the same frame.
       withPerfMeasure('tl.raf.viewportSync', () => syncViewportFromContainer(scrollLeftRef.current))
-    })
-  }, [syncViewportFromContainer])
-
-  // DaVinci-style page following: let the playhead travel naturally across the
-  // viewport, then move the native timeline (and therefore the navigator thumb)
-  // only when playback reaches an edge. This stays imperative so playback does
-  // not re-render the timeline tree on every frame.
-  useEffect(() => {
-    return usePlaybackStore.subscribe((state, previousState) => {
-      if (!state.isPlaying || state.currentFrame === previousState.currentFrame) {
-        return
-      }
-
-      const container = containerRef.current
-      if (!container) return
-
-      const cachedViewportWidth = viewportDimsRef.current?.width ?? 0
-      const viewportWidth = cachedViewportWidth > 0 ? cachedViewportWidth : container.clientWidth
-      const maxScrollLeft = Math.max(0, timelineWidthRef.current - viewportWidth)
-      const nextScrollLeft = getPlaybackFollowScrollLeft({
-        playheadX: frameToPixelsRef.current(state.currentFrame),
-        scrollLeft: scrollLeftRef.current,
-        viewportWidth,
-        maxScrollLeft,
-        playbackDirection: state.playbackRate < 0 ? -1 : 1,
-      })
-      if (nextScrollLeft === null) return
-
-      velocityXRef.current = 0
-      container.scrollLeft = nextScrollLeft
-      scrollLeftRef.current = nextScrollLeft
-      syncViewportFromContainer(nextScrollLeft, true)
-      notifyTimelineLiveScroll(container)
     })
   }, [syncViewportFromContainer])
 

@@ -27,7 +27,7 @@ describe('RenderProgress', () => {
   })
 
   it('re-derives the frame count from measured gaps, overriding a wrong hint', () => {
-    // Caller says 30fps (the fastMetadata lie); the timestamps say 24fps.
+    // A stale/approximate caller hint says 30fps; the decoded timestamps say 24fps.
     const p = new RenderProgress(10, 30)
     run(p, 6, 100, 1 / 24)
     expect(p.estimatedTotalFrames).toBe(240)

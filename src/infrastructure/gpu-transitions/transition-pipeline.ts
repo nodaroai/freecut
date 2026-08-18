@@ -17,12 +17,23 @@ interface TransitionPipelineRecord {
  * Single-pass: transition shader renders directly to the output canvas.
  */
 export class TransitionPipeline {
+  /** Compiled transition shaders are immutable and shared by every renderer on a device. */
+  private static sharedPipelines = new WeakMap<GPUDevice, Map<string, TransitionPipelineRecord>>()
+
   private device: GPUDevice
   private format: GPUTextureFormat
   private sampler: GPUSampler
   private pipelines = new Map<string, TransitionPipelineRecord>()
   private uniformBuffers = new Map<string, GPUBuffer>()
   private cachedBindGroups = new Map<string, GPUBindGroup>()
+  // GPU-native transition participants usually come from a stable texture pool.
+  // Cache their views and bind groups by texture identity so repeated frames do
+  // not recreate short-lived WebGPU wrapper objects.
+  private textureViews = new WeakMap<GPUTexture, GPUTextureView>()
+  private textureBindGroups = new WeakMap<
+    GPUTexture,
+    WeakMap<GPUTexture, Map<string, GPUBindGroup>>
+  >()
 
   // Input textures (left/right clip content)
   private leftTexture: GPUTexture | null = null
@@ -59,10 +70,19 @@ export class TransitionPipeline {
   private init(): void {
     if (this.initialized) return
 
+    const shared = TransitionPipeline.sharedPipelines.get(this.device)
+    if (shared) {
+      // Keep a private map so destroy() only tears down this session's state.
+      this.pipelines = new Map(shared)
+      this.initialized = true
+      return
+    }
+
     for (const [id, def] of GPU_TRANSITION_REGISTRY) {
       this.createTransitionPipeline(id, def)
     }
 
+    TransitionPipeline.sharedPipelines.set(this.device, new Map(this.pipelines))
     this.initialized = true
   }
 
@@ -236,6 +256,45 @@ export class TransitionPipeline {
     }
 
     return this.device.createBindGroup({ layout, entries })
+  }
+
+  private getOrCreateTextureView(texture: GPUTexture): GPUTextureView {
+    let view = this.textureViews.get(texture)
+    if (!view) {
+      view = texture.createView()
+      this.textureViews.set(texture, view)
+    }
+    return view
+  }
+
+  private getOrCreateTextureBindGroup(
+    transitionId: string,
+    layout: GPUBindGroupLayout,
+    leftTexture: GPUTexture,
+    rightTexture: GPUTexture,
+    uniformBuffer: GPUBuffer | null,
+  ): GPUBindGroup {
+    let rightTextures = this.textureBindGroups.get(leftTexture)
+    if (!rightTextures) {
+      rightTextures = new WeakMap()
+      this.textureBindGroups.set(leftTexture, rightTextures)
+    }
+    let transitionGroups = rightTextures.get(rightTexture)
+    if (!transitionGroups) {
+      transitionGroups = new Map()
+      rightTextures.set(rightTexture, transitionGroups)
+    }
+    let bindGroup = transitionGroups.get(transitionId)
+    if (!bindGroup) {
+      bindGroup = this.createBindGroup(
+        layout,
+        this.getOrCreateTextureView(leftTexture),
+        this.getOrCreateTextureView(rightTexture),
+        uniformBuffer,
+      )
+      transitionGroups.set(transitionId, bindGroup)
+    }
+    return bindGroup
   }
 
   private uploadInputs(
@@ -435,10 +494,11 @@ export class TransitionPipeline {
     )
     if (def.uniformSize > 0 && !uniformBuffer) return false
 
-    const bindGroup = this.createBindGroup(
+    const bindGroup = this.getOrCreateTextureBindGroup(
+      transitionId,
       record.bindGroupLayout,
-      leftTexture.createView(),
-      rightTexture.createView(),
+      leftTexture,
+      rightTexture,
       uniformBuffer,
     )
 
@@ -446,7 +506,7 @@ export class TransitionPipeline {
     const pass = commandEncoder.beginRenderPass({
       colorAttachments: [
         {
-          view: outputTexture.createView(),
+          view: this.getOrCreateTextureView(outputTexture),
           loadOp: 'clear',
           storeOp: 'store',
         },
@@ -479,6 +539,8 @@ export class TransitionPipeline {
     }
     this.uniformBuffers.clear()
     this.cachedBindGroups.clear()
+    this.textureViews = new WeakMap()
+    this.textureBindGroups = new WeakMap()
     this.pipelines.clear()
     this.initialized = false
   }
