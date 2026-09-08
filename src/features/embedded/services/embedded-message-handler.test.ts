@@ -8,6 +8,9 @@ import {
 describe('isAllowedOrigin', () => {
   it('allows studio.nodaro.ai, app/next, localhost and railway; rejects others', () => {
     expect(isAllowedOrigin('https://studio.nodaro.ai')).toBe(true)
+    expect(isAllowedOrigin('https://next.studio.nodaro.ai')).toBe(true)
+    expect(isAllowedOrigin('https://next.studio.nodaro.ai.evil.example')).toBe(false)
+    expect(isAllowedOrigin('http://next.studio.nodaro.ai')).toBe(false)
     expect(isAllowedOrigin('https://app.nodaro.ai')).toBe(true)
     expect(isAllowedOrigin('http://localhost:5173')).toBe(true)
     expect(isAllowedOrigin('https://foo.up.railway.app')).toBe(true)
