@@ -17,6 +17,7 @@ const ALLOWED_ORIGINS = [
   'https://app.nodaro.ai',
   'https://next.nodaro.ai',
   'https://studio.nodaro.ai',
+  'https://next.studio.nodaro.ai',
 ]
 
 export function isAllowedOrigin(origin: string): boolean {
