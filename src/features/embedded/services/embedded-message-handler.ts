@@ -287,37 +287,55 @@ const EMBEDDED_CAPABILITIES = ['timeline-add'] as const
 // for it rather than missing it.
 const importedByRef = new Map<string, Promise<string | null>>()
 
-async function handleImportFiles(event: MessageEvent) {
-  const { files } = event.data.payload
-  if (!files?.length) return
+interface ImportFile {
+  readonly name: string
+  readonly type: string
+  readonly buffer: ArrayBuffer
+  readonly ref?: unknown
+}
 
-  // Claim each ref at once — before the (async) import — so a placement that
-  // arrives mid-import finds it.
-  const settlers = new Map<string, (mediaId: string | null) => void>()
+type Settle = (mediaId: string | null) => void
+
+// Claim each file's ref at once — before the (async) import — so a placement
+// that arrives mid-import finds it. Answers how to settle each file's claim.
+function claimRefs(files: ReadonlyArray<ImportFile>): (file: ImportFile) => Settle {
+  const settlers = new Map<string, Settle>()
   for (const file of files) {
-    if (typeof file?.ref !== 'string' || !file.ref) continue
-    importedByRef.set(file.ref, new Promise((resolve) => settlers.set(file.ref, resolve)))
+    const ref = file.ref
+    if (typeof ref !== 'string' || !ref) continue
+    importedByRef.set(ref, new Promise((resolve) => settlers.set(ref, resolve)))
   }
+  return (file) => (typeof file.ref === 'string' && settlers.get(file.ref)) || (() => {})
+}
+
+// One file into the media library — its media id, or null when it failed.
+async function importFile(file: ImportFile, projectId: string): Promise<string | null> {
+  try {
+    const blob = new Blob([file.buffer], { type: file.type })
+    const media = await mediaLibraryService.importMediaBlob(blob, projectId, file.name)
+    return media.id
+  } catch (e) {
+    log.error(`Failed to import ${file.name}:`, e)
+    return null
+  }
+}
+
+async function handleImportFiles(event: MessageEvent) {
+  const files: ImportFile[] | undefined = event.data.payload?.files
+  if (!files?.length) return
+  const settleFor = claimRefs(files)
 
   await ensureEmbeddedWorkspaceMounted()
 
   const projectId = useProjectStore.getState().currentProject?.id
   if (!projectId) {
     log.warn('No current project for NODARO_IMPORT_FILES')
-    settlers.forEach((settle) => settle(null))
+    files.forEach((file) => settleFor(file)(null))
     return
   }
 
   for (const file of files) {
-    const settle = typeof file?.ref === 'string' ? settlers.get(file.ref) : undefined
-    try {
-      const blob = new Blob([file.buffer], { type: file.type })
-      const media = await mediaLibraryService.importMediaBlob(blob, projectId, file.name)
-      settle?.(media.id)
-    } catch (e) {
-      log.error(`Failed to import ${file.name}:`, e)
-      settle?.(null)
-    }
+    settleFor(file)(await importFile(file, projectId))
   }
 
   // Refresh the media library UI (lazy-import to avoid circular deps)
