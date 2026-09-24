@@ -6,6 +6,7 @@ import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract'
 import { router } from '@/app/router'
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
+import { addMediaToTimelineAtPlayhead } from './timeline-add'
 import {
   updateProject as updateProjectDB,
   getProject as getProjectDB,
@@ -274,24 +275,49 @@ function handleResetProject() {
   store.setIsImporting(false)
 }
 
+/**
+ * What the parent can ask of this editor beyond the basics, announced in
+ * FREECUT_READY: `timeline-add` — NODARO_ADD_TO_TIMELINE places a file it
+ * imported (named by its `ref`) on the timeline at the playhead (Studio's
+ * Soundtrack popover, D36). A parent that reads no capabilities offers none.
+ */
+const EMBEDDED_CAPABILITIES = ['timeline-add'] as const
+
+// The media id each parent `ref` was imported as — a promise while the import
+// is still running, so a placement asked for right after the hand-off waits
+// for it rather than missing it.
+const importedByRef = new Map<string, Promise<string | null>>()
+
 async function handleImportFiles(event: MessageEvent) {
   const { files } = event.data.payload
   if (!files?.length) return
+
+  // Claim each ref at once — before the (async) import — so a placement that
+  // arrives mid-import finds it.
+  const settlers = new Map<string, (mediaId: string | null) => void>()
+  for (const file of files) {
+    if (typeof file?.ref !== 'string' || !file.ref) continue
+    importedByRef.set(file.ref, new Promise((resolve) => settlers.set(file.ref, resolve)))
+  }
 
   await ensureEmbeddedWorkspaceMounted()
 
   const projectId = useProjectStore.getState().currentProject?.id
   if (!projectId) {
     log.warn('No current project for NODARO_IMPORT_FILES')
+    settlers.forEach((settle) => settle(null))
     return
   }
 
   for (const file of files) {
+    const settle = typeof file?.ref === 'string' ? settlers.get(file.ref) : undefined
     try {
       const blob = new Blob([file.buffer], { type: file.type })
-      await mediaLibraryService.importMediaBlob(blob, projectId, file.name)
+      const media = await mediaLibraryService.importMediaBlob(blob, projectId, file.name)
+      settle?.(media.id)
     } catch (e) {
       log.error(`Failed to import ${file.name}:`, e)
+      settle?.(null)
     }
   }
 
@@ -304,11 +330,32 @@ async function handleImportFiles(event: MessageEvent) {
   }
 }
 
+// Place a file the parent imported on the timeline at the playhead, and say
+// where it went — or why it could not — to the asker, by its own requestId.
+async function handleAddToTimeline(event: MessageEvent) {
+  const { ref, requestId } = (event.data.payload ?? {}) as { ref?: unknown; requestId?: unknown }
+  if (typeof requestId !== 'string') return
+  const reply = (type: string, payload: Record<string, unknown>) =>
+    window.parent.postMessage({ type, payload: { requestId, ...payload } }, event.origin)
+  try {
+    const mediaId = typeof ref === 'string' ? await importedByRef.get(ref) : null
+    if (!mediaId) throw new Error('That track is not in Media')
+    const placed = await addMediaToTimelineAtPlayhead(mediaId)
+    reply('FREECUT_TIMELINE_ADDED', { track: placed.track, at: placed.at })
+  } catch (e) {
+    log.warn('NODARO_ADD_TO_TIMELINE refused:', e)
+    reply('FREECUT_TIMELINE_ADD_FAILED', {
+      message: e instanceof Error ? e.message : 'Could not place it',
+    })
+  }
+}
+
 // Inbound message types the embedded editor accepts, each behind the origin allowlist.
 const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | Promise<void>> = {
   NODARO_LOAD_VIDEO: handleLoadVideo,
   NODARO_RESET_PROJECT: () => handleResetProject(),
   NODARO_IMPORT_FILES: handleImportFiles,
+  NODARO_ADD_TO_TIMELINE: handleAddToTimeline,
 }
 
 function handleMessage(event: MessageEvent) {
@@ -329,6 +376,10 @@ export function initEmbeddedMessageHandler() {
   void ensureEmbeddedWorkspaceMounted()
   window.addEventListener('message', handleMessage)
   // Signal readiness to parent (uses '*' because parent origin unknown yet, no sensitive payload)
-  window.parent.postMessage({ type: 'FREECUT_READY' }, '*')
+  // — with what this editor can do beyond the basics (EMBEDDED_CAPABILITIES).
+  window.parent.postMessage(
+    { type: 'FREECUT_READY', capabilities: [...EMBEDDED_CAPABILITIES] },
+    '*',
+  )
   log.info('Embedded message handler initialized, FREECUT_READY sent')
 }
