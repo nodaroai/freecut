@@ -14,18 +14,52 @@ import {
 
 const log = createLogger('embedded-message-handler')
 
-const ALLOWED_ORIGINS = [
-  'https://app.nodaro.ai',
-  'https://next.nodaro.ai',
-  'https://studio.nodaro.ai',
-  'https://next.studio.nodaro.ai',
-]
+/**
+ * The parents that may frame this editor and send it commands, as CSP sources.
+ * One list serves both checks: the Caddyfile sends it as `frame-ancestors` (a
+ * test holds the two equal), and `isAllowedOrigin` accepts exactly the origins
+ * it names.
+ * - `https://nodaro.ai` and any https subdomain of it, on the default port;
+ * - `http://localhost:<port>`, for local development and self-hosted installs.
+ */
+export const EMBED_PARENT_SOURCES = [
+  "'self'",
+  'https://nodaro.ai',
+  'https://*.nodaro.ai',
+  'http://localhost:*',
+] as const
+
+// The source forms read here: `scheme://host`, where `*.` before the host means
+// one or more subdomain labels (never the bare host) and `:*` after it means any
+// explicit port; without `:*` only the scheme's default port matches. A keyword
+// such as 'self' (the editor itself, which sends no commands) or any other form
+// admits nothing.
+const SOURCE_FORM = /^(https?):\/\/(\*\.)?([a-z0-9.-]+)(:\*)?$/
+const SUBDOMAIN_LABELS = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+$/
+
+function sourceAdmits(source: string, url: URL): boolean {
+  const form = SOURCE_FORM.exec(source)
+  if (!form) return false
+  const [, scheme, wildcard, host = '', anyPort] = form
+  if (url.protocol !== `${scheme}:`) return false
+  const hasPort = url.port !== ''
+  if (anyPort ? !hasPort : hasPort) return false
+  if (!wildcard) return url.hostname === host
+  const labels = url.hostname.slice(0, -host.length)
+  return url.hostname.endsWith(`.${host}`) && SUBDOMAIN_LABELS.test(labels)
+}
 
 export function isAllowedOrigin(origin: string): boolean {
-  if (ALLOWED_ORIGINS.includes(origin)) return true
-  if (origin.startsWith('http://localhost:')) return true
-  if (origin.endsWith('.up.railway.app') && origin.startsWith('https://')) return true
-  return false
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return false // "null", "" and anything else that is not an origin
+  }
+  // Only an exact origin, as MessageEvent.origin serializes one: no path,
+  // credentials, upper case or explicit default port.
+  if (url.origin !== origin) return false
+  return EMBED_PARENT_SOURCES.some((source) => sourceAdmits(source, url))
 }
 
 function postToParent(message: unknown) {

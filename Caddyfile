@@ -14,11 +14,16 @@
     @revalidate not path /assets/*
     header @revalidate Cache-Control "no-cache"
 
+    # Who may frame the editor: nodaro.ai, any https subdomain of it, and
+    # localhost. It is the same list as EMBED_PARENT_SOURCES, which decides who
+    # may send the editor commands
+    # (src/features/embedded/services/embedded-message-handler.ts); a test
+    # holds the two equal.
     header {
         Cross-Origin-Embedder-Policy "credentialless"
         Cross-Origin-Opener-Policy "same-origin-allow-popups"
         Cross-Origin-Resource-Policy "cross-origin"
-        Content-Security-Policy "frame-ancestors 'self' https://app.nodaro.ai https://next.nodaro.ai https://next.studio.nodaro.ai https://studio.nodaro.ai http://localhost:* https://*.up.railway.app"
+        Content-Security-Policy "frame-ancestors 'self' https://nodaro.ai https://*.nodaro.ai http://localhost:*"
         X-Frame-Options ""
     }
 }
