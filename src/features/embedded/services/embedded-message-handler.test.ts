@@ -14,7 +14,11 @@ describe('isAllowedOrigin', () => {
     'https://next.studio.nodaro.ai',
     'https://app.nodaro.ai',
     'https://next.nodaro.ai',
+    'https://next.app.nodaro.ai',
+    'https://tools.nodaro.ai',
     'https://next.tools.nodaro.ai',
+    'https://flow.nodaro.ai',
+    'https://next.flow.nodaro.ai',
     'https://launch-staging.nodaro.ai',
     'http://localhost:5173',
     'http://localhost:3000',
@@ -23,6 +27,10 @@ describe('isAllowedOrigin', () => {
   })
 
   it.each([
+    // The upload host, and hosts of the domain that the list does not name.
+    'https://cdn.nodaro.ai',
+    'https://unlisted.nodaro.ai',
+    'https://x.studio.nodaro.ai',
     // Look-alikes of the domain.
     'https://nodaro.ai.evil.com',
     'https://next.studio.nodaro.ai.evil.example',
@@ -57,28 +65,55 @@ describe('isAllowedOrigin', () => {
   })
 })
 
+// The value of every Content-Security-Policy header the Caddyfile sends.
+function framePolicies(): string[] {
+  const caddyfile = readFileSync('Caddyfile', 'utf8')
+  return [...caddyfile.matchAll(/Content-Security-Policy\s+"([^"]*)"/g)].map((m) => m[1] ?? '')
+}
+
 describe('EMBED_PARENT_SOURCES', () => {
-  it('is exactly nodaro.ai, its https subdomains and localhost', () => {
+  it('is exactly the app hosts that embed the editor, and localhost', () => {
     expect(EMBED_PARENT_SOURCES).toEqual([
       "'self'",
       'https://nodaro.ai',
-      'https://*.nodaro.ai',
+      'https://app.nodaro.ai',
+      'https://next.nodaro.ai',
+      'https://studio.nodaro.ai',
+      'https://next.studio.nodaro.ai',
+      'https://tools.nodaro.ai',
+      'https://next.tools.nodaro.ai',
+      'https://flow.nodaro.ai',
+      'https://next.flow.nodaro.ai',
+      'https://next.app.nodaro.ai',
+      'https://launch-staging.nodaro.ai',
       'http://localhost:*',
     ])
   })
 
   it('is what the Caddyfile sends as frame-ancestors, so framing and messages cannot drift apart', () => {
-    const caddyfile = readFileSync('Caddyfile', 'utf8')
-    const policies = [...caddyfile.matchAll(/Content-Security-Policy\s+"([^"]*)"/g)].map(
-      (m) => m[1],
-    )
-    expect(policies).toEqual([`frame-ancestors ${EMBED_PARENT_SOURCES.join(' ')}`])
+    expect(framePolicies()).toEqual([`frame-ancestors ${EMBED_PARENT_SOURCES.join(' ')}`])
+  })
+
+  it('never lets the upload host, cdn.nodaro.ai, frame the editor or send it commands', () => {
+    expect(isAllowedOrigin('https://cdn.nodaro.ai')).toBe(false)
+    // CSP cannot leave one host out of a wildcard, so the frame policy names each
+    // parent's host exactly: no wildcard host, no bare scheme, never the upload host.
+    const [policy = ''] = framePolicies()
+    for (const source of policy.replace(/^frame-ancestors\s+/, '').split(/\s+/)) {
+      if (source.startsWith("'")) continue // a keyword: 'self' is the editor's own origin
+      const host = /^https?:\/\/([^:/]+)/.exec(source)?.[1]
+      expect(host, source).toBeDefined()
+      expect(host, source).not.toContain('*')
+      expect(host, source).not.toBe('cdn.nodaro.ai')
+    }
   })
 
   it('lets every listed parent send messages, not only frame the editor', () => {
     // One origin per source; 'self' is the editor itself, which sends no commands.
+    // A wildcard source is sampled as a host no source names, so adding one fails
+    // here too: the message check reads exact hosts only.
     const sampleOf = (source: string) =>
-      source.replace('://*.', '://studio.').replace(/:\*$/, ':5173')
+      source.replace('://*.', '://unlisted.').replace(/:\*$/, ':5173')
     for (const source of EMBED_PARENT_SOURCES.filter((s) => s !== "'self'")) {
       expect(isAllowedOrigin(sampleOf(source)), source).toBe(true)
     }
