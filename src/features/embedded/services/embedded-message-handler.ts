@@ -1,6 +1,6 @@
 import { createLogger } from '@/shared/logging/logger'
 import { migrateProject } from '@/shared/projects/migrations'
-import { useEmbeddedStore } from '../stores/embedded-store'
+import { useEmbeddedStore, type SaveExitMode } from '../stores/embedded-store'
 import { roundToNearestAllowedFps } from '../utils/codec-mapping'
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract'
@@ -92,6 +92,14 @@ export function isEmptyBootPayload(payload: {
   videoBuffer?: unknown
 }): boolean {
   return !payload.videoUrl && !payload.videoBuffer
+}
+
+// What Save & Exit hands the parent, from NODARO_LOAD_VIDEO's payload.saveExit:
+// "video" asks for the timeline rendered (FREECUT_EXPORT_COMPLETE); absent or
+// anything else keeps the project JSON alone (FREECUT_SAVE_EXIT), so parents
+// that never send the field are unchanged.
+export function resolveSaveExitMode(saveExit: unknown): SaveExitMode {
+  return saveExit === 'video' ? 'video' : 'project'
 }
 
 // Use pre-fetched buffer if provided (avoids CORS), otherwise fetch URL
@@ -240,6 +248,9 @@ async function handleLoadVideo(event: MessageEvent) {
 
     // Store parent origin for outbound messages
     store.setParentOrigin(event.origin)
+    // ...and what Save & Exit hands it. Every NODARO_LOAD_VIDEO says so again;
+    // NODARO_RESET_PROJECT leaves it as it is.
+    store.setSaveExitMode(resolveSaveExitMode(event.data.payload?.saveExit))
 
     const { videoUrl, videoBuffer, videoName } = event.data.payload
     if (isEmptyBootPayload(event.data.payload)) {
