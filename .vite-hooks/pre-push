@@ -1,35 +1,48 @@
-# Pre-push hook: mirrors CI "Quality Checks" (fast subset)
+# Pre-push hook: the checks CI "Quality Checks" blocks on, except the unit
+# tests, the build and the headless suites (CI runs those).
 # Skip with: git push --no-verify
 
 set -e
 
 echo "Running quality checks before push..."
 
-echo "  [1/7] check:boundaries"
+echo "  [1/9] check:boundaries"
 vp run check:boundaries --silent
 
-echo "  [2/7] check:deps-contracts"
+echo "  [2/9] check:deps-contracts"
 vp run check:deps-contracts --silent
 
-echo "  [3/7] check:layer-boundaries"
+echo "  [3/9] check:layer-boundaries"
 vp run check:layer-boundaries --silent
 
-echo "  [4/7] check:deps-wrapper-health"
+echo "  [4/9] check:deps-wrapper-health"
 vp run check:deps-wrapper-health --silent
+
+# The two dead-code ratchets, run through node as CI runs them.
+echo "  [5/9] check:unused-exports"
+node scripts/check-fallow-unused-exports.mjs
+
+echo "  [6/9] check:unused-class-members"
+node scripts/check-fallow-unused-class-members.mjs
 
 # Advisory, as in CI ("Fallow quality ratchet", continue-on-error): its
 # new-only attribution is file-scoped, so a change that moves files, such as
-# an upstream sync, cannot pass it.
-echo "  [5/7] check:changed-health (advisory)"
-vp run check:changed-health || echo "  check:changed-health reported findings (advisory, not blocking)"
+# an upstream sync, cannot pass it. Only its findings are advisory: a missing
+# script stops the push.
+echo "  [7/9] check:changed-health (advisory)"
+test -f scripts/check-fallow-changed-health.mjs || {
+  echo "  scripts/check-fallow-changed-health.mjs is missing"
+  exit 1
+}
+node scripts/check-fallow-changed-health.mjs || echo "  check:changed-health reported findings (advisory, not blocking)"
 
-echo "  [6/7] check:edge-budgets"
+echo "  [8/9] check:edge-budgets"
 EDGE_REPORT=$(mktemp)
 trap 'rm -f "$EDGE_REPORT"' EXIT
 node scripts/report-feature-edges.mjs --json > "$EDGE_REPORT"
 node scripts/check-feature-edge-budgets.mjs --input "$EDGE_REPORT"
 
-echo "  [7/7] check"
+echo "  [9/9] check"
 vp run check --silent
 
 echo "All quality checks passed."
