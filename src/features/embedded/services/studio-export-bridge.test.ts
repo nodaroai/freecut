@@ -2,15 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sendExportToStudio } from './studio-export-bridge'
 import { useEmbeddedStore } from '../stores/embedded-store'
 
+const { saveTimeline, exportProjectJson } = vi.hoisted(() => ({
+  saveTimeline: vi.fn(async (_projectId: string) => {}),
+  exportProjectJson: vi.fn(async () => ({ version: 2, items: [] })),
+}))
+
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ currentProject: { id: 'p1' } }) },
 }))
-vi.mock('../deps/project-bundle-contract', () => ({
-  exportProjectJson: vi.fn(async () => ({ version: 2, items: [] })),
-}))
-vi.mock('../deps/timeline-contract', () => ({
-  saveTimeline: vi.fn(async () => {}),
-}))
+vi.mock('../deps/project-bundle-contract', () => ({ exportProjectJson }))
+vi.mock('../deps/timeline-contract', () => ({ saveTimeline }))
 
 /** jsdom's Blob lacks arrayBuffer(); a minimal stand-in carries the bytes. */
 function blobOf(bytes: number[]): Blob {
@@ -23,6 +24,8 @@ function blobOf(bytes: number[]): Blob {
 describe('sendExportToStudio', () => {
   beforeEach(() => {
     useEmbeddedStore.setState({ isEmbedded: false, parentOrigin: null })
+    saveTimeline.mockClear()
+    exportProjectJson.mockClear()
   })
 
   it('posts FREECUT_EXPORT_COMPLETE with keepOpen so the studio saves without closing', async () => {
@@ -47,6 +50,11 @@ describe('sendExportToStudio', () => {
     expect(message.payload.projectJson).toEqual({ version: 2, items: [] })
     expect(origin).toBe('http://localhost:8123')
     expect(transfer).toEqual([message.payload.videoBuffer])
+    // The studio gets the latest edits: the timeline is saved before the project is read.
+    expect(saveTimeline).toHaveBeenCalledWith('p1')
+    const [saved] = saveTimeline.mock.invocationCallOrder
+    const [read] = exportProjectJson.mock.invocationCallOrder
+    expect(saved).toBeLessThan(read!)
     postSpy.mockRestore()
   })
 
