@@ -82,13 +82,15 @@ interface ToolbarProps {
 }
 
 function SendBackButton() {
-  const { saveExit, isSaving, sendBackStatus } = useSendBack()
+  const { saveExit, isSaving, sendBackStatus, progress, renderer } = useSendBack()
 
+  // A video Save & Exit reports its render's progress; the project JSON alone has none.
+  const savingLabel = progress === null ? 'Saving...' : `Saving... ${Math.round(progress)}%`
   const label =
     sendBackStatus === 'sent'
       ? 'Saved!'
       : sendBackStatus === 'saving'
-        ? 'Saving...'
+        ? savingLabel
         : sendBackStatus === 'error'
           ? 'Error'
           : 'Save & Exit'
@@ -103,15 +105,18 @@ function SendBackButton() {
     )
 
   return (
-    <Button
-      size="sm"
-      className="gap-1.5 glow-primary-sm"
-      onClick={saveExit}
-      disabled={isSaving || sendBackStatus === 'sent'}
-    >
-      {icon}
-      {label}
-    </Button>
+    <>
+      {renderer}
+      <Button
+        size="sm"
+        className="gap-1.5 glow-primary-sm"
+        onClick={saveExit}
+        disabled={isSaving || sendBackStatus === 'sent'}
+      >
+        {icon}
+        {label}
+      </Button>
+    </>
   )
 }
 
