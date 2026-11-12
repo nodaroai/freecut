@@ -4,7 +4,6 @@ import { useEmbeddedStore } from '../stores/embedded-store'
 import { roundToNearestAllowedFps } from '../utils/codec-mapping'
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract'
-import { router } from '@/app/router'
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
 import { addMediaToTimelineAtPlayhead } from './timeline-add'
 import {
@@ -13,6 +12,19 @@ import {
 } from '@/infrastructure/storage'
 
 const log = createLogger('embedded-message-handler')
+
+/**
+ * What the handler needs from the app shell. A feature never imports the app
+ * (`check:layer-boundaries`), so `src/app.tsx`, which owns the router, passes in
+ * how to open a project in the editor when it starts the handler.
+ */
+export interface EmbeddedMessageHandlerDeps {
+  readonly openEditor: (projectId: string) => void
+}
+
+let openEditor: EmbeddedMessageHandlerDeps['openEditor'] = (projectId) => {
+  log.error('Cannot open the editor: initEmbeddedMessageHandler was not called', { projectId })
+}
 
 /**
  * The parents that may frame this editor and send it commands, as CSP sources.
@@ -254,10 +266,7 @@ async function handleLoadVideo(event: MessageEvent) {
         backgroundColor: '#000000',
       })
       await importAdditionalAssets(event, project.id)
-      router.navigate({
-        to: '/editor/$projectId',
-        params: { projectId: project.id },
-      })
+      openEditor(project.id)
       log.info('Empty-boot: opened a fresh project with no primary video', {
         projectId: project.id,
       })
@@ -288,10 +297,7 @@ async function handleLoadVideo(event: MessageEvent) {
 
     await importAdditionalAssets(event, project.id)
 
-    router.navigate({
-      to: '/editor/$projectId',
-      params: { projectId: project.id },
-    })
+    openEditor(project.id)
 
     log.info('Video import complete, navigating to editor', {
       projectId: project.id,
@@ -431,7 +437,8 @@ function handleMessage(event: MessageEvent) {
   void handler(event)
 }
 
-export function initEmbeddedMessageHandler() {
+export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
+  openEditor = deps.openEditor
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.
   void ensureEmbeddedWorkspaceMounted()
   window.addEventListener('message', handleMessage)

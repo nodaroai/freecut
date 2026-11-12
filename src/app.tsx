@@ -19,7 +19,11 @@ const LazyToaster = lazy(async () => {
 // the message. The bundle cost is acceptable since embedded mode is the primary use case
 // for this fork.
 if (isEmbedded()) {
-  initEmbeddedMessageHandler()
+  initEmbeddedMessageHandler({
+    openEditor: (projectId) => {
+      void router.navigate({ to: '/editor/$projectId', params: { projectId } })
+    },
+  })
 }
 
 export function App() {
