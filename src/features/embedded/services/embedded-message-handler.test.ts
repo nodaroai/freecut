@@ -1,11 +1,24 @@
 import { readFileSync } from 'node:fs'
-import { describe, it, expect } from 'vitest'
+import { beforeAll, describe, it, expect, vi } from 'vitest'
 import {
   EMBED_PARENT_SOURCES,
+  initEmbeddedMessageHandler,
   isAllowedOrigin,
   isEmptyBootPayload,
   resolvePrimaryVideoName,
+  resolveSaveExitMode,
 } from './embedded-message-handler'
+import { useEmbeddedStore } from '../stores/embedded-store'
+
+// A NODARO_LOAD_VIDEO with no video is an empty boot: it opens a fresh project
+// and navigates to it. These stand-ins keep that off storage and the router.
+vi.mock('./embedded-workspace', () => ({
+  ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}),
+}))
+vi.mock('../deps/projects-contract', () => ({
+  useProjectStore: { getState: () => ({ createProject: vi.fn(async () => ({ id: 'p1' })) }) },
+}))
+vi.mock('@/app/router', () => ({ router: { navigate: vi.fn() } }))
 
 describe('isAllowedOrigin', () => {
   it.each([
@@ -137,5 +150,69 @@ describe('resolvePrimaryVideoName', () => {
     expect(resolvePrimaryVideoName('')).toBe('nodaro-edit.mp4')
     expect(resolvePrimaryVideoName('   ')).toBe('nodaro-edit.mp4')
     expect(resolvePrimaryVideoName(42)).toBe('nodaro-edit.mp4')
+  })
+})
+
+describe('resolveSaveExitMode', () => {
+  it('asks for a video only when payload.saveExit is exactly "video"; anything else keeps the project', () => {
+    expect(resolveSaveExitMode('video')).toBe('video')
+    expect(resolveSaveExitMode('project')).toBe('project')
+    expect(resolveSaveExitMode(undefined)).toBe('project')
+    expect(resolveSaveExitMode(null)).toBe('project')
+    expect(resolveSaveExitMode('VIDEO')).toBe('project')
+    expect(resolveSaveExitMode(' video')).toBe('project')
+    expect(resolveSaveExitMode(true)).toBe('project')
+    expect(resolveSaveExitMode({ saveExit: 'video' })).toBe('project')
+  })
+})
+
+describe('saveExit on the wire', () => {
+  const PARENT = 'http://localhost:5173'
+
+  beforeAll(() => {
+    initEmbeddedMessageHandler()
+  })
+
+  function send(type: string, payload?: Record<string, unknown>) {
+    window.dispatchEvent(new MessageEvent('message', { data: { type, payload }, origin: PARENT }))
+  }
+
+  // The handler marks the import before its first await and clears it when done.
+  async function loadVideo(payload: Record<string, unknown>) {
+    send('NODARO_LOAD_VIDEO', payload)
+    expect(useEmbeddedStore.getState().isImporting).toBe(true)
+    await vi.waitFor(() => expect(useEmbeddedStore.getState().isImporting).toBe(false))
+  }
+
+  it('is set by every NODARO_LOAD_VIDEO and kept through NODARO_RESET_PROJECT', async () => {
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('project')
+
+    await loadVideo({ saveExit: 'video' })
+    expect(useEmbeddedStore.getState().parentOrigin).toBe(PARENT)
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('video')
+
+    send('NODARO_RESET_PROJECT')
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('video')
+
+    // A later load says it again: absent is the project, as before the field existed.
+    await loadVideo({})
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('project')
+
+    await loadVideo({ saveExit: 'video' })
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('video')
+    await loadVideo({ saveExit: 'junk' })
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('project')
+  })
+
+  it('takes no saveExit from a parent the allowlist refuses', async () => {
+    await loadVideo({ saveExit: 'project' })
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'NODARO_LOAD_VIDEO', payload: { saveExit: 'video' } },
+        origin: 'https://evil.example.com',
+      }),
+    )
+    expect(useEmbeddedStore.getState().isImporting).toBe(false)
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('project')
   })
 })
