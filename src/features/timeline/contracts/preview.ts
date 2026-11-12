@@ -2,7 +2,6 @@
  * Timeline contract consumed by preview feature adapters.
  */
 
-export { useTimelineStore } from '../stores/timeline-store'
 export { useItemsStore } from '../stores/items-store'
 export { useKeyframesStore } from '../stores/keyframes-store'
 export { useTransitionsStore } from '../stores/transitions-store'
@@ -41,3 +40,17 @@ export {
 } from '../utils/sub-composition-preview'
 export { createScrubThrottleState, shouldCommitScrubFrame } from '../utils/scrub-throttle'
 export { useWaveform } from '../hooks/use-waveform'
+export {
+  addItem,
+  addItemOnNewTrack,
+  applyAutoKeyframeOperations,
+  commitMaskEdit,
+  setItemEffects,
+  setTracks,
+  updateEffect,
+  updateItem,
+  updateItemTransform,
+  updateItemsTransformMap,
+  updateVectorKeyframe,
+} from '../stores/timeline-actions'
+export { addItemWithLinkedAudio } from '../stores/actions/item-actions'

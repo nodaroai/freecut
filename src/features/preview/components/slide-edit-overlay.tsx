@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { useItemsStore } from '@/features/preview/deps/timeline-store'
 import { useSlideEditPreviewStore } from '@/features/preview/deps/timeline-edit-preview'
 import { EditFourUpPanels } from './edit-4up-panels'
 import { getSourceFrameInfo } from './edit-overlay-utils'
@@ -25,7 +25,7 @@ export function SlideEditOverlay({ fps }: SlideEditOverlayProps) {
   const leftNeighborId = useSlideEditPreviewStore((s) => s.leftNeighborId)
   const rightNeighborId = useSlideEditPreviewStore((s) => s.rightNeighborId)
   const slideDelta = useSlideEditPreviewStore((s) => s.slideDelta)
-  const items = useTimelineStore((s) => s.items)
+  const items = useItemsStore((s) => s.items)
 
   const itemsMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
 

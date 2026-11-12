@@ -69,8 +69,30 @@
           {
             "patterns": [
               {
-                "group": ["@/features/**", "@/routes/**"],
-                "message": "infrastructure/ provides adapters and should not depend on features/routes."
+                "group": [
+                  "@/app/**",
+                  "@/components/**",
+                  "@/features/**",
+                  "@/runtime/**",
+                  "@/routes/**"
+                ],
+                "message": "infrastructure/ is the bottom adapter layer and must not depend on app/components/features/runtime/routes."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/components/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@/app/**", "@/features/**", "@/runtime/**", "@/routes/**"],
+                "message": "components/ is the shared UI kit and must not depend on app/features/runtime/routes."
               }
             ]
           }
@@ -85,8 +107,8 @@
           {
             "patterns": [
               {
-                "group": ["@/app/**", "@/features/**", "@/routes/**"],
-                "message": "shared/ must remain reusable and independent of app layers."
+                "group": ["@/app/**", "@/features/**", "@/runtime/**", "@/routes/**"],
+                "message": "shared/ must remain reusable and independent of app layers. shared/ui may compose @/components/ui."
               }
             ]
           }
@@ -191,6 +213,10 @@
               {
                 "group": ["@/runtime/player/**"],
                 "message": "preview/ must import player dependencies through preview/deps/* adapters."
+              },
+              {
+                "group": ["@/runtime/renderer/**"],
+                "message": "preview/ must import renderer dependencies through preview/deps/* adapters."
               },
               {
                 "group": ["@/features/preview/deps/player"],
@@ -337,6 +363,10 @@
                 "message": "export/ must import player dependencies through export/deps/* adapters."
               },
               {
+                "group": ["@/runtime/renderer/**"],
+                "message": "export/ must import renderer dependencies through export/deps/* adapters."
+              },
+              {
                 "group": [
                   "../composition-runtime/**",
                   "../../composition-runtime/**",
@@ -441,27 +471,15 @@
       "rules": { "no-restricted-imports": "off" }
     },
     {
-      "files": ["src/runtime/composition-runtime/**/*.{ts,tsx}"],
+      "files": ["src/runtime/**/*.{ts,tsx}"],
       "rules": {
         "no-restricted-imports": [
           "error",
           {
             "patterns": [
               {
-                "group": [
-                  "@/features/editor/**",
-                  "@/features/effects/**",
-                  "@/features/export/**",
-                  "@/features/keyframes/**",
-                  "@/features/media-library/**",
-                  "@/runtime/player/**",
-                  "@/features/preview/**",
-                  "@/features/project-bundle/**",
-                  "@/features/projects/**",
-                  "@/features/settings/**",
-                  "@/features/timeline/**"
-                ],
-                "message": "Import external feature modules through composition-runtime/deps/* adapters."
+                "group": ["@/features/**"],
+                "message": "runtime/ may only import src/features through runtime/<engine>/deps/*-contract.ts adapters."
               }
             ]
           }
@@ -469,7 +487,7 @@
       }
     },
     {
-      "files": ["src/runtime/composition-runtime/deps/**/*.{ts,tsx}"],
+      "files": ["src/runtime/**/deps/**/*.{ts,tsx}"],
       "rules": { "no-restricted-imports": "off" }
     }
   ]

@@ -26,9 +26,12 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/shared/ui/cn'
 import { useEditorStore } from '@/shared/state/editor'
 import {
+  addEffect,
+  addItemOnNewTrack,
   useCompositionNavigationStore,
   useCompositionsStore,
-  useTimelineStore,
+  useItemsStore,
+  useTimelineSettingsStore,
 } from '@/features/editor/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
@@ -384,7 +387,8 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const handleAddText = useCallback(
     (presetId?: (typeof TEXT_STYLE_PRESETS)[number]['id']) => {
       // Read all needed state from stores directly to avoid subscriptions
-      const { tracks, fps, addItemOnNewTrack } = useTimelineStore.getState()
+      const { tracks } = useItemsStore.getState()
+      const { fps } = useTimelineSettingsStore.getState()
       const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState()
       const currentProject = useProjectStore.getState().currentProject
 
@@ -428,7 +432,8 @@ export const MediaSidebar = memo(function MediaSidebar() {
   // Add shape item on its own new layer at the playhead, matching the canvas drop.
   const handleAddShape = useCallback((shapeType: ShapeType, shapePreset?: 'solid' | 'gradient') => {
     // Read all needed state from stores directly to avoid subscriptions
-    const { tracks, fps, addItemOnNewTrack } = useTimelineStore.getState()
+    const { tracks } = useItemsStore.getState()
+    const { fps } = useTimelineSettingsStore.getState()
     const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState()
     const currentProject = useProjectStore.getState().currentProject
     const activeCompositionId =
@@ -489,7 +494,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const handleAddGpuEffect = useCallback(
     (gpuEffectId: string) => {
       const { selectedItemIds } = useSelectionStore.getState()
-      const { items, addEffect } = useTimelineStore.getState()
+      const { items } = useItemsStore.getState()
 
       // Find selected visual items (not audio)
       const visualIds = selectedItemIds.filter((id) => {

@@ -5,7 +5,10 @@ import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
 import { createLogger } from '@/shared/logging/logger'
 import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-context'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { addItem, addItems, setTracks } from '../stores/timeline-actions'
+import type { TimelineState } from '../types'
 import { useCompositionsStore } from '../stores/compositions-store'
 import { pixelsToFrameNow } from '../utils/zoom-conversions'
 import {
@@ -160,9 +163,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   const pendingDragPreviewRef = useRef<PendingDragPreview | null>(null)
   const dragOverFlagsRef = useRef({ isDragOver: false, isExternalDragOver: false })
 
-  const addItem = useTimelineStore((s) => s.addItem)
-  const addItems = useTimelineStore((s) => s.addItems)
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const setZoneGhostPreviews = useNewTrackZonePreviewStore((s) => s.setGhostPreviews)
   const clearZoneGhostPreviews = useNewTrackZonePreviewStore((s) => s.clearGhostPreviews)
   const getMedia = useMediaLibraryStore((s) => s.mediaItems)
@@ -186,7 +187,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   }, [])
 
   const ensureVideoZoneTrack = useCallback(
-    (tracks: ReturnType<typeof useTimelineStore.getState>['tracks']) => {
+    (tracks: TimelineState['tracks']) => {
       const preferredTrackHeight = tracks.find((track) => track.id === anchorTrackId)?.height ?? 64
       const { plannedItems, tracks: nextTracks } = planNewTrackZonePlacements({
         entries: [
@@ -220,7 +221,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   }, [])
 
   const getCollisionTrackItemsMap = useCallback(() => {
-    const items = useTimelineStore.getState().items
+    const items = useItemsStore.getState().items
     const cache = collisionMapCacheRef.current
     if (cache.itemsRef !== items) {
       cache.itemsRef = items
@@ -257,9 +258,9 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       dropFrame: number,
     ): Promise<{
       items: TimelineItemType[]
-      tracks: ReturnType<typeof useTimelineStore.getState>['tracks']
+      tracks: TimelineState['tracks']
     }> => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const preferredTrackHeight =
         currentTracks.find((track) => track.id === anchorTrackId)?.height ?? 64
       const { plannedItems, tracks: workingTracks } = planNewTrackZonePlacements({
@@ -272,7 +273,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         })),
         dropFrame,
         tracks: currentTracks,
-        existingItems: useTimelineStore.getState().items,
+        existingItems: useItemsStore.getState().items,
         existingTrackItemsById: getCollisionTrackItemsMap(),
         anchorTrackId,
         zone,
@@ -350,7 +351,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       }>,
       dropFrame: number,
     ): GhostPreviewItem[] => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const preferredTrackHeight =
         currentTracks.find((track) => track.id === anchorTrackId)?.height ?? 64
       const { plannedItems } = planNewTrackZonePlacements({
@@ -367,7 +368,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         })),
         dropFrame,
         tracks: currentTracks,
-        existingItems: useTimelineStore.getState().items,
+        existingItems: useItemsStore.getState().items,
         existingTrackItemsById: getCollisionTrackItemsMap(),
         anchorTrackId,
         zone,
@@ -408,7 +409,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         return []
       }
 
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const createdTrack = ensureVideoZoneTrack(currentTracks)
       if (!createdTrack) {
         return []
@@ -546,13 +547,13 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       dropFrame: number,
     ): {
       item: TimelineItemType
-      tracks: ReturnType<typeof useTimelineStore.getState>['tracks']
+      tracks: TimelineState['tracks']
     } | null => {
       if (!isTimelineTemplateDragData(template) || zone !== 'video') {
         return null
       }
 
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const createdTrack = ensureVideoZoneTrack(currentTracks)
       if (!createdTrack) {
         return null
@@ -677,7 +678,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         return
       }
 
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const preferredTrackHeight =
         currentTracks.find((candidate) => candidate.id === anchorTrackId)?.height ?? 64
       const { plannedItems } = planNewTrackZonePlacements({
@@ -692,7 +693,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         ],
         dropFrame: pending.dropFrame,
         tracks: currentTracks,
-        existingItems: useTimelineStore.getState().items,
+        existingItems: useItemsStore.getState().items,
         existingTrackItemsById: getCollisionTrackItemsMap(),
         anchorTrackId,
         zone,
@@ -941,7 +942,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
             }
 
             const { compositionId, name, durationInFrames } = data as CompositionDragData
-            const currentTracks = useTimelineStore.getState().tracks
+            const currentTracks = useItemsStore.getState().tracks
             const preferredTrackHeight =
               currentTracks.find((track) => track.id === anchorTrackId)?.height ?? 64
             const compositionById = useCompositionsStore.getState().compositionById
@@ -965,7 +966,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
               ],
               dropFrame,
               tracks: currentTracks,
-              existingItems: useTimelineStore.getState().items,
+              existingItems: useItemsStore.getState().items,
               anchorTrackId,
               zone,
               preferredTrackHeight,
@@ -977,7 +978,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
             }
 
             if (nextTracks !== currentTracks) {
-              useTimelineStore.getState().setTracks(nextTracks)
+              setTracks(nextTracks)
             }
 
             const droppedItems = buildDroppedCompositionTimelineItems({
@@ -1009,8 +1010,8 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
               return
             }
 
-            if (templateDrop.tracks !== useTimelineStore.getState().tracks) {
-              useTimelineStore.getState().setTracks(templateDrop.tracks)
+            if (templateDrop.tracks !== useItemsStore.getState().tracks) {
+              setTracks(templateDrop.tracks)
             }
 
             addItem(templateDrop.item)
@@ -1029,13 +1030,13 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
           applyResolvedTimelineDrop({
             addItem,
             addItems,
-            currentTracks: useTimelineStore.getState().tracks,
+            currentTracks: useItemsStore.getState().tracks,
             dropResult,
             emptyMessage: t('timeline.track.unableToAddDroppedMediaItems'),
             notify: toast,
             partialFailureLabel: t('timeline.track.droppedMediaItems'),
             requestedCount: entries.length,
-            setTracks: useTimelineStore.getState().setTracks,
+            setTracks,
           })
           return
         } catch (error) {
@@ -1061,18 +1062,16 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       applyResolvedTimelineDrop({
         addItem,
         addItems,
-        currentTracks: useTimelineStore.getState().tracks,
+        currentTracks: useItemsStore.getState().tracks,
         dropResult,
         emptyMessage: t('timeline.track.unableToAddDroppedFiles'),
         notify: toast,
         partialFailureLabel: t('timeline.track.droppedFiles'),
         requestedCount: droppedEntries.length,
-        setTracks: useTimelineStore.getState().setTracks,
+        setTracks,
       })
     },
     [
-      addItem,
-      addItems,
       anchorTrackId,
       buildTimelineTemplateItem,
       clearPendingDragPreview,

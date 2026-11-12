@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { resetPlaybackPreviewState } from '@/shared/state/playback-preview-test-helpers'
-import { useTimelineStore } from '@/features/keyframes/deps/timeline'
+import { setTimelineState } from '@/features/keyframes/deps/timeline-test-helpers-contract'
 import { useAnimatedTransform, useAnimatedTransforms } from './use-animated-transform'
 import type { TimelineItem } from '@/types/timeline'
 
@@ -122,7 +122,7 @@ function resetStores() {
 
   resetPlaybackPreviewState(10)
 
-  useTimelineStore.setState({
+  setTimelineState({
     keyframes: [
       {
         itemId: ANIMATED_ITEM.id,

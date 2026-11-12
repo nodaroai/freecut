@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import type { ClientCodec } from '../utils/client-renderer'
+import type { ClientCodec } from '../deps/renderer'
 import { ExportDialog } from './export-dialog'
 
 const mockStartExport = vi.fn()
@@ -40,23 +40,6 @@ vi.mock('@/features/export/deps/projects', () => ({
           height: 1080,
         },
       },
-    }),
-}))
-
-vi.mock('@/features/export/deps/timeline', () => ({
-  useTimelineStore: (
-    selector: (state: {
-      fps: number
-      items: Array<{ from: number; durationInFrames: number }>
-      inPoint: number | null
-      outPoint: number | null
-    }) => unknown,
-  ) =>
-    selector({
-      fps: 30,
-      items: [],
-      inPoint: null,
-      outPoint: null,
     }),
 }))
 

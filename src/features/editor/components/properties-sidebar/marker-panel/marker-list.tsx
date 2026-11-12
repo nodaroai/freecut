@@ -1,7 +1,12 @@
 import { useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MapPin, Trash2 } from 'lucide-react'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  clearAllMarkers,
+  removeMarker,
+  useMarkersStore,
+  useTimelineSettingsStore,
+} from '@/features/editor/deps/timeline-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { cn } from '@/shared/ui/cn'
@@ -19,10 +24,8 @@ import { PropertySection } from '../components'
  */
 export function MarkerList({ defaultOpen = true }: { defaultOpen?: boolean }) {
   const { t } = useTranslation()
-  const markers = useTimelineStore((s) => s.markers)
-  const removeMarker = useTimelineStore((s) => s.removeMarker)
-  const clearAllMarkers = useTimelineStore((s) => s.clearAllMarkers)
-  const fps = useTimelineStore((s) => s.fps)
+  const markers = useMarkersStore((s) => s.markers)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId)
   const selectMarker = useSelectionStore((s) => s.selectMarker)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
@@ -53,13 +56,13 @@ export function MarkerList({ defaultOpen = true }: { defaultOpen?: boolean }) {
         clearSelection()
       }
     },
-    [removeMarker, clearSelection],
+    [clearSelection],
   )
 
   const handleClearAll = useCallback(() => {
     clearAllMarkers()
     clearSelection()
-  }, [clearAllMarkers, clearSelection])
+  }, [clearSelection])
 
   return (
     <PropertySection title={t('editor.markerList.title')} icon={MapPin} defaultOpen={defaultOpen}>

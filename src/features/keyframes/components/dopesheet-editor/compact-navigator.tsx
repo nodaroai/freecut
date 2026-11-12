@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { cn } from '@/shared/ui/cn'
+import { attachWindowDragListeners } from '@/shared/utils/window-drag-listeners'
 
 import {
   getKeyframeNavigatorResizeDragResult,
@@ -254,16 +255,14 @@ export function CompactNavigator({
       setDragTarget(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
+    const detachWindowDragListeners = attachWindowDragListeners(
+      handleMouseMove,
+      handleMouseUp,
+      previewAnimationFrameRef,
+    )
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      if (previewAnimationFrameRef.current !== null) {
-        cancelAnimationFrame(previewAnimationFrameRef.current)
-        previewAnimationFrameRef.current = null
-      }
+      detachWindowDragListeners()
       pendingPreviewViewportRef.current = null
       if (dragSnapshotRef.current) onViewportPreview?.(null)
     }

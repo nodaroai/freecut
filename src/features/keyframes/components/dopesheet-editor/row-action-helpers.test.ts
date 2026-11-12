@@ -1,12 +1,17 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vite-plus/test'
+import type { AnimatableProperty } from '@/types/keyframe'
 import {
   buildGroupAddEntries,
   buildPropertyKeyframeRefs,
   buildRowKeyframeRefs,
+  collectInitialFrames,
   getRemovableGroupCurrentKeyframes,
   removeSelectionIds,
+  resolveShiftRangeSelection,
+  toggleKeyframeInSelection,
+  toggleKeyframesInSelection,
 } from './row-action-helpers'
 
 describe('row action helpers', () => {
@@ -49,6 +54,48 @@ describe('row action helpers', () => {
     expect(buildGroupAddEntries(rows, 12, (row) => row.property !== 'y')).toEqual([
       { property: 'x', frame: 12 },
     ])
+  })
+
+  it('selects the inclusive range between clicked and anchor keyframes', () => {
+    const keyframes = rows[0]!.keyframes
+    expect(resolveShiftRangeSelection(keyframes, 'kf-x-2', 'kf-x-1', new Set())).toEqual(
+      new Set(['kf-x-1', 'kf-x-2']),
+    )
+  })
+
+  it('selects just the clicked keyframe when the anchor is missing', () => {
+    const keyframes = rows[0]!.keyframes
+    expect(resolveShiftRangeSelection(keyframes, 'kf-x-2', undefined, new Set(['kf-x-1']))).toEqual(
+      new Set(['kf-x-1', 'kf-x-2']),
+    )
+  })
+
+  it('toggles a keyframe id in and out of the selection', () => {
+    expect(toggleKeyframeInSelection(new Set(['kf-x-1']), 'kf-x-2')).toEqual(
+      new Set(['kf-x-1', 'kf-x-2']),
+    )
+    expect(toggleKeyframeInSelection(new Set(['kf-x-1', 'kf-x-2']), 'kf-x-1')).toEqual(
+      new Set(['kf-x-2']),
+    )
+  })
+
+  it('toggles every id in a group selection', () => {
+    expect(toggleKeyframesInSelection(new Set(['kf-x-1']), ['kf-x-1', 'kf-x-2'])).toEqual(
+      new Set(['kf-x-2']),
+    )
+  })
+
+  it('collects drag-start frames while skipping unknown ids', () => {
+    const metaById = new Map([
+      ['kf-x-1', { property: 'x' as AnimatableProperty, keyframe: rows[0]!.keyframes[0]! }],
+      ['kf-x-2', { property: 'x' as AnimatableProperty, keyframe: rows[0]!.keyframes[1]! }],
+    ])
+    expect(collectInitialFrames(['kf-x-1', 'kf-missing', 'kf-x-2'], metaById)).toEqual(
+      new Map([
+        ['kf-x-1', 12],
+        ['kf-x-2', 24],
+      ]),
+    )
   })
 
   it('filters group current keyframes down to unlocked properties', () => {

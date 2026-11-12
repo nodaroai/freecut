@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { PropertyRow } from '@/shared/ui/property-controls'
 import { cn } from '@/shared/ui/cn'
 import { evaluateMonotoneCurve } from '@/shared/utils/curve-spline'
+import { attachWindowDragListeners } from '@/shared/utils/window-drag-listeners'
 import {
   buildGpuCurvesChannelPoints,
   getDefaultGpuCurvesChannelControl,
@@ -289,16 +290,7 @@ export const GpuCurvesPanel = memo(function GpuCurvesPanel({
       setDragging(false)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current)
-        rafRef.current = null
-      }
-    }
+    return attachWindowDragListeners(handleMouseMove, handleMouseUp, rafRef)
   }, [
     effect.id,
     getNormalizedPointFromClient,

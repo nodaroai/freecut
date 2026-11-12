@@ -37,10 +37,14 @@ import {
 } from '../utils/caption-items'
 import { useProjectStore } from '@/features/media-library/deps/projects'
 import {
+  addItems,
   removeTimelineItemsExact,
+  setTracks,
+  updateItem,
   useCompositionNavigationStore,
   useCompositionsStore,
-  useTimelineStore,
+  useItemsStore,
+  useTimelineSettingsStore,
 } from '@/features/media-library/deps/timeline-stores'
 import { useSettingsStore } from '@/features/media-library/deps/settings-contract'
 import {
@@ -609,14 +613,14 @@ class MediaTranscriptionService {
    * visibility and styling remain clip-owned and are intentionally preserved.
    */
   syncExistingTranscriptCaptions(mediaId: string, transcript: MediaTranscript): number {
-    const timeline = useTimelineStore.getState()
+    const { items } = useItemsStore.getState()
     const sourceCues = buildTimelineTranscriptCaptionCues(mediaId, transcript.segments)
     let updatedClipCount = 0
 
-    for (const item of timeline.items ?? []) {
+    for (const item of items ?? []) {
       const updatedItem = buildSyncedTranscriptCaptionItem(item, mediaId, transcript, sourceCues)
       if (!updatedItem) continue
-      timeline.updateItem?.(item.id, {
+      updateItem(item.id, {
         transcriptCaptions: updatedItem.transcriptCaptions,
       } as Partial<TimelineItem>)
       updatedClipCount += 1
@@ -702,7 +706,8 @@ class MediaTranscriptionService {
       throw new Error('No transcript found for this media item')
     }
 
-    const timeline = useTimelineStore.getState()
+    const { items, tracks } = useItemsStore.getState()
+    const { fps } = useTimelineSettingsStore.getState()
     const project = useProjectStore.getState().currentProject
     const targetClips = this.resolveCaptionTargetClips(mediaId, options.clipIds)
     if (targetClips.length === 0) {
@@ -716,27 +721,27 @@ class MediaTranscriptionService {
       canvasWidth,
       canvasHeight,
     )
-    const newTracks: TimelineTrack[] = [...timeline.tracks]
+    const newTracks: TimelineTrack[] = [...tracks]
     const generatedCaptionIdsToRemove = options.replaceExisting
       ? new Set(
           targetClips.flatMap((clip) =>
-            findReplaceableCaptionItemsForClip(timeline.items, clip, 'transcript').map(
+            findReplaceableCaptionItemsForClip(items, clip, 'transcript').map(
               (item) => item.id,
             ),
           ),
         )
       : new Set<string>()
-    const plannedItems = timeline.items.filter((item) => !generatedCaptionIdsToRemove.has(item.id))
+    const plannedItems = items.filter((item) => !generatedCaptionIdsToRemove.has(item.id))
     const insertedItems: SubtitleSegmentItem[] = []
 
     for (const clip of targetClips) {
-      const clipRange = getCaptionRangeForClip(clip, transcript.segments, timeline.fps)
+      const clipRange = getCaptionRangeForClip(clip, transcript.segments, fps)
       if (!clipRange) {
         continue
       }
 
       const existingGeneratedCaptions = options.replaceExisting
-        ? findReplaceableCaptionItemsForClip(timeline.items, clip, 'transcript')
+        ? findReplaceableCaptionItemsForClip(items, clip, 'transcript')
         : []
       const preferredTrackId = this.resolvePreferredCaptionTrackId(
         newTracks,
@@ -764,7 +769,7 @@ class MediaTranscriptionService {
         trackId: targetTrack.id,
         cues: buildTimelineTranscriptCaptionCues(clip.id, transcript.segments),
         clip,
-        timelineFps: timeline.fps,
+        timelineFps: fps,
         canvasWidth,
         canvasHeight,
         label: 'Transcript',
@@ -791,10 +796,10 @@ class MediaTranscriptionService {
     }
 
     const tracksChanged =
-      newTracks.length !== timeline.tracks.length ||
-      newTracks.some((track, index) => track.id !== timeline.tracks[index]?.id)
+      newTracks.length !== tracks.length ||
+      newTracks.some((track, index) => track.id !== tracks[index]?.id)
     if (tracksChanged) {
-      timeline.setTracks(newTracks)
+      setTracks(newTracks)
     }
 
     if (generatedCaptionIdsToRemove.size > 0) {
@@ -802,7 +807,7 @@ class MediaTranscriptionService {
     }
 
     if (insertedItems.length > 0) {
-      timeline.addItems(insertedItems)
+      addItems(insertedItems)
       useSelectionStore.getState().selectItems(insertedItems.map((item) => item.id))
     }
 
@@ -821,7 +826,8 @@ class MediaTranscriptionService {
       throw new Error('No transcript found for this media item')
     }
 
-    const timeline = useTimelineStore.getState()
+    const { items } = useItemsStore.getState()
+    const { fps } = useTimelineSettingsStore.getState()
     const project = useProjectStore.getState().currentProject
     const targetClips = this.resolveCaptionTargetClips(mediaId, options.clipIds)
     if (targetClips.length === 0) {
@@ -839,7 +845,7 @@ class MediaTranscriptionService {
     const generatedCaptionIdsToRemove = options.replaceExisting
       ? new Set(
           targetClips.flatMap((clip) =>
-            findReplaceableCaptionItemsForClip(timeline.items, clip, 'transcript').map(
+            findReplaceableCaptionItemsForClip(items, clip, 'transcript').map(
               (item) => item.id,
             ),
           ),
@@ -848,11 +854,11 @@ class MediaTranscriptionService {
 
     let updatedClipCount = 0
     for (const clip of targetClips) {
-      const clipRange = getCaptionRangeForClip(clip, transcript.segments, timeline.fps)
+      const clipRange = getCaptionRangeForClip(clip, transcript.segments, fps)
       if (!clipRange) continue
 
       const existingGeneratedCaptions = options.replaceExisting
-        ? findReplaceableCaptionItemsForClip(timeline.items, clip, 'transcript')
+        ? findReplaceableCaptionItemsForClip(items, clip, 'transcript')
         : []
       const previousVirtualStyle = clip.transcriptCaptions?.style
       const existingStyle =
@@ -867,7 +873,7 @@ class MediaTranscriptionService {
       const styleTemplate =
         Object.keys(mergedStyleTemplate).length > 0 ? mergedStyleTemplate : undefined
 
-      timeline.updateItem(clip.id, {
+      updateItem(clip.id, {
         transcriptCaptions: {
           type: 'transcript',
           mediaId,
@@ -904,11 +910,11 @@ class MediaTranscriptionService {
     mediaId: string,
     clipIds?: readonly string[],
   ): CaptionableClip[] {
-    const timeline = useTimelineStore.getState()
+    const { items } = useItemsStore.getState()
     const selection = useSelectionStore.getState()
     const playheadFrame = usePlaybackStore.getState().currentFrame
 
-    const matchingClips = timeline.items
+    const matchingClips = items
       .filter(
         (item): item is CaptionableClip =>
           (item.type === 'video' || item.type === 'audio') && item.mediaId === mediaId,

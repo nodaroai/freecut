@@ -5,8 +5,8 @@ import {
   useCompositionNavigationStore,
   useCompositionsStore,
   useTimelineCommandStore,
-  useTimelineStore,
 } from '@/features/editor/deps/timeline-store'
+import { setTimelineState } from '@/features/editor/deps/timeline-test-helpers-contract'
 import { CanvasPanel } from './index'
 
 describe('CanvasPanel in a Motion composition', () => {
@@ -44,11 +44,11 @@ describe('CanvasPanel in a Motion composition', () => {
       },
     ])
     useCompositionNavigationStore.setState({ activeCompositionId: 'motion-card' })
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 24,
       items: [],
       markers: [],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
     useTimelineCommandStore.getState().clearHistory()
   })
 

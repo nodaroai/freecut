@@ -7,7 +7,8 @@ import {
   type RefObject,
 } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
-import { useTimelineStore } from '../../stores/timeline-store'
+import type { Transition } from '@/types/transition'
+import { useItemsStore } from '../../stores/items-store'
 import { useTransitionsStore } from '../../stores/transitions-store'
 import { useRollHoverStore } from '../../stores/roll-hover-store'
 import {
@@ -81,6 +82,45 @@ export function useSmartTrimHover({
     useRollHoverStore.getState().clearRollHover(item.id)
   }, [activeTool, item.id, syncHoveredEdge, syncSmartBodyIntent, syncSmartTrimIntent])
 
+  // Neighbor/bridge lookups are O(items + transitions); they only change when
+  // the item, its track items or the transitions change, so cache them across
+  // pointer moves instead of rescanning on every hover event.
+  const trimNeighborInfoRef = useRef<{
+    item: TimelineItemType
+    items: TimelineItemType[]
+    transitions: Transition[]
+    hasLeftNeighbor: boolean
+    hasRightNeighbor: boolean
+    hasStartBridge: boolean
+    hasEndBridge: boolean
+  } | null>(null)
+
+  const getTrimNeighborInfo = useCallback(
+    (items: TimelineItemType[], transitions: Transition[]) => {
+      const cached = trimNeighborInfoRef.current
+      if (
+        cached &&
+        cached.item === item &&
+        cached.items === items &&
+        cached.transitions === transitions
+      ) {
+        return cached
+      }
+      const info = {
+        item,
+        items,
+        transitions,
+        hasLeftNeighbor: !!findHandleNeighborWithTransitions(item, 'start', items, transitions),
+        hasRightNeighbor: !!findHandleNeighborWithTransitions(item, 'end', items, transitions),
+        hasStartBridge: hasTransitionBridgeAtHandle(transitions, item.id, 'start'),
+        hasEndBridge: hasTransitionBridgeAtHandle(transitions, item.id, 'end'),
+      }
+      trimNeighborInfoRef.current = info
+      return info
+    },
+    [item],
+  )
+
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (trackLocked || activeToolRef.current === 'razor' || isAnyDragActiveRef.current) {
@@ -96,22 +136,10 @@ export function useSmartTrimHover({
       const itemWidth = rect.width
 
       if (activeToolRef.current === 'trim-edit' || activeToolRef.current === 'select') {
-        const items = useTimelineStore.getState().items
+        const items = useItemsStore.getState().items
         const transitions = useTransitionsStore.getState().transitions
-        const hasLeftNeighbor = !!findHandleNeighborWithTransitions(
-          item,
-          'start',
-          items,
-          transitions,
-        )
-        const hasRightNeighbor = !!findHandleNeighborWithTransitions(
-          item,
-          'end',
-          items,
-          transitions,
-        )
-        const hasStartBridge = hasTransitionBridgeAtHandle(transitions, item.id, 'start')
-        const hasEndBridge = hasTransitionBridgeAtHandle(transitions, item.id, 'end')
+        const { hasLeftNeighbor, hasRightNeighbor, hasStartBridge, hasEndBridge } =
+          getTrimNeighborInfo(items, transitions)
         const nextIntent = resolveSmartTrimIntent({
           x,
           width: itemWidth,
@@ -187,6 +215,7 @@ export function useSmartTrimHover({
     [
       activeToolRef,
       isAnyDragActiveRef,
+      getTrimNeighborInfo,
       item,
       syncHoveredEdge,
       syncSmartBodyIntent,

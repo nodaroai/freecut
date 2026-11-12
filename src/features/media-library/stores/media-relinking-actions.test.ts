@@ -216,6 +216,42 @@ describe('createRelinkingActions', () => {
       expect(currentState.brokenMediaIds).toEqual(['media-2'])
       expect(currentState.brokenMediaInfo!.has('media-1')).toBe(false)
     })
+
+    it('prunes resolved orphans so the orphaned-clips dialog can auto-close', () => {
+      let currentState: RelinkingState = {
+        brokenMediaIds: ['media-1'],
+        brokenMediaInfo: new Map([
+          ['media-1', { mediaId: 'media-1', fileName: 'a.mp4', errorType: 'file_missing' }],
+        ]),
+        orphanedClips: [
+          {
+            itemId: 'clip-1',
+            mediaId: 'media-1',
+            itemType: 'video',
+            fileName: 'a.mp4',
+            trackId: 'track-1',
+          },
+          {
+            itemId: 'clip-2',
+            mediaId: 'media-2',
+            itemType: 'video',
+            fileName: 'b.mp4',
+            trackId: 'track-1',
+          },
+        ],
+        showOrphanedClipsDialog: true,
+      }
+      const set = vi.fn((updater: RelinkingUpdater) => {
+        currentState = applyStateUpdate(currentState, updater)
+      })
+      const get = vi.fn(() => currentState as MediaLibraryState & MediaLibraryActions)
+
+      const actions = createRelinkingActions(set, get)
+      actions.markMediaHealthy('media-1')
+
+      expect(currentState.brokenMediaIds).toEqual([])
+      expect(currentState.orphanedClips!.map((o) => o.itemId)).toEqual(['clip-2'])
+    })
   })
 
   describe('dismissMissingMediaWarnings', () => {

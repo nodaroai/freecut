@@ -5,13 +5,17 @@ import { useTransitionsStore } from '@/features/timeline/stores/transitions-stor
 import { useKeyframesStore } from '@/features/timeline/stores/keyframes-store'
 import { getSynchronizedLinkedItems } from '@/features/timeline/utils/linked-items'
 import {
+  addItems,
   deleteCompoundClips,
   getCompoundClipDeletionImpact,
   getMediaDeletionImpact,
   openComposition,
   openCompositionAsTab,
+  removeItems,
   removeProjectItems,
   renameCompoundClip,
+  setTracks,
+  updateItem,
   updateProjectItem,
 } from '@/features/timeline/stores/timeline-actions'
 import { execute } from '@/features/timeline/stores/actions/shared'
@@ -48,12 +52,20 @@ function removeTimelineItemsExact(ids: string[]): void {
 }
 
 export {
+  addItems,
   deleteCompoundClips,
   getCompoundClipDeletionImpact,
   getMediaDeletionImpact,
   openComposition,
   openCompositionAsTab,
   removeTimelineItemsExact,
+  removeItems,
   removeProjectItems,
   renameCompoundClip,
+  setTracks,
+  updateItem,
+  // Domain stores re-exported for the store-level adapter without adding a
+  // cross-feature import specifier (see check-feature-edge-budgets).
+  useItemsStore,
+  useTimelineSettingsStore,
 }

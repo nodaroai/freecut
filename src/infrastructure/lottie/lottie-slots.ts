@@ -13,6 +13,8 @@
  * slot is never mistaken for a vector.
  */
 
+import { parseLottieJsonObject as parseJson } from './lottie-json'
+
 /** A scalar (single number) or 2D vector value carried by a value slot. */
 export type LottieSlotValue = number | [number, number]
 
@@ -44,17 +46,6 @@ interface SlotProp {
 interface SlotDef {
   p?: SlotProp
   nm?: unknown
-}
-
-function parseJson(json: unknown): Record<string, unknown> | null {
-  if (typeof json === 'string') {
-    try {
-      return JSON.parse(json) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }
-  return json && typeof json === 'object' ? (json as Record<string, unknown>) : null
 }
 
 function isVec2(v: unknown): v is [number, number] {

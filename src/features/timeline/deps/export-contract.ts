@@ -4,7 +4,7 @@
  */
 
 export { convertTimelineToComposition } from '@/features/export/utils/timeline-to-composition'
-export type { ClientExportSettings, RenderProgress } from '@/features/export/utils/client-renderer'
+export type { ClientExportSettings, RenderProgress } from '@/runtime/renderer/client-renderer'
 
 export const importCanvasRenderOrchestrator = () =>
-  import('@/features/export/utils/canvas-render-orchestrator')
+  import('@/runtime/renderer/canvas-render-orchestrator')

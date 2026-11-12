@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react'
 import type { PreviewQuality } from '@/shared/state/playback'
 import { usePlaybackStore } from '@/shared/state/playback'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { useTimelineSettingsStore } from '@/features/preview/deps/timeline-store'
 import { createLogger } from '@/shared/logging/logger'
 import { getDecoderPrewarmMetricsSnapshot } from '../utils/decoder-prewarm'
 import { recordPreviewDecoderMetrics } from '@/shared/logging/preview-scrub-performance'
@@ -109,7 +109,7 @@ export function usePreviewPerfPublisher({
       const stats = previewPerfRef.current
       const seekNow = performance.now()
       const playbackState = usePlaybackStore.getState()
-      const timelineFps = useTimelineStore.getState().fps
+      const timelineFps = useTimelineSettingsStore.getState().fps
       const adaptiveQualityState = adaptiveQualityStateRef.current
       const frameTimeBudgetMs = getFrameBudgetMs(timelineFps, playbackState.playbackRate)
       const userPreviewQuality = playbackState.previewQuality

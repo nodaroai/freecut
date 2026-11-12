@@ -1,15 +1,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { TimelineItem } from '@/types/timeline'
 import { commitPreviewFrameToCurrentFrame } from '@/shared/state/playback'
-import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useDragInteractionPreamble } from './use-drag-interaction-preamble'
 import { useItemsStore } from '../stores/items-store'
 import { useTrackPushPreviewStore } from '../stores/track-push-preview-store'
-import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions'
-import { useSnapCalculator } from './use-snap-calculator'
+
 import { trackPushItems } from '../stores/actions/item-actions'
 import type { SnapTarget } from '../types/drag'
 import { setActiveSnapTargetIfChanged } from '../utils/snap-target-state'
+import { createRafCoalescedCallback } from '../utils/raf-coalesced-callback'
 
 interface TrackPushState {
   isActive: boolean
@@ -30,14 +29,15 @@ export function useTrackPush(
   timelineDuration: number,
   trackLocked: boolean = false,
 ) {
-  const pixelsToTime = pixelsToTimeNow
-  const fps = useTimelineStore((s) => s.fps)
-  const setDragState = useSelectionStore((s) => s.setDragState)
-  const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget)
-  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
-    timelineDuration,
-    item.id,
-  )
+  const {
+    pixelsToTime,
+    fps,
+    setDragState,
+    setActiveSnapTarget,
+    getMagneticSnapTargets,
+    getSnapThresholdFrames,
+    isSnapEnabled,
+  } = useDragInteractionPreamble(item, timelineDuration)
 
   const [state, setState] = useState<TrackPushState>({
     isActive: false,
@@ -96,9 +96,10 @@ export function useTrackPush(
         previewStore.setDelta(deltaFrames)
       }
 
-      if (deltaFrames !== stateRef.current.currentDelta) {
-        setState((prev) => ({ ...prev, currentDelta: deltaFrames }))
-      }
+      // The delta is only read imperatively (mouseup commit) and by the
+      // preview store above; keeping it in React state re-rendered the clip
+      // on every pointer frame for nothing.
+      stateRef.current.currentDelta = deltaFrames
 
       setActiveSnapTargetIfChanged({
         previousRef: prevSnapTargetRef,
@@ -125,11 +126,20 @@ export function useTrackPush(
 
   useEffect(() => {
     if (state.isActive) {
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
+      // Coalesce the pointer stream to one preview update per painted frame.
+      const coalescedMouseMove = createRafCoalescedCallback(handleMouseMove)
+      const queueMouseMove = (event: MouseEvent) => coalescedMouseMove.queue(event)
+      const handleCoalescedMouseUp = () => {
+        coalescedMouseMove.flush()
+        handleMouseUp()
+      }
+
+      window.addEventListener('mousemove', queueMouseMove)
+      window.addEventListener('mouseup', handleCoalescedMouseUp)
       return () => {
-        window.removeEventListener('mousemove', handleMouseMove)
-        window.removeEventListener('mouseup', handleMouseUp)
+        coalescedMouseMove.cancel()
+        window.removeEventListener('mousemove', queueMouseMove)
+        window.removeEventListener('mouseup', handleCoalescedMouseUp)
         useTrackPushPreviewStore.getState().clearPreview()
         magneticSnapTargetsRef.current = []
         setActiveSnapTarget(null)

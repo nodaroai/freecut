@@ -9,7 +9,7 @@
  */
 
 export { evaluateGlyphMotion, getActiveTextMotionSlot, isTextMotionActive } from './evaluate'
-export type { GlyphMotionState, GlyphMotionContext } from './evaluate'
+export type { GlyphMotionState } from './evaluate'
 
 export { segmentTextUnits } from './segment-units'
 export type { TextUnitSegmentation } from './segment-units'
@@ -21,16 +21,4 @@ export {
   TEXT_MOTION_OUT_PRESETS,
   TEXT_MOTION_LOOP_PRESETS,
 } from './text-motion-presets'
-export type { TextMotionPreset, TextMotionChannelContext } from './text-motion-presets'
-
-export {
-  TEXT_MOTION_IN_PRESET_IDS,
-  TEXT_MOTION_OUT_PRESET_IDS,
-  TEXT_MOTION_LOOP_PRESET_IDS,
-} from './text-motion-preset-ids'
-export type {
-  TextMotionInPresetId,
-  TextMotionOutPresetId,
-  TextMotionLoopPresetId,
-  TextMotionPresetId,
-} from './text-motion-preset-ids'
+export type { TextMotionPreset } from './text-motion-presets'

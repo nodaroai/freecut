@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import { RouterProvider } from '@tanstack/react-router'
 import { GlobalTooltip } from '@/components/ui/global-tooltip'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { ErrorBoundary } from '@/app/error-boundary'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { PwaInstallPrompt } from '@/app/pwa-install-prompt'
 import { WorkspaceGate } from '@/features/workspace-gate/workspace-gate'
 import { router } from '@/app/router'
@@ -19,7 +19,11 @@ const LazyToaster = lazy(async () => {
 // the message. The bundle cost is acceptable since embedded mode is the primary use case
 // for this fork.
 if (isEmbedded()) {
-  initEmbeddedMessageHandler()
+  initEmbeddedMessageHandler({
+    openEditor: (projectId) => {
+      void router.navigate({ to: '/editor/$projectId', params: { projectId } })
+    },
+  })
 }
 
 export function App() {

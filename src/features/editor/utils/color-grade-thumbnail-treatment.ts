@@ -6,6 +6,7 @@ import {
   readGpuCurvesChannelControl,
   type GpuCurvesChannelKey,
 } from '@/shared/utils/gpu-curves'
+import { clampFinite as clamp } from '@/shared/utils/math'
 
 type EffectParams = Record<string, number | boolean | string>
 
@@ -30,11 +31,6 @@ const DEFAULT_TREATMENT: ColorGradeThumbnailTreatment = {
   hasGrade: false,
   imageStyle: {},
   overlayStyle: null,
-}
-
-function clamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.max(min, Math.min(max, value))
 }
 
 function readNumber(params: EffectParams, key: string, fallback: number): number {

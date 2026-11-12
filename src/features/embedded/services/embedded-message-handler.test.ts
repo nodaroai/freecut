@@ -11,14 +11,14 @@ import {
 import { useEmbeddedStore } from '../stores/embedded-store'
 
 // A NODARO_LOAD_VIDEO with no video is an empty boot: it opens a fresh project
-// and navigates to it. These stand-ins keep that off storage and the router.
+// in the editor. These stand-ins keep that off storage, and the editor is
+// opened through the openEditor the tests pass in.
 vi.mock('./embedded-workspace', () => ({
   ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}),
 }))
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ createProject: vi.fn(async () => ({ id: 'p1' })) }) },
 }))
-vi.mock('@/app/router', () => ({ router: { navigate: vi.fn() } }))
 
 describe('isAllowedOrigin', () => {
   it.each([
@@ -170,7 +170,7 @@ describe('saveExit on the wire', () => {
   const PARENT = 'http://localhost:5173'
 
   beforeAll(() => {
-    initEmbeddedMessageHandler()
+    initEmbeddedMessageHandler({ openEditor: vi.fn() })
   })
 
   function send(type: string, payload?: Record<string, unknown>) {

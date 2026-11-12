@@ -45,7 +45,7 @@ export function isIndeterminateTranscriptionProgress(
  * worker. Those two run CONCURRENTLY, so they are not one ordered sequence — see
  * `mergeTranscriptionProgress`, which arbitrates between them.
  */
-export function isModelStage(stage: TranscriptionProgressStage): boolean {
+function isModelStage(stage: TranscriptionProgressStage): boolean {
   return stage === 'downloading' || stage === 'preparing'
 }
 

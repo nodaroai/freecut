@@ -6,8 +6,8 @@ import type { TimelineItem, ImageItem } from '@/types/timeline'
 import {
   captureSnapshot,
   rateStretchItemWithoutHistory,
+  useItemsStore,
   useTimelineCommandStore,
-  useTimelineStore,
 } from '@/features/editor/deps/timeline-store'
 import { PropertySection, PropertyRow, NumberInput } from '../components'
 import { getMixedValue } from '../utils'
@@ -55,7 +55,7 @@ export function GifSection({ items }: GifSectionProps) {
       // Clamp speed to valid range
       const clampedSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, roundedSpeed))
 
-      const currentItems = useTimelineStore.getState().items
+      const currentItems = useItemsStore.getState().items
       currentItems
         .filter(
           (item: TimelineItem): item is ImageItem =>
@@ -99,7 +99,7 @@ export function GifSection({ items }: GifSectionProps) {
   // Reset speed to 1x
   const handleResetSpeed = useCallback(() => {
     const tolerance = 0.01
-    const needsReset = useTimelineStore
+    const needsReset = useItemsStore
       .getState()
       .items.some(
         (item: TimelineItem) =>

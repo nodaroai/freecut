@@ -28,6 +28,7 @@ export class OperationQueue {
   #active = 0
   #waiting = 0
   #tail = Promise.resolve()
+  #capacityWaiters = new Set()
 
   constructor({ maxQueueDepth, recover }) {
     if (!Number.isInteger(maxQueueDepth) || maxQueueDepth < 0) {
@@ -40,6 +41,34 @@ export class OperationQueue {
   get accepting() {
     return this.#accepting
   }
+
+  get status() {
+    return {
+      accepting: this.#accepting,
+      active: this.#active,
+      waiting: this.#waiting,
+      maxQueueDepth: this.maxQueueDepth,
+    }
+  }
+
+  async waitForCapacity() {
+    if (!this.#accepting) {
+      throw new OperationQueueError('SERVICE_SHUTTING_DOWN', 'Service is shutting down', 503)
+    }
+    if (this.#active + this.#waiting < this.maxQueueDepth + 1) return
+    await new Promise((resolve) => this.#capacityWaiters.add(resolve))
+    if (!this.#accepting) {
+      throw new OperationQueueError('SERVICE_SHUTTING_DOWN', 'Service is shutting down', 503)
+    }
+  }
+
+  #notifyCapacity() {
+    if (this.#accepting && this.#active + this.#waiting >= this.maxQueueDepth + 1) return
+    const waiters = [...this.#capacityWaiters]
+    this.#capacityWaiters.clear()
+    waiters.forEach((resolve) => resolve())
+  }
+
   enqueue(run, { timeoutMs, kind = 'browser' }) {
     if (!this.#accepting) {
       throw new OperationQueueError('SERVICE_SHUTTING_DOWN', 'Service is shutting down', 503)
@@ -84,6 +113,7 @@ export class OperationQueue {
         )
       } finally {
         this.#active--
+        this.#notifyCapacity()
       }
     }
 
@@ -97,6 +127,7 @@ export class OperationQueue {
 
   async shutdown(timeoutMs) {
     this.#accepting = false
+    this.#notifyCapacity()
     await withDeadline(this.#tail, timeoutMs, 'shutdown').catch((error) => {
       if (error instanceof OperationQueueError && error.code === 'OPERATION_TIMEOUT') {
         throw new OperationQueueError(

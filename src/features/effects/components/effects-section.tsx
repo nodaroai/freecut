@@ -6,7 +6,16 @@ import { Button } from '@/components/ui/button'
 import type { TimelineItem } from '@/types/timeline'
 import type { ItemEffect, GpuEffect, VisualEffect } from '@/types/effects'
 import { EFFECT_PRESETS } from '@/types/effects'
-import { useTimelineStore } from '@/features/effects/deps/timeline-contract'
+import {
+  addEffect,
+  addEffects,
+  applyAutoKeyframeOperations,
+  removeEffect,
+  setItemEffects,
+  toggleEffect,
+  updateEffect,
+  useItemsStore,
+} from '@/features/effects/deps/timeline-contract'
 import {
   useGizmoStore,
   usePowerWindowEditorStore,
@@ -74,14 +83,6 @@ export const EffectsSection = memo(function EffectsSection({
   // Grade panels collapse to a summary row in the sidebar (the Edit workspace);
   // the dock owns the full grading surface, so it never collapses.
   const gradePanelCollapsible = !isDock
-  const addEffect = useTimelineStore((s) => s.addEffect)
-  const addEffects = useTimelineStore((s) => s.addEffects)
-  const updateEffect = useTimelineStore((s) => s.updateEffect)
-  const removeEffect = useTimelineStore((s) => s.removeEffect)
-  const toggleEffect = useTimelineStore((s) => s.toggleEffect)
-  const setItemEffects = useTimelineStore((s) => s.setItemEffects)
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
-
   // Gizmo store for live effect preview
   const setEffectsPreviewNew = useGizmoStore((s) => s.setEffectsPreviewNew)
   const clearPreview = useGizmoStore((s) => s.clearPreview)
@@ -161,7 +162,7 @@ export const EffectsSection = memo(function EffectsSection({
 
       if (gpuEffectId === 'gpu-power-window' && itemIds.length === 1) {
         const itemId = itemIds[0]!
-        const item = useTimelineStore.getState().items.find((candidate) => candidate.id === itemId)
+        const item = useItemsStore.getState().items.find((candidate) => candidate.id === itemId)
         const addedEffect = item?.effects?.at(-1)
         if (
           addedEffect?.effect.type === 'gpu-effect' &&
@@ -172,7 +173,7 @@ export const EffectsSection = memo(function EffectsSection({
         }
       }
     },
-    [addEffect, itemIds, startPowerWindowEditing, stopSpatialEffectEditing],
+    [itemIds, startPowerWindowEditing, stopSpatialEffectEditing],
   )
 
   const { gpuCategories, triggerPreviews } = useGpuEffectPreviewData()
@@ -246,13 +247,11 @@ export const EffectsSection = memo(function EffectsSection({
       queueMicrotask(() => clearPreview())
     },
     [
-      applyAutoKeyframeOperations,
       clearPreview,
       currentFrame,
       effects,
       getMappedEffectEntry,
       keyframesByItemId,
-      updateEffect,
       visualItems,
     ],
   )
@@ -330,13 +329,11 @@ export const EffectsSection = memo(function EffectsSection({
       queueMicrotask(() => clearPreview())
     },
     [
-      applyAutoKeyframeOperations,
       clearPreview,
       currentFrame,
       effects,
       getMappedEffectEntry,
       keyframesByItemId,
-      updateEffect,
       visualItems,
     ],
   )
@@ -404,7 +401,7 @@ export const EffectsSection = memo(function EffectsSection({
         })
       })
     },
-    [getMappedEffectEntry, updateEffect, visualItems],
+    [getMappedEffectEntry, visualItems],
   )
 
   // Apply a preset (adds multiple GPU effects as single undo/redo action)
@@ -420,7 +417,7 @@ export const EffectsSection = memo(function EffectsSection({
       }))
       addEffects(updates)
     },
-    [itemIds, addEffects],
+    [itemIds],
   )
 
   // Toggle effect visibility
@@ -433,7 +430,7 @@ export const EffectsSection = memo(function EffectsSection({
         }
       })
     },
-    [getMappedEffectEntry, toggleEffect, visualItems],
+    [getMappedEffectEntry, visualItems],
   )
 
   // Check if all effects are enabled
@@ -454,7 +451,7 @@ export const EffectsSection = memo(function EffectsSection({
         }
       })
     })
-  }, [allEffectsEnabled, effects, getMappedEffectEntry, toggleEffect, visualItems])
+  }, [allEffectsEnabled, effects, getMappedEffectEntry, visualItems])
 
   // Move effect up/down within the stack (order matters for color math).
   // One undo step across all selected items.
@@ -484,7 +481,7 @@ export const EffectsSection = memo(function EffectsSection({
         setItemEffects(updates)
       }
     },
-    [getMappedEffectEntry, isHiddenEffectEntry, setItemEffects, visualItems],
+    [getMappedEffectEntry, isHiddenEffectEntry, visualItems],
   )
 
   // Remove effect
@@ -497,7 +494,7 @@ export const EffectsSection = memo(function EffectsSection({
         }
       })
     },
-    [getMappedEffectEntry, removeEffect, visualItems],
+    [getMappedEffectEntry, visualItems],
   )
 
   // Effect picker popover state
@@ -521,7 +518,7 @@ export const EffectsSection = memo(function EffectsSection({
       if (!preset) return
       addEffects(itemIds.map((id) => ({ itemId: id, effects: preset.effects })))
     },
-    [itemIds, addEffects],
+    [itemIds],
   )
 
   const openPicker = useCallback(() => {

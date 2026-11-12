@@ -26,7 +26,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItemsTransform, useItemsStore } from '@/features/editor/deps/timeline-store'
 import { useProjectStore } from '@/features/editor/deps/projects'
 import { EffectsSection } from '@/features/editor/deps/effects-contract'
 import {
@@ -36,7 +36,6 @@ import {
 } from '@/shared/projects/defaults'
 import type { ClipInspectorTab } from '@/shared/state/editor'
 import type { SelectionState, SelectionActions } from '@/shared/state/selection'
-import type { TimelineState, TimelineActions } from '@/features/editor/deps/timeline-store'
 import type { TransformProperties } from '@/types/transform'
 import type { TimelineItem, VideoItem, CompositionItem } from '@/types/timeline'
 import { getLinkedAudioCompanion } from '@/shared/utils/linked-media'
@@ -391,9 +390,18 @@ const DeferredClipPanel = memo(function DeferredClipPanel({
   snapshot: ClipPanelSnapshot
 }) {
   const deferredSnapshot = useDeferredValue(snapshot)
+  // Controlled text fields must receive edits synchronously to retain the caret.
+  const textChanged = snapshot.selectedItems.some((item, index) => {
+    const deferredItem = deferredSnapshot.selectedItems[index]
+    return (
+      item.type === 'text' &&
+      deferredItem?.type === 'text' &&
+      item.text !== deferredItem.text
+    )
+  })
   return (
     <ClipPanelCore
-      selectedItems={deferredSnapshot.selectedItems}
+      selectedItems={textChanged ? snapshot.selectedItems : deferredSnapshot.selectedItems}
       audioPanelItems={deferredSnapshot.audioPanelItems}
     />
   )
@@ -421,9 +429,6 @@ const ClipPanelCore = memo(function ClipPanelCore({
   const setClipInspectorTab = useEditorStore((s) => s.setClipInspectorTab)
   const setWorkspace = useEditorStore((s) => s.setWorkspace)
   const handleEditInColor = useCallback(() => setWorkspace('color'), [setWorkspace])
-  const updateItemsTransform = useTimelineStore(
-    (s: TimelineState & TimelineActions) => s.updateItemsTransform,
-  )
   const projectWidth = useProjectStore(
     (s) => s.currentProject?.metadata.width ?? DEFAULT_PROJECT_WIDTH,
   )
@@ -515,14 +520,14 @@ const ClipPanelCore = memo(function ClipPanelCore({
     const newValue = !aspectLocked
     const itemIds = selectedItems.map((item: TimelineItem) => item.id)
     updateItemsTransform(itemIds, { aspectRatioLocked: newValue })
-  }, [aspectLocked, selectedItems, updateItemsTransform])
+  }, [aspectLocked, selectedItems])
 
   // Handle transform changes
   const handleTransformChange = useCallback(
     (ids: string[], updates: Partial<TransformProperties>) => {
       updateItemsTransform(ids, updates)
     },
-    [updateItemsTransform],
+    [],
   )
 
   // Edit always exposes one clip-level Animation surface. Motion uses the same

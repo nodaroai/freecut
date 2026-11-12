@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { useItemsStore } from '@/features/preview/deps/timeline-store'
 import { useRollingEditPreviewStore } from '@/features/preview/deps/timeline-edit-preview'
 import { EditTwoUpPanels } from './edit-2up-panels'
 import { getRollingEditPanelFrames } from './rolling-edit-overlay-utils'
@@ -17,7 +17,7 @@ export function RollingEditOverlay({ fps }: RollingEditOverlayProps) {
   const neighborItemId = useRollingEditPreviewStore((s) => s.neighborItemId)
   const handle = useRollingEditPreviewStore((s) => s.handle)
   const neighborDelta = useRollingEditPreviewStore((s) => s.neighborDelta)
-  const items = useTimelineStore((s) => s.items)
+  const items = useItemsStore((s) => s.items)
   const itemsMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
 
   if (!trimmedItemId || !neighborItemId || !handle) return null

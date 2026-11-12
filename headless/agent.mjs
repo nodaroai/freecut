@@ -25,6 +25,8 @@ import {
   getProjectResource,
   listMediaResources,
   listProjectResources,
+  projectForEngine,
+  publicProjectResource,
   rollbackStagedMedia,
   saveProjectResource,
   stageLocalMedia,
@@ -110,7 +112,7 @@ async function run(argv = process.argv.slice(2)) {
   if (group === 'project' && action === 'list')
     return envelope({ projects: await listProjectResources(workspace), nextCursor: null })
   if (group === 'project' && action === 'get')
-    return envelope(await getProjectResource(workspace, args.id))
+    return envelope(publicProjectResource(await getProjectResource(workspace, args.id)))
   if (group === 'media' && action === 'list')
     return envelope({ media: await listMediaResources(workspace) })
   if (group === 'media' && action === 'get')
@@ -174,7 +176,9 @@ async function run(argv = process.argv.slice(2)) {
           id: args.id,
         }),
       )
-      return envelope(await saveProjectResource(workspace, args.id, project, body))
+      return envelope(
+        publicProjectResource(await saveProjectResource(workspace, args.id, project, body)),
+      )
     }
     if (group === 'project' && action === 'update') {
       const body = validate(projectUpdateRequestSchema, {
@@ -191,7 +195,7 @@ async function run(argv = process.argv.slice(2)) {
       })
       const current = await getProjectResource(workspace, args.id)
       const next = {
-        ...current.project,
+        ...projectForEngine(current.project),
         ...body.updates,
         metadata: {
           ...current.project.metadata,
@@ -210,7 +214,9 @@ async function run(argv = process.argv.slice(2)) {
       const project = await withBrowser(workspace, args, (page) =>
         page.evaluate((value) => window.freecut.normalizeProject(value), next),
       )
-      return envelope(await saveProjectResource(workspace, args.id, project, body))
+      return envelope(
+        publicProjectResource(await saveProjectResource(workspace, args.id, project, body)),
+      )
     }
     if (group === 'project' && action === 'edit') {
       if (!args.ops) throw new Error('--ops is required')
@@ -223,7 +229,7 @@ async function run(argv = process.argv.slice(2)) {
       const current = await getProjectResource(workspace, args.id)
       const result = await withBrowser(workspace, args, async (page) => {
         const edited = await page.evaluate((payload) => window.freecut.editProject(payload), {
-          project: current.project,
+          project: projectForEngine(current.project),
           ops: body.ops,
           media: collectAddClipMedia(workspace, body.ops),
         })
@@ -241,7 +247,7 @@ async function run(argv = process.argv.slice(2)) {
       const saved = await saveProjectResource(workspace, args.id, result.project, body)
       return envelope({
         ...result,
-        project: saved.project,
+        project: projectForEngine(saved.project),
         persisted: true,
         revision: saved.revision,
         warnings: saved.warnings,

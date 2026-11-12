@@ -7,7 +7,9 @@ import { mapWithConcurrency } from '@/shared/utils/async-utils'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { addItem, addItems, setTracks } from '../stores/timeline-actions'
 import { useProjectStore } from '../deps/projects'
 import { getMediaType, resolveMediaUrl } from '../deps/media-library-resolver'
 import type { CollisionRect } from './collision-utils'
@@ -221,35 +223,36 @@ export async function addMediaItemsToTimeline(
     return
   }
 
-  const timelineState = useTimelineStore.getState()
+  const { items: currentItems, tracks: currentTracks } = useItemsStore.getState()
+  const fps = useTimelineSettingsStore.getState().fps
   const startFrame =
     position === 'end'
-      ? getTimelineEndFrame(timelineState.items)
+      ? getTimelineEndFrame(currentItems)
       : Math.max(0, usePlaybackStore.getState().currentFrame)
 
   const plan = planEntriesOntoTracks({
     entries,
     startFrame,
-    tracks: timelineState.tracks,
-    items: timelineState.items,
+    tracks: currentTracks,
+    items: currentItems,
     activeTrackId: useSelectionStore.getState().activeTrackId,
-    fps: timelineState.fps,
+    fps,
   })
 
-  const items = await resolvePlannedTimelineItems(plan.plannedItems, timelineState.fps)
+  const items = await resolvePlannedTimelineItems(plan.plannedItems, fps)
   const dropResult = { items, tracks: plan.tracks }
   prewarmDroppedTimelineAudio(entries, dropResult.items)
 
-  const store = useTimelineStore.getState()
   applyResolvedTimelineDrop({
-    addItem: store.addItem,
-    addItems: store.addItems,
-    currentTracks: store.tracks,
+    addItem,
+    addItems,
+    // Read again after the await: the tracks may have changed meanwhile.
+    currentTracks: useItemsStore.getState().tracks,
     dropResult,
     emptyMessage: i18n.t('timeline.track.unableToAddDroppedMediaItems'),
     notify: toast,
     partialFailureLabel: i18n.t('timeline.track.droppedMediaItems'),
     requestedCount: entries.length,
-    setTracks: store.setTracks,
+    setTracks,
   })
 }

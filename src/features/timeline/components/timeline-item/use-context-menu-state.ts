@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
 import { expandSelectionWithLinkedItems, getLinkedItemIds } from '../../utils/linked-items'
 
 export interface ContextMenuState {
@@ -21,7 +21,7 @@ export function useContextMenuState(item: TimelineItemType): ContextMenuState {
       setCloserEdge(x < midpoint ? 'left' : 'right')
 
       const { selectedItemIds, selectItems } = useSelectionStore.getState()
-      const items = useTimelineStore.getState().items
+      const items = useItemsStore.getState().items
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
       const targetIds = linkedSelectionEnabled ? getLinkedItemIds(items, item.id) : [item.id]
       const isCurrentSelection = targetIds.every((id) => selectedItemIds.includes(id))

@@ -6,7 +6,7 @@ import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
 import { emitUiSound } from '@/shared/ui/ui-sound'
 import type { TimelineItem } from '@/types/timeline'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
 import { expandSelectionWithLinkedItems, getLinkedItemIds } from '../utils/linked-items'
 import {
   buildTimelineDensityBuckets,
@@ -157,7 +157,7 @@ export const TimelineDensityOverview = memo(function TimelineDensityOverview({
               const item = findTimelineDensityBucketItem(bucket, frame)
               const selection = useSelectionStore.getState()
               const activeTool = selection.activeTool
-              const allItems = useTimelineStore.getState().items
+              const allItems = useItemsStore.getState().items
               const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
               const targetIds = linkedSelectionEnabled
                 ? getLinkedItemIds(allItems, item.id)

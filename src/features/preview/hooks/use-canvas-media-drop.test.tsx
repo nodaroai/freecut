@@ -5,6 +5,7 @@ import type { MediaMetadata } from '@/types/storage'
 const mocks = vi.hoisted(() => ({
   addItem: vi.fn(),
   addItemOnNewTrack: vi.fn(),
+  addItemWithLinkedAudio: vi.fn(),
   setActiveTrack: vi.fn(),
   selectItems: vi.fn(),
   findBestCanvasDropPlacement: vi.fn(() => ({ trackId: 'track-1', from: 24 })),
@@ -102,14 +103,17 @@ vi.mock('@/shared/state/playback', () => ({
 }))
 
 vi.mock('@/features/preview/deps/timeline-store', () => ({
-  useTimelineStore: Object.assign(() => undefined, {
+  addItem: mocks.addItem,
+  addItemOnNewTrack: mocks.addItemOnNewTrack,
+  addItemWithLinkedAudio: mocks.addItemWithLinkedAudio,
+  useItemsStore: Object.assign(() => undefined, {
     getState: () => ({
-      fps: 30,
       tracks: [],
       items: [],
-      addItem: mocks.addItem,
-      addItemOnNewTrack: mocks.addItemOnNewTrack,
     }),
+  }),
+  useTimelineSettingsStore: Object.assign(() => undefined, {
+    getState: () => ({ fps: 30 }),
   }),
 }))
 

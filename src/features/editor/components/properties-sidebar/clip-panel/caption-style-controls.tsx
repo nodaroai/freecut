@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/shared/ui/cn'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItem } from '@/features/editor/deps/timeline-store'
 import type { SubtitleSegmentItem, TextItem } from '@/types/timeline'
 
 import { ColorPicker, PropertyRow, SliderInput } from '../components'
@@ -42,7 +42,6 @@ export const CaptionStyleControls = memo(function CaptionStyleControls({
   onApplyPatch,
 }: CaptionStyleControlsProps) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s) => s.updateItem)
 
   const applyPatch = useCallback(
     (patch: Partial<CaptionStylableItem>) => {
@@ -52,7 +51,7 @@ export const CaptionStyleControls = memo(function CaptionStyleControls({
       }
       for (const item of items) updateItem(item.id, patch)
     },
-    [items, onApplyPatch, updateItem],
+    [items, onApplyPatch],
   )
 
   const applyPreset = useCallback(

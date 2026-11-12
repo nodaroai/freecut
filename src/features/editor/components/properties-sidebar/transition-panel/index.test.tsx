@@ -2,7 +2,8 @@ import type { ReactNode } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { transitionRegistry } from '@/shared/timeline/transitions'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useTransitionsStore } from '@/features/editor/deps/timeline-store'
+import { setTimelineState } from '@/features/editor/deps/timeline-test-helpers-contract'
 import { useSelectionStore } from '@/shared/state/selection'
 import type { Transition } from '@/types/transition'
 import type { VideoItem } from '@/types/timeline'
@@ -112,11 +113,11 @@ describe('TransitionPanel', () => {
       dragState: null,
     })
 
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 30,
       items: [LEFT_CLIP, RIGHT_CLIP],
       transitions: [TRANSITION],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
   })
 
   it('shows transition presets and exposes direction as a property', () => {
@@ -163,7 +164,7 @@ describe('TransitionPanel', () => {
 
     await waitFor(() => {
       expect(
-        useTimelineStore.getState().transitions.find((transition) => transition.id === 'tr-1')
+        useTransitionsStore.getState().transitions.find((transition) => transition.id === 'tr-1')
           ?.timing,
       ).toBe('ease-out')
     })
@@ -181,7 +182,7 @@ describe('TransitionPanel', () => {
       dragState: null,
     })
 
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 30,
       items: [LEFT_CLIP, RIGHT_CLIP],
       transitions: [
@@ -192,7 +193,7 @@ describe('TransitionPanel', () => {
           timing: 'linear',
         },
       ],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
 
     render(<TransitionPanel />)
 
@@ -210,7 +211,7 @@ describe('TransitionPanel', () => {
 
     await waitFor(() => {
       expect(
-        useTimelineStore.getState().transitions.find((transition) => transition.id === 'tr-1')
+        useTransitionsStore.getState().transitions.find((transition) => transition.id === 'tr-1')
           ?.direction,
       ).toBe('from-right')
     })
@@ -226,14 +227,14 @@ describe('TransitionPanel', () => {
 
     await waitFor(() => {
       expect(
-        useTimelineStore.getState().transitions.find((transition) => transition.id === 'tr-1')
+        useTransitionsStore.getState().transitions.find((transition) => transition.id === 'tr-1')
           ?.alignment,
       ).toBe(1)
     })
   })
 
   it('keeps duration unchanged and disables placements that lack enough handle', () => {
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 30,
       items: [
         LEFT_CLIP,
@@ -248,18 +249,18 @@ describe('TransitionPanel', () => {
           durationInFrames: 30,
         },
       ],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
 
     render(<TransitionPanel />)
 
     expect(screen.getByRole('button', { name: 'Left placement' })).toBeDisabled()
     expect(
-      useTimelineStore.getState().transitions.find((transition) => transition.id === 'tr-1'),
+      useTransitionsStore.getState().transitions.find((transition) => transition.id === 'tr-1'),
     ).toEqual(expect.objectContaining({ durationInFrames: 30, alignment: 0.5 }))
   })
 
   it('exposes a color property for dip to color dissolve', async () => {
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 30,
       items: [LEFT_CLIP, RIGHT_CLIP],
       transitions: [
@@ -269,7 +270,7 @@ describe('TransitionPanel', () => {
           properties: { color: [1, 0, 0] },
         },
       ],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
 
     render(<TransitionPanel />)
 
@@ -279,7 +280,7 @@ describe('TransitionPanel', () => {
   })
 
   it('exposes numeric parameters declared by transition definitions', () => {
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 30,
       items: [LEFT_CLIP, RIGHT_CLIP],
       transitions: [
@@ -289,7 +290,7 @@ describe('TransitionPanel', () => {
           properties: { strength: 1.4 },
         },
       ],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
 
     render(<TransitionPanel />)
 
@@ -298,7 +299,7 @@ describe('TransitionPanel', () => {
   })
 
   it('resets numeric parameters to their transition defaults', async () => {
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 30,
       items: [LEFT_CLIP, RIGHT_CLIP],
       transitions: [
@@ -308,7 +309,7 @@ describe('TransitionPanel', () => {
           properties: { strength: 1.4 },
         },
       ],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
 
     render(<TransitionPanel />)
 
@@ -319,14 +320,14 @@ describe('TransitionPanel', () => {
 
     await waitFor(() => {
       expect(
-        useTimelineStore.getState().transitions.find((transition) => transition.id === 'tr-1')
+        useTransitionsStore.getState().transitions.find((transition) => transition.id === 'tr-1')
           ?.properties?.strength,
       ).toBe(0.9)
     })
   })
 
   it('resets color parameters to their transition defaults', async () => {
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 30,
       items: [LEFT_CLIP, RIGHT_CLIP],
       transitions: [
@@ -336,7 +337,7 @@ describe('TransitionPanel', () => {
           properties: { color: [1, 0, 0] },
         },
       ],
-    } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+    })
 
     render(<TransitionPanel />)
 
@@ -347,7 +348,7 @@ describe('TransitionPanel', () => {
 
     await waitFor(() => {
       expect(
-        useTimelineStore.getState().transitions.find((transition) => transition.id === 'tr-1')
+        useTransitionsStore.getState().transitions.find((transition) => transition.id === 'tr-1')
           ?.properties?.color,
       ).toEqual([0, 0, 0])
     })

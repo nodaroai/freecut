@@ -1,7 +1,6 @@
 import { useCallback, useMemo, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Droplet, RotateCcw } from 'lucide-react'
-import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -17,7 +16,10 @@ import type { BlendMode } from '@/types/blend-modes'
 import { BLEND_MODE_GROUPS, BLEND_MODE_LABELS } from '@/types/blend-modes'
 import type { TransformProperties, CanvasSettings } from '@/types/transform'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
-import { useKeyframesStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  applyAutoKeyframeOperations,
+  updateItem,
+} from '@/features/editor/deps/timeline-store'
 import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import {
   getAutoKeyframeOperation,
@@ -27,6 +29,8 @@ import {
 } from '@/features/editor/deps/keyframes'
 import { PropertySection, PropertyRow, NumberInput, SliderInput } from '../components'
 import { applyAutoKeyframedTransformChange } from './auto-keyframe-transform'
+import { useKeyframesByItemId } from './use-keyframes-by-item-id'
+import { demixValue } from '../utils'
 
 interface FillSectionProps {
   items: TimelineItem[]
@@ -52,21 +56,7 @@ export const FillSection = memo(function FillSection({
   // Get current playhead frame for keyframe animation (throttled to reduce re-renders)
   const currentFrame = useThrottledFrame()
 
-  const itemKeyframes = useKeyframesStore(
-    useShallow(
-      useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId] ?? null), [itemIds]),
-    ),
-  )
-  const keyframesByItemId = useMemo(() => {
-    const map = new Map<string, (typeof itemKeyframes)[number]>()
-    for (const [index, itemId] of itemIds.entries()) {
-      map.set(itemId, itemKeyframes[index] ?? null)
-    }
-    return map
-  }, [itemIds, itemKeyframes])
-
-  // Item update for non-transform properties (blend mode)
-  const updateItem = useTimelineStore((s) => s.updateItem)
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   // Gizmo store for live preview
   const setTransformPreview = useGizmoStore((s) => s.setTransformPreview)
@@ -106,9 +96,6 @@ export const FillSection = memo(function FillSection({
   }, [items, canvas, keyframesByItemId, currentFrame])
 
   const opacity = opacityRaw === 'mixed' ? 'mixed' : Math.round(opacityRaw * 100)
-
-  // Get batched keyframe action for auto-keyframing
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
 
   // Helper: Check if opacity has keyframes and auto-keyframe on value change
   const autoKeyframeOpacity = useCallback(
@@ -160,7 +147,7 @@ export const FillSection = memo(function FillSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [itemIds, onTransformChange, clearPreview, autoKeyframeOpacity, applyAutoKeyframeOperations],
+    [itemIds, onTransformChange, clearPreview, autoKeyframeOpacity],
   )
 
   // Live preview for corner radius (during drag)
@@ -192,7 +179,6 @@ export const FillSection = memo(function FillSection({
       onTransformChange,
       clearPreview,
       autoKeyframeCornerRadius,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -216,7 +202,7 @@ export const FillSection = memo(function FillSection({
         updateItem(item.id, { blendMode: value as BlendMode })
       }
     },
-    [items, updateItem],
+    [items],
   )
 
   // Reset opacity to 100%
@@ -263,7 +249,7 @@ export const FillSection = memo(function FillSection({
           <KeyframeToggle
             itemIds={itemIds}
             property="opacity"
-            currentValue={opacityRaw === 'mixed' ? 1 : opacityRaw}
+            currentValue={demixValue(opacityRaw, 1)}
           />
           <Button
             variant="ghost"
@@ -280,7 +266,7 @@ export const FillSection = memo(function FillSection({
       {/* Blend Mode */}
       <PropertyRow label={t('editor.fillSection.blend')}>
         <Select
-          value={hasShapeMask ? 'normal' : blendMode === 'mixed' ? undefined : blendMode}
+          value={hasShapeMask ? 'normal' : demixValue(blendMode, undefined)}
           onValueChange={handleBlendModeChange}
           disabled={hasShapeMask}
         >
@@ -326,7 +312,7 @@ export const FillSection = memo(function FillSection({
           <KeyframeToggle
             itemIds={itemIds}
             property="cornerRadius"
-            currentValue={cornerRadius === 'mixed' ? 0 : cornerRadius}
+            currentValue={demixValue(cornerRadius, 0)}
           />
           <Button
             variant="ghost"

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
+import { canonicalJsonBytes, qualifiedSha256 } from './contract.mjs'
 import { HttpError, assertSinglePathComponent, resolveContained } from './http-security.mjs'
 import { resolveMediaFile } from './workspace.mjs'
 
@@ -129,6 +130,15 @@ export async function getProjectResource(workspace, id) {
   return { id, revision: resource.revision, project: resource.value }
 }
 
+export function projectForEngine(project) {
+  const { checkpointApplicationReceipts: _internalReceipts, ...engineProject } = project
+  return engineProject
+}
+
+export function publicProjectResource(resource) {
+  return resource?.project ? { ...resource, project: projectForEngine(resource.project) } : resource
+}
+
 export async function listProjectResources(workspace) {
   const root = path.join(workspace, 'projects')
   const results = []
@@ -195,7 +205,15 @@ export async function saveProjectResource(
   return withResourceLock(`project:${id}`, async () => {
     const current = await getProjectResource(workspace, id)
     checkRevision(current.revision, expectedRevision, force)
-    const next = { ...project, id, createdAt: current.project.createdAt, updatedAt: Date.now() }
+    const next = {
+      ...project,
+      id,
+      createdAt: current.project.createdAt,
+      updatedAt: Date.now(),
+      ...(current.project.checkpointApplicationReceipts
+        ? { checkpointApplicationReceipts: current.project.checkpointApplicationReceipts }
+        : {}),
+    }
     const bytes = Buffer.from(`${JSON.stringify(next, null, 2)}\n`)
     await atomicWriteFile(projectFile(workspace, id), bytes, {
       beforeCommit: async () => {
@@ -213,6 +231,79 @@ export async function saveProjectResource(
   })
 }
 
+function checkpointApplicationReceiptFor(project, operationId) {
+  return project?.checkpointApplicationReceipts?.[operationId] ?? null
+}
+
+export async function saveProjectResourceWithCheckpointReceipt(
+  workspace,
+  id,
+  project,
+  { expectedRevision, receipt, afterCommit } = {},
+) {
+  assertPortableId(id, 'project id')
+  if (
+    !receipt ||
+    typeof receipt.operationId !== 'string' ||
+    typeof receipt.requestSha256 !== 'string' ||
+    typeof receipt.recipeSha256 !== 'string' ||
+    typeof receipt.priorRevision !== 'string'
+  ) {
+    throw new TypeError('A complete checkpoint application receipt is required')
+  }
+  if (receipt.priorRevision !== expectedRevision) {
+    throw new TypeError('Checkpoint receipt priorRevision must equal expectedRevision')
+  }
+  return withResourceLock(`project:${id}`, async () => {
+    const current = await getProjectResource(workspace, id)
+    checkRevision(current.revision, expectedRevision, false)
+    const existing = checkpointApplicationReceiptFor(current.project, receipt.operationId)
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(receipt)) {
+        throw new HttpError(
+          409,
+          'CHECKPOINT_RECEIPT_MISMATCH',
+          'Project contains a different receipt for this checkpoint operation',
+        )
+      }
+      return current
+    }
+    const nextEngineProject = {
+      ...projectForEngine(project),
+      id,
+      createdAt: current.project.createdAt,
+      updatedAt: Date.now(),
+    }
+    const committedReceipt = {
+      ...receipt,
+      appliedProjectSha256: qualifiedSha256(canonicalJsonBytes(nextEngineProject)),
+    }
+    const next = {
+      ...nextEngineProject,
+      checkpointApplicationReceipts: {
+        ...(current.project.checkpointApplicationReceipts ?? {}),
+        [receipt.operationId]: committedReceipt,
+      },
+    }
+    const bytes = Buffer.from(`${JSON.stringify(next, null, 2)}\n`)
+    const revision = revisionOf(bytes)
+    await atomicWriteFile(projectFile(workspace, id), bytes, {
+      beforeCommit: async () => {
+        const latest = await getProjectResource(workspace, id)
+        checkRevision(latest.revision, current.revision, false)
+      },
+    })
+    await afterCommit?.({ id, revision, project: next })
+    const warnings = []
+    try {
+      await withResourceLock('projects:index', () => rebuildIndex(workspace))
+    } catch {
+      warnings.push('INDEX_REPAIR_REQUIRED')
+    }
+    return { id, revision, project: next, receipt: committedReceipt, warnings }
+  })
+}
+
 function localPidIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return null
   try {
@@ -225,6 +316,74 @@ function localPidIsAlive(pid) {
   }
 }
 
+function readLockRecord(lockPath) {
+  try {
+    return JSON.parse(fs.readFileSync(lockPath, 'utf8'))
+  } catch {
+    throw new HttpError(503, 'WORKSPACE_LOCKED', 'Workspace writer lock is unreadable')
+  }
+}
+
+/** A lock is only breakable when its owner is a dead local process. */
+function assertLockOwnerIsGone(recorded) {
+  const localHost = !recorded.hostname || recorded.hostname === os.hostname()
+  const alive = localHost ? localPidIsAlive(recorded.pid) : null
+  if (alive !== false) {
+    throw new HttpError(
+      503,
+      'WORKSPACE_LOCKED',
+      alive
+        ? 'Workspace already has a live agent writer'
+        : 'Workspace writer cannot be confirmed stale',
+    )
+  }
+}
+
+function assertLockIsStale(recorded, { breakLock, staleGraceMs }) {
+  const age = Date.now() - Number(recorded.createdAt)
+  if (!breakLock && (!Number.isFinite(age) || age < staleGraceMs)) {
+    throw new HttpError(
+      503,
+      'WORKSPACE_LOCKED',
+      'Workspace writer lock is within the stale-lock grace period',
+    )
+  }
+}
+
+/**
+ * Take the abandoned lock by renaming it aside first: if the token changed
+ * underneath us another writer won the race, so we put it back and give up.
+ */
+async function reclaimStaleLock(dir, lockPath, recorded) {
+  const recoveryPath = path.join(dir, `writer.lock.recover.${process.pid}.${crypto.randomUUID()}`)
+  try {
+    await fs.promises.rename(lockPath, recoveryPath)
+    const claimed = JSON.parse(await fs.promises.readFile(recoveryPath, 'utf8'))
+    if (claimed.token !== recorded.token) {
+      await fs.promises.rename(recoveryPath, lockPath).catch(() => {})
+      throw new HttpError(503, 'WORKSPACE_LOCKED', 'Workspace writer changed during recovery')
+    }
+    await fs.promises.rm(recoveryPath, { force: true })
+    return await fs.promises.open(lockPath, 'wx', 0o600)
+  } catch (retryError) {
+    if (retryError.code === 'EEXIST')
+      throw new HttpError(503, 'WORKSPACE_LOCKED', 'Workspace writer lock was reacquired')
+    throw retryError
+  }
+}
+
+async function openWriterLock(dir, lockPath, options) {
+  try {
+    return await fs.promises.open(lockPath, 'wx', 0o600)
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error
+    const recorded = readLockRecord(lockPath)
+    assertLockOwnerIsGone(recorded)
+    assertLockIsStale(recorded, options)
+    return reclaimStaleLock(dir, lockPath, recorded)
+  }
+}
+
 export async function acquireWriterLock(
   workspace,
   { breakLock = false, staleGraceMs = 60_000 } = {},
@@ -232,58 +391,7 @@ export async function acquireWriterLock(
   const dir = path.join(workspace, '.freecut-headless')
   await fs.promises.mkdir(dir, { recursive: true })
   const lockPath = path.join(dir, 'writer.lock')
-  let handle
-  try {
-    handle = await fs.promises.open(lockPath, 'wx', 0o600)
-  } catch (error) {
-    if (error.code === 'EEXIST') {
-      let recorded
-      try {
-        recorded = JSON.parse(await fs.promises.readFile(lockPath, 'utf8'))
-      } catch {
-        throw new HttpError(503, 'WORKSPACE_LOCKED', 'Workspace writer lock is unreadable')
-      }
-      const localHost = !recorded.hostname || recorded.hostname === os.hostname()
-      const alive = localHost ? localPidIsAlive(recorded.pid) : null
-      if (alive !== false) {
-        throw new HttpError(
-          503,
-          'WORKSPACE_LOCKED',
-          alive
-            ? 'Workspace already has a live agent writer'
-            : 'Workspace writer cannot be confirmed stale',
-        )
-      }
-      const age = Date.now() - Number(recorded.createdAt)
-      if (!breakLock && (!Number.isFinite(age) || age < staleGraceMs)) {
-        throw new HttpError(
-          503,
-          'WORKSPACE_LOCKED',
-          'Workspace writer lock is within the stale-lock grace period',
-        )
-      }
-      const recoveryPath = path.join(
-        dir,
-        `writer.lock.recover.${process.pid}.${crypto.randomUUID()}`,
-      )
-      try {
-        await fs.promises.rename(lockPath, recoveryPath)
-        const claimed = JSON.parse(await fs.promises.readFile(recoveryPath, 'utf8'))
-        if (claimed.token !== recorded.token) {
-          await fs.promises.rename(recoveryPath, lockPath).catch(() => {})
-          throw new HttpError(503, 'WORKSPACE_LOCKED', 'Workspace writer changed during recovery')
-        }
-        await fs.promises.rm(recoveryPath, { force: true })
-        handle = await fs.promises.open(lockPath, 'wx', 0o600)
-      } catch (retryError) {
-        if (retryError.code === 'EEXIST')
-          throw new HttpError(503, 'WORKSPACE_LOCKED', 'Workspace writer lock was reacquired')
-        throw retryError
-      }
-    } else {
-      throw error
-    }
-  }
+  const handle = await openWriterLock(dir, lockPath, { breakLock, staleGraceMs })
   const token = crypto.randomUUID()
   await handle.writeFile(
     JSON.stringify({ pid: process.pid, hostname: os.hostname(), token, createdAt: Date.now() }),

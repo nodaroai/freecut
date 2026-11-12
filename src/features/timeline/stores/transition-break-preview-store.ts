@@ -19,11 +19,15 @@ export const useTransitionBreakPreviewStore = create<
   handle: null,
   delta: 0,
   setPreview: (params) => set(params),
-  setDelta: (delta) => set({ delta }),
+  setDelta: (delta) => set((state) => (state.delta === delta ? state : { delta })),
   clearPreview: () =>
-    set({
-      itemId: null,
-      handle: null,
-      delta: 0,
-    }),
+    set((state) =>
+      state.itemId === null && state.handle === null && state.delta === 0
+        ? state
+        : {
+            itemId: null,
+            handle: null,
+            delta: 0,
+          },
+    ),
 }))

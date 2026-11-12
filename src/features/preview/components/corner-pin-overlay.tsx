@@ -22,8 +22,7 @@ import {
   resolveCornerPinForSize,
   withCornerPinReferenceSize,
 } from '@/features/preview/deps/composition-runtime'
-import { useItemsStore } from '@/features/preview/deps/timeline-store'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { updateItem, useItemsStore } from '@/features/preview/deps/timeline-store'
 import type { CoordinateParams, Transform } from '../types/gizmo'
 import { getEffectiveScale } from '../utils/coordinate-transform'
 
@@ -56,12 +55,13 @@ export const CornerPinOverlay = memo(function CornerPinOverlay({
   const dragHandleRef = useRef<CornerPinHandle | null>(null)
   const dragStartPinRef = useRef<CornerPinValues>(DEFAULT_PIN)
 
-  const { editingItemId, draggingHandle, hoveredHandle, previewCornerPin, setHovered } =
-    useCornerPinStore()
+  const editingItemId = useCornerPinStore((s) => s.editingItemId)
+  const draggingHandle = useCornerPinStore((s) => s.draggingHandle)
+  const hoveredHandle = useCornerPinStore((s) => s.hoveredHandle)
+  const previewCornerPin = useCornerPinStore((s) => s.previewCornerPin)
+  const setHovered = useCornerPinStore((s) => s.setHovered)
 
-  const items = useItemsStore((s) => s.items)
-
-  const item = items.find((i) => i.id === editingItemId)
+  const item = useItemsStore((s) => (editingItemId ? s.itemById[editingItemId] : undefined))
   const cornerPinTargetRect = useCallback(
     (transform: Transform) =>
       resolveCornerPinTargetRect(
@@ -341,7 +341,7 @@ export const CornerPinOverlay = memo(function CornerPinOverlay({
       const itemId = editingItemIdRef.current
       if (finalPreview && itemId && handle) {
         const targetRect = cornerPinTargetRect(itemTransformRef.current)
-        useTimelineStore.getState().updateItem(itemId, {
+        updateItem(itemId, {
           cornerPin: withCornerPinReferenceSize(finalPreview, targetRect.width, targetRect.height),
         })
       }

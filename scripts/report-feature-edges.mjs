@@ -22,6 +22,18 @@ function isFeatureDepsFile(absolutePath) {
   return /^src\/features\/[^/]+\/deps\//.test(relative);
 }
 
+/**
+ * Test-only seams (`*-test-helpers.ts` and `*-test-helpers-contract.ts`) are
+ * imported exclusively by specs, so they are not production coupling and are
+ * excluded from the edge report the budgets are calibrated against. They still
+ * cross a feature boundary, so the file has to live in the importing feature's
+ * deps/ directory like any other adapter.
+ */
+function isTestOnlySeam(absolutePath) {
+  const relative = relativeToRoot(absolutePath);
+  return /-test-helpers(-contract)?\.ts$/.test(relative);
+}
+
 function resolveTargetFeature(fromFile, rawSpecifier) {
   const normalizedSpecifier = stripQueryAndHash(rawSpecifier);
 
@@ -101,6 +113,7 @@ function reportFeatureEdges() {
   for (const file of files) {
     const fromFeature = getFeatureNameFromFeatureFile(file);
     if (!fromFeature) continue;
+    if (isTestOnlySeam(file)) continue;
 
     const source = fs.readFileSync(file, 'utf8');
     const specifiers = collectSpecifiers(source);

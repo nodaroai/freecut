@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import type { TimelineTrack } from '@/types/timeline'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
+import { setTracks } from '../stores/timeline-actions'
 import { getTrackKind } from '@/features/timeline/utils/classic-tracks'
 import { isTrackSyncLockActive } from '../utils/track-sync-lock'
 import { emitUiSound } from '@/shared/ui/ui-sound'
@@ -16,8 +17,7 @@ function clampTrackVolume(volume: number): number {
  */
 export function useTimelineTracks() {
   // Use granular selectors - Zustand v5 best practice
-  const tracks = useTimelineStore((s) => s.tracks)
-  const setTracks = useTimelineStore((s) => s.setTracks)
+  const tracks = useItemsStore((s) => s.tracks)
 
   /**
    * Add a new track to the timeline (at the top/beginning)
@@ -26,14 +26,14 @@ export function useTimelineTracks() {
    */
   const addTrack = useCallback(
     (track: TimelineTrack) => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       // Give it an order lower than all existing tracks
       const minOrder =
         currentTracks.length > 0 ? Math.min(...currentTracks.map((t) => t.order ?? 0)) : 0
       const trackWithOrder = { ...track, order: minOrder - 1 }
       setTracks([trackWithOrder, ...currentTracks])
     },
-    [setTracks],
+    []
   )
 
   /**
@@ -42,10 +42,10 @@ export function useTimelineTracks() {
    */
   const removeTrack = useCallback(
     (id: string) => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       setTracks(currentTracks.filter((track) => track.id !== id))
     },
-    [setTracks],
+    []
   )
 
   /**
@@ -55,11 +55,11 @@ export function useTimelineTracks() {
    */
   const removeTracks = useCallback(
     (ids: string[]) => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const idsSet = new Set(ids)
       setTracks(currentTracks.filter((track) => !idsSet.has(track.id)))
     },
-    [setTracks],
+    []
   )
 
   /**
@@ -70,7 +70,7 @@ export function useTimelineTracks() {
    */
   const insertTrack = useCallback(
     (track: TimelineTrack, beforeTrackId: string | null = null) => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
 
       if (!beforeTrackId) {
         // Insert at the top - give it an order lower than all existing tracks
@@ -106,7 +106,7 @@ export function useTimelineTracks() {
       newTracks.splice(targetIndex, 0, trackWithOrder)
       setTracks(newTracks)
     },
-    [setTracks],
+    []
   )
 
   /**
@@ -115,10 +115,10 @@ export function useTimelineTracks() {
    */
   const updateTrack = useCallback(
     (id: string, updates: Partial<TimelineTrack>) => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       setTracks(currentTracks.map((track) => (track.id === id ? { ...track, ...updates } : track)))
     },
-    [setTracks],
+    []
   )
 
   /**
@@ -127,18 +127,18 @@ export function useTimelineTracks() {
    */
   const reorderTracks = useCallback(
     (trackIds: string[]) => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const reordered = trackIds
         .map((id) => currentTracks.find((t) => t.id === id))
         .filter((t): t is TimelineTrack => t !== undefined)
       setTracks(reordered)
     },
-    [setTracks],
+    []
   )
 
   const updateExistingTrack = useCallback(
     (id: string, getUpdates: (track: TimelineTrack) => Partial<TimelineTrack>) => {
-      const track = useTimelineStore.getState().tracks.find((t) => t.id === id)
+      const track = useItemsStore.getState().tracks.find((t) => t.id === id)
       if (!track) return
       updateTrack(id, getUpdates(track))
     },
@@ -238,7 +238,7 @@ export function useTimelineTracks() {
    */
   const toggleTrackSolo = useCallback(
     (id: string) => {
-      const currentTracks = useTimelineStore.getState().tracks
+      const currentTracks = useItemsStore.getState().tracks
       const targetTrack = currentTracks.find((t) => t.id === id)
       if (!targetTrack) return
 

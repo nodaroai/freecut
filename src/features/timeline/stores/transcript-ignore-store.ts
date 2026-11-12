@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import { useItemsStore } from './items-store'
-import { useTimelineStore } from './timeline-store'
+import { removeTranscriptRangesFromItems } from './timeline-actions'
 import {
   normalizeRanges,
   subtractRanges,
@@ -92,9 +92,7 @@ export const useTranscriptIgnoreStore = create<TranscriptIgnoreState>((set, get)
       rangesByMediaId[mediaId] = normalizeRanges(ranges[mediaId] ?? [])
     }
 
-    const result = useTimelineStore
-      .getState()
-      .removeTranscriptRangesFromItems(itemIds, rangesByMediaId)
+    const result = removeTranscriptRangesFromItems(itemIds, rangesByMediaId)
     set({ ranges: {} })
     return result
   },

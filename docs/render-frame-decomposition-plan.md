@@ -1,7 +1,7 @@
 # `renderFrame` Decomposition Plan
 
 A staged plan for decomposing `createCompositionRenderer`'s `renderFrame` method
-in `src/features/export/utils/client-render-engine.ts`. This is the **highest-risk**
+in `src/runtime/renderer/client-render-engine.ts`. This is the **highest-risk**
 remaining work on the repo's #2 churn×complexity hotspot, and it touches the
 export/preview render path where regressions are silent (wrong pixels, not crashes).
 
@@ -130,7 +130,7 @@ them one commit at a time.
 
 Automated checks are necessary but **not sufficient** here.
 
-- `npm run lint` (0/0) and `npm run test:run -- src/features/export/utils/
+- `npm run lint` (0/0) and `npm run test:run -- src/runtime/renderer/
   src/features/preview/components/video-preview.sync.test.tsx
   src/features/preview/components/inline-composition-preview.test.tsx` (all green).
 - **Manual, in `npm run dev`:**
@@ -177,3 +177,29 @@ Automated checks are necessary but **not sufficient** here.
 - The hotspot's `complexity_density` should finally drop (complexity is split
   across cohesive methods), and the per-helper unit tests from Phase A improve the
   coverage signal fallow currently flags.
+
+## Phase C reassessment (after Phase B)
+
+Phase C was scoped when `renderFrame` was still a 1,088-line body with eight nested
+closures and dual-scope captures. Phases A and B removed that premise. What remains
+in `run()` is 2 substantive loops (`renderTask` ~67 lines,
+`renderTasksWithInteractionLimit` ~76), a handful of predicates, and four
+*adapters* that exist only to bind per-frame captures for the callback bag
+`compositeFrameResults` consumes (`applyTrackScopedMasks`,
+`renderMasksToGpuTexture`, `renderTransitionFallbackCanvas`,
+`renderItemWithEffects` — 38 lines in total).
+
+Lifting those adapters to methods does not reduce work: three of them are 2–9 line
+delegations to the pure helpers in `frame-render-tasks.ts`/`frame-mask-helpers.ts`,
+and a method passed as a callback must be bound, which allocates exactly like the
+closure it replaces. Pre-binding them once per pass instance would save ~4 of the
+~15 function objects `run()` allocates per frame — not measurable against a frame
+render.
+
+Decision: Phase C and D are dropped as written. Their structural goal — isolating
+the GPU-compositing branch from the Canvas2D path, and making the per-frame
+pipeline readable — is already met: the branches are in `frame-render-pass.ts`
+behind `FrameRenderDeps`, the item effect/mask/blend work is in
+`frame-render-tasks.ts`, and `headless/frame-oracle.mjs` proves the split is
+pixel-faithful. Split `run()` only for a concrete reason (a second render mode, a
+profiling-driven reorder) with the oracle in hand.

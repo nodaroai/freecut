@@ -3,7 +3,7 @@ import { act, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { TimelineItem } from '@/types/timeline'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../stores/timeline-store'
+import { setTimelineState } from '../test-helpers'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
 
 vi.mock('./timeline-item', () => ({
@@ -52,7 +52,7 @@ const items: TimelineItem[] = [
 
 describe('TimelineTrackItems stable DOM renderer', () => {
   beforeEach(() => {
-    useTimelineStore.setState({ fps: 30 })
+    setTimelineState({ fps: 30 })
     useSelectionStore.getState().selectItems([])
     _resetZoomStoreForTest()
   })

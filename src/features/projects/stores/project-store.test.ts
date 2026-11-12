@@ -26,13 +26,6 @@ vi.mock('@/features/projects/deps/media-library-contract', () => ({
   })),
 }))
 
-vi.mock('@/features/projects/deps/settings-contract', () => ({
-  useSettingsStore: {
-    getState: () => ({ maxUndoHistory: 100 }),
-    subscribe: vi.fn(),
-  },
-}))
-
 const { useProjectStore } = await import('./project-store')
 
 function makeProject(id: string): Project {

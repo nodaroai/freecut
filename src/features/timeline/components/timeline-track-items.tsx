@@ -4,7 +4,7 @@ import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { TimelineItem } from './timeline-item'
 import { TimelineDensityOverview } from './timeline-density-overview'
 import { TimelineJoinIndicatorsZoomGate } from './timeline-item/join-indicators'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useZoomStore } from '../stores/zoom-store'
 import { useVisibleItemDetailRange } from '../hooks/use-visible-items'
 import { useStagedTimelineDetailIds } from '../hooks/use-staged-timeline-detail'
@@ -69,7 +69,7 @@ export const TimelineTrackItems = memo(function TimelineTrackItems({
   trackLocked,
   trackHidden,
 }: TimelineTrackItemsProps) {
-  const fps = useTimelineStore((state) => state.fps)
+  const fps = useTimelineSettingsStore((state) => state.fps)
   const detailRange = useVisibleItemDetailRange(trackId)
   const usesDensityOverview = totalTrackItemCount >= DENSE_TIMELINE_OVERVIEW_ITEM_THRESHOLD
   const visibleItemRangeIndex = useMemo(

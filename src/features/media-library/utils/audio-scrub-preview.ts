@@ -16,11 +16,14 @@ interface AudioScrubPreviewOptions {
   grainDurationSeconds?: number
   fadeSeconds?: number
   gain?: number
+  /** Total decoded-PCM budget for cached scrub buffers. Defaults to 64 MB. */
+  maxCachedBufferBytes?: number
 }
 
 const DEFAULT_GRAIN_DURATION_SECONDS = 0.08
 const DEFAULT_FADE_SECONDS = 0.008
 const DEFAULT_GAIN = 0.8
+const DEFAULT_MAX_CACHED_BUFFER_BYTES = 64 * 1024 * 1024
 
 export function getAudioScrubTime(durationSeconds: number, progress: number): number {
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
@@ -46,16 +49,36 @@ export function createAudioScrubPreview(options: AudioScrubPreviewOptions = {}) 
   const grainDurationSeconds = options.grainDurationSeconds ?? DEFAULT_GRAIN_DURATION_SECONDS
   const fadeSeconds = options.fadeSeconds ?? DEFAULT_FADE_SECONDS
   const gainValue = options.gain ?? DEFAULT_GAIN
+  const maxCachedBufferBytes = options.maxCachedBufferBytes ?? DEFAULT_MAX_CACHED_BUFFER_BYTES
 
   let context: AudioContext | null = null
   let activeGrain: ActiveGrain | null = null
   const buffers = new Map<string, Promise<AudioBuffer>>()
+  const bufferBytesById = new Map<string, number>()
 
   const getContext = () => {
     if (!context) {
       context = createAudioContext()
     }
     return context
+  }
+
+  // Scrubbing only ever plays one buffer at a time; a full-song decoded PCM is
+  // ~230 MB, so keep the cache under a byte budget instead of retaining every
+  // media ever scrubbed for the lifetime of the session.
+  const evictOverBudgetBuffers = () => {
+    let totalBytes = 0
+    for (const bytes of bufferBytesById.values()) {
+      totalBytes += bytes
+    }
+    for (const mediaId of buffers.keys()) {
+      if (totalBytes <= maxCachedBufferBytes) break
+      const bytes = bufferBytesById.get(mediaId)
+      if (bytes === undefined) continue
+      buffers.delete(mediaId)
+      bufferBytesById.delete(mediaId)
+      totalBytes -= bytes
+    }
   }
 
   const loadBuffer = (mediaId: string, mediaUrl: string) => {
@@ -65,10 +88,20 @@ export function createAudioScrubPreview(options: AudioScrubPreviewOptions = {}) 
     const bufferPromise = (async () => {
       const ctx = getContext()
       const arrayBuffer = await fetchArrayBuffer(mediaUrl)
-      return ctx.decodeAudioData(arrayBuffer.slice(0))
+      const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0))
+      bufferBytesById.set(mediaId, decoded.length * decoded.numberOfChannels * 4)
+      evictOverBudgetBuffers()
+      return decoded
     })()
 
     buffers.set(mediaId, bufferPromise)
+    void bufferPromise.catch(() => {
+      // Failed decodes must not poison the cache — a later scrub can retry.
+      if (buffers.get(mediaId) === bufferPromise) {
+        buffers.delete(mediaId)
+        bufferBytesById.delete(mediaId)
+      }
+    })
     return bufferPromise
   }
 
@@ -146,6 +179,7 @@ export function createAudioScrubPreview(options: AudioScrubPreviewOptions = {}) 
   const dispose = () => {
     stop()
     buffers.clear()
+    bufferBytesById.clear()
     if (context) {
       void context.close().catch(() => {})
       context = null

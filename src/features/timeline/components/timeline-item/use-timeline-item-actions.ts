@@ -19,7 +19,8 @@ import {
   mediaTranscriptionService,
   runMediaTranscriptionJob,
 } from '@/features/timeline/deps/media-transcription-service'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useTimelineSettingsStore } from '../../stores/timeline-settings-store'
+import { joinItems, removeItems, rippleDeleteItems } from '../../stores/timeline-actions'
 import { useItemsStore } from '../../stores/items-store'
 import {
   insertFreezeFrame,
@@ -137,34 +138,34 @@ export function useTimelineItemActions({
         .map((id) => itemById[id])
         .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined)
       if (canJoinMultipleItems(selectedItems)) {
-        useTimelineStore.getState().joinItems(selectedItemIds)
+        joinItems(selectedItemIds)
       }
     }
   }, [])
 
   const handleJoinLeft = useCallback(() => {
     if (leftNeighbor) {
-      useTimelineStore.getState().joinItems([leftNeighbor.id, item.id])
+      joinItems([leftNeighbor.id, item.id])
     }
   }, [leftNeighbor, item.id])
 
   const handleJoinRight = useCallback(() => {
     if (rightNeighbor) {
-      useTimelineStore.getState().joinItems([item.id, rightNeighbor.id])
+      joinItems([item.id, rightNeighbor.id])
     }
   }, [rightNeighbor, item.id])
 
   const handleDelete = useCallback(() => {
     const selectedItemIds = useSelectionStore.getState().selectedItemIds
     if (selectedItemIds.length > 0) {
-      useTimelineStore.getState().removeItems(selectedItemIds)
+      removeItems(selectedItemIds)
     }
   }, [])
 
   const handleRippleDelete = useCallback(() => {
     const selectedItemIds = useSelectionStore.getState().selectedItemIds
     if (selectedItemIds.length > 0) {
-      useTimelineStore.getState().rippleDeleteItems(selectedItemIds)
+      rippleDeleteItems(selectedItemIds)
     }
   }, [])
 
@@ -416,7 +417,7 @@ export function useTimelineItemActions({
             }
           })
 
-          const currentFps = useTimelineStore.getState().fps
+          const currentFps = useTimelineSettingsStore.getState().fps
           const media = useMediaLibraryStore.getState().mediaById[mediaId]
           const mediaFps = media?.fps ?? currentFps
           const { detectScenes } = await importSceneDetection()

@@ -7,13 +7,11 @@
  *  - suppresses sounds while the preview is actively playing so UI chirps never
  *    pollute the audio the user is monitoring.
  *
- * Call {@link emitUiSound} from anywhere (event handlers, store actions), or use
- * {@link useUiSound} inside a component for a stable callback. Emit *intent*
- * (`'select'`, `'delete'`), never a specific sound — the active voice decides
- * how it sounds.
+ * Call {@link emitUiSound} from anywhere (event handlers, store actions). Emit
+ * *intent* (`'select'`, `'delete'`), never a specific sound — the active voice
+ * decides how it sounds.
  */
 
-import { useCallback } from 'react'
 import { playSound, VOICES, type SoundToken, type VoiceName } from '@/infrastructure/audio/ui-sound'
 import { createLogger } from '@/shared/logging/logger'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -42,11 +40,6 @@ export function emitUiSound(token: SoundToken): void {
   }
 
   playSound(token, recipe, volume)
-}
-
-/** Hook returning a stable {@link emitUiSound} callback for use in components. */
-export function useUiSound(): (token: SoundToken) => void {
-  return useCallback((token: SoundToken) => emitUiSound(token), [])
 }
 
 /**

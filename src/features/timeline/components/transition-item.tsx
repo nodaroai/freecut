@@ -2,7 +2,8 @@ import { memo, useCallback, useMemo, useState, useRef, useEffect, useLayoutEffec
 import type { Transition } from '@/types/transition'
 import { useShallow } from 'zustand/react/shallow'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { removeTransition, updateTransition } from '../stores/timeline-actions'
 import { useItemsStore } from '../stores/items-store'
 import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store'
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store'
@@ -19,7 +20,6 @@ import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-conte
 import { useZoomStore } from '../stores/zoom-store'
 import { useTransitionResize } from '../hooks/use-transition-resize'
 import { dragOffsetRef } from '../hooks/use-timeline-drag'
-import type { TimelineState, TimelineActions } from '../types'
 import type { SelectionState, SelectionActions } from '@/shared/state/selection'
 import {
   ContextMenu,
@@ -172,9 +172,7 @@ export const TransitionItem = memo(function TransitionItem({
   // samples live zoom imperatively below, so it stays pinned to clip edges
   // without rerendering the surrounding context-menu tree every wheel frame.
   const { pixelsPerSecond } = useTimelineCommittedZoomContext()
-  const fps = useTimelineStore((s: TimelineState) => s.fps)
-  const removeTransition = useTimelineStore((s: TimelineActions) => s.removeTransition)
-  const updateTransition = useTimelineStore((s: TimelineActions) => s.updateTransition)
+  const fps = useTimelineSettingsStore((s) => s.fps)
 
   // Get the clips involved in this transition
   const leftClip = useItemsStore(
@@ -570,7 +568,7 @@ export const TransitionItem = memo(function TransitionItem({
   // Handle delete
   const handleDelete = useCallback(() => {
     removeTransition(transition.id)
-  }, [transition.id, removeTransition])
+  }, [transition.id])
 
   const handleDragOver = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -614,7 +612,7 @@ export const TransitionItem = memo(function TransitionItem({
       })
       useTransitionDragStore.getState().clearDrag()
     },
-    [transition.id, updateTransition],
+    [transition.id],
   )
 
   if (!position || !effectiveLeftClip || !effectiveRightClip || isHiddenForBreakPreview) {

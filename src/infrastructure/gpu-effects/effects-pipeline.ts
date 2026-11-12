@@ -717,7 +717,7 @@ export class EffectsPipeline {
           const definition = getGpuEffect(effect.type)!
           const byteOffset = 16 + opIndex * 48
           new Uint32Array(packed, byteOffset, 4)[0] = kind
-          const values = definition.packUniforms(effect.params, w, h)
+          const values = definition.packUniforms(effect.params, w, h, effect.timelineTimeSeconds ?? 0)
           if (values) {
             new Float32Array(packed, byteOffset + 16, 8).set(values.subarray(0, 8))
           }
@@ -755,7 +755,7 @@ export class EffectsPipeline {
       const definition = getGpuEffect(effect.type)
       if (!definition) continue
 
-      const uniformData = definition.packUniforms(effect.params, w, h)
+      const uniformData = definition.packUniforms(effect.params, w, h, effect.timelineTimeSeconds ?? 0)
       let uniformBuffer: GPUBuffer | undefined
       if (uniformData) {
         uniformBuffer = this.getOrCreateUniformBuffer(passIndex, uniformData.byteLength)

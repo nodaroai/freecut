@@ -19,6 +19,8 @@
  * of scope.
  */
 
+import { parseLottieJsonObject as parseJson } from './lottie-json'
+
 /** A single editable color discovered in a Lottie animation. */
 export interface LottieColorLayer {
   /** Stable ordinal key (document-order index of the color) addressing the override. */
@@ -58,17 +60,6 @@ interface LottieShapeItem {
   nm?: unknown
   c?: AnimatedValue // solid fill/stroke color
   it?: unknown // group children
-}
-
-function parseJson(json: unknown): Record<string, unknown> | null {
-  if (typeof json === 'string') {
-    try {
-      return JSON.parse(json) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }
-  return json && typeof json === 'object' ? (json as Record<string, unknown>) : null
 }
 
 function clamp01(n: number): number {

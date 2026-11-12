@@ -379,20 +379,26 @@ function createDebugAPI(): ProjectDebugAPI {
         { usePlaybackStore },
         { useItemsStore },
         { useTransitionsStore },
-        { useTimelineStore },
+        { useKeyframesStore },
+        { useMarkersStore },
+        { useTimelineSettingsStore },
         { useMediaLibraryStore },
       ] = await Promise.all([
         import('@/shared/state/playback'),
         import('@/features/timeline/stores/items-store'),
         import('@/features/timeline/stores/transitions-store'),
-        import('@/features/timeline/stores/timeline-store'),
+        import('@/features/timeline/stores/keyframes-store'),
+        import('@/features/timeline/stores/markers-store'),
+        import('@/features/timeline/stores/timeline-settings-store'),
         import('@/features/media-library/stores/media-library-store'),
       ])
       return {
         playback: usePlaybackStore.getState(),
         items: useItemsStore.getState(),
         transitions: useTransitionsStore.getState(),
-        timeline: useTimelineStore.getState(),
+        keyframes: useKeyframesStore.getState(),
+        markers: useMarkersStore.getState(),
+        timelineSettings: useTimelineSettingsStore.getState(),
         mediaLibrary: useMediaLibraryStore.getState(),
       }
     },
@@ -416,16 +422,15 @@ function createDebugAPI(): ProjectDebugAPI {
     },
 
     getTransitionWindows: async () => {
-      const [{ useTransitionsStore }, { useItemsStore }, { useTimelineStore }] = await Promise.all([
+      const [{ useTransitionsStore }, { useItemsStore }] = await Promise.all([
         import('@/features/timeline/stores/transitions-store'),
         import('@/features/timeline/stores/items-store'),
-        import('@/features/timeline/stores/timeline-store'),
       ])
       const { resolveTransitionWindows } =
         await import('@/shared/timeline/transitions/transition-planner')
       const transitions = useTransitionsStore.getState().transitions
       const itemsByTrackId = useItemsStore.getState().itemsByTrackId
-      const tracks = useTimelineStore.getState().tracks
+      const tracks = useItemsStore.getState().tracks
       const clipMap = new Map<string, unknown>()
       for (const track of tracks) {
         const items = itemsByTrackId[track.id]
@@ -466,11 +471,8 @@ function createDebugAPI(): ProjectDebugAPI {
     },
 
     getTracks: async () => {
-      const [{ useTimelineStore }, { useItemsStore }] = await Promise.all([
-        import('@/features/timeline/stores/timeline-store'),
-        import('@/features/timeline/stores/items-store'),
-      ])
-      const tracks = useTimelineStore.getState().tracks
+      const { useItemsStore } = await import('@/features/timeline/stores/items-store')
+      const tracks = useItemsStore.getState().tracks
       const itemsByTrackId = useItemsStore.getState().itemsByTrackId
       return tracks.map((t) => ({
         id: t.id.substring(0, 8),
@@ -823,14 +825,14 @@ function createDebugAPI(): ProjectDebugAPI {
         { usePlaybackStore },
         { useTransitionsStore },
         { useItemsStore },
-        { useTimelineStore },
+        { useTimelineSettingsStore },
         { resolveTransitionWindows },
         trace,
       ] = await Promise.all([
         import('@/shared/state/playback'),
         import('@/features/timeline/stores/transitions-store'),
         import('@/features/timeline/stores/items-store'),
-        import('@/features/timeline/stores/timeline-store'),
+        import('@/features/timeline/stores/timeline-settings-store'),
         import('@/shared/timeline/transitions/transition-planner'),
         import('@/shared/logging/preview-trace'),
       ])
@@ -844,7 +846,7 @@ function createDebugAPI(): ProjectDebugAPI {
 
       const transitions = useTransitionsStore.getState().transitions
       const itemsByTrackId = useItemsStore.getState().itemsByTrackId
-      const tracks = useTimelineStore.getState().tracks
+      const tracks = useItemsStore.getState().tracks
       const clipMap = new Map<string, unknown>()
       for (const track of tracks) {
         for (const item of itemsByTrackId[track.id] ?? []) clipMap.set(item.id, item)
@@ -863,7 +865,7 @@ function createDebugAPI(): ProjectDebugAPI {
           .slice()
           .sort((a, b) => Math.abs(a.startFrame - ref) - Math.abs(b.startFrame - ref))[0]!
 
-      const fps = useTimelineStore.getState().fps || 30
+      const fps = useTimelineSettingsStore.getState().fps || 30
       const runUpFrames = Math.round(fps * 1.5)
       const startFrame = Math.max(0, win.startFrame - runUpFrames)
       const endTarget = win.endFrame + Math.round(fps * 0.5)

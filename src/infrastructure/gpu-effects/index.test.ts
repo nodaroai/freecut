@@ -9,6 +9,23 @@ import {
 import { EFFECT_PRESETS } from '@/types/effects'
 
 describe('GPU effect registry', () => {
+  it('uses explicit timeline time independently of render order and wall clock', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(10)
+    try {
+      let animated = 0
+      for (const [id, effect] of GPU_EFFECT_REGISTRY) {
+        const params = getGpuEffectDefaultParams(id)
+        const first = Array.from(effect.packUniforms(params, 960, 540, 17.25) ?? [])
+        clock.mockReturnValue(987654321)
+        effect.packUniforms(params, 960, 540, 90)
+        expect(Array.from(effect.packUniforms(params, 960, 540, 17.25) ?? []), id).toEqual(first)
+        if (JSON.stringify(first) !== JSON.stringify(Array.from(effect.packUniforms(params, 960, 540, 0) ?? []))) animated++
+      }
+      expect(animated).toBe(7)
+      expect(clock).not.toHaveBeenCalled()
+    } finally { clock.mockRestore() }
+  })
+
   it('registers every effect with shader metadata and valid default uniforms', () => {
     expect(GPU_EFFECT_REGISTRY.size).toBeGreaterThan(0)
 

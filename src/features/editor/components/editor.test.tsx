@@ -65,7 +65,7 @@ vi.mock('@/components/ui/resizable', () => ({
   ResizableHandle: () => <div data-testid="resizable-handle" />,
 }))
 
-vi.mock('@/app/error-boundary', () => ({
+vi.mock('@/components/error-boundary', () => ({
   ErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
 
@@ -160,19 +160,21 @@ vi.mock('@/features/editor/deps/timeline-subscriptions', () => ({
 }))
 
 vi.mock('@/features/editor/deps/timeline-store', () => {
-  const useTimelineStore = Object.assign(
+  const useTimelineSettingsStore = Object.assign(
     (selector: (state: { isDirty: boolean }) => unknown) => selector({ isDirty: false }),
     {
       getState: () => ({
-        loadTimeline: mocks.loadTimeline,
-        saveTimeline: mocks.saveTimeline,
         snapEnabled: true,
-        toggleSnap: mocks.toggleSnap,
       }),
     },
   )
 
-  return { useTimelineStore }
+  return {
+    useTimelineSettingsStore,
+    loadTimeline: mocks.loadTimeline,
+    saveTimeline: mocks.saveTimeline,
+    toggleSnap: mocks.toggleSnap,
+  }
 })
 
 vi.mock('@/features/editor/deps/project-bundle', () => ({

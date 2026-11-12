@@ -1,6 +1,6 @@
 export type PreviewScrubWorkspace = 'edit' | 'color' | 'animate' | 'motion'
 
-export interface PreviewScrubRequestSample {
+interface PreviewScrubRequestSample {
   seq: number
   workspace: PreviewScrubWorkspace
   frame: number
@@ -26,7 +26,7 @@ export interface PreviewCompositionRenderSample {
   }>
 }
 
-export interface PreviewScrubPresentedSample {
+interface PreviewScrubPresentedSample {
   seq: number
   workspace: PreviewScrubWorkspace
   requestedFrame: number
@@ -39,7 +39,7 @@ export interface PreviewScrubPresentedSample {
   supersededByRequests: number
 }
 
-export interface PreviewScrubFallbackSample {
+interface PreviewScrubFallbackSample {
   seq: number
   workspace: PreviewScrubWorkspace
   frame: number
@@ -64,7 +64,7 @@ export interface PreviewVideoSourceSample {
   canUseDom?: boolean
 }
 
-export interface PreviewPreseekPlanSample {
+interface PreviewPreseekPlanSample {
   frame: number
   sourceCount: number
   timestampCount: number
@@ -106,7 +106,7 @@ export interface PreviewDecoderMetricsSample {
   exactFallbackReplacements: number
 }
 
-export interface PreviewScrubPerformanceState {
+interface PreviewScrubPerformanceState {
   version: 1
   requests: PreviewScrubRequestSample[]
   renders: PreviewCompositionRenderSample[]

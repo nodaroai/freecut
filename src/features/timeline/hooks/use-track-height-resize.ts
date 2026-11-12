@@ -5,6 +5,7 @@ import { commitTrackHeights, resetTrackHeights } from '../stores/actions/track-h
 import { resizeAllTracksInList, resizeTrackInList } from '../utils/track-resize'
 import { getTrackKind } from '../utils/classic-tracks'
 import { flushTrackHeightOverrides } from '../utils/track-heights'
+import { createRafCoalescedCallback } from '../utils/raf-coalesced-callback'
 
 interface TrackResizeState {
   trackId: string | null
@@ -132,8 +133,17 @@ export function useTrackHeightResize() {
   useEffect(() => {
     if (!resizeState.trackId) return
 
-    document.addEventListener('mousemove', handleMouseMove, { capture: true })
-    document.addEventListener('mouseup', handleMouseUp, { capture: true })
+    // Each move commits a new tracks array (re-rendering every row), so coalesce
+    // the high-frequency pointer stream to at most one commit per frame.
+    const coalescedMouseMove = createRafCoalescedCallback(handleMouseMove)
+    const queueMouseMove = (event: MouseEvent) => coalescedMouseMove.queue(event)
+    const handleCoalescedMouseUp = (event: MouseEvent) => {
+      coalescedMouseMove.flush()
+      handleMouseUp(event)
+    }
+
+    document.addEventListener('mousemove', queueMouseMove, { capture: true })
+    document.addEventListener('mouseup', handleCoalescedMouseUp, { capture: true })
 
     const preventClick = (event: MouseEvent) => {
       event.preventDefault()
@@ -143,8 +153,9 @@ export function useTrackHeightResize() {
     document.addEventListener('click', preventClick, { capture: true, once: true })
 
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove, { capture: true })
-      document.removeEventListener('mouseup', handleMouseUp, { capture: true })
+      coalescedMouseMove.cancel()
+      document.removeEventListener('mousemove', queueMouseMove, { capture: true })
+      document.removeEventListener('mouseup', handleCoalescedMouseUp, { capture: true })
       document.removeEventListener('click', preventClick, { capture: true })
     }
   }, [handleMouseMove, handleMouseUp, resizeState.trackId])

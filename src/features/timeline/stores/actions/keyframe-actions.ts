@@ -640,19 +640,6 @@ export function trimAnimationToItemBounds(itemId: string): number {
   )
 }
 
-// Read-only keyframe helpers (no undo needed)
-export function getKeyframesForItem(itemId: string) {
-  return useKeyframesStore.getState().getKeyframesForItem(itemId)
-}
-
-export function hasKeyframesAtFrame(
-  itemId: string,
-  property: AnimatableProperty,
-  frame: number,
-): boolean {
-  return useKeyframesStore.getState().hasKeyframesAtFrame(itemId, property, frame)
-}
-
 /**
  * Remove multiple keyframes at once.
  */

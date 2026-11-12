@@ -110,7 +110,7 @@ function isAnimatableGpuNumberParam(effect: GpuEffect, paramKey: string): boolea
   )
 }
 
-export function isAnimatableGpuColorParam(effect: GpuEffect, paramKey: string): boolean {
+function isAnimatableGpuColorParam(effect: GpuEffect, paramKey: string): boolean {
   const definition = getGpuEffect(effect.gpuEffectType)
   const param = definition?.params[paramKey]
   const value = effect.params[paramKey]

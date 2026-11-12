@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { LottieItem, TimelineItem } from '@/types/timeline'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItem } from '@/features/editor/deps/timeline-store'
 import { extractLottieTextLayers, type LottieTextLayer } from '@/infrastructure/lottie/lottie-text'
 import {
   extractLottieColorLayers,
@@ -105,7 +105,6 @@ function TextLayerInput({
  */
 export function LottieSection({ items }: { items: TimelineItem[] }) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s) => s.updateItem)
   // Live edit preview: drags/keystrokes update the canvas through this channel
   // (read by the render engine's getLiveItemSnapshot) without a timeline-store
   // commit, so a single color/slot/text edit is one undo entry, not dozens.
@@ -119,7 +118,7 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
     (updates: Partial<LottieItem>) => {
       for (const id of ids) updateItem(id, updates)
     },
-    [ids, updateItem],
+    [ids],
   )
 
   const speed = getMixedValue(lottieItems, (i) => i.speed, 1)
@@ -205,7 +204,7 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
       const end = single.segmentEnd ?? maxFrame
       updateItem(single.id, { segmentStart: Math.max(0, Math.min(Math.round(value), end)) })
     },
-    [single, updateItem],
+    [single],
   )
 
   const handleSegmentEnd = useCallback(
@@ -215,7 +214,7 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
       const start = single.segmentStart ?? 0
       updateItem(single.id, { segmentEnd: Math.max(start, Math.min(Math.round(value), maxFrame)) })
     },
-    [single, updateItem],
+    [single],
   )
 
   // The animation that plays by default is the manifest's first; a stored
@@ -248,14 +247,14 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
         })
       })()
     },
-    [single, effectiveAnimationId, resolveSingleUrl, updateItem],
+    [single, effectiveAnimationId, resolveSingleUrl],
   )
 
   const handleThemeChange = useCallback(
     (value: string) => {
       if (single) updateItem(single.id, { themeId: value === NO_THEME ? undefined : value })
     },
-    [single, updateItem],
+    [single],
   )
 
   // Apply a named marker as the active segment. A zero-duration marker (a cue
@@ -273,7 +272,7 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
           : maxFrame
       updateItem(single.id, { segmentStart: start, segmentEnd: end })
     },
-    [single, markers, updateItem],
+    [single, markers],
   )
 
   // Clear this clip's live preview when the clip changes or the panel unmounts,
@@ -308,7 +307,7 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
       updateItem(single.id, { textOverrides: nextTextMap(key, value) })
       setLottiePreview(single.id, null)
     },
-    [single, nextTextMap, updateItem, setLottiePreview],
+    [single, nextTextMap, setLottiePreview],
   )
 
   // Group the extracted colors by their original value so a color shared across
@@ -390,12 +389,12 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
       updateItem(single.id, { colorOverrides: nextColorMap(keys, original, value) })
       setLottiePreview(single.id, null)
     },
-    [single, nextColorMap, updateItem, setLottiePreview],
+    [single, nextColorMap, setLottiePreview],
   )
 
   const resetAllColors = useCallback(() => {
     if (single) updateItem(single.id, { colorOverrides: undefined })
-  }, [single, updateItem])
+  }, [single])
 
   const hasColorOverrides =
     !!single?.colorOverrides && Object.keys(single.colorOverrides).length > 0
@@ -432,12 +431,12 @@ export function LottieSection({ items }: { items: TimelineItem[] }) {
       updateItem(single.id, { slotOverrides: nextSlotMap(id, next, original) })
       setLottiePreview(single.id, null)
     },
-    [single, nextSlotMap, updateItem, setLottiePreview],
+    [single, nextSlotMap, setLottiePreview],
   )
 
   const resetAllSlots = useCallback(() => {
     if (single) updateItem(single.id, { slotOverrides: undefined })
-  }, [single, updateItem])
+  }, [single])
 
   const hasSlotOverrides = !!single?.slotOverrides && Object.keys(single.slotOverrides).length > 0
 

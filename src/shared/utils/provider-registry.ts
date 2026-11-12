@@ -33,8 +33,4 @@ export class ProviderRegistry<TProvider extends NamedProvider> {
   getDefault(): TProvider {
     return this.get(this.defaultProviderId)
   }
-
-  list(): readonly TProvider[] {
-    return [...this.providers.values()]
-  }
 }

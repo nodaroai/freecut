@@ -12,8 +12,8 @@ export {
   resolveMediaUrl,
   resolveProxyUrl,
   resolveMediaUrls,
-  cleanupBlobUrls,
 } from '@/features/media-library/utils/media-resolver'
+export { clearPendingMediaRequests } from '@/features/media-library/utils/media-resolver-requests'
 export { importMediaLibraryService } from '@/features/media-library/services/media-library-service-loader'
 export { FileAccessError } from '@/features/media-library/services/file-access'
 export { extractValidMediaFileEntriesFromDataTransfer } from '@/features/media-library/utils/file-drop'

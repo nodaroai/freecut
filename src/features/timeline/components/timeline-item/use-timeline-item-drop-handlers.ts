@@ -9,7 +9,9 @@ import {
   type DraggedTransitionDescriptor,
 } from '@/shared/state/transition-drag'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useTimelineSettingsStore } from '../../stores/timeline-settings-store'
+import { addTransition } from '../../stores/timeline-actions'
+import type { TimelineActions } from '../../types'
 import { useItemsStore } from '../../stores/items-store'
 import { useTransitionsStore } from '../../stores/transitions-store'
 import { useEffectDropPreviewStore } from '../../stores/effect-drop-preview-store'
@@ -22,7 +24,7 @@ import { resolveEffectiveTrackStates } from '@/features/timeline/utils/group-uti
 import { isDragPointInsideElement, resolveEffectDropTargetIds } from '../../utils/effect-drop'
 import { getTemplateEffectsForDirectApplication } from '../../utils/generated-layer-items'
 
-type AddEffects = ReturnType<typeof useTimelineStore.getState>['addEffects']
+type AddEffects = TimelineActions['addEffects']
 const CUT_DROP_LEFT_PLACEMENT_THRESHOLD = 1 / 3
 const CUT_DROP_RIGHT_PLACEMENT_THRESHOLD = 2 / 3
 
@@ -89,7 +91,7 @@ export function useTimelineItemDropHandlers({
         edge,
         items: useItemsStore.getState().items,
         transitions: useTransitionsStore.getState().transitions,
-        timelineFps: useTimelineStore.getState().fps,
+        timelineFps: useTimelineSettingsStore.getState().fps,
         alignment,
         allowDurationClamp: false,
       })
@@ -163,7 +165,7 @@ export function useTimelineItemDropHandlers({
         edge,
         items: useItemsStore.getState().items,
         transitions: useTransitionsStore.getState().transitions,
-        timelineFps: useTimelineStore.getState().fps,
+        timelineFps: useTimelineSettingsStore.getState().fps,
         alignment: resolveTransitionDropAlignment(e),
         allowDurationClamp: false,
       })
@@ -176,17 +178,15 @@ export function useTimelineItemDropHandlers({
       e.preventDefault()
       e.stopPropagation()
 
-      useTimelineStore
-        .getState()
-        .addTransition(
-          target.leftClipId,
-          target.rightClipId,
-          'crossfade',
-          target.suggestedDurationInFrames,
-          dragDescriptor.presentation,
-          dragDescriptor.direction,
-          target.alignment,
-        )
+      addTransition(
+        target.leftClipId,
+        target.rightClipId,
+        'crossfade',
+        target.suggestedDurationInFrames,
+        dragDescriptor.presentation,
+        dragDescriptor.direction,
+        target.alignment,
+      )
       useTransitionDragStore.getState().clearDrag()
     },
     [item.id, trackLocked],
@@ -214,7 +214,7 @@ export function useTimelineItemDropHandlers({
       const items = useItemsStore.getState().items
       const itemById = new Map(items.map((timelineItem) => [timelineItem.id, timelineItem]))
       const lockedTrackIds = new Set(
-        resolveEffectiveTrackStates(useTimelineStore.getState().tracks)
+        resolveEffectiveTrackStates(useItemsStore.getState().tracks)
           .filter((track) => track.locked)
           .map((track) => track.id),
       )

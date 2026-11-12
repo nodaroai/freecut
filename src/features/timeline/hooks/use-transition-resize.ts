@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import type { Transition } from '@/types/transition'
 import { commitPreviewFrameToCurrentFrame } from '@/shared/state/playback'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { updateTransition } from '../stores/timeline-actions'
 import { useItemsStore } from '../stores/items-store'
 import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions'
-import type { TimelineState, TimelineActions } from '../types'
 import { getMaxTransitionDurationForHandles } from '../utils/transition-utils'
 
 type ResizeHandle = 'left' | 'right'
@@ -28,8 +28,7 @@ interface ResizeState {
  */
 export function useTransitionResize(transition: Transition) {
   const pixelsToTime = pixelsToTimeNow
-  const fps = useTimelineStore((s: TimelineState) => s.fps)
-  const updateTransition = useTimelineStore((s: TimelineActions) => s.updateTransition)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const leftClip = useItemsStore(
     useCallback((s) => s.itemById[transition.leftClipId] ?? null, [transition.leftClipId]),
   )
@@ -130,7 +129,7 @@ export function useTransitionResize(transition: Transition) {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     },
-    [transition.id, updateTransition],
+    [transition.id],
   )
 
   // Start resizing

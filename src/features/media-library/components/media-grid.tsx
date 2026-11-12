@@ -10,7 +10,7 @@ import type { MediaMetadata } from '@/types/storage'
 import {
   getMediaDeletionImpact,
   removeProjectItems,
-  useTimelineStore,
+  saveTimeline,
 } from '@/features/media-library/deps/timeline-stores'
 import { useEditorStore } from '@/shared/state/editor'
 import {
@@ -150,7 +150,7 @@ const MediaGridBase = memo(function MediaGridBase({
         const removedTimelineReferences = removeProjectItems(affectedMediaImpact.itemIds)
         const currentProjectId = useMediaLibraryStore.getState().currentProjectId
         if (removedTimelineReferences && currentProjectId) {
-          await useTimelineStore.getState().saveTimeline(currentProjectId)
+          await saveTimeline(currentProjectId)
         }
       }
 

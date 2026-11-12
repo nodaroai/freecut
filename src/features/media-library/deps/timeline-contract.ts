@@ -16,5 +16,6 @@ export {
   importCanvasRenderOrchestrator,
   resolveMediaUrl,
   resolveMediaUrls,
+  saveTimeline,
   useCompositionsStore,
 } from '@/features/timeline/contracts/media-library'

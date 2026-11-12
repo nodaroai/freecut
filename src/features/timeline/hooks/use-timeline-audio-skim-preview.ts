@@ -13,7 +13,7 @@ import {
 } from '../deps/composition-runtime-contract'
 import { useCompositionsStore } from '../stores/compositions-store'
 import { useItemsStore } from '../stores/items-store'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import {
   createLatestOnlyAsyncFrameRunner,
   getTimelineAudioBufferPeak,
@@ -23,7 +23,7 @@ import {
 } from '../utils/timeline-audio-skim'
 
 export function useTimelineAudioSkimPreview(): void {
-  const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
+  const audioSkimmingEnabled = useTimelineSettingsStore((s) => s.audioSkimmingEnabled)
   const requestIdRef = useRef(0)
   const rafRef = useRef<number | null>(null)
   const pendingFrameRef = useRef<number | null>(null)
@@ -102,7 +102,7 @@ export function useTimelineAudioSkimPreview(): void {
 
   const skimPreviewFrame = useCallback(
     async (frame: number) => {
-      if (!useTimelineStore.getState().audioSkimmingEnabled) {
+      if (!useTimelineSettingsStore.getState().audioSkimmingEnabled) {
         stopAudioSkim()
         return
       }
@@ -113,7 +113,7 @@ export function useTimelineAudioSkimPreview(): void {
         return
       }
 
-      const timelineFps = useTimelineStore.getState().fps
+      const timelineFps = useTimelineSettingsStore.getState().fps
       const { items, tracks } = useItemsStore.getState()
       const source = selectTimelineSkimSourceAtFrame(
         frame,

@@ -57,10 +57,11 @@ export class PageSession {
   #context
   #page
 
-  constructor({ browser, harnessUrl, onPageError = () => {} }) {
+  constructor({ browser, harnessUrl, onPageError = () => {}, onProgress = () => {} }) {
     this.browser = browser
     this.harnessUrl = harnessUrl
     this.onPageError = onPageError
+    this.onProgress = onProgress
   }
 
   get page() {
@@ -73,7 +74,9 @@ export class PageSession {
     try {
       const page = await context.newPage()
       page.on('pageerror', this.onPageError)
-      await page.exposeBinding('__freecutProgress', () => {})
+      await page.exposeBinding('__freecutProgress', (_source, progress) =>
+        this.onProgress(progress),
+      )
       await page.goto(this.harnessUrl, { waitUntil: 'load', timeout: 60_000 })
       await page.waitForFunction(() => Boolean(window.freecut?.ready), { timeout: 30_000 })
       this.#context = context

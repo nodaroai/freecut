@@ -351,11 +351,18 @@ function LandingPage() {
             className="group block overflow-hidden rounded-xl border border-border bg-card shadow-lg transition-colors hover:border-primary/50"
           >
             <div className="relative aspect-video w-full overflow-hidden bg-muted">
-              <img
-                src="/assets/landing/main.png"
-                alt={t('projects.landing.demoPreviewAlt')}
-                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-              />
+              <picture>
+                <source srcSet="/assets/landing/main.webp" type="image/webp" />
+                <img
+                  src="/assets/landing/main.png"
+                  alt={t('projects.landing.demoPreviewAlt')}
+                  loading="lazy"
+                  decoding="async"
+                  width={1920}
+                  height={959}
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+              </picture>
               <div className="absolute inset-0 bg-black/30 transition-colors group-hover:bg-black/20" />
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="flex h-20 w-20 items-center justify-center rounded-full border border-white/30 bg-black/55 text-white shadow-2xl backdrop-blur-sm">

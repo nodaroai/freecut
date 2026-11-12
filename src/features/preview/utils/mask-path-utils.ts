@@ -125,13 +125,50 @@ export function convertVertexToCorner(vertices: MaskVertex[], index: number): Ma
   return result
 }
 
+function resolveBezierNeighbor(
+  vertices: MaskVertex[],
+  index: number,
+  offset: -1 | 1,
+  closed: boolean,
+): MaskVertex {
+  const endpoint = (offset === -1 && index === 0) || (offset === 1 && index === vertices.length - 1)
+  if (!closed && endpoint) return vertices[index]!
+  return vertices[(index + offset + vertices.length) % vertices.length]!
+}
+
+function resolveBezierDirection(
+  existingInDirection: [number, number] | null,
+  existingOutDirection: [number, number] | null,
+  previousPosition: readonly [number, number],
+  position: readonly [number, number],
+  nextPosition: readonly [number, number],
+): [number, number] {
+  const combinedExistingDirection =
+    existingInDirection && existingOutDirection
+      ? normalizeVector([
+          existingInDirection[0] + existingOutDirection[0],
+          existingInDirection[1] + existingOutDirection[1],
+        ])
+      : null
+  if (
+    combinedExistingDirection &&
+    (combinedExistingDirection[0] !== 0 || combinedExistingDirection[1] !== 0)
+  ) {
+    return combinedExistingDirection
+  }
+  return (
+    existingOutDirection ??
+    existingInDirection ??
+    getSmoothTangentDirection(previousPosition, position, nextPosition)
+  )
+}
+
 /**
  * Convert a vertex to a smooth bezier knot.
  *
  * Existing handle lengths are preserved when present. If the knot is currently
  * a corner, new handle lengths are synthesized from neighboring segment lengths.
  */
-// fallow-ignore-next-line complexity
 export function convertVertexToBezier(
   vertices: MaskVertex[],
   index: number,
@@ -143,43 +180,30 @@ export function convertVertexToBezier(
 
   const result = vertices.map(cloneVertex)
   const vertex = result[index]!
-  const prev =
-    !closed && index === 0 ? vertex : result[(index - 1 + result.length) % result.length]!
-  const next =
-    !closed && index === result.length - 1 ? vertex : result[(index + 1) % result.length]!
-
+  const previous = resolveBezierNeighbor(result, index, -1, closed)
+  const next = resolveBezierNeighbor(result, index, 1, closed)
   const existingInLength = getVectorLength(vertex.inHandle)
   const existingOutLength = getVectorLength(vertex.outHandle)
-  const prevDistance = Math.hypot(
-    vertex.position[0] - prev.position[0],
-    vertex.position[1] - prev.position[1],
+  const previousDistance = Math.hypot(
+    vertex.position[0] - previous.position[0],
+    vertex.position[1] - previous.position[1],
   )
   const nextDistance = Math.hypot(
     next.position[0] - vertex.position[0],
     next.position[1] - vertex.position[1],
   )
-  const inLength = existingInLength || prevDistance * DEFAULT_BEZIER_HANDLE_SCALE
+  const inLength = existingInLength || previousDistance * DEFAULT_BEZIER_HANDLE_SCALE
   const outLength = existingOutLength || nextDistance * DEFAULT_BEZIER_HANDLE_SCALE
-
   const existingInDirection =
     existingInLength > 0 ? normalizeVector([-vertex.inHandle[0], -vertex.inHandle[1]]) : null
   const existingOutDirection = existingOutLength > 0 ? normalizeVector(vertex.outHandle) : null
-
-  const combinedExistingDirection =
-    existingInDirection && existingOutDirection
-      ? normalizeVector([
-          existingInDirection[0] + existingOutDirection[0],
-          existingInDirection[1] + existingOutDirection[1],
-        ])
-      : null
-
-  const direction =
-    combinedExistingDirection &&
-    (combinedExistingDirection[0] !== 0 || combinedExistingDirection[1] !== 0)
-      ? combinedExistingDirection
-      : (existingOutDirection ??
-        existingInDirection ??
-        getSmoothTangentDirection(prev.position, vertex.position, next.position))
+  const direction = resolveBezierDirection(
+    existingInDirection,
+    existingOutDirection,
+    previous.position,
+    vertex.position,
+    next.position,
+  )
 
   if (direction[0] === 0 && direction[1] === 0) {
     return convertVertexToCorner(result, index)

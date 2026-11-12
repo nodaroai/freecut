@@ -9,32 +9,11 @@ import type { SceneVerificationProvider } from './types'
 
 export type VerificationModel = SceneVerificationModelId
 
-export const DEFAULT_SCENE_VERIFICATION_PROVIDER_ID: VerificationModel =
-  DEFAULT_SCENE_VERIFICATION_MODEL
-
 const sceneVerificationProviderRegistry = new ProviderRegistry<SceneVerificationProvider>(
   [gemmaSceneVerificationProvider, lfmSceneVerificationProvider],
-  DEFAULT_SCENE_VERIFICATION_PROVIDER_ID,
+  DEFAULT_SCENE_VERIFICATION_MODEL,
 )
-
-export function getDefaultSceneVerificationProvider(): SceneVerificationProvider {
-  return sceneVerificationProviderRegistry.getDefault()
-}
 
 export function getSceneVerificationProvider(model: VerificationModel): SceneVerificationProvider {
   return sceneVerificationProviderRegistry.get(model)
-}
-
-export function getSceneVerificationModelLabel(model: VerificationModel): string {
-  return getSceneVerificationProvider(model).label
-}
-
-export function getSceneVerificationModelOptions(): readonly {
-  value: VerificationModel
-  label: string
-}[] {
-  return sceneVerificationProviderRegistry.list().map((provider) => ({
-    value: provider.id as VerificationModel,
-    label: provider.label,
-  }))
 }

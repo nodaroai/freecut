@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useMarkersStore } from '@/features/editor/deps/timeline-store'
 
 /**
  * The two regions an After Effects timeline draws over its layers: the comp's own
@@ -66,8 +66,8 @@ export const MotionActiveRegionOverlay = memo(function MotionActiveRegionOverlay
   testId?: string
   compositionEndTestId?: string
 }) {
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
+  const inPoint = useMarkersStore((s) => s.inPoint)
+  const outPoint = useMarkersStore((s) => s.outPoint)
 
   const hasActiveRegion = inPoint !== null && outPoint !== null && outPoint > inPoint
   const inPercent = hasActiveRegion ? clampPercent(toPercent(inPoint, viewport)) : 0

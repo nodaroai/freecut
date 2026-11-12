@@ -3,7 +3,12 @@ import { getSpatialPointEffectConfig } from '@/infrastructure/gpu-effects/spatia
 import type { ItemEffect } from '@/types/effects'
 import type { TimelineItem } from '@/types/timeline'
 import { usePlaybackStore } from '@/shared/state/playback'
-import { useItemsStore, useKeyframesStore, useTimelineStore } from '../deps/timeline-store'
+import {
+  applyAutoKeyframeOperations,
+  setItemEffects,
+  useItemsStore,
+  useKeyframesStore,
+} from '../deps/timeline-store'
 import { useGizmoStore } from '../stores/gizmo-store'
 import { useSpatialEffectEditorStore } from '../stores/spatial-effect-editor-store'
 import type { CoordinateParams, Point } from '../types/gizmo'
@@ -130,8 +135,6 @@ const SpatialEffectPointOverlay = memo(function SpatialEffectPointOverlay({
   const previewEffect = useGizmoStore((s) =>
     s.preview?.[item.id]?.effects?.find((entry) => entry.id === effect.id),
   )
-  const setItemEffects = useTimelineStore((s) => s.setItemEffects)
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
   const itemKeyframes = useKeyframesStore((s) => s.keyframesByItemId[item.id])
   const point = readPoint(previewEffect ?? effect, xParam, yParam)
   const currentEffects = useMemo(
@@ -214,13 +217,11 @@ const SpatialEffectPointOverlay = memo(function SpatialEffectPointOverlay({
       clearPreviewForItems([item.id])
     },
     [
-      applyAutoKeyframeOperations,
       clearPreviewForItems,
       currentEffects,
       effect,
       item,
       itemKeyframes,
-      setItemEffects,
       xParam,
       yParam,
     ],

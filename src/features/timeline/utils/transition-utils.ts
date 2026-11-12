@@ -340,7 +340,7 @@ export function clampSlideDeltaToPreserveTransitions(
   return clampDeltaToLastValidValue(requestedDelta, isValid)
 }
 
-function clampDeltaToLastValidValue(
+export function clampDeltaToLastValidValue(
   requestedDelta: number,
   isValid: (delta: number) => boolean,
 ): number {

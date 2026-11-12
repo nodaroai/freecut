@@ -15,9 +15,9 @@ import {
   type ExportableSequence,
 } from '@/features/export/deps/timeline-compositions'
 import { useProjectStore } from '@/features/export/deps/projects'
-import { mapRequestedClientSettings, resolveClientSettings } from './render-pipeline'
+import { mapRequestedClientSettings, resolveClientSettings } from '../deps/renderer'
 import { assessSmartCopyEligibility } from './smart-copy'
-import type { ClientExportSettings } from './client-renderer'
+import type { ClientExportSettings } from '../deps/renderer'
 import type { RenderJob, RenderJobSnapshot } from '../stores/render-queue-store'
 
 export interface FrameRange {

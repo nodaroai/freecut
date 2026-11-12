@@ -1,8 +1,10 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  useTimelineStore,
-  useTransitionsStore,
+  useItemsStore,
+  useKeyframesStore,
   useMediaDependencyStore,
+  useTimelineSettingsStore,
+  useTransitionsStore,
 } from '@/features/preview/deps/timeline-store'
 import type { TimelineItem } from '@/types/timeline'
 import {
@@ -52,9 +54,9 @@ export function usePreviewViewModel({
   const backgroundRef = useRef<HTMLDivElement>(null)
   const [playerContainerRect, setPlayerContainerRect] = useState<DOMRect | null>(null)
 
-  const fps = useTimelineStore((s) => s.fps)
-  const tracks = useTimelineStore((s) => s.tracks)
-  const keyframes = useTimelineStore((s) => s.keyframes)
+  const fps = useTimelineSettingsStore((s) => s.fps)
+  const tracks = useItemsStore((s) => s.tracks)
+  const keyframes = useKeyframesStore((s) => s.keyframes)
   const { items, itemsByTrackId } = itemsSnapshot
   const mediaDependencyVersion = useMediaDependencyStore((s) => s.mediaDependencyVersion)
   const transitions = useTransitionsStore((s) => s.transitions)

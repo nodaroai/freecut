@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
 import { useTransitionsStore } from '../../stores/transitions-store'
 import { useEditorStore } from '@/shared/state/editor'
 import { frameToPixelsNow } from '../../utils/zoom-conversions'
@@ -80,7 +80,7 @@ export function useToolOperationOverlay({
     const currentRightPx = visualLeft + visualWidth
 
     if (isTrimming && trimHandle) {
-      const { items } = useTimelineStore.getState()
+      const { items } = useItemsStore.getState()
       const { transitions } = useTransitionsStore.getState()
 
       return getTrimOperationBoundsVisual({
@@ -111,7 +111,7 @@ export function useToolOperationOverlay({
     }
 
     if (isSlipSlideActive && slipSlideMode === 'slide') {
-      const { items } = useTimelineStore.getState()
+      const { items } = useItemsStore.getState()
       const { transitions } = useTransitionsStore.getState()
 
       // Compute wall positions across all participants (primary + companions).

@@ -5,7 +5,7 @@ import { FloatingPanel } from '@/components/ui/floating-panel'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { useTimelineStore } from '../stores/timeline-store'
+import { removeFillerWordsFromItems } from '../stores/timeline-actions'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
 import { useItemsStore } from '../stores/items-store'
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
@@ -707,9 +707,7 @@ export function FillerRemovalDialog() {
   const handleApply = useCallback(() => {
     let result: RemoveSilenceResult | null = null
     try {
-      result = useTimelineStore
-        .getState()
-        .removeFillerWordsFromItems(itemIds, selectedRangesByMediaId)
+      result = removeFillerWordsFromItems(itemIds, selectedRangesByMediaId)
     } catch (error) {
       logger.warn('Filler removal failed', error)
       toast.error(

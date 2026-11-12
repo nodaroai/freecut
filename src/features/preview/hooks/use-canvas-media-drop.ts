@@ -3,7 +3,13 @@ import { toast } from 'sonner'
 import { i18n } from '@/i18n'
 import { useSelectionStore } from '@/shared/state/selection'
 import { usePlaybackStore } from '@/shared/state/playback'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import {
+  addItem,
+  addItemOnNewTrack,
+  addItemWithLinkedAudio,
+  useItemsStore,
+  useTimelineSettingsStore,
+} from '@/features/preview/deps/timeline-store'
 import {
   buildDroppedMediaTimelineItem,
   createOverlayLayerTrack,
@@ -258,13 +264,14 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
       }
 
       const effectiveProjectSize = placementProjectSize ?? projectSize
-      const timelineState = useTimelineStore.getState()
+      const { items, tracks } = useItemsStore.getState()
+      const { fps } = useTimelineSettingsStore.getState()
       const playbackState = usePlaybackStore.getState()
       const selectionState = useSelectionStore.getState()
-      const durationInFrames = getDroppedMediaDurationInFrames(media, mediaType, timelineState.fps)
+      const durationInFrames = getDroppedMediaDurationInFrames(media, mediaType, fps)
       const placement = findBestCanvasDropPlacement({
-        tracks: timelineState.tracks,
-        items: timelineState.items,
+        tracks,
+        items,
         activeTrackId: selectionState.activeTrackId,
         proposedFrame: playbackState.currentFrame,
         durationInFrames,
@@ -289,7 +296,7 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
         mediaId: media.id,
         mediaType,
         label,
-        timelineFps: timelineState.fps,
+        timelineFps: fps,
         blobUrl,
         thumbnailUrl,
         canvasWidth: effectiveProjectSize.width,
@@ -313,9 +320,9 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
       // with embedded audio gets its audio split onto a linked audio track,
       // just like a timeline drop. Otherwise it's a plain visual placement.
       if (placedItem.type === 'video' && media.audioCodec) {
-        timelineState.addItemWithLinkedAudio(placedItem)
+        addItemWithLinkedAudio(placedItem)
       } else {
-        timelineState.addItem(placedItem)
+        addItem(placedItem)
       }
       selectionState.setActiveTrack(placement.trackId)
       selectionState.selectItems([placedItem.id])
@@ -335,7 +342,8 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
         return
       }
 
-      const timelineState = useTimelineStore.getState()
+      const { tracks } = useItemsStore.getState()
+      const { fps } = useTimelineSettingsStore.getState()
       const playbackState = usePlaybackStore.getState()
       const selectionState = useSelectionStore.getState()
 
@@ -344,7 +352,7 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
       // sits at the playhead over whatever is below instead of being shoved to
       // free space on a shared track.
       const newTrack = createOverlayLayerTrack({
-        tracks: timelineState.tracks,
+        tracks,
         activeTrackId: selectionState.activeTrackId,
       })
 
@@ -353,7 +361,7 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
         return
       }
 
-      const durationInFrames = getDefaultGeneratedLayerDurationInFrames(timelineState.fps)
+      const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps)
       const baseItem = createTimelineTemplateItem({
         template,
         placement: {
@@ -362,7 +370,7 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
           durationInFrames,
           canvasWidth: projectSize.width,
           canvasHeight: projectSize.height,
-          fps: timelineState.fps,
+          fps,
         },
       })
 
@@ -372,7 +380,7 @@ export function useCanvasMediaDrop({ coordParams, projectSize }: UseCanvasMediaD
         projectSize,
       )
 
-      timelineState.addItemOnNewTrack(placedItem, newTrack.tracks)
+      addItemOnNewTrack(placedItem, newTrack.tracks)
       selectionState.setActiveTrack(newTrack.trackId)
       selectionState.selectItems([placedItem.id])
     },

@@ -120,6 +120,48 @@ function baseProject() {
   }
 }
 
+function linkedProject() {
+  const project = baseProject()
+  project.timeline.items.push(
+    {
+      id: 'linked-video',
+      type: 'video',
+      trackId: 'video-1',
+      from: 60,
+      durationInFrames: 30,
+      label: 'Linked video',
+      mediaId: 'linked-media',
+      src: '',
+      volume: 0,
+      sourceStart: 0,
+      sourceEnd: 30,
+      sourceDuration: 60,
+      sourceFps: 30,
+      speed: 1,
+      linkedGroupId: 'linked-pair',
+      transform: {},
+    },
+    {
+      id: 'linked-audio',
+      type: 'audio',
+      trackId: 'audio-1',
+      from: 60,
+      durationInFrames: 30,
+      label: 'Linked audio',
+      mediaId: 'linked-media',
+      src: '',
+      volume: 0,
+      sourceStart: 0,
+      sourceEnd: 30,
+      sourceDuration: 60,
+      sourceFps: 30,
+      speed: 1,
+      linkedGroupId: 'linked-pair',
+    },
+  )
+  return project
+}
+
 const item = (project, id) => project.timeline.items.find((candidate) => candidate.id === id)
 const roundTrip = (project) => JSON.parse(JSON.stringify(project))
 
@@ -461,6 +503,47 @@ async function main() {
       }
       process.stdout.write(`  PASS  ${testCase.name}\n`)
     }
+
+    const unlinked = await edit(page, linkedProject(), [
+      { op: 'removeItems', ids: ['linked-video'], linked: false },
+    ])
+    assert.equal(item(unlinked.project, 'linked-video'), undefined)
+    assert.ok(item(unlinked.project, 'linked-audio'), 'linked:false edits only the requested item')
+
+    const linked = await edit(page, linkedProject(), [
+      { op: 'removeItems', ids: ['linked-video'], linked: true },
+    ])
+    assert.equal(item(linked.project, 'linked-video'), undefined)
+    assert.equal(
+      item(linked.project, 'linked-audio'),
+      undefined,
+      'linked:true edits the linked pair',
+    )
+
+    const afterSuccessfulOverride = await edit(page, linkedProject(), [
+      { op: 'removeItems', ids: ['linked-video'] },
+    ])
+    assert.equal(item(afterSuccessfulOverride.project, 'linked-video'), undefined)
+    assert.equal(
+      item(afterSuccessfulOverride.project, 'linked-audio'),
+      undefined,
+      'an omitted override observes the restored linked-selection state',
+    )
+
+    await assert.rejects(
+      edit(page, linkedProject(), [{ op: 'split', id: 'linked-video', frame: 60, linked: false }]),
+      undefined,
+      'linked override failure path rejects',
+    )
+    const afterFailedOverride = await edit(page, linkedProject(), [
+      { op: 'removeItems', ids: ['linked-video'] },
+    ])
+    assert.equal(
+      item(afterFailedOverride.project, 'linked-audio'),
+      undefined,
+      'a failed override also restores linked-selection state',
+    )
+    process.stdout.write('  PASS  linked operation override and state restoration\n')
   } finally {
     await browser.close()
     await server.close()

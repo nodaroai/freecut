@@ -1,46 +1,16 @@
-import {
-  memo,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  ChevronDown,
-  ExternalLink,
-  Layers3,
-  ListFilter,
-  Plus,
-  Search,
-  Trash2,
-  WandSparkles,
-  X,
-} from 'lucide-react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import type { CanvasSettings } from '@/types/transform'
 import type { AnimationKeyframeSource, AnimatableProperty } from '@/types/keyframe'
-import type { TextItem, TimelineItem } from '@/types/timeline'
+import type { TextItem } from '@/types/timeline'
 import type { TextMotionSlot } from '@/types/text-motion'
-import type {
-  MotionModifierChannel,
-  MotionModifierChannelGains,
-  MotionModifierType,
-} from '@/types/motion'
+import type { MotionModifierType } from '@/types/motion'
 import { cn } from '@/shared/ui/cn'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { MotionBakeConfirmationDialog } from '@/shared/ui/motion-bake-confirmation-dialog'
-import { SliderInput } from '@/shared/ui/property-controls'
 import { useSelectionStore } from '@/shared/state/selection'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useProjectStore } from '@/features/editor/deps/projects'
@@ -72,7 +42,6 @@ import {
 import { getSourceDimensions, resolveTransform } from '@/features/editor/deps/composition-runtime'
 import {
   getAnimatablePropertiesForItem,
-  getKeyframePropertyLabel,
   getMotionPresetAnchorFrame,
   MOTION_MODULATORS,
   MOTION_PRESET_CATEGORIES,
@@ -92,415 +61,38 @@ import {
   type MotionGeneratorSettings,
   type MotionModulator,
 } from '@/features/editor/deps/keyframes'
-import { getTextMotionPreset } from '@/shared/typography/text-motion'
 import { getTextMotionTimelineBands } from '@/shared/timeline/text-motion-timeline'
 import {
   readAnimationPresets,
   saveAnimationPresets,
   type AnimationPreset,
 } from '@/infrastructure/storage'
-import { MotionPresetThumbnail } from './motion-preset-thumbnail'
 import { SaveAnimationPresetDialog } from './save-animation-preset-dialog'
-import { TextMotionSlotRows } from '../text-motion/text-motion-slot-rows'
 import { filterAnimationPresetCandidates } from './animation-preset-filter'
-import { AppliedContinuousMotionControls } from './applied-continuous-motion-controls'
-
-// Every transform/opacity property any built-in motion preset can write. In
-// Replace mode we clear these (within the new preset's frame window) so a fresh
-// preset fully supersedes whatever animation occupied that region.
-const MOTION_PRESET_PROPERTIES: AnimatableProperty[] = Array.from(
-  new Set(MOTION_PRESETS.flatMap((preset) => preset.properties)),
-)
-
-const presetsByCategory = MOTION_PRESET_CATEGORIES.reduce(
-  (map, category) => {
-    map[category] = MOTION_PRESETS.filter((preset) => preset.category === category)
-    return map
-  },
-  {} as Record<MotionPresetCategory, MotionPreset[]>,
-)
-
-const TEXT_SLOT_BY_MOTION_CATEGORY: Partial<Record<MotionPresetCategory, TextMotionSlot>> = {
-  entrance: 'in',
-  exit: 'out',
-}
-
-const EDIT_QUICK_PRESET_IDS = new Set([
-  'fade-in',
-  'slide-in-left',
-  'pop-in',
-  'fade-out',
-  'slide-out-right',
-  'pulse',
-])
-
-function isTimelineItem(item: TimelineItem | undefined): item is TimelineItem {
-  return Boolean(item)
-}
-
-interface ModifierEditSettings {
-  intensityScale?: number
-  durationScale?: number
-  channelGains?: MotionModifierChannelGains
-}
-
-interface ContinuousMotionRowProps {
-  modulator: MotionModulator
-  active: boolean
-  /** Disabled reason (incompatible selection) or null. */
-  reason: string | null
-  /** Live settings of the applied modifier (seeds the flyout sliders). */
-  settings: {
-    intensityScale: number
-    durationScale: number
-    channelGains: MotionModifierChannelGains
-  } | null
-  onApply: () => void
-  onRemove: () => void
-  onLiveEdit: (settings: ModifierEditSettings) => void
-  onCommitEdit: (settings: ModifierEditSettings) => void
-  t: (key: string, options?: Record<string, unknown>) => string
-}
-
-/**
- * One continuous-motion generator, rendered as an animated tile (the glyph
- * demonstrates the motion on hover, mirroring the keyframe-preset grid). Not
- * applied → click applies it with sensible defaults. Applied → the tile is a
- * flyout (popover) whose Intensity/Duration sliders tune the LIVE modifier on
- * the clip (preview updates as you drag, one undo per gesture) and remove it. No
- * tuning happens before applying.
- */
-const ContinuousMotionRow = memo(function ContinuousMotionRow({
-  modulator,
-  active,
-  reason,
-  settings,
-  onApply,
-  onRemove,
-  onLiveEdit,
-  onCommitEdit,
-  t,
-}: ContinuousMotionRowProps) {
-  const label = t(`editor.motionGenerator.modulators.${modulator.labelKey}`)
-  const tileBody = (
-    <>
-      <MotionPresetThumbnail thumbnail={modulator.thumbnail} />
-      <span className="w-full truncate text-center leading-tight">{label}</span>
-    </>
-  )
-
-  if (!active) {
-    const tile = (
-      <button
-        type="button"
-        disabled={reason !== null}
-        onClick={onApply}
-        className={cn(
-          'group flex h-full w-full flex-col items-center gap-1 rounded-md border border-border/60 p-1.5 text-[10px]',
-          reason !== null
-            ? 'cursor-not-allowed text-muted-foreground/50'
-            : 'text-muted-foreground hover:border-border hover:bg-secondary/40 hover:text-foreground',
-        )}
-      >
-        {tileBody}
-      </button>
-    )
-    if (!reason) return tile
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div>{tile}</div>
-        </TooltipTrigger>
-        <TooltipContent>{reason}</TooltipContent>
-      </Tooltip>
-    )
-  }
-
-  const intensity = settings?.intensityScale ?? 1
-  const duration = settings?.durationScale ?? 1
-  const channelGain = (channel: MotionModifierChannel) => settings?.channelGains[channel] ?? 1
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={t('editor.animateStages.liveBadge') + ' — ' + label}
-          className="group relative flex h-full w-full flex-col items-center gap-1 rounded-md border border-primary/60 bg-secondary/30 p-1.5 text-[10px] text-foreground hover:bg-secondary/50"
-        >
-          {/* Active dot — the tile is "live"; the flyout holds the controls. */}
-          <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary shadow ring-1 ring-background" />
-          {tileBody}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="left" align="start" className="w-56 space-y-2 p-2">
-        <div className="text-[11px] font-medium text-foreground">{label}</div>
-        <div className="flex flex-col gap-1.5">
-          <SliderInput
-            label={t('editor.motionGenerator.intensity')}
-            value={intensity}
-            min={0}
-            max={2}
-            step={0.05}
-            formatValue={(v) => `${Math.round(v * 100)}%`}
-            onChange={(v) => onCommitEdit({ intensityScale: v })}
-            onLiveChange={(v) => onLiveEdit({ intensityScale: v })}
-          />
-          <SliderInput
-            label={t('editor.motionGenerator.duration')}
-            value={duration}
-            min={0.25}
-            max={3}
-            step={0.05}
-            formatValue={(v) => `${Math.round(v * 100)}%`}
-            onChange={(v) => onCommitEdit({ durationScale: v })}
-            onLiveChange={(v) => onLiveEdit({ durationScale: v })}
-          />
-        </div>
-        <Separator />
-        <div className="space-y-1.5">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            {t('timeline.keyframeEditor.parameters')}
-          </div>
-          {modulator.properties.map((property) => (
-            <SliderInput
-              key={property}
-              label={t(`keyframes.properties.${property}`)}
-              value={channelGain(property)}
-              min={0}
-              max={2}
-              step={0.05}
-              formatValue={(value) => `${Math.round(value * 100)}%`}
-              onChange={(value) => onCommitEdit({ channelGains: { [property]: value } })}
-              onLiveChange={(value) => onLiveEdit({ channelGains: { [property]: value } })}
-            />
-          ))}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 w-full justify-start gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-          onClick={onRemove}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {t('editor.motionGenerator.removeAction')}
-        </Button>
-      </PopoverContent>
-    </Popover>
-  )
-})
-
-interface StageSectionProps {
-  /** Uppercase intent label (e.g. "Entrance", "Loop & behaviors"). */
-  title: string
-  /** One-line description of what the stage does / how it behaves. */
-  hint?: string
-  defaultOpen?: boolean
-  children: ReactNode
-}
-
-/**
- * Collapsible intent stage. Keyframed layer recipes and live text/layer motion
- * can share a stage without coupling their specialized render engines.
- */
-const StageSection = memo(function StageSection({
-  title,
-  hint,
-  defaultOpen = true,
-  children,
-}: StageSectionProps) {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-2">
-      <CollapsibleTrigger className="group flex items-center justify-between gap-2 text-left">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          {title}
-        </span>
-        <ChevronDown
-          className={cn(
-            'h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform',
-            !open && '-rotate-90',
-          )}
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="flex flex-col gap-2">
-        {hint && <p className="text-[10px] leading-snug text-muted-foreground/70">{hint}</p>}
-        {children}
-      </CollapsibleContent>
-    </Collapsible>
-  )
-})
-
-interface MotionPresetSectionProps {
-  category: MotionPresetCategory
-  presets: MotionPreset[]
-  reasonFor: (preset: MotionPreset) => string | null
-  onApply: (preset: MotionPreset) => void
-  showHeading?: boolean
-  t: (key: string, options?: Record<string, unknown>) => string
-}
-
-/** One category of built-in motion presets, rendered as an animated icon grid. */
-const MotionPresetSection = memo(function MotionPresetSection({
-  category,
-  presets,
-  reasonFor,
-  onApply,
-  showHeading = true,
-  t,
-}: MotionPresetSectionProps) {
-  return (
-    <section className="flex flex-col gap-1.5">
-      {showHeading ? (
-        <h3 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          {t(`editor.motionPresets.categories.${category}`)}
-        </h3>
-      ) : null}
-      <div className="grid grid-cols-3 gap-1.5">
-        {presets.map((preset) => {
-          const reason = reasonFor(preset)
-          const disabled = reason !== null
-          const label = t(`editor.motionPresets.items.${preset.labelKey}`)
-
-          return (
-            <Tooltip key={preset.id}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-disabled={disabled}
-                  onClick={() => {
-                    if (!disabled) onApply(preset)
-                  }}
-                  className={cn(
-                    'group flex min-h-16 w-full flex-col items-center gap-1 rounded-md border border-border/60 p-1.5 text-[10px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                    disabled
-                      ? 'cursor-not-allowed text-muted-foreground/50'
-                      : 'text-muted-foreground hover:border-border hover:bg-secondary/40 hover:text-foreground',
-                  )}
-                >
-                  <MotionPresetThumbnail thumbnail={preset.thumbnail} />
-                  <span className="w-full truncate text-center leading-tight">{label}</span>
-                </button>
-              </TooltipTrigger>
-              {reason && <TooltipContent>{reason}</TooltipContent>}
-            </Tooltip>
-          )
-        })}
-      </div>
-    </section>
-  )
-})
-
-const MotionPresetControls = memo(function MotionPresetControls({
-  onSettingsChange,
-  t,
-}: {
-  onSettingsChange: (settings: MotionGeneratorSettings) => void
-  t: (key: string, options?: Record<string, unknown>) => string
-}) {
-  const [settings, setSettings] = useState<MotionGeneratorSettings>(() => ({
-    ...DEFAULT_MOTION_GENERATOR_SETTINGS,
-  }))
-  const update = useCallback(
-    (partial: Partial<MotionGeneratorSettings>) => {
-      setSettings((current) => {
-        const next = { ...current, ...partial }
-        onSettingsChange(next)
-        return next
-      })
-    },
-    [onSettingsChange],
-  )
-
-  return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-border/60 bg-secondary/20 p-2">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-        {t('editor.animateStages.presetParameters')}
-      </span>
-      <span className="text-[9px] leading-snug text-muted-foreground">
-        {t('editor.animateStages.presetParametersHint')}
-      </span>
-      <SliderInput
-        label={t('editor.motionGenerator.duration')}
-        value={settings.durationScale}
-        min={0.25}
-        max={3}
-        step={0.05}
-        formatValue={(value) => `${Math.round(value * 100)}%`}
-        onChange={(value) => update({ durationScale: value })}
-        onLiveChange={(value) => update({ durationScale: value })}
-      />
-      <SliderInput
-        label={t('editor.motionGenerator.intensity')}
-        value={settings.intensityScale}
-        min={0}
-        max={2}
-        step={0.05}
-        formatValue={(value) => `${Math.round(value * 100)}%`}
-        onChange={(value) => update({ intensityScale: value })}
-        onLiveChange={(value) => update({ intensityScale: value })}
-      />
-      <SliderInput
-        label={t('textMotion.stagger')}
-        value={settings.staggerFrames}
-        min={0}
-        max={30}
-        step={1}
-        formatValue={(value) => `${Math.round(value)}f`}
-        onChange={(value) => update({ staggerFrames: Math.round(value) })}
-        onLiveChange={(value) => update({ staggerFrames: Math.round(value) })}
-      />
-    </div>
-  )
-})
-
-const AppliedMotionRow = memo(function AppliedMotionRow({
-  label,
-  detail,
-  removeLabel,
-  onRemove,
-  onNavigate,
-}: {
-  label: string
-  detail: string
-  removeLabel?: string
-  onRemove?: () => void
-  onNavigate?: () => void
-}) {
-  const content = (
-    <>
-      <div className="truncate text-[11px] font-medium text-foreground">{label}</div>
-      <div className="truncate text-[10px] text-muted-foreground">{detail}</div>
-    </>
-  )
-
-  return (
-    <div className="flex min-w-0 items-center rounded-md border border-border/60 bg-background/50">
-      {onNavigate ? (
-        <button
-          type="button"
-          className="min-w-0 flex-1 rounded-l-md px-2 py-1.5 text-left hover:bg-secondary/35 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-          onClick={onNavigate}
-        >
-          {content}
-        </button>
-      ) : (
-        <div className="min-w-0 flex-1 px-2 py-1.5">{content}</div>
-      )}
-      {onRemove && removeLabel ? (
-        <button
-          type="button"
-          aria-label={removeLabel}
-          className="mr-1 rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
-          onClick={onRemove}
-        >
-          <X className="h-3 w-3" />
-        </button>
-      ) : null}
-    </div>
-  )
-})
+import { AppliedMotionSummary } from './applied-motion-summary'
+import { AnimationPresetLibraryEdit } from './animation-preset-library-edit'
+import { AnimationPresetToolbar } from './animation-preset-toolbar'
+import { ApplyModeSelector, type MotionApplyMode } from './apply-mode-selector'
+import { ContinuousMotionStage } from './continuous-motion-stage'
+import {
+  hasActiveMotionFilters,
+  hasVisibleMotionResults,
+  isMotionClipSelection,
+} from './motion-library-status'
+import {
+  collectKeyframeApplications,
+  summarizeManualKeyframes,
+} from './motion-clip-summary'
+import { MotionPresetStages } from './motion-preset-stages'
+import { SavedAnimationList } from './saved-animation-list'
+import type { ModifierEditSettings } from './continuous-motion-row'
+import { MotionPresetControls } from './motion-preset-controls'
+import {
+  EDIT_QUICK_PRESET_IDS,
+  MOTION_PRESET_PROPERTIES,
+  presetsByCategory,
+} from './animation-preset-catalogue'
+import { selectPresetSelectedItems } from './preset-selection'
 
 /**
  * Animation preset library (U7, R16): browse and save/apply the project's saved
@@ -529,20 +121,7 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
   const selectedItemIds = itemIds ?? storeSelectedItemIds
   const selectedItems = useItemsStore(
     useShallow(
-      useCallback(
-        (s) => {
-          const orderByTrack = new Map(s.tracks.map((track) => [track.id, track.order ?? 0]))
-          return selectedItemIds
-            .map((id) => s.itemById[id])
-            .filter(isTimelineItem)
-            .sort((left, right) => {
-              const frameDelta = left.from - right.from
-              if (frameDelta !== 0) return frameDelta
-              return (orderByTrack.get(left.trackId) ?? 0) - (orderByTrack.get(right.trackId) ?? 0)
-            })
-        },
-        [selectedItemIds],
-      ),
+      useCallback((s) => selectPresetSelectedItems(s, selectedItemIds), [selectedItemIds]),
     ),
   )
   const selectedItem = selectedItems[0] ?? null
@@ -565,7 +144,7 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
   const [bakeDialogOpen, setBakeDialogOpen] = useState(false)
   // 'replace' (default) clears a preset's target properties before applying so
   // reapplying an entrance/exit preset swaps it; 'add' layers onto what's there.
-  const [applyMode, setApplyMode] = useState<'replace' | 'merge' | 'layer'>('replace')
+  const [applyMode, setApplyMode] = useState<MotionApplyMode>('replace')
   const [searchQuery, setSearchQuery] = useState('')
   const [compatibleOnly, setCompatibleOnly] = useState(false)
   // Keyframe-preset parameters are authoring inputs, not timeline state. Keep
@@ -575,6 +154,10 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
     ...DEFAULT_MOTION_GENERATOR_SETTINGS,
   })
   const deferredSearchQuery = useDeferredValue(searchQuery)
+
+  const openSaveDialog = useCallback(() => setDialogOpen(true), [])
+  const toggleCompatibleOnly = useCallback(() => setCompatibleOnly((current) => !current), [])
+  const openBakeDialog = useCallback(() => setBakeDialogOpen(true), [])
 
   useEffect(() => {
     if (!projectId) {
@@ -1166,77 +749,23 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
       ),
     [filteredMotionPresetsByCategory],
   )
-  const filtersActive = deferredSearchQuery.trim().length > 0 || compatibleOnly
-  const hasVisiblePresetResults =
-    visibleMotionPresetCount > 0 ||
-    filteredModulators.length > 0 ||
-    filteredSavedPresets.length > 0 ||
-    selectedTextItems.length > 0
+  const filtersActive = hasActiveMotionFilters(deferredSearchQuery, compatibleOnly)
+  const hasVisiblePresetResults = hasVisibleMotionResults(
+    visibleMotionPresetCount,
+    filteredModulators.length,
+    filteredSavedPresets.length,
+    selectedTextItems.length,
+  )
 
   // --- "Applied to this clip" summary (state the panel otherwise hides) ---
-  const keyframeApplications = useMemo(() => {
-    const applications = new Map<
-      string,
-      {
-        source: NonNullable<import('@/types/keyframe').Keyframe['source']>
-        properties: Set<string>
-        keyframeCount: number
-        firstFrame: number
-      }
-    >()
-    const add = (
-      propertyLabel: string,
-      frame: number,
-      source: import('@/types/keyframe').Keyframe['source'],
-    ) => {
-      if (!source) return
-      const current = applications.get(source.applicationId) ?? {
-        source,
-        properties: new Set<string>(),
-        keyframeCount: 0,
-        firstFrame: frame,
-      }
-      current.properties.add(propertyLabel)
-      current.keyframeCount += 1
-      current.firstFrame = Math.min(current.firstFrame, frame)
-      applications.set(source.applicationId, current)
-    }
-    for (const property of selectedItemKeyframes?.properties ?? []) {
-      const label = getKeyframePropertyLabel(t, property.property)
-      for (const keyframe of property.keyframes) add(label, keyframe.frame, keyframe.source)
-    }
-    for (const property of selectedItemKeyframes?.vectorProperties ?? []) {
-      const label = t(`editor.animateStages.vectorProperties.${property.property}`)
-      for (const keyframe of property.keyframes) add(label, keyframe.frame, keyframe.source)
-    }
-    return [...applications.values()]
-  }, [selectedItemKeyframes, t])
-  const manualKeyframeSummary = useMemo(() => {
-    const properties = new Set<string>()
-    let keyframeCount = 0
-    let firstFrame = Number.POSITIVE_INFINITY
-    for (const property of selectedItemKeyframes?.properties ?? []) {
-      const manualKeyframes = property.keyframes.filter((keyframe) => !keyframe.source)
-      const count = manualKeyframes.length
-      if (count === 0) continue
-      properties.add(getKeyframePropertyLabel(t, property.property))
-      keyframeCount += count
-      for (const keyframe of manualKeyframes) firstFrame = Math.min(firstFrame, keyframe.frame)
-    }
-    for (const property of selectedItemKeyframes?.vectorProperties ?? []) {
-      const manualKeyframes = property.keyframes.filter((keyframe) => !keyframe.source)
-      const count = manualKeyframes.length
-      if (count === 0) continue
-      properties.add(t(`editor.animateStages.vectorProperties.${property.property}`))
-      keyframeCount += count
-      for (const keyframe of manualKeyframes) firstFrame = Math.min(firstFrame, keyframe.frame)
-    }
-    return {
-      properties: [...properties],
-      keyframeCount,
-      firstFrame: Number.isFinite(firstFrame) ? firstFrame : null,
-    }
-  }, [selectedItemKeyframes, t])
+  const keyframeApplications = useMemo(
+    () => collectKeyframeApplications(selectedItemKeyframes, t),
+    [selectedItemKeyframes, t],
+  )
+  const manualKeyframeSummary = useMemo(
+    () => summarizeManualKeyframes(selectedItemKeyframes, t),
+    [selectedItemKeyframes, t],
+  )
   const trimmedKeyframeCount = useMemo(
     () =>
       selectedItem
@@ -1358,10 +887,11 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
       ? state.compositionById[selectedItem.compositionId]?.editorKind
       : undefined,
   )
-  const isMotionClip =
-    selectedItems.length === 1 &&
-    selectedItem?.type === 'composition' &&
-    selectedCompositionKind === 'composite-2d'
+  const isMotionClip = isMotionClipSelection(
+    selectedItems.length,
+    selectedItem?.type,
+    selectedCompositionKind,
+  )
   const handleMotionClip = useCallback(() => {
     if (isMotionClip && selectedItem?.type === 'composition') {
       openComposition(selectedItem.compositionId, selectedItem.label, selectedItem.id)
@@ -1377,163 +907,28 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
 
   if (variant === 'edit') {
     return (
-      <TooltipProvider delayDuration={300}>
-        <div className="flex flex-col gap-4" data-testid="edit-animation-panel">
-          <section className="flex flex-col gap-2">
-            <div>
-              <h3 className="text-xs font-medium">{t('editor.editAnimation.quickTitle')}</h3>
-              <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                {t('editor.editAnimation.quickHint')}
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {editQuickPresets.map((preset) => {
-                const disabledReason = motionReason(preset)
-                const label = t(`editor.motionPresets.items.${preset.labelKey}`)
-                return (
-                  <Tooltip key={preset.id}>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        disabled={disabledReason !== null}
-                        onClick={() => handleApplyMotion(preset)}
-                        className={cn(
-                          'group flex min-h-14 flex-col items-center gap-1 rounded-md border border-border/60 p-1.5 text-[10px]',
-                          disabledReason
-                            ? 'cursor-not-allowed text-muted-foreground/40'
-                            : 'text-muted-foreground hover:border-border hover:bg-secondary/40 hover:text-foreground',
-                        )}
-                      >
-                        <MotionPresetThumbnail thumbnail={preset.thumbnail} />
-                        <span className="w-full truncate text-center">{label}</span>
-                      </button>
-                    </TooltipTrigger>
-                    {disabledReason ? <TooltipContent>{disabledReason}</TooltipContent> : null}
-                  </Tooltip>
-                )
-              })}
-            </div>
-          </section>
-
-          {hasAnyAnimation ? (
-            <>
-              <Separator />
-              <section className="flex flex-col gap-2">
-                <div>
-                  <h3 className="text-xs font-medium">{t('editor.animateStages.appliedTitle')}</h3>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">
-                    {t('editor.editAnimation.appliedHint')}
-                  </p>
-                </div>
-                <div className="flex flex-col gap-1 rounded-md border border-border/60 bg-secondary/20 p-2">
-                  {manualKeyframeSummary.keyframeCount > 0 ? (
-                    <AppliedMotionRow
-                      label={t('editor.animateStages.manualKeyframes')}
-                      detail={`${manualKeyframeSummary.properties.join(', ')} · ${t('editor.animateStages.keyframeCount', { count: manualKeyframeSummary.keyframeCount })}`}
-                      removeLabel={t('editor.animateStages.removeManualKeyframes')}
-                      onRemove={handleRemoveManualKeyframes}
-                      onNavigate={
-                        manualKeyframeSummary.firstFrame === null
-                          ? undefined
-                          : () => navigateToItemFrame(manualKeyframeSummary.firstFrame ?? 0)
-                      }
-                    />
-                  ) : null}
-                  {trimmedKeyframeCount > 0 ? (
-                    <AppliedMotionRow
-                      label={t('timeline.keyframeEditor.trimmedKeyframesLabel')}
-                      detail={t('timeline.keyframeEditor.trimmedKeyframesDetail', {
-                        count: trimmedKeyframeCount,
-                      })}
-                      removeLabel={t('timeline.keyframeEditor.trimAnimation')}
-                      onRemove={handleTrimAnimation}
-                    />
-                  ) : null}
-                  {keyframeApplications.map((application) => (
-                    <AppliedMotionRow
-                      key={application.source.applicationId}
-                      label={application.source.presetName}
-                      detail={`${t('editor.animateStages.generatedKeyframes')} · ${t('editor.animateStages.keyframeCount', { count: application.keyframeCount })}`}
-                      removeLabel={t('editor.animateStages.removePresetApplication', {
-                        name: application.source.presetName,
-                      })}
-                      onRemove={() =>
-                        handleRemovePresetApplication(application.source.applicationId)
-                      }
-                      onNavigate={() => navigateToItemFrame(application.firstFrame)}
-                    />
-                  ))}
-                  <AppliedContinuousMotionControls
-                    items={selectedItems}
-                    canvas={canvas}
-                    variant="rows"
-                    showBakeAction
-                  />
-                  {activeTextMotion.map(({ slot, effect }) => (
-                    <AppliedMotionRow
-                      key={slot}
-                      label={t(getTextMotionPreset(effect.presetId).labelKey)}
-                      detail={`${t('editor.animateStages.scopeText')} · ${t(`textMotion.slots.${slot}`)} · ${t('editor.animateStages.liveBadge')}`}
-                      removeLabel={t('textMotion.removePreset', {
-                        name: t(getTextMotionPreset(effect.presetId).labelKey),
-                      })}
-                      onRemove={() => handleRemoveTextMotion(slot)}
-                      onNavigate={() => navigateToTextMotion(slot)}
-                    />
-                  ))}
-                </div>
-              </section>
-            </>
-          ) : null}
-
-          {selectedTextItems.length > 0 ? (
-            <>
-              <Separator />
-              <section className="flex flex-col gap-2">
-                <div>
-                  <h3 className="text-xs font-medium">{t('textMotion.sectionTitle')}</h3>
-                  <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                    {t('editor.editAnimation.textHint')}
-                  </p>
-                </div>
-                <TextMotionSlotRows items={selectedTextItems} />
-              </section>
-            </>
-          ) : null}
-
-          <Separator />
-
-          <section className="rounded-md border border-border/60 bg-secondary/20 p-2.5">
-            <div className="flex items-start gap-2">
-              <Layers3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <h3 className="text-xs font-medium">{t('editor.editAnimation.motionClipTitle')}</h3>
-                <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                  {isMotionClip
-                    ? t('editor.editAnimation.motionClipOpenHint')
-                    : t('editor.editAnimation.motionClipCreateHint')}
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="mt-2 h-7 gap-1.5 px-2 text-[10px]"
-                  onClick={handleMotionClip}
-                >
-                  {isMotionClip ? (
-                    <ExternalLink className="h-3 w-3" />
-                  ) : (
-                    <Layers3 className="h-3 w-3" />
-                  )}
-                  {isMotionClip
-                    ? t('editor.editAnimation.openInMotion')
-                    : t('editor.editAnimation.createMotionClip')}
-                </Button>
-              </div>
-            </div>
-          </section>
-        </div>
-      </TooltipProvider>
+      <AnimationPresetLibraryEdit
+        quickPresets={editQuickPresets}
+        reasonFor={motionReason}
+        onApplyPreset={handleApplyMotion}
+        hasAnyAnimation={hasAnyAnimation}
+        manualKeyframeSummary={manualKeyframeSummary}
+        trimmedKeyframeCount={trimmedKeyframeCount}
+        keyframeApplications={keyframeApplications}
+        activeTextMotion={activeTextMotion}
+        selectedItems={selectedItems}
+        selectedTextItems={selectedTextItems}
+        canvas={canvas}
+        onRemoveManualKeyframes={handleRemoveManualKeyframes}
+        onTrimAnimation={handleTrimAnimation}
+        onRemovePresetApplication={handleRemovePresetApplication}
+        onNavigateToItemFrame={navigateToItemFrame}
+        onRemoveTextMotion={handleRemoveTextMotion}
+        onNavigateToTextMotion={navigateToTextMotion}
+        isMotionClip={isMotionClip}
+        onMotionClip={handleMotionClip}
+        t={t}
+      />
     )
   }
 
@@ -1546,71 +941,15 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
         )}
         data-testid="motion-library"
       >
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <span className="text-xs font-medium text-muted-foreground">
-            {t('editor.animatePresets.title')}
-          </span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 px-1.5 text-[11px]"
-                  disabled={!canCapture}
-                  onClick={() => setDialogOpen(true)}
-                >
-                  <Plus className="h-3 w-3" />
-                  {t('editor.animatePresets.saveButtonLong')}
-                </Button>
-              </span>
-            </TooltipTrigger>
-            {!canCapture && (
-              <TooltipContent>{t('editor.animatePresets.noAnimationToSave')}</TooltipContent>
-            )}
-          </Tooltip>
-        </div>
-
-        <div className="flex items-center gap-1.5 border-b border-border/70 p-2">
-          <div className="relative min-w-0 flex-1">
-            <Search
-              className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              type="search"
-              name="animation-preset-search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={t('editor.animatePresets.searchPlaceholder')}
-              aria-label={t('editor.animatePresets.searchPlaceholder')}
-              autoComplete="off"
-              className="h-7 pl-7 pr-7 text-[11px]"
-            />
-            {searchQuery.length > 0 ? (
-              <button
-                type="button"
-                aria-label={t('editor.animatePresets.clearSearch')}
-                className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={() => setSearchQuery('')}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            ) : null}
-          </div>
-          <Button
-            type="button"
-            variant={compatibleOnly ? 'secondary' : 'ghost'}
-            size="sm"
-            className="h-7 shrink-0 gap-1 px-2 text-[10px]"
-            aria-pressed={compatibleOnly}
-            title={t('editor.animatePresets.compatibleOnlyHint')}
-            onClick={() => setCompatibleOnly((current) => !current)}
-          >
-            <ListFilter className="h-3 w-3" />
-            {t('editor.animatePresets.compatibleOnly')}
-          </Button>
-        </div>
+        <AnimationPresetToolbar
+          canCapture={canCapture}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          compatibleOnly={compatibleOnly}
+          onToggleCompatibleOnly={toggleCompatibleOnly}
+          onOpenSaveDialog={openSaveDialog}
+          t={t}
+        />
 
         <ScrollArea className="min-h-0 flex-1">
           {/* Extra right padding clears the overlay scrollbar so values aren't clipped. */}
@@ -1618,57 +957,22 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
             {/* ── Applied state for the selected clip — keyframes, live
                 modulators, audio pulse. Each removable thing carries an ✕. ── */}
             {hasAnyAnimation && (
-              <section className="flex flex-col gap-2 rounded-md border border-border/60 bg-secondary/20 p-2">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  {t('editor.animateStages.appliedTitle')}
-                </span>
-                <div className="flex flex-col gap-1">
-                  {manualKeyframeSummary.keyframeCount > 0 ? (
-                    <AppliedMotionRow
-                      label={t('editor.animateStages.manualKeyframes')}
-                      detail={`${manualKeyframeSummary.properties.join(', ')} · ${t('editor.animateStages.keyframeCount', { count: manualKeyframeSummary.keyframeCount })}`}
-                      removeLabel={t('editor.animateStages.removeManualKeyframes')}
-                      onRemove={handleRemoveManualKeyframes}
-                      onNavigate={
-                        manualKeyframeSummary.firstFrame === null
-                          ? undefined
-                          : () => navigateToItemFrame(manualKeyframeSummary.firstFrame ?? 0)
-                      }
-                    />
-                  ) : null}
-                  {keyframeApplications.map((application) => (
-                    <AppliedMotionRow
-                      key={application.source.applicationId}
-                      label={application.source.presetName}
-                      detail={`${t('editor.animateStages.generatedKeyframes')} · ${[...application.properties].join(', ')} · ${t('editor.animateStages.keyframeCount', { count: application.keyframeCount })}`}
-                      removeLabel={t('editor.animateStages.removePresetApplication', {
-                        name: application.source.presetName,
-                      })}
-                      onRemove={() =>
-                        handleRemovePresetApplication(application.source.applicationId)
-                      }
-                      onNavigate={() => navigateToItemFrame(application.firstFrame)}
-                    />
-                  ))}
-                  <AppliedContinuousMotionControls
-                    items={selectedItems}
-                    canvas={canvas}
-                    variant="rows"
-                  />
-                  {activeTextMotion.map(({ slot, effect }) => (
-                    <AppliedMotionRow
-                      key={slot}
-                      label={t(getTextMotionPreset(effect.presetId).labelKey)}
-                      detail={`${t('editor.animateStages.scopeText')} · ${t(`textMotion.slots.${slot}`)} · ${t('editor.animateStages.liveBadge')}`}
-                      removeLabel={t('textMotion.removePreset', {
-                        name: t(getTextMotionPreset(effect.presetId).labelKey),
-                      })}
-                      onRemove={() => handleRemoveTextMotion(slot)}
-                      onNavigate={() => navigateToTextMotion(slot)}
-                    />
-                  ))}
-                </div>
-              </section>
+              <AppliedMotionSummary
+                variant="panel"
+                manualKeyframeSummary={manualKeyframeSummary}
+                trimmedKeyframeCount={trimmedKeyframeCount}
+                keyframeApplications={keyframeApplications}
+                activeTextMotion={activeTextMotion}
+                selectedItems={selectedItems}
+                canvas={canvas}
+                onRemoveManualKeyframes={handleRemoveManualKeyframes}
+                onTrimAnimation={handleTrimAnimation}
+                onRemovePresetApplication={handleRemovePresetApplication}
+                onNavigateToItemFrame={navigateToItemFrame}
+                onRemoveTextMotion={handleRemoveTextMotion}
+                onNavigateToTextMotion={navigateToTextMotion}
+                t={t}
+              />
             )}
 
             {/* ── Start: presets (declarative). Picking one fills the dopesheet
@@ -1679,223 +983,49 @@ export const AnimationPresetLibrary = memo(function AnimationPresetLibrary({
 
             {/* Keyframe presets can replace a region, merge diamonds into the
                 base lanes, or remain independent as a named additive layer. */}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] text-muted-foreground">
-                {t('editor.animateStages.onApply')}
-              </span>
-              <div className="inline-flex overflow-hidden rounded-md border border-border/60">
-                {(['replace', 'merge', 'layer'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    aria-pressed={applyMode === mode}
-                    onClick={() => setApplyMode(mode)}
-                    className={cn(
-                      'px-2 py-0.5 text-[10px] font-medium',
-                      applyMode === mode
-                        ? 'bg-secondary text-foreground'
-                        : 'text-muted-foreground hover:bg-secondary/40',
-                    )}
-                  >
-                    {t(`editor.animateStages.applyMode.${mode}`)}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ApplyModeSelector mode={applyMode} onChange={setApplyMode} t={t} />
 
             <MotionPresetControls onSettingsChange={handleMotionGeneratorSettingsChange} t={t} />
 
-            {MOTION_PRESET_CATEGORIES.map((category) => {
-              const textSlot = TEXT_SLOT_BY_MOTION_CATEGORY[category]
-              const layerPresets = filteredMotionPresetsByCategory[category]
-              const showTextScope = selectedTextItems.length > 0 && textSlot
-              if (layerPresets.length === 0 && !showTextScope) return null
-              return (
-                <StageSection
-                  key={category}
-                  title={t(`editor.motionPresets.categories.${category}`)}
-                >
-                  {layerPresets.length > 0 ? (
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-medium text-muted-foreground">
-                        {t('editor.animateStages.scopeLayer')}
-                      </span>
-                      <MotionPresetSection
-                        category={category}
-                        presets={layerPresets}
-                        reasonFor={motionReason}
-                        onApply={handleApplyMotion}
-                        showHeading={false}
-                        t={t}
-                      />
-                    </div>
-                  ) : null}
-                  {showTextScope ? (
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-medium text-muted-foreground">
-                        {t('editor.animateStages.scopeText')}
-                      </span>
-                      <TextMotionSlotRows
-                        items={selectedTextItems}
-                        query={deferredSearchQuery}
-                        slots={[textSlot]}
-                        showSlotHeading={false}
-                        showEmptyState={false}
-                      />
-                    </div>
-                  ) : null}
-                </StageSection>
-              )
-            })}
+            <MotionPresetStages
+              presetsByCategory={filteredMotionPresetsByCategory}
+              selectedTextItems={selectedTextItems}
+              query={deferredSearchQuery}
+              reasonFor={motionReason}
+              onApply={handleApplyMotion}
+              t={t}
+            />
 
             {/* Layer behaviours and text loops share the same user intent even
                 though only the layer behaviours can be baked to keyframes. */}
-            {filteredModulators.length > 0 || selectedTextItems.length > 0 ? (
-              <StageSection
-                title={t('editor.animateStages.continuousTitle')}
-                hint={t('editor.animateStages.continuousHint')}
-                defaultOpen={false}
-              >
-                {filteredModulators.length > 0 ? (
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-medium text-muted-foreground">
-                      {t('editor.animateStages.scopeLayer')}
-                    </span>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {filteredModulators.map((modulator) => (
-                        <ContinuousMotionRow
-                          key={modulator.id}
-                          modulator={modulator}
-                          active={activeModulatorIds.has(modulator.id)}
-                          reason={modulatorReason(modulator)}
-                          settings={modulatorSettingsByType.get(modulator.id) ?? null}
-                          onApply={() => handleApplyModulator(modulator)}
-                          onRemove={() => handleRemoveModulator(modulator)}
-                          onLiveEdit={(settings) => handleModulatorLiveEdit(modulator.id, settings)}
-                          onCommitEdit={(settings) =>
-                            handleModulatorCommitEdit(modulator.id, settings)
-                          }
-                          t={t}
-                        />
-                      ))}
-                    </div>
+            {/* Layer behaviours and text loops share the same user intent even
+                though only the layer behaviours can be baked to keyframes. */}
+            <ContinuousMotionStage
+              modulators={filteredModulators}
+              activeModulatorIds={activeModulatorIds}
+              settingsByModulator={modulatorSettingsByType}
+              selectedTextItems={selectedTextItems}
+              query={deferredSearchQuery}
+              reasonFor={modulatorReason}
+              onApplyModulator={handleApplyModulator}
+              onRemoveModulator={handleRemoveModulator}
+              onLiveEdit={handleModulatorLiveEdit}
+              onCommitEdit={handleModulatorCommitEdit}
+              hasBakeableMotion={hasBakeableMotion}
+              onOpenBakeDialog={openBakeDialog}
+              t={t}
+            />
 
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-full justify-start gap-1.5 px-2 text-[11px]"
-                            disabled={!hasBakeableMotion}
-                            onClick={() => setBakeDialogOpen(true)}
-                          >
-                            <WandSparkles className="h-3.5 w-3.5" />
-                            {t('editor.motionGenerator.bakeToKeyframes')}
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {t('editor.motionGenerator.bakeToKeyframesHint')}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : null}
-                {selectedTextItems.length > 0 ? (
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-medium text-muted-foreground">
-                      {t('editor.animateStages.scopeText')}
-                    </span>
-                    <TextMotionSlotRows
-                      items={selectedTextItems}
-                      query={deferredSearchQuery}
-                      slots={['loop']}
-                      showSlotHeading={false}
-                      showEmptyState={false}
-                    />
-                  </div>
-                ) : null}
-              </StageSection>
-            ) : null}
-
-            {!hasVisiblePresetResults && filtersActive ? (
-              <div
-                className="rounded-md border border-dashed border-border/70 px-3 py-6 text-center text-xs text-muted-foreground"
-                role="status"
-              >
-                {t('editor.animatePresets.noMatches')}
-              </div>
-            ) : null}
-
-            {!filtersActive || filteredSavedPresets.length > 0 ? <Separator /> : null}
-
-            {/* ── Saved animations — user-captured presets, also declarative ── */}
-            {!filtersActive || filteredSavedPresets.length > 0 ? (
-              <section className="flex flex-col gap-1">
-                <h3 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  {t('editor.animatePresets.animationsHeading')}
-                </h3>
-                {presets.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    {t('editor.animatePresets.empty')}
-                  </p>
-                ) : (
-                  filteredSavedPresets.map((preset) => {
-                    const reason = incompatibilityReason(preset)
-                    const disabled = reason !== null
-                    const row = (
-                      <div
-                        key={preset.id}
-                        className="group flex items-center gap-1 rounded-md border border-border/60"
-                      >
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              aria-disabled={disabled}
-                              onClick={() => {
-                                if (!disabled) handleApply(preset)
-                              }}
-                              className={cn(
-                                'min-w-0 flex-1 truncate px-2 py-1.5 text-left text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
-                                disabled
-                                  ? 'cursor-not-allowed text-muted-foreground/60'
-                                  : 'hover:bg-secondary/40',
-                              )}
-                            >
-                              <span className="flex min-w-0 items-center gap-1.5">
-                                <span className="min-w-0 flex-1 truncate">{preset.name}</span>
-                                {preset.motionModifiers?.length || preset.textMotion ? (
-                                  <span
-                                    className="shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[9px] font-medium text-primary"
-                                    title={t('editor.animateStages.liveBadge')}
-                                  >
-                                    ƒx
-                                  </span>
-                                ) : null}
-                              </span>
-                            </button>
-                          </TooltipTrigger>
-                          {reason ? <TooltipContent>{reason}</TooltipContent> : null}
-                        </Tooltip>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-                          aria-label={t('editor.animatePresets.deleteLabel')}
-                          onClick={() => void handleDelete(preset)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    )
-
-                    return row
-                  })
-                )}
-              </section>
-            ) : null}
+            <SavedAnimationList
+              presets={presets}
+              visiblePresets={filteredSavedPresets}
+              filtersActive={filtersActive}
+              hasVisibleResults={hasVisiblePresetResults}
+              reasonFor={incompatibilityReason}
+              onApply={handleApply}
+              onDelete={handleDelete}
+              t={t}
+            />
           </div>
         </ScrollArea>
 

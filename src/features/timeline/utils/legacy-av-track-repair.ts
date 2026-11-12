@@ -269,13 +269,9 @@ export function makeGeneratedAudioItem(
   }
 }
 
-export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyAvRepairResult {
-  const createId = params.createId ?? (() => crypto.randomUUID())
-  const sortedTracks = sortTracksByOrder(params.tracks)
-  const trackById = new Map(sortedTracks.map((track) => [track.id, track]))
+function groupItemsByTrackId(items: TimelineItem[]): Map<string, TimelineItem[]> {
   const itemsByTrackId = new Map<string, TimelineItem[]>()
-
-  for (const item of params.items) {
+  for (const item of items) {
     const existing = itemsByTrackId.get(item.trackId)
     if (existing) {
       existing.push(item)
@@ -283,8 +279,19 @@ export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyA
       itemsByTrackId.set(item.trackId, [item])
     }
   }
+  return itemsByTrackId
+}
 
-  const kindsByTrackId = inferTrackKinds(sortedTracks, itemsByTrackId)
+function resolveVideoLaneMaps(
+  sortedTracks: TimelineTrack[],
+  kindsByTrackId: Map<string, TrackKind>,
+): {
+  videoTrackSourceIds: string[]
+  audioTrackSourceIds: string[]
+  videoTrackLaneIndex: Map<string, number>
+  videoTrackSourceIdsByLane: string[]
+  trackOrderMap: Map<string, number>
+} {
   const videoTrackSourceIds = sortedTracks
     .filter((track) => kindsByTrackId.get(track.id) === 'video')
     .map((track) => track.id)
@@ -297,44 +304,49 @@ export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyA
       getVideoLaneIndex(index, videoTrackSourceIds.length),
     ]),
   )
-  const videoTrackSourceIdsByLane = [...videoTrackSourceIds].reverse()
-  const trackOrderMap = new Map(sortedTracks.map((track) => [track.id, track.order ?? 0]))
-
-  const existingAudioPairs = findExistingAudioPairs({
-    items: params.items,
+  return {
+    videoTrackSourceIds,
+    audioTrackSourceIds,
     videoTrackLaneIndex,
-    trackOrderMap,
-  })
-  const existingAudioByVideoId = new Map(
-    existingAudioPairs.map((pair) => [pair.video.id, pair.audio]),
-  )
-  const pairedAudioTrackSourceIdByLane = new Map<number, string>()
-
-  for (const pair of existingAudioPairs) {
-    if (!pairedAudioTrackSourceIdByLane.has(pair.videoLaneIndex)) {
-      pairedAudioTrackSourceIdByLane.set(pair.videoLaneIndex, pair.audio.trackId)
-    }
+    videoTrackSourceIdsByLane: [...videoTrackSourceIds].reverse(),
+    trackOrderMap: new Map(sortedTracks.map((track) => [track.id, track.order ?? 0])),
   }
+}
 
+function collectPairedAudioLaneIndices(
+  existingAudioPairs: ExistingAudioPair[],
+  items: TimelineItem[],
+  videoTrackLaneIndex: Map<string, number>,
+  videoHasAudioByMediaId: Record<string, boolean | undefined>,
+): Set<number> {
   const pairedAudioLaneIndices = new Set<number>(
     existingAudioPairs.map((pair) => pair.videoLaneIndex),
   )
-  for (const item of params.items) {
+  for (const item of items) {
     if (item.type !== 'video') continue
-    if (!item.mediaId || params.videoHasAudioByMediaId[item.mediaId] !== true) continue
+    if (!item.mediaId || videoHasAudioByMediaId[item.mediaId] !== true) continue
     const laneIndex = videoTrackLaneIndex.get(item.trackId)
     if (laneIndex !== undefined) {
       pairedAudioLaneIndices.add(laneIndex)
     }
   }
+  return pairedAudioLaneIndices
+}
 
-  const pairedAudioLaneOrder = [...pairedAudioLaneIndices].sort((left, right) => left - right)
-  const pairedAudioLaneCount = pairedAudioLaneOrder.length
-  const emptyAudioTrackSourceIds = audioTrackSourceIds.filter(
-    (trackId) => (itemsByTrackId.get(trackId)?.length ?? 0) === 0,
-  )
-  const consumedAudioSourceIds = new Set<string>()
+function assignPairedAudioSources(options: {
+  pairedAudioLaneOrder: number[]
+  pairedAudioTrackSourceIdByLane: Map<number, string>
+  emptyAudioTrackSourceIds: string[]
+  videoTrackSourceIdsByLane: string[]
+}): { pairedAudioSourceIds: string[]; consumedAudioSourceIds: Set<string> } {
+  const {
+    pairedAudioLaneOrder,
+    pairedAudioTrackSourceIdByLane,
+    emptyAudioTrackSourceIds,
+    videoTrackSourceIdsByLane,
+  } = options
   const pairedAudioSourceIds: string[] = []
+  const consumedAudioSourceIds = new Set<string>()
   for (const laneIndex of pairedAudioLaneOrder) {
     const sourceTrackId =
       pairedAudioTrackSourceIdByLane.get(laneIndex) ??
@@ -350,9 +362,15 @@ export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyA
       )
     }
   }
+  return { pairedAudioSourceIds, consumedAudioSourceIds }
+}
 
-  const pairedAudioIds = new Set(existingAudioPairs.map((pair) => pair.audio.id))
-  const standaloneAudioTrackIds = params.items
+function collectStandaloneAudioTrackIds(
+  items: TimelineItem[],
+  pairedAudioIds: Set<string>,
+  trackOrderMap: Map<string, number>,
+): string[] {
+  return items
     .filter((item): item is AudioItem => item.type === 'audio' && !pairedAudioIds.has(item.id))
     .toSorted((left, right) => {
       const leftOrder = trackOrderMap.get(left.trackId) ?? 0
@@ -363,15 +381,33 @@ export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyA
     })
     .map((item) => item.trackId)
     .filter((trackId, index, array) => array.indexOf(trackId) === index)
+}
 
-  const remainingAudioTrackSourceIds = audioTrackSourceIds.filter(
-    (trackId) => !consumedAudioSourceIds.has(trackId),
-  )
-  const standaloneAudioSourceIds = [
-    ...standaloneAudioTrackIds,
-    ...remainingAudioTrackSourceIds.filter((trackId) => !standaloneAudioTrackIds.includes(trackId)),
-  ]
-
+function rebuildRepairedTracks(options: {
+  videoTrackSourceIds: string[]
+  videoTrackLaneIndex: Map<string, number>
+  pairedAudioSourceIds: string[]
+  pairedAudioLaneOrder: number[]
+  standaloneAudioSourceIds: string[]
+  pairedAudioLaneCount: number
+  trackById: Map<string, TimelineTrack>
+  createId: () => string
+}): {
+  repairedTracks: TimelineTrack[]
+  repairedVideoTrackIdsByLane: Map<number, string>
+  repairedAudioTrackIdsByLane: Map<number, string>
+  repairedStandaloneAudioTrackIdsBySource: Map<string, string>
+} {
+  const {
+    videoTrackSourceIds,
+    videoTrackLaneIndex,
+    pairedAudioSourceIds,
+    pairedAudioLaneOrder,
+    standaloneAudioSourceIds,
+    pairedAudioLaneCount,
+    trackById,
+    createId,
+  } = options
   const usedTrackIds = new Set<string>()
   const repairedTracks: TimelineTrack[] = []
   const repairedVideoTrackIdsByLane = new Map<number, string>()
@@ -420,137 +456,212 @@ export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyA
     repairedStandaloneAudioTrackIdsBySource.set(sourceTrackId, nextTrack.id)
   })
 
-  const keyframesByItemId = new Map(params.keyframes.map((entry) => [entry.itemId, entry]))
-  const repairedKeyframes = [
-    ...params.keyframes.map((entry) => ({
-      ...entry,
-      properties: entry.properties.map((property) => ({
-        ...property,
-        keyframes: property.keyframes.map((keyframe) => ({ ...keyframe })),
-      })),
+  return {
+    repairedTracks,
+    repairedVideoTrackIdsByLane,
+    repairedAudioTrackIdsByLane,
+    repairedStandaloneAudioTrackIdsBySource,
+  }
+}
+
+function deepCloneKeyframes(keyframes: ItemKeyframes[]): ItemKeyframes[] {
+  return keyframes.map((entry) => ({
+    ...entry,
+    properties: entry.properties.map((property) => ({
+      ...property,
+      keyframes: property.keyframes.map((keyframe) => ({ ...keyframe })),
     })),
-  ]
-  const repairedItems: TimelineItem[] = []
-  const generatedAudioItems: AudioItem[] = []
-  const generatedVideoGroupIds = new Map<string, string>()
+  }))
+}
 
-  const standaloneAudioTrackIndexFallback = standaloneAudioSourceIds[0]
-    ? repairedStandaloneAudioTrackIdsBySource.get(standaloneAudioSourceIds[0])
-    : repairedAudioTrackIdsByLane.get(0)
+interface AvItemRepairContext {
+  existingAudioPairs: ExistingAudioPair[]
+  existingAudioByVideoId: Map<string, AudioItem>
+  repairedAudioTrackIdsByLane: Map<number, string>
+  repairedVideoTrackIdsByLane: Map<number, string>
+  repairedStandaloneAudioTrackIdsBySource: Map<string, string>
+  standaloneAudioTrackIndexFallback: string | undefined
+  videoTrackLaneIndex: Map<string, number>
+  videoHasAudioByMediaId: Record<string, boolean | undefined>
+  keyframesByItemId: Map<string, ItemKeyframes>
+  repairedItems: TimelineItem[]
+  repairedKeyframes: ItemKeyframes[]
+  generatedAudioItems: AudioItem[]
+  generatedVideoGroupIds: Map<string, string>
+  createId: () => string
+}
 
-  for (const originalItem of params.items) {
+function repairPairedAudioItem(
+  originalItem: AudioItem,
+  pair: ExistingAudioPair,
+  ctx: AvItemRepairContext,
+): void {
+  const repairedTrackId =
+    ctx.repairedAudioTrackIdsByLane.get(pair.videoLaneIndex) ?? originalItem.trackId
+  const linkedGroupId =
+    ctx.generatedVideoGroupIds.get(pair.video.id) ??
+    pair.video.linkedGroupId ??
+    pair.audio.linkedGroupId ??
+    ctx.createId()
+  ctx.generatedVideoGroupIds.set(pair.video.id, linkedGroupId)
+  const repairedAudio =
+    pair.audio.trackId === repairedTrackId && pair.audio.linkedGroupId === linkedGroupId
+      ? pair.audio
+      : { ...pair.audio, trackId: repairedTrackId, linkedGroupId }
+
+  const existingAudioVolumeKeyframes = ctx.keyframesByItemId
+    .get(originalItem.id)
+    ?.properties.some((property) => property.property === 'volume')
+  if (!existingAudioVolumeKeyframes) {
+    const clonedVolumeKeyframes = cloneVolumeKeyframes(
+      ctx.keyframesByItemId.get(pair.video.id),
+      originalItem.id,
+    )
+    if (clonedVolumeKeyframes) {
+      ctx.repairedKeyframes.push(clonedVolumeKeyframes)
+    }
+  }
+
+  ctx.repairedItems.push(repairedAudio)
+}
+
+function repairStandaloneAudioItem(originalItem: AudioItem, ctx: AvItemRepairContext): void {
+  const repairedTrackId =
+    ctx.repairedStandaloneAudioTrackIdsBySource.get(originalItem.trackId) ??
+    ctx.standaloneAudioTrackIndexFallback
+  ctx.repairedItems.push(
+    repairedTrackId && originalItem.trackId !== repairedTrackId
+      ? { ...originalItem, trackId: repairedTrackId }
+      : originalItem,
+  )
+}
+
+function linkVideoToExistingAudio(
+  repairedVideo: VideoItem,
+  originalItem: VideoItem,
+  existingAudio: AudioItem,
+  ctx: AvItemRepairContext,
+): VideoItem {
+  const linkedGroupId =
+    ctx.generatedVideoGroupIds.get(originalItem.id) ??
+    repairedVideo.linkedGroupId ??
+    existingAudio.linkedGroupId ??
+    ctx.createId()
+  if (repairedVideo.linkedGroupId !== linkedGroupId) {
+    repairedVideo = { ...repairedVideo, linkedGroupId }
+  }
+  ctx.generatedVideoGroupIds.set(originalItem.id, linkedGroupId)
+  return repairedVideo
+}
+
+function generateMissingVideoAudio(
+  repairedVideo: VideoItem,
+  originalItem: VideoItem,
+  laneIndex: number,
+  ctx: AvItemRepairContext,
+): VideoItem {
+  const audioTrackId = ctx.repairedAudioTrackIdsByLane.get(laneIndex)
+  if (!audioTrackId) return repairedVideo
+  const linkedGroupId = repairedVideo.linkedGroupId ?? ctx.createId()
+  if (repairedVideo.linkedGroupId !== linkedGroupId) {
+    repairedVideo = { ...repairedVideo, linkedGroupId }
+  }
+
+  const generatedAudio = makeGeneratedAudioItem(repairedVideo, audioTrackId, ctx.createId)
+  ctx.generatedAudioItems.push(generatedAudio)
+
+  const clonedVolumeKeyframes = cloneVolumeKeyframes(
+    ctx.keyframesByItemId.get(originalItem.id),
+    generatedAudio.id,
+  )
+  if (clonedVolumeKeyframes) {
+    ctx.repairedKeyframes.push(clonedVolumeKeyframes)
+  }
+  return repairedVideo
+}
+
+function repairVideoItem(originalItem: VideoItem, ctx: AvItemRepairContext): void {
+  const laneIndex = ctx.videoTrackLaneIndex.get(originalItem.trackId) ?? 0
+  const repairedTrackId = ctx.repairedVideoTrackIdsByLane.get(laneIndex) ?? originalItem.trackId
+  const existingAudio = ctx.existingAudioByVideoId.get(originalItem.id)
+
+  let repairedVideo: VideoItem =
+    repairedTrackId !== originalItem.trackId
+      ? { ...originalItem, trackId: repairedTrackId }
+      : originalItem
+
+  if (existingAudio) {
+    repairedVideo = linkVideoToExistingAudio(repairedVideo, originalItem, existingAudio, ctx)
+  }
+
+  if (
+    !existingAudio &&
+    originalItem.mediaId &&
+    ctx.videoHasAudioByMediaId[originalItem.mediaId] === true
+  ) {
+    repairedVideo = generateMissingVideoAudio(repairedVideo, originalItem, laneIndex, ctx)
+  }
+
+  ctx.repairedItems.push(repairedVideo)
+}
+
+function seedPairedAudioTrackSources(existingAudioPairs: ExistingAudioPair[]): Map<number, string> {
+  const pairedAudioTrackSourceIdByLane = new Map<number, string>()
+  for (const pair of existingAudioPairs) {
+    if (!pairedAudioTrackSourceIdByLane.has(pair.videoLaneIndex)) {
+      pairedAudioTrackSourceIdByLane.set(pair.videoLaneIndex, pair.audio.trackId)
+    }
+  }
+  return pairedAudioTrackSourceIdByLane
+}
+
+function repairOtherVisualItem(originalItem: TimelineItem, itemCtx: AvItemRepairContext): void {
+  const laneIndex = itemCtx.videoTrackLaneIndex.get(originalItem.trackId) ?? 0
+  const repairedTrackId = itemCtx.repairedVideoTrackIdsByLane.get(laneIndex) ?? originalItem.trackId
+  itemCtx.repairedItems.push(
+    repairedTrackId !== originalItem.trackId
+      ? { ...originalItem, trackId: repairedTrackId }
+      : originalItem,
+  )
+}
+
+function repairLegacyItems(
+  items: TimelineItem[],
+  existingAudioPairs: ExistingAudioPair[],
+  itemCtx: AvItemRepairContext,
+): void {
+  for (const originalItem of items) {
     if (originalItem.type === 'audio') {
       const pair = existingAudioPairs.find((candidate) => candidate.audio.id === originalItem.id)
       if (pair) {
-        const repairedTrackId =
-          repairedAudioTrackIdsByLane.get(pair.videoLaneIndex) ?? originalItem.trackId
-        const linkedGroupId =
-          generatedVideoGroupIds.get(pair.video.id) ??
-          pair.video.linkedGroupId ??
-          pair.audio.linkedGroupId ??
-          createId()
-        generatedVideoGroupIds.set(pair.video.id, linkedGroupId)
-        const repairedAudio =
-          pair.audio.trackId === repairedTrackId && pair.audio.linkedGroupId === linkedGroupId
-            ? pair.audio
-            : { ...pair.audio, trackId: repairedTrackId, linkedGroupId }
-
-        const existingAudioVolumeKeyframes = keyframesByItemId
-          .get(originalItem.id)
-          ?.properties.some((property) => property.property === 'volume')
-        if (!existingAudioVolumeKeyframes) {
-          const clonedVolumeKeyframes = cloneVolumeKeyframes(
-            keyframesByItemId.get(pair.video.id),
-            originalItem.id,
-          )
-          if (clonedVolumeKeyframes) {
-            repairedKeyframes.push(clonedVolumeKeyframes)
-          }
-        }
-
-        repairedItems.push(repairedAudio)
-        continue
+        repairPairedAudioItem(originalItem, pair, itemCtx)
+      } else {
+        repairStandaloneAudioItem(originalItem, itemCtx)
       }
-
-      const repairedTrackId =
-        repairedStandaloneAudioTrackIdsBySource.get(originalItem.trackId) ??
-        standaloneAudioTrackIndexFallback
-      repairedItems.push(
-        repairedTrackId && originalItem.trackId !== repairedTrackId
-          ? { ...originalItem, trackId: repairedTrackId }
-          : originalItem,
-      )
       continue
     }
 
     if (originalItem.type === 'video') {
-      const laneIndex = videoTrackLaneIndex.get(originalItem.trackId) ?? 0
-      const repairedTrackId = repairedVideoTrackIdsByLane.get(laneIndex) ?? originalItem.trackId
-      const existingAudio = existingAudioByVideoId.get(originalItem.id)
-
-      let repairedVideo: VideoItem =
-        repairedTrackId !== originalItem.trackId
-          ? { ...originalItem, trackId: repairedTrackId }
-          : originalItem
-
-      if (existingAudio) {
-        const linkedGroupId =
-          generatedVideoGroupIds.get(originalItem.id) ??
-          repairedVideo.linkedGroupId ??
-          existingAudio.linkedGroupId ??
-          createId()
-        if (repairedVideo.linkedGroupId !== linkedGroupId) {
-          repairedVideo = { ...repairedVideo, linkedGroupId }
-        }
-        generatedVideoGroupIds.set(originalItem.id, linkedGroupId)
-      }
-
-      if (
-        !existingAudio &&
-        originalItem.mediaId &&
-        params.videoHasAudioByMediaId[originalItem.mediaId] === true
-      ) {
-        const audioTrackId = repairedAudioTrackIdsByLane.get(laneIndex)
-        if (audioTrackId) {
-          const linkedGroupId = repairedVideo.linkedGroupId ?? createId()
-          if (repairedVideo.linkedGroupId !== linkedGroupId) {
-            repairedVideo = { ...repairedVideo, linkedGroupId }
-          }
-
-          const generatedAudio = makeGeneratedAudioItem(repairedVideo, audioTrackId, createId)
-          generatedAudioItems.push(generatedAudio)
-
-          const clonedVolumeKeyframes = cloneVolumeKeyframes(
-            keyframesByItemId.get(originalItem.id),
-            generatedAudio.id,
-          )
-          if (clonedVolumeKeyframes) {
-            repairedKeyframes.push(clonedVolumeKeyframes)
-          }
-        }
-      }
-
-      repairedItems.push(repairedVideo)
+      repairVideoItem(originalItem, itemCtx)
       continue
     }
 
     if (isVisualItem(originalItem)) {
-      const laneIndex = videoTrackLaneIndex.get(originalItem.trackId) ?? 0
-      const repairedTrackId = repairedVideoTrackIdsByLane.get(laneIndex) ?? originalItem.trackId
-      repairedItems.push(
-        repairedTrackId !== originalItem.trackId
-          ? { ...originalItem, trackId: repairedTrackId }
-          : originalItem,
-      )
+      repairOtherVisualItem(originalItem, itemCtx)
       continue
     }
 
-    repairedItems.push(originalItem)
+    itemCtx.repairedItems.push(originalItem)
   }
+}
 
-  repairedItems.push(...generatedAudioItems)
-
-  const changed =
+function haveRepairOutputsChanged(
+  params: LegacyAvRepairParams,
+  repairedTracks: TimelineTrack[],
+  repairedItems: TimelineItem[],
+  repairedKeyframes: ItemKeyframes[],
+): boolean {
+  return (
     JSON.stringify({
       tracks: params.tracks,
       items: params.items,
@@ -561,11 +672,119 @@ export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyA
       items: repairedItems,
       keyframes: repairedKeyframes,
     })
+  )
+}
+
+export function repairLegacyAvTrackLayout(params: LegacyAvRepairParams): LegacyAvRepairResult {
+  const createId = params.createId ?? (() => crypto.randomUUID())
+  const sortedTracks = sortTracksByOrder(params.tracks)
+  const trackById = new Map(sortedTracks.map((track) => [track.id, track]))
+  const itemsByTrackId = groupItemsByTrackId(params.items)
+
+  const kindsByTrackId = inferTrackKinds(sortedTracks, itemsByTrackId)
+  const {
+    videoTrackSourceIds,
+    audioTrackSourceIds,
+    videoTrackLaneIndex,
+    videoTrackSourceIdsByLane,
+    trackOrderMap,
+  } = resolveVideoLaneMaps(sortedTracks, kindsByTrackId)
+
+  const existingAudioPairs = findExistingAudioPairs({
+    items: params.items,
+    videoTrackLaneIndex,
+    trackOrderMap,
+  })
+  const existingAudioByVideoId = new Map(
+    existingAudioPairs.map((pair) => [pair.video.id, pair.audio]),
+  )
+  const pairedAudioTrackSourceIdByLane = seedPairedAudioTrackSources(existingAudioPairs)
+
+  const pairedAudioLaneIndices = collectPairedAudioLaneIndices(
+    existingAudioPairs,
+    params.items,
+    videoTrackLaneIndex,
+    params.videoHasAudioByMediaId,
+  )
+
+  const pairedAudioLaneOrder = [...pairedAudioLaneIndices].sort((left, right) => left - right)
+  const pairedAudioLaneCount = pairedAudioLaneOrder.length
+  const emptyAudioTrackSourceIds = audioTrackSourceIds.filter(
+    (trackId) => (itemsByTrackId.get(trackId)?.length ?? 0) === 0,
+  )
+  const { pairedAudioSourceIds, consumedAudioSourceIds } = assignPairedAudioSources({
+    pairedAudioLaneOrder,
+    pairedAudioTrackSourceIdByLane,
+    emptyAudioTrackSourceIds,
+    videoTrackSourceIdsByLane,
+  })
+
+  const pairedAudioIds = new Set(existingAudioPairs.map((pair) => pair.audio.id))
+  const standaloneAudioTrackIds = collectStandaloneAudioTrackIds(
+    params.items,
+    pairedAudioIds,
+    trackOrderMap,
+  )
+
+  const remainingAudioTrackSourceIds = audioTrackSourceIds.filter(
+    (trackId) => !consumedAudioSourceIds.has(trackId),
+  )
+  const standaloneAudioSourceIds = [
+    ...standaloneAudioTrackIds,
+    ...remainingAudioTrackSourceIds.filter((trackId) => !standaloneAudioTrackIds.includes(trackId)),
+  ]
+
+  const {
+    repairedTracks,
+    repairedVideoTrackIdsByLane,
+    repairedAudioTrackIdsByLane,
+    repairedStandaloneAudioTrackIdsBySource,
+  } = rebuildRepairedTracks({
+    videoTrackSourceIds,
+    videoTrackLaneIndex,
+    pairedAudioSourceIds,
+    pairedAudioLaneOrder,
+    standaloneAudioSourceIds,
+    pairedAudioLaneCount,
+    trackById,
+    createId,
+  })
+
+  const keyframesByItemId = new Map(params.keyframes.map((entry) => [entry.itemId, entry]))
+  const repairedKeyframes = deepCloneKeyframes(params.keyframes)
+  const repairedItems: TimelineItem[] = []
+  const generatedAudioItems: AudioItem[] = []
+  const generatedVideoGroupIds = new Map<string, string>()
+
+  const standaloneAudioTrackIndexFallback = standaloneAudioSourceIds[0]
+    ? repairedStandaloneAudioTrackIdsBySource.get(standaloneAudioSourceIds[0])
+    : repairedAudioTrackIdsByLane.get(0)
+
+  const itemCtx: AvItemRepairContext = {
+    existingAudioPairs,
+    existingAudioByVideoId,
+    repairedAudioTrackIdsByLane,
+    repairedVideoTrackIdsByLane,
+    repairedStandaloneAudioTrackIdsBySource,
+    standaloneAudioTrackIndexFallback,
+    videoTrackLaneIndex,
+    videoHasAudioByMediaId: params.videoHasAudioByMediaId,
+    keyframesByItemId,
+    repairedItems,
+    repairedKeyframes,
+    generatedAudioItems,
+    generatedVideoGroupIds,
+    createId,
+  }
+
+  repairLegacyItems(params.items, existingAudioPairs, itemCtx)
+
+  repairedItems.push(...generatedAudioItems)
 
   return {
     tracks: repairedTracks,
     items: repairedItems,
     keyframes: repairedKeyframes,
-    changed,
+    changed: haveRepairOutputsChanged(params, repairedTracks, repairedItems, repairedKeyframes),
   }
 }

@@ -110,16 +110,7 @@ vi.mock('@/features/editor/deps/projects', () => ({
 }))
 
 vi.mock('@/features/editor/deps/timeline-store', () => ({
-  useTimelineStore: (
-    selector: (state: {
-      markDirty: typeof mocks.markDirty
-      setFps: typeof mocks.setFps
-    }) => unknown,
-  ) =>
-    selector({
-      markDirty: mocks.markDirty,
-      setFps: mocks.setFps,
-    }),
+  markDirty: mocks.markDirty,
   useTimelineSettingsStore: (selector: (state: { setFps: typeof mocks.setFps }) => unknown) =>
     selector({
       setFps: mocks.setFps,

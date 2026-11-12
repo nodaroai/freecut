@@ -2,8 +2,10 @@ import { memo, useCallback, useEffect, useRef, type PointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   setInOutPointsWithoutHistory,
+  setInPoint,
+  setOutPoint,
+  useMarkersStore,
   useTimelineSettingsStore,
-  useTimelineStore,
 } from '@/features/editor/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import {
@@ -48,10 +50,8 @@ export const MotionIoLane = memo(function MotionIoLane({
   fps: number
 }) {
   const { t } = useTranslation()
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
-  const setInPoint = useTimelineStore((s) => s.setInPoint)
-  const setOutPoint = useTimelineStore((s) => s.setOutPoint)
+  const inPoint = useMarkersStore((s) => s.inPoint)
+  const outPoint = useMarkersStore((s) => s.outPoint)
 
   const laneRef = useRef<HTMLDivElement>(null)
   // The lane positions via `%`, but the handles need the real visible span in px

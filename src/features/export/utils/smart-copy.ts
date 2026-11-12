@@ -4,8 +4,8 @@ import type { MediaMetadata } from '@/types/storage'
 import type { TimelineItem, TimelineTrack, VideoItem, AudioItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 import { getMediaFileById, getMediaMetadataById } from '../deps/media-library'
-import type { ClientExportSettings, ClientRenderResult, RenderProgress } from './client-renderer'
-import { normalizeVideoCodec } from './video-bitrate'
+import type { ClientExportSettings, ClientRenderResult, RenderProgress } from '../deps/renderer'
+import { normalizeVideoCodec } from '../deps/renderer'
 
 export type SmartCopyReason =
   | 'eligible'

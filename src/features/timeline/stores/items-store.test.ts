@@ -7,11 +7,15 @@ import type {
   VideoItem,
 } from '@/types/timeline'
 import { resetTimelineItemsTestState } from '@/features/timeline/test-helpers'
+import { DEFAULT_TRACK_HEIGHT } from '../constants'
 import { useItemsStore } from './items-store'
 import { selectReplaceableCaptionClipIds } from './items-store-indexes'
+import { useMarkersStore } from './markers-store'
+import { useTimelineCommandStore } from './timeline-command-store'
 import { useTimelineSettingsStore } from './timeline-settings-store'
 import { timelineToSourceFrames } from '../utils/source-calculations'
 import { rollingTrimItems } from './actions/item-actions'
+import { setInPoint, setOutPoint } from './actions/marker-actions'
 
 function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
   return {
@@ -799,5 +803,73 @@ describe('rolling edit', () => {
     expect(updatedLeft.durationInFrames + updatedRight.durationInFrames).toBe(140)
     // Clips remain adjacent
     expect(updatedLeft.from + updatedLeft.durationInFrames).toBe(updatedRight.from)
+  })
+})
+
+describe('items-store timeline bounds sync', () => {
+  beforeEach(() => {
+    resetTimelineItemsTestState()
+    useMarkersStore.getState().setMarkers([])
+    useMarkersStore.getState().setInOutPoints(null, null)
+    useTimelineCommandStore.getState().clearHistory()
+  })
+
+  it('clamps the out-point when the timeline content shrinks', () => {
+    useItemsStore.getState().setItems([makeVideoItem({ id: 'item-1', durationInFrames: 600 })])
+    useMarkersStore.getState().setInPoint(120)
+    useMarkersStore.getState().setOutPoint(600)
+
+    useItemsStore.getState().setItems([makeVideoItem({ id: 'item-1', durationInFrames: 240 })])
+
+    // Content now ends at 240, so the bound is the 10s floor at 30fps (300 frames).
+    expect(useMarkersStore.getState().inPoint).toBe(120)
+    expect(useMarkersStore.getState().outPoint).toBe(300)
+  })
+
+  it('clamps the out-point when the tail clip is deleted', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({ id: 'item-1', durationInFrames: 600 }),
+      makeVideoItem({ id: 'item-2', from: 600, durationInFrames: 300 }),
+    ])
+    useMarkersStore.getState().setInPoint(120)
+    useMarkersStore.getState().setOutPoint(900)
+
+    useItemsStore.getState()._removeItems(['item-2'])
+
+    expect(useMarkersStore.getState().inPoint).toBe(120)
+    expect(useMarkersStore.getState().outPoint).toBe(600)
+  })
+
+  it('clamps a stale out-point to the timeline end when it is set through the marker actions', () => {
+    useItemsStore.getState().setItems([makeVideoItem({ id: 'item-1', durationInFrames: 600 })])
+
+    setInPoint(120)
+    setOutPoint(5000)
+
+    expect(useMarkersStore.getState().inPoint).toBe(120)
+    expect(useMarkersStore.getState().outPoint).toBe(600)
+  })
+})
+
+describe('items-store track heights', () => {
+  beforeEach(() => resetTimelineItemsTestState())
+
+  it('re-derives track height from the track-size preset, discarding the stored height', () => {
+    const track = {
+      id: 'track-1',
+      name: 'Track 1',
+      height: 80,
+      locked: false,
+      visible: true,
+      muted: false,
+      solo: false,
+      order: 0,
+      items: [],
+    }
+
+    useItemsStore.getState().setTracks([track])
+
+    // Height is a local view preference, so the stored 80 is discarded.
+    expect(useItemsStore.getState().tracks).toEqual([{ ...track, height: DEFAULT_TRACK_HEIGHT }])
   })
 })
