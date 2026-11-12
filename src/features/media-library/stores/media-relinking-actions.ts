@@ -170,6 +170,11 @@ export function createRelinkingActions(
           dismissedMissingMediaIds: (state.dismissedMissingMediaIds ?? []).filter(
             (bid) => bid !== id,
           ),
+          // Drop orphan entries for the recovered media so the
+          // orphaned-clips dialog's auto-close effect can fire once the
+          // last one clears. Without this the dialog stays open with
+          // stale content after the media resolves healthy.
+          orphanedClips: (state.orphanedClips ?? []).filter((orphan) => orphan.mediaId !== id),
         }
       })
     },

@@ -10,7 +10,8 @@ import type {
 } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
 import { TransitionItem } from './transition-item'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { addItem, addItems, closeGapAtPosition, setTracks } from '../stores/timeline-actions'
 import {
   registerTrackDropGhostOverlay,
   useTrackDropPreviewStore,
@@ -264,10 +265,10 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const dragOverFlagsRef = useRef({ isDragOver: false, isExternalDragOver: false })
 
   // Resolve inherited parent-group state through the store, but derive this
-  // row's own state directly from the current `track` prop. The timeline store
-  // facade memoizes selections by snapshot; closing over `track` inside the
-  // selector can return the previous track state for one render after toggles.
-  const parentInteractionState = useTimelineStore((s) => {
+  // row's own state directly from the current `track` prop. The store selector
+  // only re-runs when the tracks state changes; closing over `track` inside it
+  // can return the previous track state for one render after toggles.
+  const parentInteractionState = useItemsStore((s) => {
     const parentGroup = track.parentTrackId
       ? s.tracks.find((t) => t.id === track.parentTrackId && t.isGroup)
       : undefined
@@ -299,10 +300,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   )
   const totalTrackItemCount = trackItemRangeIndex.itemCount
   const hasAnyItems = totalTrackItemCount > 0
-  const addItem = useTimelineStore((s) => s.addItem)
-  const addItems = useTimelineStore((s) => s.addItems)
-  const fps = useTimelineStore((s) => s.fps)
-  const closeGapAtPosition = useTimelineStore((s) => s.closeGapAtPosition)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const setTrackGhostPreviews = useTrackDropPreviewStore((s) => s.setGhostPreviews)
   const clearTrackGhostPreviews = useTrackDropPreviewStore((s) => s.clearGhostPreviews)
   const getMedia = useMediaLibraryStore((s) => s.mediaItems)
@@ -333,7 +331,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   }, [])
 
   const getCollisionTrackItemsMap = useCallback(() => {
-    const items = useTimelineStore.getState().items
+    const items = useItemsStore.getState().items
     const cache = collisionMapCacheRef.current
     if (cache.itemsRef !== items) {
       cache.itemsRef = items
@@ -378,8 +376,8 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           hasLinkedAudio: entry.mediaType === 'video' && !!entry.media.audioCodec,
         })),
         dropFrame,
-        tracks: useTimelineStore.getState().tracks,
-        existingItems: useTimelineStore.getState().items,
+        tracks: useItemsStore.getState().tracks,
+        existingItems: useItemsStore.getState().items,
         existingTrackItemsById: getCollisionTrackItemsMap(),
         dropTargetTrackId: track.id,
       })
@@ -468,8 +466,8 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           hasLinkedAudio: entry.hasLinkedAudio,
         })),
         dropFrame,
-        tracks: useTimelineStore.getState().tracks,
-        existingItems: useTimelineStore.getState().items,
+        tracks: useItemsStore.getState().tracks,
+        existingItems: useItemsStore.getState().items,
         existingTrackItemsById: getCollisionTrackItemsMap(),
         dropTargetTrackId: track.id,
       })
@@ -514,7 +512,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         return []
       }
 
-      const store = useTimelineStore.getState()
+      const store = useItemsStore.getState()
       const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps)
       const targetTrack = findCompatibleTrackForItemType({
         tracks: store.tracks,
@@ -658,7 +656,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         return null
       }
 
-      const store = useTimelineStore.getState()
+      const store = useItemsStore.getState()
       const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps)
       const targetTrack = findCompatibleTrackForItemType({
         tracks: store.tracks,
@@ -775,7 +773,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         return
       }
 
-      const store = useTimelineStore.getState()
+      const store = useItemsStore.getState()
       const compositionById = useCompositionsStore.getState().compositionById
       const composition = compositionById[data.compositionId]
       if (!composition) {
@@ -951,7 +949,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       closeGapAtPosition(track.id, gapContextMenuRequest.frame)
       setGapContextMenuRequest(null)
     }
-  }, [closeGapAtPosition, gapContextMenuRequest, track.id])
+  }, [gapContextMenuRequest, track.id])
 
   const clearOwnedPreview = useCallback(() => {
     clearPendingDragPreview()
@@ -1107,7 +1105,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           }
 
           const { compositionId, name, durationInFrames } = data as CompositionDragData
-          const store = useTimelineStore.getState()
+          const store = useItemsStore.getState()
           const compositionById = useCompositionsStore.getState().compositionById
           const composition = compositionById[compositionId]
           if (!composition) {
@@ -1136,7 +1134,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           }
 
           if (nextTracks !== store.tracks) {
-            useTimelineStore.getState().setTracks(nextTracks)
+            setTracks(nextTracks)
           }
 
           const droppedItems = buildDroppedCompositionTimelineItems({
@@ -1176,13 +1174,13 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         applyResolvedTimelineDrop({
           addItem,
           addItems,
-          currentTracks: useTimelineStore.getState().tracks,
+          currentTracks: useItemsStore.getState().tracks,
           dropResult,
           emptyMessage: t('timeline.track.unableToAddDroppedMediaItems'),
           notify: toast,
           partialFailureLabel: t('timeline.track.droppedMediaItems'),
           requestedCount: entries.length,
-          setTracks: useTimelineStore.getState().setTracks,
+          setTracks,
         })
         return
       } catch (error) {
@@ -1208,13 +1206,13 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     applyResolvedTimelineDrop({
       addItem,
       addItems,
-      currentTracks: useTimelineStore.getState().tracks,
+      currentTracks: useItemsStore.getState().tracks,
       dropResult,
       emptyMessage: t('timeline.track.unableToAddDroppedFiles'),
       notify: toast,
       partialFailureLabel: t('timeline.track.droppedFiles'),
       requestedCount: droppedEntries.length,
-      setTracks: useTimelineStore.getState().setTracks,
+      setTracks,
     })
   }
 

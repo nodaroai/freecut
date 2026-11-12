@@ -340,6 +340,61 @@ export function selectReplaceableCaptionClipIds(state: { items: TimelineItem[] }
   return captionCacheSet
 }
 
+// Items-keyed memo for per-cue caption ownership (embedded subtitles and
+// subtitle imports). Every mounted clip asks whether it owns consolidatable
+// captions on each store notification; a raw scan would be O(N²).
+let consolidatableCaptionItems: TimelineItem[] | null = null
+let consolidatableCaptionClipIds: Set<string> = new Set()
+
+export function selectConsolidatableCaptionClipIds(state: {
+  items: TimelineItem[]
+}): Set<string> {
+  if (consolidatableCaptionItems === state.items) return consolidatableCaptionClipIds
+  const ids = new Set<string>()
+  for (const item of state.items) {
+    if (item.type !== 'text') continue
+    const source = item.captionSource
+    if (
+      source &&
+      (source.type === 'embedded-subtitles' || source.type === 'subtitle-import') &&
+      source.clipId
+    ) {
+      ids.add(source.clipId)
+    }
+  }
+  consolidatableCaptionItems = state.items
+  consolidatableCaptionClipIds = ids
+  return ids
+}
+
+// Items-keyed memo for the audio mixer graph. Returning the same array while
+// items are unchanged keeps the mixer panel from re-filtering (and rebuilding
+// its graph) on every unrelated item edit.
+let audioGraphItemsCacheItems: TimelineItem[] | null = null
+let audioGraphItemsCache: TimelineItem[] = []
+
+export function selectAudioGraphItems(state: { items: TimelineItem[] }): TimelineItem[] {
+  if (audioGraphItemsCacheItems === state.items) return audioGraphItemsCache
+  audioGraphItemsCacheItems = state.items
+  audioGraphItemsCache = state.items.filter(
+    (item) => item.type === 'audio' || item.type === 'video' || item.type === 'composition',
+  )
+  return audioGraphItemsCache
+}
+
+// Items-keyed memo for consumers that only need stable item ids (marquee hit
+// testing at the timeline root). Avoids re-allocating the id array on every
+// unrelated items update.
+let itemIdsCacheItems: TimelineItem[] | null = null
+let itemIdsCache: string[] = []
+
+export function selectItemIds(state: { items: TimelineItem[] }): string[] {
+  if (itemIdsCacheItems === state.items) return itemIdsCache
+  itemIdsCacheItems = state.items
+  itemIdsCache = state.items.map((item) => item.id)
+  return itemIdsCache
+}
+
 function buildReplaceableCaptionClipIds(items: TimelineItem[]): Set<string> {
   const ids = new Set<string>()
   const clipsByMediaId: Record<string, Array<AudioItem | VideoItem>> = {}

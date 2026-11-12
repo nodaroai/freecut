@@ -16,13 +16,10 @@ export async function consumePendingEmbeddedImport(): Promise<void> {
       await import('@/features/editor/deps/media-library-contract')
     const mediaLibraryModule = await importMediaLibraryService()
     const { mediaLibraryService } = mediaLibraryModule
-    const {
-      addItem,
-      buildDroppedMediaTimelineItem,
-      getDroppedMediaDurationInFrames,
-      useItemsStore,
-      useTimelineStore,
-    } = await import('@/features/editor/deps/timeline-contract')
+    const { addItem, addItemWithLinkedAudio, useItemsStore } =
+      await import('@/features/editor/deps/timeline-store')
+    const { buildDroppedMediaTimelineItem, getDroppedMediaDurationInFrames } =
+      await import('@/features/editor/deps/timeline-motion')
 
     // Read from IndexedDB directly (store may not be populated yet)
     const metadata = await mediaLibraryService.getMedia(mediaId)
@@ -86,7 +83,7 @@ export async function consumePendingEmbeddedImport(): Promise<void> {
     // auto-placed primary is never silent.
     const hasLinkedAudio = videoItem.type === 'video' && !!metadata.audioCodec
     if (videoItem.type === 'video' && metadata.audioCodec) {
-      useTimelineStore.getState().addItemWithLinkedAudio(videoItem)
+      addItemWithLinkedAudio(videoItem)
     } else {
       addItem(videoItem)
     }

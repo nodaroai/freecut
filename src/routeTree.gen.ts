@@ -22,7 +22,7 @@ const ChangelogRoute = ChangelogRouteImport.update({
   id: '/changelog',
   path: '/changelog',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/changelog.lazy').then((d) => d.Route))
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -32,17 +32,19 @@ const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/projects/',
   path: '/projects/',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() =>
+  import('./routes/projects/index.lazy').then((d) => d.Route),
+)
 const DocsIndexRoute = DocsIndexRouteImport.update({
   id: '/docs/',
   path: '/docs/',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/docs/index.lazy').then((d) => d.Route))
 const ProjectsNewRoute = ProjectsNewRouteImport.update({
   id: '/projects/new',
   path: '/projects/new',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/projects/new.lazy').then((d) => d.Route))
 const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
   path: '/projects/$projectId',
@@ -59,7 +61,7 @@ const DocsSlugRoute = DocsSlugRouteImport.update({
   id: '/docs/$slug',
   path: '/docs/$slug',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/docs/$slug.lazy').then((d) => d.Route))
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute

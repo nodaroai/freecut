@@ -80,16 +80,3 @@ export function playSound(token: string, recipe: Recipe, volume: number): void {
   // Start a hair in the future so scheduled ramps don't clip against "now".
   renderRecipe(nodes.ctx, nodes.master, recipe, now + 0.001, volume, Math.random)
 }
-
-/**
- * Release the shared context. Intended for teardown/tests; the next
- * {@link playSound} lazily recreates it.
- */
-export function disposeEngine(): void {
-  lastPlayed.clear()
-  if (ctx) {
-    void ctx.close().catch(() => {})
-  }
-  ctx = null
-  master = null
-}

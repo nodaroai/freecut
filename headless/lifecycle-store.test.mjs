@@ -9,8 +9,11 @@ import {
   createProjectResource,
   getProjectResource,
   listProjectResources,
+  projectForEngine,
+  publicProjectResource,
   revisionOf,
   saveProjectResource,
+  saveProjectResourceWithCheckpointReceipt,
   stageLocalMedia,
 } from './lib/lifecycle-store.mjs'
 
@@ -24,6 +27,53 @@ const project = (id = 'p1') => ({
   duration: 0,
   schemaVersion: 14,
   metadata: { width: 1920, height: 1080, fps: 30 },
+})
+
+test('checkpoint receipt is committed in the project write and survives phase-update crash', async (t) => {
+  const root = tempWorkspace()
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const created = await createProjectResource(root, project())
+  const receipt = {
+    operationId: '018f22d2-8d42-7c2a-a4cc-7a3f2c5f6b10',
+    requestSha256: `sha256:${'2'.repeat(64)}`,
+    recipeSha256: `sha256:${'3'.repeat(64)}`,
+    priorRevision: created.revision,
+  }
+  await assert.rejects(
+    () =>
+      saveProjectResourceWithCheckpointReceipt(
+        root,
+        'p1',
+        { ...created.project, name: 'Applied once' },
+        {
+          expectedRevision: created.revision,
+          receipt,
+          afterCommit: () => {
+            throw new Error('simulated kill after project rename')
+          },
+        },
+      ),
+    /simulated kill/,
+  )
+  const committed = await getProjectResource(root, 'p1')
+  assert.equal(committed.project.name, 'Applied once')
+  const embeddedReceipt = committed.project.checkpointApplicationReceipts[receipt.operationId]
+  assert.deepEqual(
+    { ...embeddedReceipt, appliedProjectSha256: undefined },
+    { ...receipt, appliedProjectSha256: undefined },
+  )
+  assert.match(embeddedReceipt.appliedProjectSha256, /^sha256:[0-9a-f]{64}$/)
+  assert.equal(projectForEngine(committed.project).checkpointApplicationReceipts, undefined)
+  assert.equal(publicProjectResource(committed).project.checkpointApplicationReceipts, undefined)
+  assert.notEqual(committed.revision, created.revision)
+  await assert.rejects(
+    () =>
+      saveProjectResourceWithCheckpointReceipt(root, 'p1', committed.project, {
+        expectedRevision: created.revision,
+        receipt: { ...receipt, recipeSha256: `sha256:${'5'.repeat(64)}` },
+      }),
+    (error) => error.code === 'REVISION_CONFLICT',
+  )
 })
 
 test('project writes return exact-byte revisions and reject stale saves', async (t) => {

@@ -4,7 +4,8 @@ import { HOTKEYS } from '@/config/hotkeys'
 import { useEditorStore } from '@/shared/state/editor'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
+import { setTimelineState } from '../../test-helpers'
 import { useTimelineCommandStore } from '../../stores/timeline-command-store'
 import { useKeyframeSelectionStore } from '../../stores/keyframe-selection-store'
 import { useEditingShortcuts } from './use-editing-shortcuts'
@@ -106,7 +107,7 @@ describe('useEditingShortcuts delete ownership', () => {
       previewFrame: null,
       previewItemId: null,
     })
-    useTimelineStore.setState({
+    setTimelineState({
       tracks: [TRACK],
       items: [ITEM],
       transitions: [],
@@ -155,7 +156,7 @@ describe('useEditingShortcuts delete ownership', () => {
       rippleDeleteCallback(rippleDeleteEvent)
     })
 
-    expect(useTimelineStore.getState().items).toHaveLength(1)
+    expect(useItemsStore.getState().items).toHaveLength(1)
     expect(deleteEvent.preventDefault).toHaveBeenCalled()
     expect(deleteEvent.stopPropagation).toHaveBeenCalled()
     expect(backspaceEvent.preventDefault).toHaveBeenCalled()
@@ -192,7 +193,7 @@ describe('useEditingShortcuts delete ownership', () => {
       backspaceCallback(backspaceEvent)
     })
 
-    expect(useTimelineStore.getState().items).toHaveLength(1)
+    expect(useItemsStore.getState().items).toHaveLength(1)
     expect(deleteEvent.preventDefault).toHaveBeenCalled()
     expect(deleteEvent.stopPropagation).toHaveBeenCalled()
     expect(backspaceEvent.preventDefault).toHaveBeenCalled()
@@ -226,7 +227,7 @@ describe('useEditingShortcuts delete ownership', () => {
       rippleDeleteCallback(rippleDeleteEvent)
     })
 
-    expect(useTimelineStore.getState().items).toHaveLength(1)
+    expect(useItemsStore.getState().items).toHaveLength(1)
     expect(deleteEvent.preventDefault).toHaveBeenCalled()
     expect(deleteEvent.stopPropagation).toHaveBeenCalled()
     expect(backspaceEvent.preventDefault).toHaveBeenCalled()
@@ -257,7 +258,7 @@ describe('useEditingShortcuts delete ownership', () => {
       deleteCallback(deleteEvent)
     })
 
-    expect(useTimelineStore.getState().items).toHaveLength(0)
+    expect(useItemsStore.getState().items).toHaveLength(0)
     expect(deleteEvent.preventDefault).toHaveBeenCalled()
     expect(deleteEvent.stopPropagation).not.toHaveBeenCalled()
   })
@@ -276,7 +277,7 @@ describe('useEditingShortcuts delete ownership', () => {
       durationInFrames: 30,
     }
 
-    useTimelineStore.setState({
+    setTimelineState({
       tracks: [TRACK, TRACK_2],
       items: [clip1, clip2],
     })
@@ -295,9 +296,7 @@ describe('useEditingShortcuts delete ownership', () => {
       splitCallback(splitEvent)
     })
 
-    const items = useTimelineStore
-      .getState()
-      .items.toSorted((left, right) => left.from - right.from)
+    const items = useItemsStore.getState().items.toSorted((left, right) => left.from - right.from)
     expect(items).toHaveLength(4)
     expect(useTimelineCommandStore.getState().undoStack).toHaveLength(1)
     expect(items[0]).toMatchObject({ id: 'clip-1', from: 20, durationInFrames: 30 })
@@ -310,6 +309,6 @@ describe('useEditingShortcuts delete ownership', () => {
       useTimelineCommandStore.getState().undo()
     })
 
-    expect(useTimelineStore.getState().items).toEqual([clip1, clip2])
+    expect(useItemsStore.getState().items).toEqual([clip1, clip2])
   })
 })

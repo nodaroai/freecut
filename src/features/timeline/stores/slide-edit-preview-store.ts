@@ -51,7 +51,13 @@ export const useSlideEditPreviewStore = createEditPreviewStore<
   initialState: createInitialState,
   normalizePreview: (params) => withPreviewDefaults(params, { minDelta: 0, maxDelta: 0 }),
   createActions: (set) => ({
-    setSlideDelta: (slideDelta) => set({ slideDelta }),
-    setSlideRange: (minDelta, maxDelta) => set({ minDelta, maxDelta }),
+    setSlideDelta: (slideDelta) =>
+      set((state) => (state.slideDelta === slideDelta ? state : { slideDelta })),
+    setSlideRange: (minDelta, maxDelta) =>
+      set((state) =>
+        state.minDelta === minDelta && state.maxDelta === maxDelta
+          ? state
+          : { minDelta, maxDelta },
+      ),
   }),
 })

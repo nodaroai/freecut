@@ -6,11 +6,14 @@ import { ArrowLeftRight, RotateCcw, LayoutDashboard, Clock } from 'lucide-react'
 import { useProjectStore } from '@/features/editor/deps/projects'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
 import {
+  markDirty,
   setCompositionCanvasSettings,
   setCompositionDuration,
   useCompositionNavigationStore,
   useCompositionsStore,
-  useTimelineStore,
+  useItemsStore,
+  useMarkersStore,
+  useTimelineSettingsStore,
 } from '@/features/editor/deps/timeline-store'
 import { useGizmoStore } from '@/features/editor/deps/preview'
 import { HexColorPicker } from 'react-colorful'
@@ -111,8 +114,7 @@ export const CanvasPanel = memo(function CanvasPanel() {
   // Granular selectors
   const currentProject = useProjectStore((s) => s.currentProject)
   const updateProject = useProjectStore((s) => s.updateProject)
-  const fps = useTimelineStore((s) => s.fps)
-  const markDirty = useTimelineStore((s) => s.markDirty)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   // Inside a composition (Motion, or a drilled compound clip) the duration on
   // show is the comp's authored canvas length, and it is editable here.
   const activeCompositionId = useCompositionNavigationStore((s) => s.activeCompositionId)
@@ -120,11 +122,11 @@ export const CanvasPanel = memo(function CanvasPanel() {
     activeCompositionId ? s.compositionById[activeCompositionId] : undefined,
   )
   const isLayerComposition = activeComposition?.editorKind === 'composite-2d'
-  const markerCount = useTimelineStore((s) => s.markers.length)
+  const markerCount = useMarkersStore((s) => s.markers.length)
 
   // Derived selector: only returns the computed duration, not the full items array
   // This prevents re-renders when items change but duration stays the same
-  const timelineDuration = useTimelineStore((s) =>
+  const timelineDuration = useItemsStore((s) =>
     s.items.length === 0
       ? 0
       : Math.max(...s.items.map((item) => item.from + item.durationInFrames)),
@@ -163,7 +165,7 @@ export const CanvasPanel = memo(function CanvasPanel() {
         })
       }
     },
-    [currentProject, markDirty, updateProject, t],
+    [currentProject, updateProject, t],
   )
 
   const handleWidthChange = useCallback(

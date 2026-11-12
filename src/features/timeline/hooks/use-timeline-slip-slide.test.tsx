@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vite-plus/test'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { act, renderHook } from '@testing-library/react'
 import type { CompositionItem, TimelineItem } from '@/types/timeline'
 import { useEditorStore } from '@/shared/state/editor'
@@ -17,6 +17,10 @@ import { useZoomStore } from '../stores/zoom-store'
 import { useTimelineSlipSlide } from './use-timeline-slip-slide'
 
 const TIMELINE_DURATION = 600
+
+// Mouse-move handling is RAF-coalesced, so tests flush pending frame callbacks
+// after dispatching a move event.
+let rafCallbacks: FrameRequestCallback[] = []
 
 /**
  * Zoom is pinned so 1 px == 1 frame: pixelsPerSecond 30 at 30 fps means
@@ -114,6 +118,9 @@ function startSlide(result: { current: ReturnType<typeof useTimelineSlipSlide> }
 function moveMouse(clientX: number) {
   act(() => {
     window.dispatchEvent(new MouseEvent('mousemove', { clientX }))
+    const callbacks = rafCallbacks
+    rafCallbacks = []
+    for (const callback of callbacks) callback(performance.now())
   })
 }
 
@@ -124,7 +131,19 @@ function releaseMouse() {
 }
 
 describe('useTimelineSlipSlide', () => {
-  beforeEach(() => setupStores(false))
+  beforeEach(() => {
+    rafCallbacks = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      rafCallbacks.push(callback)
+      return rafCallbacks.length
+    })
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      rafCallbacks[id - 1] = () => {}
+    })
+    setupStores(false)
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
 
   it('preserves slide bounds and enables snapping when snap is toggled on mid-drag', () => {
     const { left, center, right } = makeSlideItems()

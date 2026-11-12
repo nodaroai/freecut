@@ -23,7 +23,7 @@ import {
   type PlayerEventTypes,
   type CallbackListener,
 } from './event-emitter'
-import { ClockBridgeProvider, useBridgedTimelineContext } from './clock'
+import { ClockBridgeProvider, useBridgedTimelinePlayback, useClock, useClockFrame } from './clock'
 import { usePlayer } from './use-player'
 import { VideoConfigProvider } from './video-config-context'
 import { calculatePlayerContentLayout } from './player-layout'
@@ -216,7 +216,6 @@ const DefaultProgressBar: React.FC<{
  */
 const DefaultControls: React.FC<{
   isPlaying: boolean
-  currentFrame: number
   durationInFrames: number
   fps: number
   playbackRate: number
@@ -227,7 +226,6 @@ const DefaultControls: React.FC<{
   onToggleFullscreen: () => void
 }> = ({
   isPlaying,
-  currentFrame,
   durationInFrames,
   fps,
   playbackRate,
@@ -237,6 +235,9 @@ const DefaultControls: React.FC<{
   onPlaybackRateChange,
   onToggleFullscreen,
 }) => {
+  // Subscribe the controls (not the whole player shell) to frame ticks.
+  const currentFrame = useClockFrame()
+
   const formatTime = (frame: number) => {
     const seconds = frame / fps
     const mins = Math.floor(seconds / 60)
@@ -391,13 +392,10 @@ const PlayerInner = forwardRef<PlayerRef, PlayerProps>(
     // Get player methods
     const player = usePlayer(durationInFrames, { loop, onEnded })
 
-    // Get context values
-    const {
-      frame: currentFrame,
-      playing,
-      playbackRate,
-      setPlaybackRate,
-    } = useBridgedTimelineContext()
+    // Play transport state only — the frame stays out of this component's
+    // render path so a clock tick cannot re-render the player shell.
+    const { playing, playbackRate, setPlaybackRate } = useBridgedTimelinePlayback()
+    const clock = useClock()
     const emitter = usePlayerEmitter()
 
     // Sync initial frame — ONCE on mount only. The Clock is already created with
@@ -424,10 +422,12 @@ const PlayerInner = forwardRef<PlayerRef, PlayerProps>(
       }
     }, [autoPlay, playing, player])
 
-    // Handle frame changes
+    // Handle frame changes imperatively. Delivering them through a render
+    // subscription would re-render the whole player shell per clock tick.
     useEffect(() => {
-      onFrameChange?.(currentFrame)
-    }, [currentFrame, onFrameChange])
+      onFrameChange?.(clock.currentFrame)
+      return clock.onFrameChange((frame) => onFrameChange?.(frame))
+    }, [clock, onFrameChange])
 
     // Handle play state changes
     useEffect(() => {
@@ -525,7 +525,6 @@ const PlayerInner = forwardRef<PlayerRef, PlayerProps>(
             {/* Controls - on top so scrubber/buttons receive clicks */}
             <DefaultControls
               isPlaying={playing}
-              currentFrame={currentFrame}
               durationInFrames={durationInFrames}
               fps={fps}
               playbackRate={playbackRate}

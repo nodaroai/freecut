@@ -26,16 +26,8 @@ vi.mock('@/features/keyframes/deps/timeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/features/keyframes/deps/timeline')>()
   return {
     ...actual,
-    useTimelineStore: (
-      selector: (state: {
-        addKeyframes: typeof mocks.addKeyframes
-        removeKeyframes: typeof mocks.removeKeyframes
-      }) => unknown,
-    ) =>
-      selector({
-        addKeyframes: mocks.addKeyframes,
-        removeKeyframes: mocks.removeKeyframes,
-      }),
+    addKeyframes: mocks.addKeyframes,
+    removeKeyframes: mocks.removeKeyframes,
   }
 })
 

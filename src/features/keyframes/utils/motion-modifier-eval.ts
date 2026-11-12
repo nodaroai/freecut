@@ -114,13 +114,22 @@ const ZERO_CONTRIBUTION: MotionContribution = {
   scaleHeight: 1,
 }
 
+/** Shared time/phase resolution for oscillation evaluators. */
+function resolveModifierTiming(
+  modifier: MotionModifier,
+  ctx: MotionModifierEvalContext,
+): { t: number; phase: number } {
+  const t = ctx.frame / Math.max(1, ctx.fps)
+  const phase = (modifier.phaseFrames / Math.max(1, ctx.fps)) * modifier.frequency * TWO_PI
+  return { t, phase }
+}
+
 function evaluateFloatDrift(
   modifier: MotionModifier,
   ctx: MotionModifierEvalContext,
   out: MotionContribution,
 ): void {
-  const t = ctx.frame / Math.max(1, ctx.fps)
-  const phase = (modifier.phaseFrames / Math.max(1, ctx.fps)) * modifier.frequency * TWO_PI
+  const { t, phase } = resolveModifierTiming(modifier, ctx)
   const xAmp = clamp(ctx.frameWidth * 0.008, 4, 18) * modifier.amplitude
   const yAmp = clamp(ctx.frameHeight * 0.014, 6, 28) * modifier.amplitude
   const rotAmp = 1.2 * modifier.amplitude
@@ -145,8 +154,7 @@ function evaluateBreathPulse(
   ctx: MotionModifierEvalContext,
   out: MotionContribution,
 ): void {
-  const t = ctx.frame / Math.max(1, ctx.fps)
-  const phase = (modifier.phaseFrames / Math.max(1, ctx.fps)) * modifier.frequency * TWO_PI
+  const { t, phase } = resolveModifierTiming(modifier, ctx)
   const scaleAmount = 0.035 * modifier.amplitude
   const opacityAmount = Math.min(0.08, 0.04 * modifier.amplitude)
   const wave = Math.sin(TWO_PI * modifier.frequency * t + phase)
@@ -180,8 +188,7 @@ function evaluateSway(
   ctx: MotionModifierEvalContext,
   out: MotionContribution,
 ): void {
-  const t = ctx.frame / Math.max(1, ctx.fps)
-  const phase = (modifier.phaseFrames / Math.max(1, ctx.fps)) * modifier.frequency * TWO_PI
+  const { t, phase } = resolveModifierTiming(modifier, ctx)
   out.dRotation +=
     getMotionModifierChannelGain(modifier, 'rotation') *
     4 *

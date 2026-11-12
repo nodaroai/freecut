@@ -54,11 +54,11 @@ vi.mock('@/shared/state/selection', () => ({
 }))
 
 vi.mock('../deps/timeline-store', () => ({
+  applyAutoKeyframeOperations: mocks.timelineState.applyAutoKeyframeOperations,
+  setItemEffects: mocks.timelineState.setItemEffects,
   useItemsStore: (selector: (state: typeof mocks.timelineState) => unknown) =>
     selector(mocks.timelineState),
   useKeyframesStore: (selector: (state: typeof mocks.timelineState) => unknown) =>
-    selector(mocks.timelineState),
-  useTimelineStore: (selector: (state: typeof mocks.timelineState) => unknown) =>
     selector(mocks.timelineState),
 }))
 

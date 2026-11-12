@@ -22,7 +22,7 @@ export function getBezierPresetForEasing(easing: EasingType): BezierControlPoint
  * source of truth shared by the docked interpolation controls and the
  * dopesheet's per-segment easing popover.
  */
-export const BEZIER_PRESETS = [
+const BEZIER_PRESETS = [
   {
     value: 'soft',
     labelKey: 'timeline.keyframeEditor.bezierPreset.soft',
@@ -114,7 +114,7 @@ export const BEZIER_PRESETS = [
 export type BezierPresetName = (typeof BEZIER_PRESETS)[number]['value']
 export type BezierPresetValue = BezierPresetName | 'custom'
 
-export function areBezierPointsEqual(a: BezierControlPoints, b: BezierControlPoints): boolean {
+function areBezierPointsEqual(a: BezierControlPoints, b: BezierControlPoints): boolean {
   return a.x1 === b.x1 && a.y1 === b.y1 && a.x2 === b.x2 && a.y2 === b.y2
 }
 

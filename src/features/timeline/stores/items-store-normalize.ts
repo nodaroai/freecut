@@ -1,4 +1,5 @@
-import type { SubtitleSegmentItem, TimelineItem, TimelineTrack } from '@/types/timeline'
+import type { ShapeItem, SubtitleSegmentItem, TimelineItem, TimelineTrack } from '@/types/timeline'
+import type { MaskVertex } from '@/types/masks'
 import { normalizeAudioEqSettings } from '@/shared/utils/audio-eq'
 import { resolveCornerPinTargetRect } from '@/features/timeline/deps/composition-runtime'
 import {
@@ -17,7 +18,91 @@ function clampShapePercent(value: number | undefined, max = 100): number | undef
   return value === undefined ? undefined : Math.max(0, Math.min(max, value))
 }
 
-// fallow-ignore-next-line complexity
+function resolveCornerPinReferenceDimension(
+  existing: number | undefined,
+  measured: number,
+): number | undefined {
+  if (existing !== undefined) return existing
+  return measured > 0 ? measured : undefined
+}
+
+function normalizeCornerPinReference(item: TimelineItem): void {
+  if (!item.cornerPin) return
+  const targetRect = resolveCornerPinTargetRect(
+    item.transform?.width ?? 0,
+    item.transform?.height ?? 0,
+    item.type === 'video' || item.type === 'image'
+      ? {
+          sourceWidth: item.sourceWidth,
+          sourceHeight: item.sourceHeight,
+          crop: item.crop,
+        }
+      : undefined,
+  )
+  item.cornerPin = {
+    ...item.cornerPin,
+    referenceWidth: resolveCornerPinReferenceDimension(
+      item.cornerPin.referenceWidth,
+      targetRect.width,
+    ),
+    referenceHeight: resolveCornerPinReferenceDimension(
+      item.cornerPin.referenceHeight,
+      targetRect.height,
+    ),
+  }
+}
+
+function resolvePathTangentMode(vertex: MaskVertex): MaskVertex['tangentMode'] {
+  if (vertex.tangentMode) return vertex.tangentMode
+  const hasNoHandles =
+    vertex.inHandle[0] === 0 &&
+    vertex.inHandle[1] === 0 &&
+    vertex.outHandle[0] === 0 &&
+    vertex.outHandle[1] === 0
+  return hasNoHandles ? 'corner' : 'smooth'
+}
+
+function applyPathStrokeDefaults(item: ShapeItem): void {
+  item.strokeEnabled ??= true
+  item.strokeLineCap ??= 'butt'
+  item.strokeLineJoin ??= 'miter'
+  item.strokeMiterLimit ??= 4
+}
+
+function normalizePathShapeFields(item: ShapeItem): void {
+  if (item.shapeType !== 'path') return
+  item.pathClosed = item.isMask ? true : (item.pathClosed ?? true)
+  if (item.pathClosed === false) item.fillEnabled = false
+  else item.fillEnabled ??= true
+  applyPathStrokeDefaults(item)
+  item.pathVertices = item.pathVertices?.map((vertex) => ({
+    ...vertex,
+    tangentMode: resolvePathTangentMode(vertex),
+  }))
+}
+
+function normalizeShapeFields(item: ShapeItem): void {
+  item.taperStartWidth = clampShapePercent(item.taperStartWidth, 200)
+  item.taperEndWidth = clampShapePercent(item.taperEndWidth, 200)
+  item.taperStartLength = clampShapePercent(item.taperStartLength)
+  item.taperEndLength = clampShapePercent(item.taperEndLength)
+  normalizePathShapeFields(item)
+  if (item.strokeEnabled === true && (item.strokeWidth ?? 0) < MIN_ENABLED_STROKE_WIDTH) {
+    item.strokeWidth = MIN_ENABLED_STROKE_WIDTH
+  }
+  if (item.isMask) item.blendMode = 'normal'
+}
+
+function normalizeLegacySourceStart(item: TimelineItem): void {
+  if (
+    (item.type === 'video' || item.type === 'audio') &&
+    item.sourceEnd !== undefined &&
+    item.sourceStart === undefined
+  ) {
+    item.sourceStart = 0
+  }
+}
+
 export function normalizeFrameFields<T extends TimelineItem>(item: T): T {
   // Start from a shallow copy so the optional-clamp loop can rewrite fields
   // in place without mutating the caller's object.
@@ -27,72 +112,9 @@ export function normalizeFrameFields<T extends TimelineItem>(item: T): T {
   applyOptionalClamps(normalized)
 
   const result = normalized as TimelineItem
-
-  if (result.cornerPin) {
-    const cornerPinTargetRect = resolveCornerPinTargetRect(
-      result.transform?.width ?? 0,
-      result.transform?.height ?? 0,
-      result.type === 'video' || result.type === 'image'
-        ? {
-            sourceWidth: result.sourceWidth,
-            sourceHeight: result.sourceHeight,
-            crop: result.crop,
-          }
-        : undefined,
-    )
-    result.cornerPin = {
-      ...result.cornerPin,
-      referenceWidth:
-        result.cornerPin.referenceWidth ??
-        (cornerPinTargetRect.width > 0 ? cornerPinTargetRect.width : undefined),
-      referenceHeight:
-        result.cornerPin.referenceHeight ??
-        (cornerPinTargetRect.height > 0 ? cornerPinTargetRect.height : undefined),
-    }
-  }
-
-  if (result.type === 'shape') {
-    result.taperStartWidth = clampShapePercent(result.taperStartWidth, 200)
-    result.taperEndWidth = clampShapePercent(result.taperEndWidth, 200)
-    result.taperStartLength = clampShapePercent(result.taperStartLength)
-    result.taperEndLength = clampShapePercent(result.taperEndLength)
-    if (result.shapeType === 'path') {
-      result.pathClosed = result.isMask ? true : (result.pathClosed ?? true)
-      if (result.pathClosed === false) result.fillEnabled = false
-      else result.fillEnabled ??= true
-      result.strokeEnabled ??= true
-      result.strokeLineCap ??= 'butt'
-      result.strokeLineJoin ??= 'miter'
-      result.strokeMiterLimit ??= 4
-      result.pathVertices = result.pathVertices?.map((vertex) => ({
-        ...vertex,
-        tangentMode:
-          vertex.tangentMode ??
-          (vertex.inHandle[0] === 0 &&
-          vertex.inHandle[1] === 0 &&
-          vertex.outHandle[0] === 0 &&
-          vertex.outHandle[1] === 0
-            ? 'corner'
-            : 'smooth'),
-      }))
-    }
-    if (result.strokeEnabled === true && (result.strokeWidth ?? 0) < MIN_ENABLED_STROKE_WIDTH) {
-      result.strokeWidth = MIN_ENABLED_STROKE_WIDTH
-    }
-    if (result.isMask) result.blendMode = 'normal'
-  }
-
-  // Legacy split clips can have sourceEnd without sourceStart.
-  // Treat them as explicitly bounded from 0 to sourceEnd so rate stretch
-  // operates on the split segment rather than the full media duration.
-  if (
-    (result.type === 'video' || result.type === 'audio') &&
-    result.sourceEnd !== undefined &&
-    result.sourceStart === undefined
-  ) {
-    result.sourceStart = 0
-  }
-
+  normalizeCornerPinReference(result)
+  if (result.type === 'shape') normalizeShapeFields(result)
+  normalizeLegacySourceStart(result)
   return result as T
 }
 

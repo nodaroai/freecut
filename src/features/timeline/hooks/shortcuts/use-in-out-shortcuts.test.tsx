@@ -2,7 +2,8 @@ import { render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { HOTKEYS } from '@/config/hotkeys'
 import { usePlaybackStore } from '@/shared/state/playback'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useMarkersStore } from '../../stores/markers-store'
+import { setTimelineState } from '../../test-helpers'
 import { useInOutShortcuts } from './use-in-out-shortcuts'
 import type { TimelineTrack, VideoItem } from '@/types/timeline'
 
@@ -63,7 +64,7 @@ function createHotkeyEvent(): HotkeyEvent {
 describe('useInOutShortcuts', () => {
   beforeEach(() => {
     useHotkeysMock.mockClear()
-    useTimelineStore.setState({
+    setTimelineState({
       tracks: [TRACK],
       items: [ITEM],
       markers: [],
@@ -82,11 +83,11 @@ describe('useInOutShortcuts', () => {
     render(<ShortcutHarness />)
 
     getHotkeyRegistration(HOTKEYS.MARK_IN)[1](createHotkeyEvent())
-    expect(useTimelineStore.getState().inPoint).toBe(48)
+    expect(useMarkersStore.getState().inPoint).toBe(48)
 
     usePlaybackStore.setState({ currentFrame: 96 })
     getHotkeyRegistration(HOTKEYS.MARK_OUT)[1](createHotkeyEvent())
-    expect(useTimelineStore.getState().outPoint).toBe(96)
+    expect(useMarkersStore.getState().outPoint).toBe(96)
   })
 
   it('marks in and out at the preview playhead with Shift variants', () => {
@@ -94,20 +95,20 @@ describe('useInOutShortcuts', () => {
     usePlaybackStore.setState({ currentFrame: 48, previewFrame: 120 })
 
     getHotkeyRegistration('shift+i')[1](createHotkeyEvent())
-    expect(useTimelineStore.getState().inPoint).toBe(120)
+    expect(useMarkersStore.getState().inPoint).toBe(120)
 
     usePlaybackStore.setState({ previewFrame: 180 })
     getHotkeyRegistration('shift+o')[1](createHotkeyEvent())
-    expect(useTimelineStore.getState().outPoint).toBe(180)
+    expect(useMarkersStore.getState().outPoint).toBe(180)
   })
 
   it('clears in/out points with the configured clear shortcut', () => {
     render(<ShortcutHarness />)
-    useTimelineStore.setState({ inPoint: 24, outPoint: 120 })
+    setTimelineState({ inPoint: 24, outPoint: 120 })
 
     getHotkeyRegistration(HOTKEYS.CLEAR_IN_OUT)[1](createHotkeyEvent())
 
-    expect(useTimelineStore.getState().inPoint).toBeNull()
-    expect(useTimelineStore.getState().outPoint).toBeNull()
+    expect(useMarkersStore.getState().inPoint).toBeNull()
+    expect(useMarkersStore.getState().outPoint).toBeNull()
   })
 })

@@ -24,11 +24,11 @@ export interface TimelineTranscriptCaptionCue {
   text: string
 }
 
-export type TimelineTranscriptCaptionStyle = TextStyleFields & {
+type TimelineTranscriptCaptionStyle = TextStyleFields & {
   transform?: TransformProperties
 }
 
-export interface TimelineTranscriptCaptions {
+interface TimelineTranscriptCaptions {
   type: 'transcript'
   mediaId: string
   enabled: boolean

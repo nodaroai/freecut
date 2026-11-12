@@ -160,7 +160,7 @@ export interface ItemPreview {
   lottie?: LottiePreview
 }
 
-export interface GizmoPresentationHandoff {
+interface GizmoPresentationHandoff {
   interactionId: number
   mode: GizmoState['mode']
   itemId: string

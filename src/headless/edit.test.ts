@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { Project, ProjectTimeline } from '@/types/project'
 import type { MediaMetadata } from '@/types/storage'
-import { editProject, type EditOp } from './edit'
+import { editProject } from './edit'
+import type { EditOp } from './edit-op-support'
 
 /**
  * Integration tests through the REAL timeline stores/actions (the module
@@ -157,6 +158,15 @@ describe('editProject', () => {
         ],
       }),
     ).rejects.toThrow(/Duplicate edit callerId/)
+  })
+
+  it('rejects operation names inherited from Object.prototype', async () => {
+    await expect(
+      editProject({
+        project: baseProject(),
+        ops: [{ op: 'toString' } as unknown as EditOp],
+      }),
+    ).rejects.toThrow(/Unknown edit op: toString/)
   })
 
   it('rejects a $ref to an unknown prior operation', async () => {

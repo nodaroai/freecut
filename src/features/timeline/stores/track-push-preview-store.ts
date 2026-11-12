@@ -36,6 +36,6 @@ export const useTrackPushPreviewStore = createEditPreviewStore<
 >({
   initialState: createInitialState,
   createActions: (set) => ({
-    setDelta: (delta) => set({ delta }),
+    setDelta: (delta) => set((state) => (state.delta === delta ? state : { delta })),
   }),
 })

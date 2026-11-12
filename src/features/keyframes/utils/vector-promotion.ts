@@ -13,6 +13,7 @@ import type {
 } from '@/types/keyframe'
 import type { ResolvedTransform } from '@/types/transform'
 import { getPropertyKeyframes, interpolatePropertyValue } from './interpolation'
+import { toVectorScalePercent } from './vector-proxy'
 
 const VECTOR_SOURCE_PROPERTIES: Record<
   VectorAnimatableProperty,
@@ -145,10 +146,6 @@ function resolvePositionValue(
   }
 }
 
-function toScalePercent(value: number, baseValue: number): number {
-  return Math.abs(baseValue) <= Number.EPSILON ? 100 : (value / baseValue) * 100
-}
-
 function resolveScaleValue(
   widthKeyframes: Keyframe[],
   heightKeyframes: Keyframe[],
@@ -158,8 +155,8 @@ function resolveScaleValue(
   const width = interpolatePropertyValue(widthKeyframes, frame, base.width)
   const height = interpolatePropertyValue(heightKeyframes, frame, base.height)
   return {
-    x: toScalePercent(width, base.width),
-    y: toScalePercent(height, base.height),
+    x: toVectorScalePercent(width, base.width),
+    y: toVectorScalePercent(height, base.height),
   }
 }
 

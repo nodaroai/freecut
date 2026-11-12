@@ -10,13 +10,15 @@ import {
   useSyncExternalStore,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useShallow } from 'zustand/react/shallow'
 import {
-  useTimelineStore,
+  markDirty,
   useItemsStore,
+  selectAudioGraphItems,
   useCompositionsStore,
   useTimelineCommandStore,
   captureSnapshot,
+  useTransitionsStore,
+  useTimelineSettingsStore,
 } from '@/features/editor/deps/timeline-store'
 import { importWaveformCache } from '@/features/editor/deps/timeline-cache'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
@@ -205,21 +207,14 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   const [trackSnapshotVersion, setTrackSnapshotVersion] = useState(0)
   const eqDetachedWindowRef = useRef<Window | null>(null)
 
-  const tracks = useTimelineStore((s) => s.tracks)
-  const transitions = useTimelineStore((s) => s.transitions)
-  const fps = useTimelineStore((s) => s.fps)
-  const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
+  const tracks = useItemsStore((s) => s.tracks)
+  const transitions = useTransitionsStore((s) => s.transitions)
+  const fps = useTimelineSettingsStore((s) => s.fps)
+  const audioSkimmingEnabled = useTimelineSettingsStore((s) => s.audioSkimmingEnabled)
   // Purely visual layers cannot contribute audio. Keep them out of this
   // subscription so moving text/shapes does not rebuild the complete mixer
   // graph on gizmo release.
-  const audioGraphItems = useItemsStore(
-    useShallow((state) =>
-      state.items.filter(
-        (item) =>
-          item.type === 'audio' || item.type === 'video' || item.type === 'composition',
-      ),
-    ),
-  )
+  const audioGraphItems = useItemsStore(selectAudioGraphItems)
   const itemsByTrackId = useMemo(() => {
     const grouped: Record<string, typeof audioGraphItems> = {}
     for (const item of audioGraphItems) {
@@ -683,7 +678,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       return
     }
 
-    useTimelineStore.getState().markDirty()
+    markDirty()
     useTimelineCommandStore
       .getState()
       .addUndoEntry({ type: 'UPDATE_TRACK_VOLUME', payload: { id: trackId } }, beforeSnapshot)
@@ -704,7 +699,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     if (trackItemIds.length > 0) {
       useGizmoStore.getState().clearPreviewForItems(trackItemIds)
     }
-    useTimelineStore.getState().markDirty()
+    markDirty()
     useTimelineCommandStore
       .getState()
       .addUndoEntry({ type: 'UPDATE_TRACK_EQ', payload: { id: trackId } }, beforeSnapshot)
@@ -723,7 +718,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     if (trackItemIds.length > 0) {
       useGizmoStore.getState().clearPreviewForItems(trackItemIds)
     }
-    useTimelineStore.getState().markDirty()
+    markDirty()
     useTimelineCommandStore
       .getState()
       .addUndoEntry({ type: 'UPDATE_TRACK_EQ_ENABLED', payload: { id: trackId } }, beforeSnapshot)
@@ -736,7 +731,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       const eqPatch = getSparseAudioEqSettings(patch)
       const current = usePlaybackStore.getState().busAudioEq
       setBusAudioEq({ ...current, ...eqPatch, midGainDb: 0 })
-      useTimelineStore.getState().markDirty()
+      markDirty()
       useTimelineCommandStore
         .getState()
         .addUndoEntry({ type: 'UPDATE_BUS_EQ', payload: {} }, snapshot)
@@ -749,7 +744,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       const snapshot = captureSnapshot()
       const current = usePlaybackStore.getState().busAudioEq
       setBusAudioEq({ ...(current ?? {}), enabled })
-      useTimelineStore.getState().markDirty()
+      markDirty()
       useTimelineCommandStore
         .getState()
         .addUndoEntry({ type: 'UPDATE_BUS_EQ_ENABLED', payload: {} }, snapshot)
@@ -846,7 +841,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       }
       ;(track as { muted: boolean }).muted = !track.muted
       applyMuteSoloLiveGains()
-      useTimelineStore.getState().markDirty()
+      markDirty()
       useTimelineCommandStore
         .getState()
         .addUndoEntry({ type: 'UPDATE_TRACK_MUTE', payload: { id: trackId } }, beforeSnapshot)
@@ -867,7 +862,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       }
       ;(track as { solo: boolean }).solo = !track.solo
       applyMuteSoloLiveGains()
-      useTimelineStore.getState().markDirty()
+      markDirty()
       useTimelineCommandStore
         .getState()
         .addUndoEntry({ type: 'UPDATE_TRACK_SOLO', payload: { id: trackId } }, beforeSnapshot)

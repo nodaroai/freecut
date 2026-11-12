@@ -2,7 +2,8 @@ import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { ReactNode } from 'react'
 import type { CompositionItem, VideoItem } from '@/types/timeline'
-import { useKeyframesStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useKeyframesStore } from '@/features/editor/deps/timeline-store'
+import { setTimelineState } from '@/features/editor/deps/timeline-test-helpers-contract'
 import { VideoSection } from './video-section'
 
 const keyframeToggleSpy = vi.hoisted(() => vi.fn())
@@ -68,7 +69,7 @@ function getCropSliderMax(property: 'cropLeft' | 'cropRight' | 'cropTop' | 'crop
 describe('VideoSection crop controls', () => {
   beforeEach(() => {
     keyframeToggleSpy.mockClear()
-    useTimelineStore.setState({ items: [VIDEO_ITEM, COMPOSITION_ITEM], fps: 30 })
+    setTimelineState({ items: [VIDEO_ITEM, COMPOSITION_ITEM], fps: 30 })
     useKeyframesStore.setState({ keyframesByItemId: {} })
   })
 

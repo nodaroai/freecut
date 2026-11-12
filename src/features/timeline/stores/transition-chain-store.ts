@@ -2,7 +2,8 @@
  * Transition Index Store
  *
  * Derived state store that pre-computes transition indexes for O(1) lookups.
- * Subscribes to timeline-store and recomputes only when items/transitions change.
+ * Subscribes to the items and transitions stores and recomputes only when
+ * items/transitions change.
  *
  * Performance benefits:
  * - O(1) transition lookups via indexes
@@ -11,7 +12,8 @@
  */
 
 import { create } from 'zustand'
-import { useTimelineStore } from './timeline-store'
+import { useItemsStore } from './items-store'
+import { useTransitionsStore } from './transitions-store'
 import type { TimelineItem, TimelineTrack } from '@/types/timeline'
 import type { Transition, ClipTransitionIndex } from '@/types/transition'
 import { buildTransitionIndexes, type TransitionIndexes } from '../utils/transition-indexes'
@@ -128,33 +130,42 @@ const useTransitionChainStore = create<TransitionChainStore>()((set, get) => ({
  */
 export function initTransitionChainSubscription(): () => void {
   // Get initial data and compute
-  const timelineState = useTimelineStore.getState()
-  useTransitionChainStore
-    .getState()
-    .recompute(timelineState.items, timelineState.transitions, timelineState.tracks)
+  const itemsState = useItemsStore.getState()
+  const transitions = useTransitionsStore.getState().transitions
+  useTransitionChainStore.getState().recompute(itemsState.items, transitions, itemsState.tracks)
 
   // Track previous values for shallow comparison
-  let prevItems = timelineState.items
-  let prevTransitions = timelineState.transitions
-  let prevTracks = timelineState.tracks
+  let prevItems = itemsState.items
+  let prevTransitions = transitions
+  let prevTracks = itemsState.tracks
 
-  // Subscribe to changes with manual shallow comparison
-  const unsubscribe = useTimelineStore.subscribe(() => {
-    const state = useTimelineStore.getState()
+  // Subscribe to the two domain stores that hold the recompute inputs
+  const sync = () => {
+    const nextItems = useItemsStore.getState().items
+    const nextTracks = useItemsStore.getState().tracks
+    const nextTransitions = useTransitionsStore.getState().transitions
 
     // Only recompute if items, transitions, or tracks changed
     if (
-      state.items !== prevItems ||
-      state.transitions !== prevTransitions ||
-      state.tracks !== prevTracks
+      nextItems === prevItems &&
+      nextTransitions === prevTransitions &&
+      nextTracks === prevTracks
     ) {
-      prevItems = state.items
-      prevTransitions = state.transitions
-      prevTracks = state.tracks
-
-      useTransitionChainStore.getState().recompute(state.items, state.transitions, state.tracks)
+      return
     }
-  })
 
-  return unsubscribe
+    prevItems = nextItems
+    prevTransitions = nextTransitions
+    prevTracks = nextTracks
+
+    useTransitionChainStore.getState().recompute(nextItems, nextTransitions, nextTracks)
+  }
+
+  const unsubscribeItems = useItemsStore.subscribe(sync)
+  const unsubscribeTransitions = useTransitionsStore.subscribe(sync)
+
+  return () => {
+    unsubscribeItems()
+    unsubscribeTransitions()
+  }
 }

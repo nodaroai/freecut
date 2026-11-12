@@ -411,8 +411,8 @@ fn triggerWaveFragment(input: VertexOutput) -> @location(0) vec4f {
       animatable: true,
     },
   },
-  packUniforms: (p, w, h) => {
-    const time = performance.now() / 1000
+  packUniforms: (p, w, h, timelineTimeSeconds = 0) => {
+    const time = timelineTimeSeconds
     const glowColor = parseHexColor((p.glowColor as string) ?? '#2e6b8c', [0.18, 0.42, 0.55, 1])
     return new Float32Array([
       (p.strength as number) ?? 0.035,

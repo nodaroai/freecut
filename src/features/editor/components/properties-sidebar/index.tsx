@@ -54,6 +54,67 @@ function PropertiesPanelLoadingFallback() {
 
 type HeaderItem = Pick<TimelineItem, 'id' | 'label' | 'linkedGroupId' | 'type'>
 
+// Selection headers are derived per items-store update. A module cache keyed on
+// the selection contents returns the same array identity while the selected
+// items' header fields are unchanged, so unrelated item edits don't re-render
+// the sidebar header (previously done by stringifying/parsing a JSON signature).
+let selectedItemHeadersCache: { ids: string[]; headers: HeaderItem[] } | null = null
+
+function areIdListsEqual(previous: readonly string[], next: readonly string[]): boolean {
+  if (previous.length !== next.length) return false
+  for (let index = 0; index < previous.length; index += 1) {
+    if (previous[index] !== next[index]) return false
+  }
+  return true
+}
+
+function areHeaderFieldsCurrent(
+  headers: readonly HeaderItem[],
+  itemById: Record<string, TimelineItem>,
+): boolean {
+  for (const header of headers) {
+    const item = itemById[header.id]
+    if (!item) return false
+    if (
+      item.label !== header.label ||
+      item.linkedGroupId !== header.linkedGroupId ||
+      item.type !== header.type
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function selectSelectedItemHeaders(
+  state: { itemById: Record<string, TimelineItem> },
+  selectedItemIds: readonly string[],
+): HeaderItem[] {
+  const cached = selectedItemHeadersCache
+  if (
+    cached &&
+    areIdListsEqual(cached.ids, selectedItemIds) &&
+    areHeaderFieldsCurrent(cached.headers, state.itemById)
+  ) {
+    return cached.headers
+  }
+
+  const headers: HeaderItem[] = []
+  for (const itemId of selectedItemIds) {
+    const item = state.itemById[itemId]
+    if (item) {
+      headers.push({
+        id: item.id,
+        label: item.label,
+        linkedGroupId: item.linkedGroupId,
+        type: item.type,
+      })
+    }
+  }
+  selectedItemHeadersCache = { ids: [...selectedItemIds], headers }
+  return headers
+}
+
 function buildClipHeaderGroups(items: HeaderItem[]) {
   const groups = new Map<
     string,
@@ -145,30 +206,11 @@ export const PropertiesSidebar = memo(function PropertiesSidebar() {
     activeCompositionId ? s.compositionById[activeCompositionId]?.name : undefined,
   )
   const prefersReducedMotion = useReducedMotion()
-  const selectedItemHeaderSignature = useItemsStore(
+  const selectedItems = useItemsStore(
     useCallback(
-      (state) =>
-        JSON.stringify(
-          selectedItemIds.flatMap((itemId) => {
-            const item = state.itemById[itemId]
-            return item
-              ? [
-                  {
-                    id: item.id,
-                    label: item.label,
-                    linkedGroupId: item.linkedGroupId,
-                    type: item.type,
-                  } satisfies HeaderItem,
-                ]
-              : []
-          }),
-        ),
+      (state) => selectSelectedItemHeaders(state, selectedItemIds),
       [selectedItemIds],
     ),
-  )
-  const selectedItems = useMemo(
-    () => JSON.parse(selectedItemHeaderSignature) as HeaderItem[],
-    [selectedItemHeaderSignature],
   )
 
   const hasClipSelection = selectedItemIds.length > 0

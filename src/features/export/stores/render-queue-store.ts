@@ -13,7 +13,7 @@ import type { TimelineTrack, TimelineItem } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
 import type { ItemKeyframes } from '@/types/keyframe'
 import type { AudioEqSettings } from '@/types/audio'
-import type { ClientExportSettings, RenderProgress } from '../utils/client-renderer'
+import type { ClientExportSettings, RenderProgress } from '../deps/renderer'
 import { abortJob } from '../utils/render-queue-control'
 
 export type RenderJobStatus = 'queued' | 'rendering' | 'completed' | 'failed' | 'cancelled'

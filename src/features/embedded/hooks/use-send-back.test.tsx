@@ -10,7 +10,7 @@ vi.mock('../deps/project-bundle-contract', () => ({
   exportProjectJson: vi.fn(async () => ({ version: 2, items: [] })),
 }))
 vi.mock('../deps/timeline-contract', () => ({
-  useTimelineStore: { getState: () => ({ saveTimeline: vi.fn(async () => {}) }) },
+  saveTimeline: vi.fn(async () => {}),
 }))
 
 describe('useSendBack (save & exit)', () => {

@@ -2,35 +2,22 @@ import {
   createContext,
   useCallback,
   useContext,
-  useMemo,
   type Dispatch,
   type MutableRefObject,
   type SetStateAction,
 } from 'react'
-
-export interface TimelineContextValue {
-  frame: number
-  playing: boolean
-  rootId: string
-  playbackRate: number
-  imperativePlaying: MutableRefObject<boolean>
-  setPlaybackRate: (rate: number) => void
-  inFrame: number | null
-  outFrame: number | null
-}
 
 export interface SetTimelineContextValue {
   setFrame: Dispatch<SetStateAction<Record<string, number>>>
   setPlaying: Dispatch<SetStateAction<boolean>>
 }
 
-interface TimelinePlaybackContextValue {
+export interface TimelinePlaybackContextValue {
   playing: boolean
   playbackRate: number
   imperativePlaying: MutableRefObject<boolean>
   setPlaybackRate: (rate: number) => void
 }
-
 interface TimelineBoundsContextValue {
   rootId: string
   inFrame: number | null
@@ -44,14 +31,18 @@ export const BridgedTimelinePlaybackContext = createContext<TimelinePlaybackCont
 export const BridgedTimelineBoundsContext = createContext<TimelineBoundsContextValue | null>(null)
 export const BridgedSetTimelineContext = createContext<SetTimelineContextValue | null>(null)
 
-export function useBridgedTimelineContext(): TimelineContextValue {
-  const frame = useContext(BridgedTimelineFrameContext)
+/**
+ * Play transport state without the per-frame context. Components that only
+ * need play/pause/rate (e.g. the Player shell and usePlayer) must use this
+ * instead of subscribing to the frame context so a frame tick cannot
+ * re-render them.
+ */
+export function useBridgedTimelinePlayback(): TimelinePlaybackContextValue {
   const playback = useContext(BridgedTimelinePlaybackContext)
-  const bounds = useContext(BridgedTimelineBoundsContext)
-  if (frame === null || !playback || !bounds) {
-    throw new Error('useBridgedTimelineContext must be used within a ClockBridgeProvider')
+  if (!playback) {
+    throw new Error('useBridgedTimelinePlayback must be used within a ClockBridgeProvider')
   }
-  return useMemo(() => ({ frame, ...playback, ...bounds }), [bounds, frame, playback])
+  return playback
 }
 
 export function useBridgedSetTimelineContext(): SetTimelineContextValue {

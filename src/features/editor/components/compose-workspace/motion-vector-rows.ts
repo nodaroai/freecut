@@ -3,52 +3,39 @@ import type {
   ItemKeyframes,
   Keyframe,
   PropertyKeyframes,
-  TransformAnimatableProperty,
   VectorAnimatableProperty,
   VectorKeyframe,
   VectorPropertyKeyframes,
 } from '@/types/keyframe'
 import { getDirectPropertyLinks } from '@/types/keyframe'
 import type { ResolvedTransform } from '@/types/transform'
+import {
+  VECTOR_PROPERTY_PAIRS,
+  getEditorVectorKeyframeId,
+  type VectorPropertyPair,
+} from '@/features/editor/deps/keyframes-contract'
 
-export interface MotionVectorRowDefinition {
-  property: VectorAnimatableProperty
-  primary: TransformAnimatableProperty
-  secondary: TransformAnimatableProperty
+export interface MotionVectorRowDefinition extends VectorPropertyPair {
   label: string
   unit: string
 }
 
-export const MOTION_VECTOR_ROW_DEFINITIONS: readonly MotionVectorRowDefinition[] = [
-  { property: 'position', primary: 'x', secondary: 'y', label: 'Position', unit: 'px' },
-  { property: 'scale', primary: 'width', secondary: 'height', label: 'Scale', unit: '%' },
-  { property: 'anchor', primary: 'anchorX', secondary: 'anchorY', label: 'Anchor', unit: 'px' },
-]
-
-export function getMotionVectorProxy(property: AnimatableProperty): {
-  property: VectorAnimatableProperty
-  axis: 'x' | 'y'
-} | null {
-  for (const row of MOTION_VECTOR_ROW_DEFINITIONS) {
-    if (property === row.primary) return { property: row.property, axis: 'x' }
-    if (property === row.secondary) return { property: row.property, axis: 'y' }
-  }
-  return null
+/** Presentation metadata for the coupled transform rows. Keyed by the canonical
+ *  mapping so labels can never drift from the property pairs. */
+const MOTION_VECTOR_ROW_PRESENTATION: Record<
+  VectorAnimatableProperty,
+  { label: string; unit: string }
+> = {
+  position: { label: 'Position', unit: 'px' },
+  scale: { label: 'Scale', unit: '%' },
+  anchor: { label: 'Anchor', unit: 'px' },
 }
 
-export function getStoredMotionVectorKeyframeId(
-  keyframeId: string,
-  axis: 'x' | 'y',
-): string {
-  return axis === 'y' && keyframeId.endsWith(':y') ? keyframeId.slice(0, -2) : keyframeId
-}
-
-function getEditorMotionVectorKeyframeId(
-  keyframeId: string,
-  axis: 'x' | 'y',
-): string {
-  return axis === 'y' ? `${keyframeId}:y` : keyframeId
-}
+export const MOTION_VECTOR_ROW_DEFINITIONS: readonly MotionVectorRowDefinition[] =
+  VECTOR_PROPERTY_PAIRS.map((pair) => ({
+    ...pair,
+    ...MOTION_VECTOR_ROW_PRESENTATION[pair.property],
+  }))
 
 function hasScalarAuthoring(
   itemKeyframes: ItemKeyframes | undefined,
@@ -169,7 +156,7 @@ export function toMotionVectorProxyKeyframes(
 ): Keyframe[] {
   return keyframes.map((keyframe) => ({
     ...keyframe,
-    id: getEditorMotionVectorKeyframeId(keyframe.id, axis),
+    id: getEditorVectorKeyframeId(keyframe.id, axis),
     value: keyframe.value[axis],
     spatial: undefined,
     temporalEase: undefined,

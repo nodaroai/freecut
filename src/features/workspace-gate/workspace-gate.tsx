@@ -80,7 +80,10 @@ export function WorkspaceGate({ children }: { children: React.ReactNode }) {
   }, [])
 
   // Initial load: check if we have a saved handle, check its permission.
+  // Skipped on routes that never touch storage (landing page) so first paint
+  // doesn't wait on IndexedDB; the effect re-runs when a protected route mounts.
   useEffect(() => {
+    if (!needsWorkspace) return
     let cancelled = false
     ;(async () => {
       if (!isFileSystemAccessSupported()) {
@@ -111,7 +114,7 @@ export function WorkspaceGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [activate])
+  }, [activate, needsWorkspace])
 
   // Permission-lost mid-session → flip to reconnect.
   useEffect(() => {

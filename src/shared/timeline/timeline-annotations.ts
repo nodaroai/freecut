@@ -1,4 +1,5 @@
 import type { ProjectMarker } from '@/types/timeline'
+import { clampFinite as clamp } from '@/shared/utils/math'
 
 export interface TimelineAnnotationPoint {
   frame: number
@@ -20,11 +21,6 @@ export interface TimelineAnnotationModel {
     endRatio: number
   } | null
   markers: TimelineAnnotationMarker[]
-}
-
-function clamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.max(min, Math.min(max, value))
 }
 
 function normalizeFrame(frame: number | null | undefined): number | null {

@@ -194,23 +194,6 @@ export interface TimelineActions {
       >
     >,
   ) => void
-  updateTransitions: (
-    updates: Array<{
-      id: string
-      updates: Partial<
-        Pick<
-          Transition,
-          | 'durationInFrames'
-          | 'type'
-          | 'presentation'
-          | 'direction'
-          | 'timing'
-          | 'alignment'
-          | 'properties'
-        >
-      >
-    }>,
-  ) => void
   removeTransition: (id: string) => void
   // Keyframe actions
   addKeyframe: (
@@ -269,9 +252,6 @@ export interface TimelineActions {
   removeKeyframes: (refs: KeyframeRef[]) => void
   removeKeyframesForItem: (itemId: string) => void
   removeKeyframesForProperty: (itemId: string, property: AnimatableProperty) => void
-  getKeyframesForItem: (itemId: string) => ItemKeyframes | undefined
-  hasKeyframesAtFrame: (itemId: string, property: AnimatableProperty, frame: number) => boolean
-  repairLegacyAvTracks: () => Promise<boolean>
   saveTimeline: (projectId: string) => Promise<void>
   loadTimeline: (projectId: string, options?: LoadTimelineOptions) => Promise<void>
   clearTimeline: () => void

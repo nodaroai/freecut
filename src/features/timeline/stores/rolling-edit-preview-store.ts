@@ -43,6 +43,11 @@ export const useRollingEditPreviewStore = createEditPreviewStore<
   normalizePreview: (params) => withPreviewDefaults(params, { constrained: false }),
   createActions: (set) => ({
     setNeighborDelta: (neighborDelta, constrained) =>
-      set({ neighborDelta, constrained: constrained ?? false }),
+      set((state) => {
+        const nextConstrained = constrained ?? false
+        return state.neighborDelta === neighborDelta && state.constrained === nextConstrained
+          ? state
+          : { neighborDelta, constrained: nextConstrained }
+      }),
   }),
 })

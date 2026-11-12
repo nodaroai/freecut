@@ -1,9 +1,9 @@
 // @vitest-environment node
 
 import { describe, expect, it, beforeEach, vi, type Mock } from 'vite-plus/test'
-import { resolveMediaUrl, resolveMediaUrls, cleanupBlobUrls } from './media-resolver'
+import { resolveMediaUrl, resolveMediaUrls } from './media-resolver'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
-import { FileAccessError } from '@/features/preview/deps/media-library'
+import { clearPendingMediaRequests, FileAccessError } from '@/features/preview/deps/media-library'
 import type { TimelineTrack, VideoItem } from '@/types/timeline'
 
 const mockMarkMediaBroken = vi.fn()
@@ -50,7 +50,7 @@ let blobUrlCounter = 0
 beforeEach(() => {
   vi.clearAllMocks()
   blobUrlManager.releaseAll()
-  cleanupBlobUrls()
+  clearPendingMediaRequests()
   blobUrlCounter = 0
 
   vi.stubGlobal('URL', {

@@ -1,4 +1,7 @@
-import { CURRENT_SCHEMA_VERSION } from '@/shared/projects/migrations'
+// Import the constant from the leaf module (not the migrations barrel) so
+// shell-reachable callers don't pull migrations/normalize/audio-eq into the
+// initial bundle for a single number.
+import { CURRENT_SCHEMA_VERSION } from '@/shared/projects/migrations/types'
 import { i18n } from '@/i18n'
 import type { Project } from '@/types/project'
 

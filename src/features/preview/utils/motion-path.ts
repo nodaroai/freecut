@@ -9,7 +9,7 @@ import {
 } from '@/types/keyframe'
 import type { CanvasSettings } from '@/types/transform'
 import type { TimelineItem } from '@/types/timeline'
-import type { CoordinateParams, Point } from '../types/gizmo'
+import type { CoordinateParams } from '../types/gizmo'
 import { resolveItemTransformAtFrame } from '../deps/composition-runtime'
 import { getEffectiveScale } from './coordinate-transform'
 
@@ -348,13 +348,5 @@ export function canvasPointToMotionPathScreenPoint(
         screenY: (point.y + point.spatial.outTangent.y) * scale,
       },
     }),
-  }
-}
-
-export function canvasPointToPlayerPoint(point: Point, coordParams: CoordinateParams): Point {
-  const scale = getEffectiveScale(coordParams)
-  return {
-    x: point.x * scale,
-    y: point.y * scale,
   }
 }

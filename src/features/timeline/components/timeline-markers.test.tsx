@@ -7,7 +7,7 @@ import {
   resetTimelineSkimmerScrubForTest,
   timelineSkimmerScrubSignal,
 } from '@/shared/timeline/main-timeline-scrub'
-import { useTimelineStore } from '../stores/timeline-store'
+import { setTimelineState } from '../test-helpers'
 import { TimelineMarkers } from './timeline-markers'
 
 vi.mock('../contexts/timeline-zoom-context', () => ({
@@ -26,7 +26,7 @@ describe('TimelineMarkers ruler scrub cancellation', () => {
       previewItemId: null,
       isPlaying: false,
     })
-    useTimelineStore.setState({ fps: 30, inPoint: null, outPoint: null, markers: [] })
+    setTimelineState({ fps: 30, inPoint: null, outPoint: null, markers: [] })
     mainTimelineScrubActiveRef.current = false
     resetTimelineSkimmerScrubForTest()
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
@@ -279,7 +279,7 @@ describe('TimelineMarkers ruler scrub cancellation', () => {
   })
 
   it('keeps the IO strip in its own lane above the viewport ruler canvas', () => {
-    useTimelineStore.setState({ inPoint: 15, outPoint: 45 })
+    setTimelineState({ inPoint: 15, outPoint: 45 })
 
     const { container } = render(
       <div className="timeline-container">

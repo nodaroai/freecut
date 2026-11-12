@@ -7,7 +7,7 @@ import { i18n } from '@/i18n'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItem, useTimelineSettingsStore } from '@/features/editor/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import {
   buildCueText,
@@ -142,8 +142,7 @@ const VirtualTranscriptSubtitleEditor = memo(function VirtualTranscriptSubtitleE
   canvasWidth,
   canvasHeight,
 }: VirtualTranscriptSubtitleEditorProps) {
-  const updateItem = useTimelineStore((s) => s.updateItem)
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame)
   const firstClip = clips[0]!
   const totalCues = clips.reduce((sum, clip) => sum + clip.transcriptCaptions.cues.length, 0)
@@ -187,7 +186,7 @@ const VirtualTranscriptSubtitleEditor = memo(function VirtualTranscriptSubtitleE
         } as Partial<TimelineItem>)
       }
     },
-    [clips, updateItem],
+    [clips],
   )
 
   const setCaptionsVisible = useCallback(
@@ -202,7 +201,7 @@ const VirtualTranscriptSubtitleEditor = memo(function VirtualTranscriptSubtitleE
         } as Partial<TimelineItem>)
       }
     },
-    [clips, updateItem],
+    [clips],
   )
 
   const updateCue = useCallback(
@@ -218,7 +217,7 @@ const VirtualTranscriptSubtitleEditor = memo(function VirtualTranscriptSubtitleE
         },
       } as Partial<TimelineItem>)
     },
-    [firstClip, updateItem],
+    [firstClip],
   )
 
   const seekToCue = useCallback(
@@ -326,8 +325,7 @@ const SingleSubtitleSegmentEditor = memo(function SingleSubtitleSegmentEditor({
   canvasWidth,
   canvasHeight,
 }: SingleSubtitleSegmentEditorProps) {
-  const updateItem = useTimelineStore((s) => s.updateItem)
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame)
 
   // Keep a ref to the latest cues so `updateCue`'s identity stays stable
@@ -345,7 +343,7 @@ const SingleSubtitleSegmentEditor = memo(function SingleSubtitleSegmentEditor({
       const next = cuesRef.current.map((cue) => (cue.id === cueId ? { ...cue, ...patch } : cue))
       updateItem(segment.id, { cues: next })
     },
-    [segment.id, updateItem],
+    [segment.id],
   )
 
   const seekToCue = useCallback(

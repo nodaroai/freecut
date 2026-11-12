@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { framesToSeconds } from '@/shared/utils/time-utils'
-import { formatBytes } from '../utils/client-renderer'
+import { formatBytes } from '../deps/renderer'
 import {
   useRenderQueueStore,
   type RenderJob,

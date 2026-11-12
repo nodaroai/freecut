@@ -1,7 +1,7 @@
 import { memo } from 'react'
 
 import { IO_HANDLE_COLOR } from '@/shared/timeline/io-range'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useMarkersStore } from '../stores/markers-store'
 import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-context'
 
 /**
@@ -11,8 +11,8 @@ import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-conte
  * pass through to the clips underneath.
  */
 export const TimelineRangeHighlight = memo(function TimelineRangeHighlight() {
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
+  const inPoint = useMarkersStore((s) => s.inPoint)
+  const outPoint = useMarkersStore((s) => s.outPoint)
   const { frameToPixels } = useTimelineCommittedZoomContext()
 
   if (inPoint === null || outPoint === null) {

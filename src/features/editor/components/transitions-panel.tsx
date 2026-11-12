@@ -2,7 +2,13 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Blend, Info } from 'lucide-react'
 import { TransitionPreview } from './transition-preview/transition-preview'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  addTransition,
+  updateTransition,
+  useItemsStore,
+  useTimelineSettingsStore,
+  useTransitionsStore,
+} from '@/features/editor/deps/timeline-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { resolveTransitionTargetFromSelection } from '@/features/editor/deps/timeline-utils'
 import type {
@@ -154,11 +160,9 @@ const CategorySection = memo(function CategorySection({
 
 export const TransitionsPanel = memo(function TransitionsPanel() {
   const { t } = useTranslation()
-  const addTransition = useTimelineStore((s) => s.addTransition)
-  const updateTransition = useTimelineStore((s) => s.updateTransition)
-  const items = useTimelineStore((s) => s.items)
-  const transitions = useTimelineStore((s) => s.transitions)
-  const fps = useTimelineStore((s) => s.fps)
+  const items = useItemsStore((s) => s.items)
+  const transitions = useTransitionsStore((s) => s.transitions)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   // Get selection
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
   const selectionCount = selectedItemIds.length
@@ -211,11 +215,9 @@ export const TransitionsPanel = memo(function TransitionsPanel() {
       if (!config) return
 
       // Get fresh state at click time
-      const {
-        items: currentItems,
-        transitions: currentTransitions,
-        fps: currentFps,
-      } = useTimelineStore.getState()
+      const { items: currentItems } = useItemsStore.getState()
+      const { transitions: currentTransitions } = useTransitionsStore.getState()
+      const { fps: currentFps } = useTimelineSettingsStore.getState()
       const currentSelectedIds = useSelectionStore.getState().selectedItemIds
       const info = resolveTransitionTargetFromSelection({
         selectedItemIds: currentSelectedIds,
@@ -247,7 +249,7 @@ export const TransitionsPanel = memo(function TransitionsPanel() {
         )
       }
     },
-    [addTransition, updateTransition],
+    [],
   )
 
   const hasValidClickTarget = !!adjacentInfo && (adjacentInfo.hasExisting || adjacentInfo.canApply)

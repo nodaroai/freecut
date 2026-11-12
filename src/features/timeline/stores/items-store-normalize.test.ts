@@ -318,6 +318,25 @@ describe('normalizeFrameFields', () => {
     } as unknown as VideoItem)
     expect((masked as unknown as { blendMode: string }).blendMode).toBe('normal')
   })
+
+  it('derives missing corner-pin reference dimensions without replacing explicit ones', () => {
+    const item = makeVideo({
+      transform: { x: 0, y: 0, width: 320, height: 180, rotation: 0, opacity: 1 },
+      cornerPin: {
+        topLeft: [0, 0],
+        topRight: [0, 0],
+        bottomRight: [0, 0],
+        bottomLeft: [0, 0],
+        referenceWidth: 640,
+      },
+    })
+
+    const result = normalizeFrameFields(item)
+
+    expect(result.cornerPin?.referenceWidth).toBe(640)
+    expect(result.cornerPin?.referenceHeight).toBe(180)
+    expect(item.cornerPin?.referenceHeight).toBeUndefined()
+  })
 })
 
 describe('normalizeItemUpdates', () => {

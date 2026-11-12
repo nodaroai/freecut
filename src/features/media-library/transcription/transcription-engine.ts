@@ -1,11 +1,11 @@
 import type { MediaTranscriptModel } from '@/types/storage'
 import type { TranscriptionEngine } from './types'
 
-export const PARAKEET_MODEL: MediaTranscriptModel = 'parakeet-tdt-v3'
+const PARAKEET_MODEL: MediaTranscriptModel = 'parakeet-tdt-v3'
 
 // When Parakeet can't handle a job we transcribe with Whisper base — the fastest Whisper
 // tier with broad language coverage and a small download.
-export const PARAKEET_FALLBACK_WHISPER_MODEL: MediaTranscriptModel = 'whisper-base'
+const PARAKEET_FALLBACK_WHISPER_MODEL: MediaTranscriptModel = 'whisper-base'
 
 // Parakeet TDT 0.6B v3 covers 25 European languages (auto-detected). Anything outside this
 // set — notably ja/ko/zh, which FreeCut supports — must fall back to Whisper.

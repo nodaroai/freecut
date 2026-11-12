@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { TimelinePlayhead } from './timeline-playhead'
 import { useZoomStore, _resetZoomStoreForTest } from '../stores/zoom-store'
-import { useTimelineStore } from '../stores/timeline-store'
+import { setTimelineState } from '../test-helpers'
 import {
   mainTimelineScrubActiveRef,
   mainTimelineScrubHandoffFrameRef,
@@ -34,7 +34,7 @@ describe('TimelinePlayhead', () => {
       useProxy: true,
       previewQuality: 1,
     })
-    useTimelineStore.setState({ fps: 30 })
+    setTimelineState({ fps: 30 })
     _resetZoomStoreForTest()
     useZoomStore.getState().setZoomLevelSynchronized(1)
     mainTimelineScrubActiveRef.current = false
@@ -111,7 +111,7 @@ describe('TimelinePlayhead', () => {
     expect(playhead).toHaveStyle({ transform: 'translate3d(40px, 0, 0)' })
 
     act(() => {
-      useTimelineStore.setState({ fps: 60 })
+      setTimelineState({ fps: 60 })
     })
 
     expect(playhead).toHaveStyle({ transform: 'translate3d(20px, 0, 0)' })

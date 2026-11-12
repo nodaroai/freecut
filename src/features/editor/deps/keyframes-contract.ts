@@ -19,6 +19,15 @@ export {
   type AutoKeyframeOperation,
 } from '@/features/keyframes/utils/auto-keyframe'
 export { getAnimatablePropertiesForItem } from '@/features/keyframes/utils/animatable-properties'
+export {
+  VECTOR_PROPERTY_PAIRS,
+  findStoredVectorKeyframe,
+  getEditorVectorKeyframeId,
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+  toVectorScalePercent,
+  type VectorPropertyPair,
+} from '@/features/keyframes/utils/vector-proxy'
 export { getAnimatablePropertyBaseValue } from '@/features/keyframes/utils/animatable-property-base-value'
 export { hasPathVertexKeyframes } from '@/features/keyframes/utils/path-animatable-properties'
 export { getKeyframePropertyLabel } from '@/features/keyframes/utils/property-i18n'
@@ -46,14 +55,4 @@ export {
   updateMotionModifierSettings,
 } from '@/features/keyframes/utils/motion-modifier-eval'
 export { createMotionAnimationLayer } from '@/features/keyframes/utils/motion-layer-eval'
-export {
-  bakeMotionModifiersToKeyframes,
-  bakeAudioPulseToKeyframes,
-  buildBakeMotionPlan,
-} from '@/features/keyframes/utils/bake-motion'
-export {
-  TRIGGER_WAVE_MOTION_LAYER_LABEL,
-  createAudioPulseModulation,
-  buildTriggerWaveMotionLayerKeyframes,
-  createTriggerWaveMotionLayerEffects,
-} from '@/features/keyframes/utils/trigger-wave-motion-layer'
+export { buildBakeMotionPlan } from '@/features/keyframes/utils/bake-motion'

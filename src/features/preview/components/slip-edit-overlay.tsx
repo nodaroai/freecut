@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { useItemsStore } from '@/features/preview/deps/timeline-store'
 import { useSlipEditPreviewStore } from '@/features/preview/deps/timeline-edit-preview'
 import { EditFourUpPanels } from './edit-4up-panels'
 import { getSourceFrameInfo } from './edit-overlay-utils'
@@ -23,7 +23,7 @@ interface SlipEditOverlayProps {
 export function SlipEditOverlay({ fps }: SlipEditOverlayProps) {
   const itemId = useSlipEditPreviewStore((s) => s.itemId)
   const slipDelta = useSlipEditPreviewStore((s) => s.slipDelta)
-  const items = useTimelineStore((s) => s.items)
+  const items = useItemsStore((s) => s.items)
 
   const itemsMap = useMemo(() => new Map(items.map((i) => [i.id, i])), [items])
   const operationItem = itemId ? (itemsMap.get(itemId) ?? null) : null

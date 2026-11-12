@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useRef, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Move, RotateCcw, Link2, Link2Off } from 'lucide-react'
-import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { TimelineItem, VideoItem, CompositionItem } from '@/types/timeline'
@@ -10,9 +9,10 @@ import type { ItemKeyframes } from '@/types/keyframe'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
 import {
+  applyAutoKeyframeOperations,
+  updateItemsTransformMap,
   useItemsStore,
   useKeyframesStore,
-  useTimelineStore,
 } from '@/features/editor/deps/timeline-store'
 import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import {
@@ -23,6 +23,8 @@ import {
 } from '@/features/editor/deps/keyframes'
 import { PropertySection, PropertyRow, NumberInput, SliderInput } from '../components'
 import { applyAutoKeyframedTransformChange } from './auto-keyframe-transform'
+import { useKeyframesByItemId } from './use-keyframes-by-item-id'
+import { demixValue } from '../utils'
 
 interface LayoutSectionProps {
   items: TimelineItem[]
@@ -104,9 +106,7 @@ function resolveMixedPositionValue({
   if (values.length === 0) return 0
 
   const firstValue = values[0]!
-  return values.every((value) => Math.abs(value - firstValue) < 0.1)
-    ? firstValue
-    : 'mixed'
+  return values.every((value) => Math.abs(value - firstValue) < 0.1) ? firstValue : 'mixed'
 }
 
 const PositionAxisControl = memo(function PositionAxisControl({
@@ -176,7 +176,7 @@ const PositionAxisControl = memo(function PositionAxisControl({
           keyframesByItemId: useKeyframesStore.getState().keyframesByItemId,
         })
   const currentValueRef = useRef(0)
-  currentValueRef.current = canonicalValue === 'mixed' ? 0 : canonicalValue
+  currentValueRef.current = demixValue(canonicalValue, 0)
   const getCurrentValue = useCallback(() => currentValueRef.current, [])
   const displayedValue = liveValue ?? canonicalValue
 
@@ -224,18 +224,7 @@ export const LayoutSection = memo(function LayoutSection({
   // Get current playhead frame for keyframe animation (throttled to reduce re-renders)
   const currentFrame = useThrottledFrame()
 
-  const itemKeyframes = useKeyframesStore(
-    useShallow(
-      useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId] ?? null), [itemIds]),
-    ),
-  )
-  const keyframesByItemId = useMemo(() => {
-    const map = new Map<string, (typeof itemKeyframes)[number]>()
-    for (const [index, itemId] of itemIds.entries()) {
-      map.set(itemId, itemKeyframes[index] ?? null)
-    }
-    return map
-  }, [itemIds, itemKeyframes])
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   // Gizmo store for live preview (both for properties panel and gizmo drag sync)
   const setTransformPreview = useGizmoStore((s) => s.setTransformPreview)
@@ -351,10 +340,6 @@ export const LayoutSection = memo(function LayoutSection({
     return height > 0 ? width / height : 1
   }, [width, height])
 
-  // Get batched keyframe action for auto-keyframing
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
-  const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap)
-
   // Helper: Build auto-keyframe operations for properties that are already animated.
   const getAutoKeyframeOperation = useCallback(
     (
@@ -400,7 +385,6 @@ export const LayoutSection = memo(function LayoutSection({
       onTransformChange,
       clearPreview,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -433,7 +417,6 @@ export const LayoutSection = memo(function LayoutSection({
       onTransformChange,
       clearPreview,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -493,8 +476,6 @@ export const LayoutSection = memo(function LayoutSection({
       height,
       currentAspectRatio,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
-      updateItemsTransformMap,
     ],
   )
 
@@ -554,8 +535,6 @@ export const LayoutSection = memo(function LayoutSection({
       width,
       currentAspectRatio,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
-      updateItemsTransformMap,
     ],
   )
 
@@ -588,7 +567,6 @@ export const LayoutSection = memo(function LayoutSection({
       onTransformChange,
       clearPreview,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -617,7 +595,6 @@ export const LayoutSection = memo(function LayoutSection({
       queueMicrotask(() => clearPreview())
     },
     [
-      applyAutoKeyframeOperations,
       clearPreview,
       getAutoKeyframeOperation,
       mediaTransformItemIds,
@@ -650,7 +627,6 @@ export const LayoutSection = memo(function LayoutSection({
       queueMicrotask(() => clearPreview())
     },
     [
-      applyAutoKeyframeOperations,
       clearPreview,
       getAutoKeyframeOperation,
       mediaTransformItemIds,
@@ -830,7 +806,7 @@ export const LayoutSection = memo(function LayoutSection({
           <KeyframeToggle
             itemIds={itemIds}
             property="width"
-            currentValue={width === 'mixed' ? 100 : width}
+            currentValue={demixValue(width, 100)}
           />
           <Button
             variant="ghost"
@@ -863,7 +839,7 @@ export const LayoutSection = memo(function LayoutSection({
           <KeyframeToggle
             itemIds={itemIds}
             property="height"
-            currentValue={height === 'mixed' ? 100 : height}
+            currentValue={demixValue(height, 100)}
           />
           <Button
             variant="ghost"
@@ -893,7 +869,7 @@ export const LayoutSection = memo(function LayoutSection({
           <KeyframeToggle
             itemIds={itemIds}
             property="rotation"
-            currentValue={rotation === 'mixed' ? 0 : rotation}
+            currentValue={demixValue(rotation, 0)}
           />
           <Button
             variant="ghost"
@@ -923,7 +899,7 @@ export const LayoutSection = memo(function LayoutSection({
               <KeyframeToggle
                 itemIds={mediaTransformItemIds}
                 property="anchorX"
-                currentValue={mediaAnchorX === 'mixed' ? 0 : mediaAnchorX}
+                currentValue={demixValue(mediaAnchorX, 0)}
               />
             </div>
             <div className="flex items-center gap-0.5 flex-1 min-w-0">
@@ -939,7 +915,7 @@ export const LayoutSection = memo(function LayoutSection({
               <KeyframeToggle
                 itemIds={mediaTransformItemIds}
                 property="anchorY"
-                currentValue={mediaAnchorY === 'mixed' ? 0 : mediaAnchorY}
+                currentValue={demixValue(mediaAnchorY, 0)}
               />
             </div>
             <Button
@@ -960,7 +936,7 @@ export const LayoutSection = memo(function LayoutSection({
           <div className="flex items-center justify-between gap-3 w-full">
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <Switch
-                checked={flipHorizontal === 'mixed' ? false : flipHorizontal}
+                checked={demixValue(flipHorizontal, false)}
                 onCheckedChange={handleFlipHorizontalChange}
                 aria-label={t('editor.layoutSection.flipHorizontalAria')}
               />
@@ -972,7 +948,7 @@ export const LayoutSection = memo(function LayoutSection({
             </label>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <Switch
-                checked={flipVertical === 'mixed' ? false : flipVertical}
+                checked={demixValue(flipVertical, false)}
                 onCheckedChange={handleFlipVerticalChange}
                 aria-label={t('editor.layoutSection.flipVerticalAria')}
               />

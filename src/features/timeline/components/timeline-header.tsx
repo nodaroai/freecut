@@ -32,7 +32,17 @@ import {
 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { formatHotkeyBinding } from '@/config/hotkeys'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useMarkersStore } from '../stores/markers-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import {
+  addMarker,
+  clearAllMarkers,
+  clearInOutPoints,
+  removeMarker,
+  toggleAudioSkimming,
+  toggleSnap,
+} from '../stores/timeline-actions'
+import { useInOutPoints } from '../hooks/use-in-out-points'
 import { cutInOutRange } from '../stores/actions/edit/cut-range-actions'
 import { useTimelineCommandStore } from '../stores/timeline-command-store'
 import { useZoomStore } from '../stores/zoom-store'
@@ -449,20 +459,11 @@ export const TimelineHeader = memo(function TimelineHeader({
 }: TimelineHeaderProps) {
   const { t } = useTranslation()
   const hotkeys = useResolvedHotkeys()
-  const snapEnabled = useTimelineStore((s) => s.snapEnabled)
-  const toggleSnap = useTimelineStore((s) => s.toggleSnap)
-  const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
-  const toggleAudioSkimming = useTimelineStore((s) => s.toggleAudioSkimming)
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
-  const setInPoint = useTimelineStore((s) => s.setInPoint)
-  const setOutPoint = useTimelineStore((s) => s.setOutPoint)
-  const clearInOutPoints = useTimelineStore((s) => s.clearInOutPoints)
-  const addMarker = useTimelineStore((s) => s.addMarker)
+  const snapEnabled = useTimelineSettingsStore((s) => s.snapEnabled)
+  const audioSkimmingEnabled = useTimelineSettingsStore((s) => s.audioSkimmingEnabled)
+  const { inPoint, outPoint, setInPoint, setOutPoint } = useInOutPoints()
   // Only subscribe to marker count for disabled state - avoids re-render on marker changes
-  const hasMarkers = useTimelineStore((s) => s.markers.length > 0)
-  const removeMarker = useTimelineStore((s) => s.removeMarker)
-  const clearAllMarkers = useTimelineStore((s) => s.clearAllMarkers)
+  const hasMarkers = useMarkersStore((s) => s.markers.length > 0)
   // NOTE: Don't subscribe to currentFrame - only needed in click handlers
   // Read from store directly when needed to avoid re-renders every frame
   const activeTool = useSelectionStore((s) => s.activeTool)
@@ -485,11 +486,11 @@ export const TimelineHeader = memo(function TimelineHeader({
   } as const
 
   const handleUndo = () => {
-    useTimelineStore.temporal.getState().undo()
+    useTimelineCommandStore.getState().undo()
   }
 
   const handleRedo = () => {
-    useTimelineStore.temporal.getState().redo()
+    useTimelineCommandStore.getState().redo()
   }
 
   return (

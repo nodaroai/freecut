@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useTimelineViewportStore } from '../stores/timeline-viewport-store'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useItemsStore } from '../stores/items-store'
 import { useZoomStore } from '../stores/zoom-store'
 import { notifyTimelineLiveScroll } from '@/shared/timeline/live-scroll-sync'
 import { getTimelineWidth } from '../utils/timeline-layout'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
 import { cn } from '@/shared/ui/cn'
+import { attachWindowDragListeners } from '@/shared/utils/window-drag-listeners'
 import { getNavigatorResizeDragResult, getNavigatorThumbMetrics } from './timeline-navigator-utils'
 
 interface TimelineNavigatorProps {
@@ -153,7 +154,7 @@ export function TimelineNavigator({ actualDuration, scrollContainerRef }: Timeli
   const pendingPreviewRef = useRef<NavigatorDragPreview | null>(null)
   const latestPreviewRef = useRef<NavigatorDragPreview | null>(null)
   const viewHandoffRef = useRef<NavigatorViewHandoff | null>(null)
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const setZoomImmediate = useZoomStore((s) => s.setZoomLevelImmediate)
   const setZoomSynchronized = useZoomStore((s) => s.setZoomLevelSynchronized)
   const viewportWidth = useTimelineViewportStore((s) => s.viewportWidth)
@@ -505,16 +506,14 @@ export function TimelineNavigator({ actualDuration, scrollContainerRef }: Timeli
       setDragTarget(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
+    const detachWindowDragListeners = attachWindowDragListeners(
+      handleMouseMove,
+      handleMouseUp,
+      dragRafRef,
+    )
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      if (dragRafRef.current !== null) {
-        cancelAnimationFrame(dragRafRef.current)
-        dragRafRef.current = null
-      }
+      detachWindowDragListeners()
       pendingPreviewRef.current = null
     }
   }, [

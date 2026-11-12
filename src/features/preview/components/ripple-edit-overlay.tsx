@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { TimelineItem } from '@/types/timeline'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { useItemsStore } from '@/features/preview/deps/timeline-store'
 import { useRippleEditPreviewStore } from '@/features/preview/deps/timeline-edit-preview'
 import { EditTwoUpPanels } from './edit-2up-panels'
 import { getSourceFrameInfo } from './edit-overlay-utils'
@@ -79,7 +79,7 @@ export function RippleEditOverlay({ fps }: RippleEditOverlayProps) {
   const downstreamItemIds = useRippleEditPreviewStore((s) => s.downstreamItemIds)
   const delta = useRippleEditPreviewStore((s) => s.delta)
   const trimDelta = useRippleEditPreviewStore((s) => s.trimDelta)
-  const items = useTimelineStore((s) => s.items)
+  const items = useItemsStore((s) => s.items)
   const itemsMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
   const trimmedItem = trimmedItemId ? (itemsMap.get(trimmedItemId) ?? null) : null
 

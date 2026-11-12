@@ -5,7 +5,12 @@ import type { TimelineItem } from '@/types/timeline'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useGizmoStore } from '../stores/gizmo-store'
 import { usePowerWindowEditorStore } from '../stores/power-window-editor-store'
-import { useItemsStore, useKeyframesStore, useTimelineStore } from '../deps/timeline-store'
+import {
+  applyAutoKeyframeOperations,
+  setItemEffects,
+  useItemsStore,
+  useKeyframesStore,
+} from '../deps/timeline-store'
 import type { CoordinateParams, Point } from '../types/gizmo'
 import { screenToCanvas } from '../utils/coordinate-transform'
 import { planEffectGizmoCommit } from '../utils/effect-gizmo-keyframes'
@@ -130,8 +135,6 @@ const PowerWindowOverlay = memo(function PowerWindowOverlay({
   const previewEffect = useGizmoStore((s) =>
     s.preview?.[item.id]?.effects?.find((entry) => entry.id === effect.id),
   )
-  const setItemEffects = useTimelineStore((s) => s.setItemEffects)
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
   const itemKeyframes = useKeyframesStore((s) => s.keyframesByItemId[item.id])
 
   const params = readPowerWindowParams(previewEffect ?? effect)
@@ -192,13 +195,11 @@ const PowerWindowOverlay = memo(function PowerWindowOverlay({
       clearPreviewForItems([item.id])
     },
     [
-      applyAutoKeyframeOperations,
       clearPreviewForItems,
       currentEffects,
       effect,
       item,
       itemKeyframes,
-      setItemEffects,
     ],
   )
 

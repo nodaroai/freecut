@@ -66,6 +66,7 @@ export interface GpuEffectDefinition {
     params: Record<string, number | boolean | string>,
     width: number,
     height: number,
+    timelineTimeSeconds?: number,
   ) => Float32Array | null
   dataTexture?: EffectDataTextureSpec
   /** When set, the effect runs as a compute pass rather than a fragment pass. */
@@ -75,6 +76,8 @@ export interface GpuEffectDefinition {
 export type GpuEffectCategory = 'color' | 'blur' | 'distort' | 'stylize' | 'keying'
 
 export interface GpuEffectInstance {
+  /** Composition timeline time, never wall-clock or media source time. */
+  timelineTimeSeconds?: number
   id: string
   type: string
   name: string

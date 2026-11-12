@@ -9,8 +9,6 @@ import type { MotionGeneratorSettings } from './motion-generator'
 import { colorStringToKeyframeValue } from './color-keyframes'
 import { clamp } from '@/shared/utils/math'
 
-export const TRIGGER_WAVE_MOTION_LAYER_LABEL = 'Trigger Wave Motion'
-
 export interface TriggerWaveMotionLayerKeyframePayload {
   itemId: string
   property: AnimatableProperty
@@ -219,7 +217,7 @@ function smoothstep(t: number): number {
 }
 
 /** Beat-pulse envelope in [0,1]: fast attack to a peak at 15%, ease-out decay. */
-export function pulseEnvelope(progress: number): number {
+function pulseEnvelope(progress: number): number {
   if (progress < 0.15) return smoothstep(progress / 0.15)
   return 1 - smoothstep((progress - 0.15) / 0.85)
 }

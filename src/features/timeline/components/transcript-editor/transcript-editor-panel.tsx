@@ -44,7 +44,7 @@ import { useEditorStore } from '@/shared/state/editor'
 import type { MediaTranscript } from '@/types/storage'
 import { useItemsStore } from '../../stores/items-store'
 import { useTimelineSettingsStore } from '../../stores/timeline-settings-store'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { removeTranscriptRangesFromItems } from '../../stores/timeline-actions'
 import {
   countIgnoredSpans,
   totalIgnoredSeconds,
@@ -576,7 +576,7 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
       const rangesByMediaId = buildRemovalRangesByMediaId(selectedSlice)
       const itemIds = Array.from(new Set(selectedSlice.map((token) => token.itemId)))
       try {
-        useTimelineStore.getState().removeTranscriptRangesFromItems(itemIds, rangesByMediaId)
+        removeTranscriptRangesFromItems(itemIds, rangesByMediaId)
       } catch (error) {
         logger.warn('Transcript cut failed', error)
         toast.error(t('transcript.toastRemoveFailed'))

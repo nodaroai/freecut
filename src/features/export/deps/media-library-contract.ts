@@ -7,26 +7,7 @@ import { useMediaLibraryStore } from '@/features/media-library/stores/media-libr
 import { importMediaLibraryService } from '@/features/media-library/services/media-library-service-loader'
 import type { MediaMetadata } from '@/types/storage'
 
-export {
-  resolveMediaUrl,
-  resolveMediaUrls,
-  resolveProxyUrl,
-} from '@/features/media-library/utils/media-resolver'
-
-export function getMediaAudioCodecById(mediaId: string | undefined): string | undefined {
-  if (!mediaId) return undefined
-
-  const media = useMediaLibraryStore.getState().mediaById[mediaId]
-  if (!media) return undefined
-
-  if (media.mimeType.startsWith('video/')) {
-    return media.audioCodec
-  }
-  if (media.mimeType.startsWith('audio/')) {
-    return media.codec
-  }
-  return undefined
-}
+export { resolveMediaUrls } from '@/features/media-library/utils/media-resolver'
 
 export function getMediaMetadataById(mediaId: string | undefined): MediaMetadata | undefined {
   if (!mediaId) return undefined

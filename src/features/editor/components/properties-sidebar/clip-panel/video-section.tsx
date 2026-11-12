@@ -7,15 +7,18 @@ import type { TimelineItem, VideoItem, AudioItem, CompositionItem } from '@/type
 import type { CropSettings } from '@/types/transform'
 import type { ItemKeyframes } from '@/types/keyframe'
 import {
+  applyAutoKeyframeOperations,
   captureSnapshot,
   rateStretchItemWithoutHistory,
+  resetSpeedWithRipple,
+  updateItem,
+  useItemsStore,
   useKeyframesStore,
   useTimelineCommandStore,
-  useTimelineStore,
+  useTimelineSettingsStore,
 } from '@/features/editor/deps/timeline-store'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
-import type { TimelineState, TimelineActions } from '@/features/editor/deps/timeline-store'
 import {
   timelineToSourceFrames,
   sourceToTimelineFrames,
@@ -28,7 +31,7 @@ import {
   resolveAnimatedCrop,
 } from '@/features/editor/deps/keyframes'
 import { PropertySection, PropertyRow, SliderInput } from '../components'
-import { getMixedValue } from '../utils'
+import { demixValue, getMixedValue } from '../utils'
 import {
   cropPixelsToRatio,
   cropSignedPixelsToRatio,
@@ -162,8 +165,6 @@ function getCropPropertyValuesByItemId(
  */
 export function VideoSection({ items }: VideoSectionProps) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s: TimelineState & TimelineActions) => s.updateItem)
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
   const currentFrame = useThrottledFrame()
 
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew)
@@ -281,7 +282,8 @@ export function VideoSection({ items }: VideoSectionProps) {
       const roundedSpeed = Math.round(newSpeed * 100) / 100
       const clampedSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, roundedSpeed))
 
-      const { items: currentItems, fps } = useTimelineStore.getState()
+      const { items: currentItems } = useItemsStore.getState()
+      const { fps } = useTimelineSettingsStore.getState()
       currentItems
         .filter(
           (item: TimelineItem): item is VideoItem | AudioItem =>
@@ -353,7 +355,7 @@ export function VideoSection({ items }: VideoSectionProps) {
       videoItemIds.forEach((id) => updateItem(id, { fadeIn: value }))
       commitPreviewClear()
     },
-    [videoItemIds, updateItem, commitPreviewClear],
+    [videoItemIds, commitPreviewClear],
   )
 
   const handleFadeOutLiveChange = useCallback(
@@ -372,7 +374,7 @@ export function VideoSection({ items }: VideoSectionProps) {
       videoItemIds.forEach((id) => updateItem(id, { fadeOut: value }))
       commitPreviewClear()
     },
-    [videoItemIds, updateItem, commitPreviewClear],
+    [videoItemIds, commitPreviewClear],
   )
 
   const previewCropEdge = useCallback(
@@ -421,11 +423,9 @@ export function VideoSection({ items }: VideoSectionProps) {
       commitPreviewClear()
     },
     [
-      applyAutoKeyframeOperations,
       commitPreviewClear,
       currentFrame,
       keyframesByItemId,
-      updateItem,
       cropItems,
     ],
   )
@@ -475,11 +475,9 @@ export function VideoSection({ items }: VideoSectionProps) {
       commitPreviewClear()
     },
     [
-      applyAutoKeyframeOperations,
       commitPreviewClear,
       currentFrame,
       keyframesByItemId,
-      updateItem,
       cropItems,
     ],
   )
@@ -506,16 +504,13 @@ export function VideoSection({ items }: VideoSectionProps) {
     commitCropSoftness(0)
   }, [commitCropSoftness, cropItems, resolvedCropStatesByItem])
 
-  const resetSpeedWithRipple = useTimelineStore(
-    (s: TimelineState & TimelineActions) => s.resetSpeedWithRipple,
-  )
   const handleResetSpeed = useCallback(() => {
     resetSpeedWithRipple(rateStretchableIds)
-  }, [rateStretchableIds, resetSpeedWithRipple])
+  }, [rateStretchableIds])
 
   const handleResetFadeIn = useCallback(() => {
     const tolerance = 0.01
-    const currentItems = useTimelineStore.getState().items
+    const currentItems = useItemsStore.getState().items
     const needsUpdate = currentItems.some(
       (item: TimelineItem) =>
         videoItemIds.includes(item.id) && ((item as VideoItem).fadeIn ?? 0) > tolerance,
@@ -523,11 +518,11 @@ export function VideoSection({ items }: VideoSectionProps) {
     if (needsUpdate) {
       videoItemIds.forEach((id) => updateItem(id, { fadeIn: 0 }))
     }
-  }, [updateItem, videoItemIds])
+  }, [videoItemIds])
 
   const handleResetFadeOut = useCallback(() => {
     const tolerance = 0.01
-    const currentItems = useTimelineStore.getState().items
+    const currentItems = useItemsStore.getState().items
     const needsUpdate = currentItems.some(
       (item: TimelineItem) =>
         videoItemIds.includes(item.id) && ((item as VideoItem).fadeOut ?? 0) > tolerance,
@@ -535,7 +530,7 @@ export function VideoSection({ items }: VideoSectionProps) {
     if (needsUpdate) {
       videoItemIds.forEach((id) => updateItem(id, { fadeOut: 0 }))
     }
-  }, [updateItem, videoItemIds])
+  }, [videoItemIds])
 
   if (cropItems.length === 0) return null
 
@@ -635,7 +630,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropLeft"
-              currentValue={cropLeft === 'mixed' ? 0 : cropLeft}
+              currentValue={demixValue(cropLeft, 0)}
               currentValuesByItemId={cropValuesByProperty.cropLeft}
             />
             <Button
@@ -667,7 +662,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropRight"
-              currentValue={cropRight === 'mixed' ? 0 : cropRight}
+              currentValue={demixValue(cropRight, 0)}
               currentValuesByItemId={cropValuesByProperty.cropRight}
             />
             <Button
@@ -699,7 +694,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropTop"
-              currentValue={cropTop === 'mixed' ? 0 : cropTop}
+              currentValue={demixValue(cropTop, 0)}
               currentValuesByItemId={cropValuesByProperty.cropTop}
             />
             <Button
@@ -731,7 +726,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropBottom"
-              currentValue={cropBottom === 'mixed' ? 0 : cropBottom}
+              currentValue={demixValue(cropBottom, 0)}
               currentValuesByItemId={cropValuesByProperty.cropBottom}
             />
             <Button
@@ -763,7 +758,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropSoftness"
-              currentValue={cropSoftness === 'mixed' ? 0 : cropSoftness}
+              currentValue={demixValue(cropSoftness, 0)}
               currentValuesByItemId={cropValuesByProperty.cropSoftness}
             />
             <Button

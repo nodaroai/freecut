@@ -9,7 +9,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  removeKeyframesForItem,
+  removeKeyframesForProperty,
+} from '@/features/editor/deps/timeline-store'
 import { PROPERTY_LABELS } from '@/types/keyframe'
 import { useClearKeyframesDialogStore } from '@/shared/state/clear-keyframes-dialog'
 
@@ -27,13 +30,11 @@ export function ClearKeyframesDialog() {
   const handleConfirm = () => {
     if (property) {
       // Clear keyframes for specific property
-      const removeKeyframesForProperty = useTimelineStore.getState().removeKeyframesForProperty
       for (const itemId of itemIds) {
         removeKeyframesForProperty(itemId, property)
       }
     } else {
       // Clear all keyframes
-      const removeKeyframesForItem = useTimelineStore.getState().removeKeyframesForItem
       for (const itemId of itemIds) {
         removeKeyframesForItem(itemId)
       }

@@ -20,7 +20,7 @@ export type RenderPumpFrameState = Pick<
   'currentFrame' | 'currentFrameEpoch' | 'previewFrame' | 'previewFrameEpoch'
 >
 
-export type PreviewPresentationHandoffState = Pick<
+type PreviewPresentationHandoffState = Pick<
   PlaybackState,
   'currentFrame' | 'previewFrame' | 'isPlaying'
 >
@@ -47,8 +47,13 @@ interface ShouldRejectBlankTransportHandoffParams {
   isTransportSettling: boolean
   renderedFrame: number
   displayedFrame: number | null
-  renderedFrameBlank: boolean
-  displayedFrameBlank: boolean
+  /**
+   * Lazy pixel probes. Evaluating them eagerly forces a synchronous GPU
+   * readback even when the cheap frame gate below already fails, so callers
+   * pass thunks and the helper only samples when a rejection is still possible.
+   */
+  probeRenderedFrameBlank: () => boolean
+  probeDisplayedFrameBlank: () => boolean
 }
 
 interface ShouldRejectBlankReleasedScrubHandoffParams {
@@ -58,8 +63,9 @@ interface ShouldRejectBlankReleasedScrubHandoffParams {
   previewFrame: number | null
   isPlaying: boolean
   snapshotFrame: number | null
-  renderedFrameBlank: boolean
-  snapshotFrameBlank: boolean
+  /** Lazy pixel probes — see ShouldRejectBlankTransportHandoffParams. */
+  probeRenderedFrameBlank: () => boolean
+  probeSnapshotFrameBlank: () => boolean
 }
 
 interface ShouldPreservePausedTransportPresentationParams {
@@ -148,15 +154,15 @@ export function shouldRejectBlankTransportHandoff({
   isTransportSettling,
   renderedFrame,
   displayedFrame,
-  renderedFrameBlank,
-  displayedFrameBlank,
+  probeRenderedFrameBlank,
+  probeDisplayedFrameBlank,
 }: ShouldRejectBlankTransportHandoffParams): boolean {
   return (
     isTransportSettling &&
     displayedFrame !== null &&
     Math.abs(renderedFrame - displayedFrame) <= 1 &&
-    renderedFrameBlank &&
-    !displayedFrameBlank
+    probeRenderedFrameBlank() &&
+    !probeDisplayedFrameBlank()
   )
 }
 
@@ -173,8 +179,8 @@ export function shouldRejectBlankReleasedScrubHandoff({
   previewFrame,
   isPlaying,
   snapshotFrame,
-  renderedFrameBlank,
-  snapshotFrameBlank,
+  probeRenderedFrameBlank,
+  probeSnapshotFrameBlank,
 }: ShouldRejectBlankReleasedScrubHandoffParams): boolean {
   return (
     releaseGuardFrame !== null &&
@@ -183,8 +189,8 @@ export function shouldRejectBlankReleasedScrubHandoff({
     previewFrame === null &&
     !isPlaying &&
     snapshotFrame === releaseGuardFrame &&
-    renderedFrameBlank &&
-    !snapshotFrameBlank
+    probeRenderedFrameBlank() &&
+    !probeSnapshotFrameBlank()
   )
 }
 

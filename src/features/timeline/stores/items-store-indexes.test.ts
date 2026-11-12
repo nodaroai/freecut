@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
-import type { VideoItem } from '@/types/timeline'
-import { getTrackItemRelations } from './items-store-indexes'
+import type { TextItem, VideoItem } from '@/types/timeline'
+import { getTrackItemRelations, selectConsolidatableCaptionClipIds } from './items-store-indexes'
 
 function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
   return {
@@ -14,6 +14,30 @@ function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
     mediaId: 'media-1',
     ...overrides,
   }
+}
+
+function makeCaptionItem(
+  overrides: Partial<TextItem> & {
+    clipId: string
+    sourceType?: 'embedded-subtitles' | 'subtitle-import'
+  },
+): TextItem {
+  const { clipId, sourceType = 'embedded-subtitles', ...rest } = overrides
+  return {
+    id: 'caption',
+    type: 'text',
+    trackId: 'track-1',
+    from: 20,
+    durationInFrames: 10,
+    text: 'caption',
+    color: '#ffffff',
+    captionSource: {
+      type: sourceType,
+      clipId,
+      mediaId: 'media-1',
+    },
+    ...rest,
+  } as TextItem
 }
 
 describe('getTrackItemRelations', () => {
@@ -64,5 +88,40 @@ describe('getTrackItemRelations', () => {
     expect(getTrackItemRelations(trackItems, target)).toBe(
       getTrackItemRelations(trackItems, target),
     )
+  })
+})
+
+describe('selectConsolidatableCaptionClipIds', () => {
+  it('collects clip ids owning embedded or imported per-cue captions', () => {
+    const items = [
+      makeCaptionItem({ clipId: 'clip-1' }),
+      makeCaptionItem({ id: 'caption-2', clipId: 'clip-2', sourceType: 'subtitle-import' }),
+      makeCaptionItem({ id: 'caption-3', clipId: 'clip-3', sourceType: 'subtitle-import' }),
+      makeVideoItem({ id: 'clip-1' }),
+    ]
+    // Overwrite one caption's source type via a fresh object to prove the
+    // selector ignores non-consolidatable sources (e.g. transcript captions).
+    const transcriptCaption: TextItem = {
+      ...makeCaptionItem({ id: 'caption-4', clipId: 'clip-4' }),
+      captionSource: { type: 'transcript', clipId: 'clip-4', mediaId: 'media-1' },
+    }
+    items.push(transcriptCaption)
+
+    const ids = selectConsolidatableCaptionClipIds({ items })
+
+    expect(ids.has('clip-1')).toBe(true)
+    expect(ids.has('clip-2')).toBe(true)
+    expect(ids.has('clip-3')).toBe(true)
+    expect(ids.has('clip-4')).toBe(false)
+  })
+
+  it('reuses the derived index while the items array is unchanged', () => {
+    const items = [makeCaptionItem({ clipId: 'clip-1' })]
+    const first = selectConsolidatableCaptionClipIds({ items })
+    expect(selectConsolidatableCaptionClipIds({ items })).toBe(first)
+
+    const rebuilt = selectConsolidatableCaptionClipIds({ items: [...items] })
+    expect(rebuilt).not.toBe(first)
+    expect(rebuilt.has('clip-1')).toBe(true)
   })
 })

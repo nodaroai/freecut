@@ -187,7 +187,7 @@ const TextMotionSlotRow = memo(function TextMotionSlotRow({
   )
 })
 
-export interface TextMotionSlotRowsProps {
+interface TextMotionSlotRowsProps {
   /** Selected text items (callers filter the selection to `type === 'text'`). */
   items: TextItem[]
   /** Optional preset-browser query used by the Motion library. */

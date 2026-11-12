@@ -10,7 +10,6 @@ export const MINI_TIMELINE_MIN_FRAMES = 300
 export const MINI_TIMELINE_RULER_HEIGHT = 20
 export const MINI_TIMELINE_IO_LANE_HEIGHT = 14
 export const MINI_TIMELINE_IO_HANDLE_WIDTH = 6
-export const MINI_TIMELINE_IO_HANDLE_COLOR = 'var(--color-timeline-io-handle)'
 
 // Film-tile geometry (clip thumbnail row).
 export const MINI_FILM_TILE_WIDTH = 118

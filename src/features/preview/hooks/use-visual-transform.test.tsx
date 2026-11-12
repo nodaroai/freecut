@@ -4,7 +4,7 @@ import { createJSONStorage } from 'zustand/middleware'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { resetPlaybackPreviewState } from '@/shared/state/playback-preview-test-helpers'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { setTimelineState } from '@/features/preview/deps/timeline-test-helpers-contract'
 import { useGizmoStore } from '@/features/preview/stores/gizmo-store'
 import { useVisualTransforms } from './use-visual-transform'
 import type { TimelineItem } from '@/types/timeline'
@@ -121,7 +121,7 @@ function resetStores() {
 
   resetPlaybackPreviewState(10)
 
-  useTimelineStore.setState({
+  setTimelineState({
     keyframes: [
       {
         itemId: ITEM.id,

@@ -11,26 +11,32 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import type { ExportSettings, ExtendedExportSettings } from '@/types/export'
-import type { RenderProgress, ClientRenderResult, ClientCodec } from '../utils/client-renderer'
+import type { RenderProgress, ClientRenderResult, ClientCodec } from '../deps/renderer'
 import {
   mapToClientSettings,
   getSupportedCodecs,
   formatBytes,
   estimateFileSize,
   getVideoBitrateForQuality,
-} from '../utils/client-renderer'
+} from '../deps/renderer'
 import {
   isExtendedSettings,
   mapRequestedClientSettings,
   resolveClientSettings,
   runRender,
-} from '../utils/render-pipeline'
+} from '../deps/renderer'
 import { trySmartCopyExport } from '../utils/smart-copy'
 import { convertTimelineToComposition } from '../utils/timeline-to-composition'
-import { buildTranscriptSubtitleCues } from '../utils/embedded-subtitle-export'
+import { buildTranscriptSubtitleCues } from '../deps/renderer'
 import { serializeSrt } from '@/shared/utils/subtitles'
-import { releaseTemporaryExportOutput } from '../utils/export-output-target'
-import { useTimelineStore } from '@/features/export/deps/timeline'
+import { releaseTemporaryExportOutput } from '../deps/renderer'
+import {
+  useItemsStore,
+  useKeyframesStore,
+  useMarkersStore,
+  useTimelineSettingsStore,
+  useTransitionsStore,
+} from '@/features/export/deps/timeline'
 import { useProjectStore } from '@/features/export/deps/projects'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
 import { resolveMediaUrls } from '@/features/export/deps/media-library'
@@ -39,7 +45,7 @@ import { createLogger, createOperationId } from '@/shared/logging/logger'
 
 const log = createLogger('Export')
 
-type ClientRenderStatus =
+export type ClientRenderStatus =
   | 'idle'
   | 'preparing'
   | 'rendering'
@@ -138,8 +144,11 @@ export function useClientRender(): UseClientRenderReturn {
         abortControllerRef.current = new AbortController()
 
         // Read current state from stores
-        const state = useTimelineStore.getState()
-        const { tracks, items, transitions, fps, inPoint, outPoint, keyframes } = state
+        const { tracks, items } = useItemsStore.getState()
+        const { transitions } = useTransitionsStore.getState()
+        const { keyframes } = useKeyframesStore.getState()
+        const { inPoint, outPoint } = useMarkersStore.getState()
+        const { fps } = useTimelineSettingsStore.getState()
 
         // Get project metadata (background color and native resolution)
         const currentProject = useProjectStore.getState().currentProject
@@ -454,7 +463,7 @@ export function useClientRender(): UseClientRenderReturn {
    */
   const estimateFileSizeForSettings = useCallback(
     (settings: ExportSettings, durationSeconds: number) => {
-      const fps = useTimelineStore.getState().fps
+      const fps = useTimelineSettingsStore.getState().fps
       const clientSettings = mapToClientSettings(settings, fps)
       const bytes = estimateFileSize(clientSettings, durationSeconds)
       return formatBytes(bytes)

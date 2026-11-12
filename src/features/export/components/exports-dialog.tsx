@@ -19,7 +19,7 @@ import {
   workspaceFolderName,
   type ExportFileEntry,
 } from '@/infrastructure/storage'
-import { formatBytes } from '../utils/client-renderer'
+import { formatBytes } from '../deps/renderer'
 import { useRenderQueueStore } from '../stores/render-queue-store'
 import { RenderQueueList } from './render-queue-panel'
 

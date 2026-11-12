@@ -126,8 +126,8 @@ fn grainFragment(input: VertexOutput) -> @location(0) vec4f {
       animatable: false,
     },
   },
-  packUniforms: (p) => {
-    const time = performance.now() / 1000
+  packUniforms: (p, _width, _height, timelineTimeSeconds = 0) => {
+    const time = timelineTimeSeconds
     return new Float32Array([
       (p.amount as number) ?? 0.1,
       (p.size as number) ?? 1,
@@ -433,8 +433,8 @@ fn scanlinesFragment(input: VertexOutput) -> @location(0) vec4f {
       animatable: false,
     },
   },
-  packUniforms: (p) => {
-    const time = performance.now() / 1000
+  packUniforms: (p, _width, _height, timelineTimeSeconds = 0) => {
+    const time = timelineTimeSeconds
     return new Float32Array([
       (p.density as number) ?? 5,
       (p.opacity as number) ?? 0.3,
@@ -470,7 +470,14 @@ fn colorGlitchFragment(input: VertexOutput) -> @location(0) vec4f {
   let t = rawStep - floor(rawStep / 64.0) * 64.0;
 
   // Tear the frame into horizontal bands; each band glitches independently.
-  let band = floor(uv.y * 28.0);
+  // Jitter shared boundaries, not independent heights: no gaps or overlapping bands.
+        let band_position = min(uv.y, 0.999999) * 28.0;
+        let cell = floor(band_position);
+        let start = cell + select((hash(vec2f(cell, t + 11.0)) - 0.5) * 0.8, 0.0, cell == 0.0);
+        let end = cell + 1.0 + select((hash(vec2f(cell + 1.0, t + 11.0)) - 0.5) * 0.8, 0.0, cell >= 27.0);
+        var band = cell;
+        if (band_position < start) { band = cell - 1.0; }
+        if (band_position >= end) { band = cell + 1.0; }
   let bandNoise = hash(vec2f(band, t));
 
   // More bands corrupt as intensity rises (full frame at intensity = 1).
@@ -517,8 +524,8 @@ fn colorGlitchFragment(input: VertexOutput) -> @location(0) vec4f {
       animatable: false,
     },
   },
-  packUniforms: (p) => {
-    const time = performance.now() / 1000
+  packUniforms: (p, _width, _height, timelineTimeSeconds = 0) => {
+    const time = timelineTimeSeconds
     return new Float32Array([(p.intensity as number) ?? 0.5, (p.speed as number) ?? 1, time, 0])
   },
 }
@@ -625,13 +632,13 @@ fn blockGlitchFragment(input: VertexOutput) -> @location(0) vec4f {
       animatable: false,
     },
   },
-  packUniforms: (p, w, h) =>
+  packUniforms: (p, w, h, timelineTimeSeconds = 0) =>
     new Float32Array([
       (p.coverage as number) ?? 0.3,
       (p.intensity as number) ?? 0.6,
       (p.blockSize as number) ?? 40,
       (p.speed as number) ?? 1,
-      performance.now() / 1000,
+      timelineTimeSeconds,
       w,
       h,
       0,
@@ -2429,13 +2436,13 @@ fn vhsFragment(input: VertexOutput) -> @location(0) vec4f {
       animatable: false,
     },
   },
-  packUniforms: (p, w, h) =>
+  packUniforms: (p, w, h, timelineTimeSeconds = 0) =>
     new Float32Array([
       (p.bleed as number) ?? 0.4,
       (p.waviness as number) ?? 0.3,
       (p.noise as number) ?? 0.25,
       (p.scanline as number) ?? 0.35,
-      (performance.now() / 1000) * ((p.speed as number) ?? 1),
+      timelineTimeSeconds * ((p.speed as number) ?? 1),
       w,
       h,
       0,

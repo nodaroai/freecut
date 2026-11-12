@@ -10,6 +10,6 @@ export type { ItemPropertiesPreview } from '@/features/preview/stores/gizmo-stor
 export { useCornerPinStore } from '@/features/preview/stores/corner-pin-store'
 export { useMaskEditorStore } from '@/features/preview/stores/mask-editor-store'
 export { usePlaybackStore } from '@/shared/state/playback'
-export { useTimelineStore } from '@/features/timeline/stores/timeline-store'
+export { useKeyframesStore } from '@/features/timeline/stores/keyframes-store'
 export { useCompositionsStore } from '@/features/timeline/stores/compositions-store'
 export { useDebugStore } from '@/features/editor/stores/debug-store'

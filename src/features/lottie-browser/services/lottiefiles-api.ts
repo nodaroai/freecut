@@ -13,7 +13,7 @@ import type { MediaAttribution } from '@/types/storage'
 const ENDPOINT = 'https://graphql.lottiefiles.com/2022-08'
 
 /** Free LottieFiles animations are distributed under this license. */
-export const LOTTIEFILES_LICENSE = 'Lottie Simple License (FL 9.13.21)'
+const LOTTIEFILES_LICENSE = 'Lottie Simple License (FL 9.13.21)'
 
 /** Browse feeds (used when there is no active search query). */
 export type LottieBrowseCategory = 'featured' | 'popular' | 'recent'

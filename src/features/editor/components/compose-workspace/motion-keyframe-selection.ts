@@ -5,7 +5,10 @@ import type {
   VectorAnimatableProperty,
 } from '@/types/keyframe'
 import type { TimelineItem } from '@/types/timeline'
-import { getMotionVectorProxy, getStoredMotionVectorKeyframeId } from './motion-vector-rows'
+import {
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+} from '@/features/editor/deps/keyframes-contract'
 
 export type MotionSelectionStorage =
   | {
@@ -56,12 +59,12 @@ export interface MotionSelectionTimeRange {
 }
 
 function getVectorStorage(ref: KeyframeRef): MotionSelectionStorage | null {
-  const proxy = getMotionVectorProxy(ref.property)
+  const proxy = getVectorPropertyProxy(ref.property)
   return proxy
     ? {
         kind: 'vector',
         property: proxy.property,
-        keyframeId: getStoredMotionVectorKeyframeId(ref.keyframeId, proxy.axis),
+        keyframeId: getStoredVectorKeyframeId(ref.keyframeId, proxy.axis),
       }
     : null
 }

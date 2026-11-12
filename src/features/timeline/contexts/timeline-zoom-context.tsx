@@ -6,7 +6,7 @@
 
 import { createContext, useContext, useMemo, useSyncExternalStore } from 'react'
 import { useSettledZoomStore, useZoomStore } from '../stores/zoom-store'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 
 export const SettledContentPixelsPerSecondContext = createContext<number | null>(null)
 
@@ -68,7 +68,7 @@ function useTimelineZoomValue(
 ): TimelineZoomValue {
   const zoomLevel = useZoomStore(zoomLevelSelector)
   const pixelsPerSecond = useZoomStore(pixelsPerSecondSelector)
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
 
   return useMemo(
     () => ({
@@ -100,7 +100,7 @@ export function useTimelineZoomContext(): TimelineZoomValue {
 export function useTimelineCommittedZoomContext(): TimelineZoomValue {
   const zoomLevel = useSettledZoomStore((state) => state.contentLevel)
   const pixelsPerSecond = useSettledZoomStore((state) => state.contentPixelsPerSecond)
-  const fps = useTimelineStore((state) => state.fps)
+  const fps = useTimelineSettingsStore((state) => state.fps)
 
   return useMemo(
     () => ({

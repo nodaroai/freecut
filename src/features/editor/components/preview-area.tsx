@@ -18,7 +18,7 @@ import { useEditorStore } from '@/shared/state/editor'
 import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/config/editor-layout'
 import { InteractionLockRegion } from './interaction-lock-region'
 import { Button } from '@/components/ui/button'
-import { ErrorBoundary } from '@/app/error-boundary'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { useTranslation } from 'react-i18next'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { ShuttleIndicator } from '@/shared/ui/shuttle-indicator'
@@ -203,7 +203,7 @@ export const PreviewArea = memo(function PreviewArea({
     useCallback(
       (s) => {
         if (!editingItemId) return 0
-        const item = s.items.find((candidate) => candidate.id === editingItemId)
+        const item = s.itemById[editingItemId]
         return item?.type === 'shape' && item.shapeType === 'path'
           ? (item.pathVertices?.length ?? 0)
           : 0

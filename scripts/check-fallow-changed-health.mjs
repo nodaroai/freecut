@@ -44,8 +44,52 @@ function getNpmExecPath() {
   return fs.existsSync(bundledNpmPath) ? bundledNpmPath : '';
 }
 
+// Headless drivers run under `node --test`, so Vitest coverage never sees them
+// and every headless function scores as uncovered in CRAP. `npm run
+// coverage:headless` writes this file; when it is present we hand it to Fallow
+// so complexity findings reflect real coverage instead of an assumed zero.
+const HEADLESS_COVERAGE_PATH = path.join(process.cwd(), '.coverage', 'headless.json');
+
+/**
+ * Ignore a coverage feed that predates the sources it claims to describe:
+ * scoring today's code with yesterday's coverage can let a genuinely uncovered
+ * function inherit "covered" data. Only the files the feed actually contains
+ * matter, so editing the bench or a test does not invalidate it.
+ */
+function coverageIsStale(coveragePath) {
+  const collectedAt = fs.statSync(coveragePath).mtimeMs;
+  let scored;
+  try {
+    scored = Object.keys(JSON.parse(fs.readFileSync(coveragePath, 'utf8')));
+  } catch {
+    return 'unreadable';
+  }
+  for (const file of scored) {
+    if (!fs.existsSync(file)) return `covered file is gone: ${path.basename(file)}`;
+    if (fs.statSync(file).mtimeMs > collectedAt) {
+      return `${path.basename(file)} changed after collection`;
+    }
+  }
+  return null;
+}
+
+function coverageArgs() {
+  if (!fs.existsSync(HEADLESS_COVERAGE_PATH)) return [];
+  const stale = coverageIsStale(HEADLESS_COVERAGE_PATH);
+  if (stale) {
+    console.warn(
+      `Ignoring .coverage/headless.json (${stale}).\n` +
+        'Run `npm run coverage:headless` to refresh it.'
+    );
+    return [];
+  }
+  const ageHours = (Date.now() - fs.statSync(HEADLESS_COVERAGE_PATH).mtimeMs) / 3_600_000;
+  console.log(`Using .coverage/headless.json (collected ${ageHours.toFixed(1)}h ago).`);
+  return ['--coverage', HEADLESS_COVERAGE_PATH];
+}
+
 function createFallowCommand(baseRef) {
-  const fallowArgs = ['audit', '--format', 'json', '--quiet', '--base', baseRef];
+  const fallowArgs = ['audit', '--format', 'json', '--quiet', '--base', baseRef, ...coverageArgs()];
   const npmExecPath = getNpmExecPath();
   if (npmExecPath) {
     return {

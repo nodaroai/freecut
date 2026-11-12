@@ -46,6 +46,7 @@ import {
   startHarness,
   warningsHeaderValue,
   loadJobProject,
+  outputPathForContainer,
   resolveProjectMedia,
 } from './lib/render-core.mjs'
 import { OperationQueue, OperationQueueError } from './lib/operation-queue.mjs'
@@ -65,7 +66,9 @@ import {
   frameRequestSchema,
   layoutRequestSchema,
   lifecycleEditRequestSchema,
+  mediaImportRequestSchema,
   mediaProbeRequestSchema,
+  checkpointOperationRequestSchema,
   projectCreateRequestSchema,
   projectSaveRequestSchema,
   projectUpdateRequestSchema,
@@ -81,10 +84,30 @@ import {
   getProjectResource,
   listMediaResources,
   listProjectResources,
+  projectForEngine,
+  publicProjectResource,
   saveProjectResource,
+  saveProjectResourceWithCheckpointReceipt,
   updateMediaMetadata,
 } from './lib/lifecycle-store.mjs'
 import { withIdempotency } from './lib/idempotency.mjs'
+import { importWorkspaceMedia, workspaceFingerprint } from './lib/media-import.mjs'
+import { ServiceStatus } from './lib/service-status.mjs'
+import {
+  createCheckpointOperationRunner,
+  createCheckpointOperationStore,
+} from './lib/checkpoint-operations.mjs'
+import { conformFinalRenderArtifact, probeFinalRenderArtifact } from './lib/final-render-probe.mjs'
+
+const MIME_BY_RENDER_CONTAINER = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mkv: 'video/x-matroska',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+}
 
 const HELP = `Usage: node headless/serve.mjs --workspace <dir> [options]\n\nOptions:\n  --host <address>           Bind address (default: 127.0.0.1)\n  --port <n>                 HTTP port (default: 8787)\n  --render-timeout-ms <n>    Whole render deadline (default: 1800000)\n  --edit-timeout-ms <n>      Whole edit deadline (default: 120000)\n  --max-queue-depth <n>      Waiting operations allowed behind the active one (default: 8)\n  --shutdown-timeout-ms <n>  Graceful queue drain deadline (default: 30000)\n  --build  --head  --harness-url <url>\n`
 const SERVE_OPTIONS = new Set([
@@ -113,6 +136,42 @@ export function resolveHost(args = {}, env = process.env) {
     throw new Error('Host must be a non-empty string (--host or FREECUT_HOST)')
   }
   return host.trim()
+}
+
+const envelopeResource = (resource) => ({
+  ok: true,
+  apiVersion: HEADLESS_API_VERSION,
+  ...publicProjectResource(resource),
+})
+
+function projectMatchesCreateRequest(project, body) {
+  return (
+    project.id === body.id &&
+    project.name === body.name &&
+    project.description === (body.description ?? '') &&
+    project.metadata?.width === (body.width ?? 1920) &&
+    project.metadata?.height === (body.height ?? 1080) &&
+    project.metadata?.fps === (body.fps ?? 30) &&
+    project.metadata?.backgroundColor === body.backgroundColor
+  )
+}
+
+export async function recoverDeterministicProjectCreate(workspace, body, execute) {
+  if (!body.id) return null
+  let resource
+  try {
+    resource = await getProjectResource(workspace, body.id)
+  } catch (error) {
+    if (error.code === 'PROJECT_NOT_FOUND') return execute()
+    throw error
+  }
+  if (!projectMatchesCreateRequest(resource.project, body))
+    throw new HttpError(
+      409,
+      'PROJECT_CREATE_CONFLICT',
+      'Project id already exists with different create parameters',
+    )
+  return { status: 201, response: envelopeResource(resource) }
 }
 
 const IMAGE_MIME_BY_FORMAT = {
@@ -174,10 +233,12 @@ async function main() {
   const maxQueueDepth = positiveInt('max-queue-depth', 8, { min: 0, max: 10_000 })
   const shutdownTimeoutMs = positiveInt('shutdown-timeout-ms', 30_000)
 
+  const transientMedia = new Map()
   const { harnessUrl, mediaUrlOf, closeServers } = await startHarness({
     workspace,
     devUrl: args['harness-url'],
     build: args.build,
+    resolveAdditionalMedia: (mediaId) => transientMedia.get(mediaId),
   })
 
   const browser = await chromium.launch({
@@ -185,10 +246,12 @@ async function main() {
     headless: !args.head,
     args: chromeLaunchArgs(),
   })
+  const serviceStatus = new ServiceStatus()
   const session = new PageSession({
     browser,
     harnessUrl,
     onPageError: (e) => console.error('[pageerror]', e.message),
+    onProgress: (progress) => serviceStatus.reportProgress(progress),
   })
   await session.open()
 
@@ -219,17 +282,191 @@ async function main() {
       gpu = await probeGpu(session.page)
     },
   })
+  serviceStatus.ready()
 
   const tmpDir = path.join(os.tmpdir(), 'freecut-serve')
   fs.mkdirSync(tmpDir, { recursive: true })
   let counter = 0
+
+  const checkpointStore = createCheckpointOperationStore({ workspace })
+  const assertCheckpointRecipeMedia = async (recipe) => {
+    for (const operation of recipe.operations) {
+      if (operation.op !== 'addClip') continue
+      const media = await getMediaResource(workspace, operation.mediaId).catch((error) => {
+        if (error.code === 'MEDIA_NOT_FOUND') {
+          throw new HttpError(422, 'UNKNOWN_MEDIA_ID', 'Recipe references unknown media')
+        }
+        throw error
+      })
+      if (!media || !resolveMediaFile(workspace, operation.mediaId)) {
+        throw new HttpError(422, 'UNKNOWN_MEDIA_ID', 'Recipe references unknown media')
+      }
+    }
+  }
+  const checkpointRunner = createCheckpointOperationRunner({
+    store: checkpointStore,
+    loadProject: (projectId) => getProjectResource(workspace, projectId),
+    applyRecipe: async ({ project, recipe }) => {
+      await assertCheckpointRecipeMedia(recipe)
+      const media = collectAddClipMedia(workspace, recipe.operations)
+      try {
+        const result = await session.page.evaluate(
+          (payload) => window.freecut.editProject(payload),
+          { project: projectForEngine(project), ops: recipe.operations, media },
+        )
+        return result.project
+      } catch (error) {
+        await queue.recover?.(error)
+        throw error
+      }
+    },
+    commitProject: ({ projectId, expectedRevision, project, receipt }) =>
+      saveProjectResourceWithCheckpointReceipt(workspace, projectId, project, {
+        expectedRevision,
+        receipt,
+      }),
+    renderArtifact: async ({ project, recipe, renderProfile, tempPath }) => {
+      for (const container of ['mp4', 'webm', 'mov', 'mkv', 'mp3', 'wav', 'm4a']) {
+        await fs.promises.rm(outputPathForContainer(tempPath, container), { force: true })
+      }
+      const job = prepareJob(
+        workspace,
+        {
+          projectObject: projectForEngine(project),
+          ...(renderProfile
+            ? {
+                codec: renderProfile.codec,
+                container: renderProfile.container,
+                quality: renderProfile.quality,
+                resolution: `${renderProfile.width}x${renderProfile.height}`,
+                fps: renderProfile.frameRate.numerator / renderProfile.frameRate.denominator,
+                strict: true,
+              }
+            : recipe.render),
+          out: tempPath,
+        },
+        mediaUrlOf,
+      )
+      assertHardwareGpuForJob(job, isSoftwareGpu(gpu))
+      let summary
+      try {
+        summary = await renderJob(session.page, job, { downloadTimeoutMs: 0 })
+      } catch (error) {
+        await queue.recover?.(error)
+        throw error
+      }
+      if (summary.outputPath !== tempPath) {
+        await fs.promises.rm(tempPath, { force: true })
+        await fs.promises.rename(summary.outputPath, tempPath)
+      }
+      if (renderProfile) await conformFinalRenderArtifact(tempPath, renderProfile)
+      const mimeType = (
+        summary.mimeType ?? MIME_BY_RENDER_CONTAINER[summary.effectiveSettings?.container]
+      )
+        ?.split(';', 1)[0]
+        .trim()
+      return {
+        mimeType,
+      }
+    },
+    probeFinalRenderArtifact,
+  })
+
+  const checkpointExecutionTimeoutMs = renderTimeoutMs + editTimeoutMs
+  let checkpointPump
+  let checkpointPumpRequested = false
+  const runCheckpointPump = () => {
+    checkpointPumpRequested = true
+    if (checkpointPump) return checkpointPump
+    /** Drains newly submitted checkpoint operations until none are left pending. */
+    const drainCheckpointQueue = async () => {
+      do {
+        checkpointPumpRequested = false
+        while (queue.accepting) {
+          const [operation] = await checkpointStore.list({ unfinishedOnly: true })
+          if (!operation) break
+          await queue.waitForCapacity()
+          try {
+            await queue.enqueue(() => checkpointRunner.execute(operation.operationId), {
+              timeoutMs: checkpointExecutionTimeoutMs,
+              kind: 'checkpoint-operation',
+            })
+          } catch (error) {
+            if (error instanceof OperationQueueError && error.code === 'QUEUE_FULL') continue
+            throw error
+          }
+        }
+      } while (checkpointPumpRequested && queue.accepting)
+    }
+    checkpointPump = drainCheckpointQueue()
+      .catch((error) => {
+        if (error.code !== 'SERVICE_SHUTTING_DOWN') {
+          console.error('checkpoint pump failed:', error.message ?? error)
+        }
+      })
+      .finally(() => {
+        checkpointPump = undefined
+        if (checkpointPumpRequested && queue.accepting) runCheckpointPump()
+      })
+    return checkpointPump
+  }
+
+  const checkpointView = (record) => {
+    const request = JSON.parse(record.canonicalRequest)
+    return {
+      operationId: record.operationId,
+      state: record.state,
+      phase: record.phase,
+      projectId: request.projectId,
+      expectedRevision: request.expectedRevision,
+      kind: request.kind ?? 'checkpoint',
+      ...(request.recipeSha256 ? { recipeSha256: request.recipeSha256 } : {}),
+      ...(request.renderProfileSha256 ? { renderProfileSha256: request.renderProfileSha256 } : {}),
+      ...(request.approvalBindingSha256
+        ? { approvalBindingSha256: request.approvalBindingSha256 }
+        : {}),
+      requestSha256: record.requestSha256 ?? record.requestHash,
+      ...(record.resultingRevision ? { resultingRevision: record.resultingRevision } : {}),
+      ...(record.error ? { error: record.error } : {}),
+      ...(record.artifact ? { artifact: record.artifact } : {}),
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    }
+  }
+
+  const handleCheckpointCreate = async (req, res) => {
+    const { value } = await readJsonBodyWithBytes(req, { maxBytes: 16 * 1024 * 1024 })
+    const request = validate(checkpointOperationRequestSchema, value)
+    const submitted = await checkpointStore.submit({
+      request,
+      idempotencyKey: req.headers['idempotency-key'],
+      beforeCreate: () =>
+        request.kind === 'final_render'
+          ? Promise.resolve()
+          : assertCheckpointRecipeMedia(request.recipe),
+    })
+    runCheckpointPump()
+    if (!submitted.created) res.setHeader('Idempotency-Replayed', 'true')
+    sendJson(res, 202, {
+      ok: true,
+      apiVersion: HEADLESS_API_VERSION,
+      operation: checkpointView(submitted.operation),
+    })
+  }
 
   const handleRender = async (req, res, { normalizeInline = false } = {}) => {
     let body = validate(renderRequestSchema, await readJsonBody(req))
     if (normalizeInline && body.projectObject) {
       body = { ...body, projectObject: await browserNormalize(body.projectObject) }
     }
-    if (body.project) assertSinglePathComponent(body.project, 'project id')
+    if (body.project) {
+      assertSinglePathComponent(body.project, 'project id')
+      body = {
+        ...body,
+        project: undefined,
+        projectObject: projectForEngine(loadProjectById(workspace, body.project).project),
+      }
+    }
     const outPath = path.join(tmpDir, `render-${process.pid}-${++counter}.out`)
     const job = prepareJob(workspace, { ...body, out: outPath }, mediaUrlOf)
     assertHardwareGpuForJob(job, isSoftwareGpu(gpu))
@@ -262,7 +499,9 @@ async function main() {
   const handleEdit = async (req, res) => {
     const body = validate(editRequestSchema, await readJsonBody(req))
     if (body.project) assertSinglePathComponent(body.project, 'project id')
-    const project = body.projectObject ?? loadProjectById(workspace, body.project).project
+    const project = projectForEngine(
+      body.projectObject ?? loadProjectById(workspace, body.project).project,
+    )
     const ops = body.ops
     const media = collectAddClipMedia(workspace, ops)
     const result = await queue.enqueue(
@@ -283,11 +522,7 @@ async function main() {
       { timeoutMs: editTimeoutMs, kind: 'project-normalize' },
     )
 
-  const resourceEnvelope = (resource) => ({
-    ok: true,
-    apiVersion: HEADLESS_API_VERSION,
-    ...resource,
-  })
+  const resourceEnvelope = envelopeResource
 
   const handleV1ProjectList = async (url, res) => {
     const limitText = url.searchParams.get('limit')
@@ -324,6 +559,14 @@ async function main() {
     const { value: raw, rawBytes } = await readJsonBodyWithBytes(req, { maxBytes: 1024 * 1024 })
     const body = validate(projectCreateRequestSchema, raw)
     const route = '/v1/projects'
+    const execute = async () => {
+      const project = await queue.enqueue(
+        () => session.page.evaluate((value) => window.freecut.createProject(value), body),
+        { timeoutMs: editTimeoutMs, kind: 'project-create' },
+      )
+      const resource = await createProjectResource(workspace, project)
+      return { status: 201, response: resourceEnvelope(resource) }
+    }
     const result = await withIdempotency(
       workspace,
       {
@@ -331,15 +574,11 @@ async function main() {
         method: 'POST',
         route,
         requestBytes: rawBytes,
+        recoverPending: body.id
+          ? () => recoverDeterministicProjectCreate(workspace, body, execute)
+          : undefined,
       },
-      async () => {
-        const project = await queue.enqueue(
-          () => session.page.evaluate((value) => window.freecut.createProject(value), body),
-          { timeoutMs: editTimeoutMs, kind: 'project-create' },
-        )
-        const resource = await createProjectResource(workspace, project)
-        return { status: 201, response: resourceEnvelope(resource) }
-      },
+      execute,
     )
     if (result.replayed) res.setHeader('Idempotency-Replayed', 'true')
     sendJson(res, result.status, result.response)
@@ -364,7 +603,7 @@ async function main() {
     )
     const current = await getProjectResource(workspace, id)
     const project = await browserNormalize({
-      ...current.project,
+      ...projectForEngine(current.project),
       ...(body.updates.name !== undefined ? { name: body.updates.name } : {}),
       ...(body.updates.description !== undefined ? { description: body.updates.description } : {}),
       metadata: {
@@ -392,7 +631,7 @@ async function main() {
       const result = await queue.enqueue(
         () =>
           session.page.evaluate((payload) => window.freecut.editProject(payload), {
-            project: current.project,
+            project: projectForEngine(current.project),
             ops: body.ops,
             media,
           }),
@@ -415,7 +654,7 @@ async function main() {
         response: {
           ...result,
           apiVersion: HEADLESS_API_VERSION,
-          project: resource.project,
+          project: projectForEngine(resource.project),
           persisted: true,
           revision: resource.revision,
           warnings: resource.warnings,
@@ -479,6 +718,44 @@ async function main() {
     })
   }
 
+  const handleV1MediaImport = async (req, res) => {
+    const { value: raw, rawBytes } = await readJsonBodyWithBytes(req, { maxBytes: 64 * 1024 })
+    const body = validate(mediaImportRequestSchema, raw)
+    const execute = ({ requestHash }) =>
+      importWorkspaceMedia(workspace, body, {
+        requestHash,
+        registerTransient: (mediaId, file) => {
+          transientMedia.set(mediaId, file)
+          return () => {
+            if (transientMedia.get(mediaId) === file) transientMedia.delete(mediaId)
+          }
+        },
+        probe: (staged) =>
+          queue.enqueue(
+            () =>
+              session.page.evaluate((payload) => window.freecut.probeMedia(payload), {
+                url: mediaUrlOf(staged.id),
+                fileName: staged.fileName,
+                mimeType: staged.mimeType,
+              }),
+            { timeoutMs: editTimeoutMs, kind: 'media-import-probe' },
+          ),
+      })
+    const result = await withIdempotency(
+      workspace,
+      {
+        key: req.headers['idempotency-key'],
+        method: 'POST',
+        route: '/v1/media/import',
+        requestBytes: rawBytes,
+        recoverPending: execute,
+      },
+      execute,
+    )
+    if (result.replayed) res.setHeader('Idempotency-Replayed', 'true')
+    sendJson(res, result.status, result.response)
+  }
+
   // Grab a single composited frame (default: full-res PNG) — no encoder/muxer,
   // much faster than /render + extract for eyeballing a position on a warm page.
   // Warm-service frame endpoint; exercised end-to-end by headless/test.mjs
@@ -486,8 +763,9 @@ async function main() {
   const handleFrame = async (req, res) => {
     const body = validate(frameRequestSchema, await readJsonBody(req))
     if (body.project) assertSinglePathComponent(body.project, 'project id')
-    const project =
-      body.projectObject ?? loadJobProject(workspace, { project: body.project }).project
+    const project = projectForEngine(
+      body.projectObject ?? loadJobProject(workspace, { project: body.project }).project,
+    )
     const { media, missing } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
     const format = (body.format ?? 'png').toLowerCase()
     const mime = IMAGE_MIME_BY_FORMAT[format]
@@ -540,8 +818,9 @@ async function main() {
   const handleLayout = async (req, res) => {
     const body = validate(layoutRequestSchema, await readJsonBody(req))
     if (body.project) assertSinglePathComponent(body.project, 'project id')
-    const project =
-      body.projectObject ?? loadJobProject(workspace, { project: body.project }).project
+    const project = projectForEngine(
+      body.projectObject ?? loadJobProject(workspace, { project: body.project }).project,
+    )
     // Only metadata (source dimensions) is used; media URLs are never fetched.
     const { media } = resolveProjectMedia(workspace, project, mediaUrlOf, null)
     const layout = await queue.enqueue(
@@ -557,9 +836,25 @@ async function main() {
     sendJson(res, 200, layout)
   }
 
+  for (const operation of await checkpointStore.list({ unfinishedOnly: true })) {
+    await queue.waitForCapacity()
+    await queue.enqueue(() => checkpointRunner.execute(operation.operationId), {
+      timeoutMs: checkpointExecutionTimeoutMs,
+      kind: 'checkpoint-reconciliation',
+    })
+  }
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const route = `${req.method} ${url.pathname}`
+    if (route === 'GET /v1/status') {
+      sendJson(res, 200, {
+        ok: true,
+        apiVersion: HEADLESS_API_VERSION,
+        ...serviceStatus.snapshot(queue.status),
+      })
+      return
+    }
     const projectMatch = /^\/v1\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/.exec(url.pathname)
     const projectEditMatch = /^\/v1\/projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/edit$/.exec(
       url.pathname,
@@ -568,102 +863,151 @@ async function main() {
     const mediaProbeMatch = /^\/v1\/media\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/probe$/.exec(
       url.pathname,
     )
+    const checkpointMatch =
+      /^\/v1\/checkpoint-operations\/([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(
+        url.pathname,
+      )
     const handler =
       route === 'GET /health'
         ? async () => {
+            const workspaceIdentity = await workspaceFingerprint(workspace)
             sendJson(res, 200, {
               ok: true,
               apiVersion: HEADLESS_API_VERSION,
               gpu,
               software: isSoftwareGpu(gpu),
               harnessUrl,
+              workspace: workspaceIdentity,
             })
           }
         : route === 'GET /capabilities'
-          ? async () => sendJson(res, 200, capabilities())
+          ? async () =>
+              sendJson(res, 200, {
+                ...capabilities(),
+                workspace: await workspaceFingerprint(workspace),
+              })
           : route === 'GET /v1/capabilities'
-            ? async () => sendJson(res, 200, { ok: true, ...capabilities() })
-            : route === 'POST /v1/projects'
-              ? () => handleV1ProjectCreate(req, res)
-              : route === 'GET /v1/projects'
-                ? () => handleV1ProjectList(url, res)
-                : projectEditMatch && req.method === 'POST'
-                  ? () =>
-                      handleV1ProjectEdit(
-                        req,
-                        res,
-                        assertPortableId(projectEditMatch[1], 'project id'),
-                      )
-                  : projectMatch && req.method === 'GET'
-                    ? async () =>
-                        sendJson(
-                          res,
-                          200,
-                          resourceEnvelope(
-                            await getProjectResource(
-                              workspace,
-                              assertPortableId(projectMatch[1], 'project id'),
-                            ),
-                          ),
-                        )
-                    : projectMatch && req.method === 'PUT'
+            ? async () =>
+                sendJson(res, 200, {
+                  ok: true,
+                  ...capabilities(),
+                  workspace: await workspaceFingerprint(workspace),
+                })
+            : route === 'POST /v1/checkpoint-operations'
+              ? () => handleCheckpointCreate(req, res)
+              : checkpointMatch && req.method === 'GET'
+                ? async () =>
+                    sendJson(res, 200, {
+                      ok: true,
+                      apiVersion: HEADLESS_API_VERSION,
+                      operation: checkpointView(await checkpointStore.get(checkpointMatch[1])),
+                    })
+                : route === 'POST /v1/projects'
+                  ? () => handleV1ProjectCreate(req, res)
+                  : route === 'GET /v1/projects'
+                    ? () => handleV1ProjectList(url, res)
+                    : projectEditMatch && req.method === 'POST'
                       ? () =>
-                          handleV1ProjectSave(
+                          handleV1ProjectEdit(
                             req,
                             res,
-                            assertPortableId(projectMatch[1], 'project id'),
+                            assertPortableId(projectEditMatch[1], 'project id'),
                           )
-                      : projectMatch && req.method === 'PATCH'
-                        ? () =>
-                            handleV1ProjectUpdate(
-                              req,
+                      : projectMatch && req.method === 'GET'
+                        ? async () =>
+                            sendJson(
                               res,
-                              assertPortableId(projectMatch[1], 'project id'),
+                              200,
+                              resourceEnvelope(
+                                await getProjectResource(
+                                  workspace,
+                                  assertPortableId(projectMatch[1], 'project id'),
+                                ),
+                              ),
                             )
-                        : route === 'GET /v1/media'
-                          ? async () =>
-                              sendJson(res, 200, {
-                                ok: true,
-                                apiVersion: HEADLESS_API_VERSION,
-                                media: await listMediaResources(workspace),
-                              })
-                          : mediaProbeMatch && req.method === 'POST'
+                        : projectMatch && req.method === 'PUT'
+                          ? () =>
+                              handleV1ProjectSave(
+                                req,
+                                res,
+                                assertPortableId(projectMatch[1], 'project id'),
+                              )
+                          : projectMatch && req.method === 'PATCH'
                             ? () =>
-                                handleV1MediaProbe(
+                                handleV1ProjectUpdate(
                                   req,
                                   res,
-                                  assertPortableId(mediaProbeMatch[1], 'media id'),
+                                  assertPortableId(projectMatch[1], 'project id'),
                                 )
-                            : mediaMatch && req.method === 'GET'
+                            : route === 'GET /v1/media'
                               ? async () =>
-                                  sendJson(
-                                    res,
-                                    200,
-                                    resourceEnvelope(
-                                      await getMediaResource(
-                                        workspace,
-                                        assertPortableId(mediaMatch[1], 'media id'),
-                                      ),
-                                    ),
-                                  )
-                              : route === 'POST /v1/render'
-                                ? () => handleRender(req, res, { normalizeInline: true })
-                                : route === 'GET /projects'
-                                  ? async () => sendJson(res, 200, listProjects(workspace))
-                                  : route === 'POST /render'
-                                    ? () => handleRender(req, res)
-                                    : route === 'POST /edit'
-                                      ? () => handleEdit(req, res)
-                                      : route === 'POST /frame'
-                                        ? () => handleFrame(req, res)
-                                        : route === 'POST /layout'
-                                          ? () => handleLayout(req, res)
-                                          : null
+                                  sendJson(res, 200, {
+                                    ok: true,
+                                    apiVersion: HEADLESS_API_VERSION,
+                                    media: await listMediaResources(workspace),
+                                  })
+                              : route === 'POST /v1/media/import'
+                                ? () => handleV1MediaImport(req, res)
+                                : mediaProbeMatch && req.method === 'POST'
+                                  ? () =>
+                                      handleV1MediaProbe(
+                                        req,
+                                        res,
+                                        assertPortableId(mediaProbeMatch[1], 'media id'),
+                                      )
+                                  : mediaMatch && req.method === 'GET'
+                                    ? async () =>
+                                        sendJson(
+                                          res,
+                                          200,
+                                          resourceEnvelope(
+                                            await getMediaResource(
+                                              workspace,
+                                              assertPortableId(mediaMatch[1], 'media id'),
+                                            ),
+                                          ),
+                                        )
+                                    : route === 'POST /v1/render'
+                                      ? () => handleRender(req, res, { normalizeInline: true })
+                                      : route === 'GET /projects'
+                                        ? async () => sendJson(res, 200, listProjects(workspace))
+                                        : route === 'POST /render'
+                                          ? () => handleRender(req, res)
+                                          : route === 'POST /edit'
+                                            ? () => handleEdit(req, res)
+                                            : route === 'POST /frame'
+                                              ? () => handleFrame(req, res)
+                                              : route === 'POST /layout'
+                                                ? () => handleLayout(req, res)
+                                                : null
     if (!handler) {
       sendJson(res, 404, { error: `No route: ${route}` })
       return
     }
-    handler().catch((e) => {
+    const operationKind =
+      route === 'POST /v1/projects'
+        ? 'project-create'
+        : route === 'POST /v1/checkpoint-operations'
+          ? 'checkpoint-operation-submit'
+          : projectEditMatch && req.method === 'POST'
+            ? 'project-edit'
+            : projectMatch && req.method === 'PUT'
+              ? 'project-save'
+              : projectMatch && req.method === 'PATCH'
+                ? 'project-update'
+                : mediaProbeMatch && req.method === 'POST'
+                  ? 'media-probe'
+                  : route === 'POST /v1/render' || route === 'POST /render'
+                    ? 'render'
+                    : route === 'POST /edit'
+                      ? 'edit'
+                      : route === 'POST /frame'
+                        ? 'frame'
+                        : route === 'POST /layout'
+                          ? 'layout'
+                          : null
+    const operation = operationKind ? () => serviceStatus.track(operationKind, handler) : handler
+    operation().catch((e) => {
       console.error(`${route} failed:`, e.message ?? e)
       if (!res.headersSent) {
         const validation = e instanceof ContractValidationError
@@ -713,6 +1057,7 @@ async function main() {
   const shutdown = () =>
     (shuttingDown ??= (async () => {
       console.log('\nShutting down...')
+      serviceStatus.draining()
       const serverClosed = new Promise((resolve) => server.close(resolve))
       try {
         await queue.shutdown(shutdownTimeoutMs)
@@ -732,6 +1077,7 @@ async function main() {
         ])
         clearTimeout(closeTimer)
         if (!closed) server.closeAllConnections?.()
+        serviceStatus.stopped()
       }
     })())
   process.on('SIGINT', shutdown)

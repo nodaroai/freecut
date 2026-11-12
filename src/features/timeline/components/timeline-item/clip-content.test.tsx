@@ -7,7 +7,7 @@ import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-sto
 import { useItemsStore } from '../../stores/items-store'
 import { useCompositionsStore } from '../../stores/compositions-store'
 import { useSequencesStore } from '../../stores/sequences-store'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { setTimelineState } from '../../test-helpers'
 import { useZoomStore, _resetZoomStoreForTest } from '../../stores/zoom-store'
 import { useTimelineViewportStore } from '../../stores/timeline-viewport-store'
 import { ClipContent } from './clip-content'
@@ -74,7 +74,7 @@ function addUnrelatedComposition(id: string): void {
 
 describe('ClipContent', () => {
   beforeEach(() => {
-    useTimelineStore.setState({ fps: 30 })
+    setTimelineState({ fps: 30 })
     _resetZoomStoreForTest()
     useZoomStore.setState({
       level: 1,

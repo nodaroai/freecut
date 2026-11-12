@@ -3,20 +3,21 @@
  * Preview modules should import export utilities from here.
  */
 
+import type { CompositionRendererInstance } from '@/runtime/renderer/client-render-engine'
+
+export type { CompositionRendererInstance }
+
 export {
   SharedVideoExtractorPool,
   type VideoFrameSource,
-} from '@/features/export/utils/shared-video-extractor'
+} from '@/runtime/renderer/shared-video-extractor'
 export {
   isFrameInsideSourceTimeRamp,
   resolveAATransitionRamps,
   resolveTransitionRenderTimelineSpan,
   resolveVideoRenderSourceTimeSeconds,
-} from '@/features/export/utils/render-span'
+} from '@/runtime/renderer/render-span'
 
-export type CreateCompositionRenderer =
-  (typeof import('@/features/export/utils/client-render-engine'))['createCompositionRenderer']
-export type CompositionRendererInstance = Awaited<ReturnType<CreateCompositionRenderer>>
-
-export const importCompositionRenderer = () =>
-  import('@/features/export/utils/client-render-engine')
+// Dynamic on purpose: preview must not pull the canvas engine into its eager
+// graph; it loads the renderer only when a composition preview mounts.
+export const importCompositionRenderer = () => import('@/runtime/renderer/client-render-engine')

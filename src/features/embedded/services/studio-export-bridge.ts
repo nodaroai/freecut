@@ -14,8 +14,8 @@ export async function collectProjectJson(): Promise<unknown> {
   try {
     const currentProject = useProjectStore.getState().currentProject
     if (!currentProject) return null
-    const { useTimelineStore } = await import('../deps/timeline-contract')
-    await useTimelineStore.getState().saveTimeline(currentProject.id)
+    const { saveTimeline } = await import('../deps/timeline-contract')
+    await saveTimeline(currentProject.id)
     return await exportProjectJson(currentProject.id, {
       includeMediaReferences: true,
       stripVolatileFields: true,

@@ -1,5 +1,6 @@
 import type { ItemEffect } from '@/types/effects'
 import type { Point } from '../types/gizmo'
+import { clampFinite as clamp } from '@/shared/utils/math'
 import { rotatePoint } from '../utils/coordinate-transform'
 
 export type PowerWindowHandle = 'center' | 'east' | 'west' | 'north' | 'south' | 'rotation'
@@ -125,11 +126,6 @@ export function buildPowerWindowEffects(
 
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-function clamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.max(min, Math.min(max, value))
 }
 
 function getPointerAngle(point: Point, center: Point, aspectRatio: number): number {

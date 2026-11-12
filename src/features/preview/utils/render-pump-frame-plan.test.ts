@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { describe, expect, it } from 'vite-plus/test'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import {
   isAtomicPreviewTarget,
   resolveActivePreviewPresentationTarget,
@@ -146,8 +146,8 @@ describe('render pump frame plan', () => {
         isTransportSettling: true,
         renderedFrame: 100,
         displayedFrame: 100,
-        renderedFrameBlank: true,
-        displayedFrameBlank: false,
+        probeRenderedFrameBlank: () => true,
+        probeDisplayedFrameBlank: () => false,
       }),
     ).toBe(true)
 
@@ -156,8 +156,8 @@ describe('render pump frame plan', () => {
         isTransportSettling: true,
         renderedFrame: 101,
         displayedFrame: 100,
-        renderedFrameBlank: true,
-        displayedFrameBlank: false,
+        probeRenderedFrameBlank: () => true,
+        probeDisplayedFrameBlank: () => false,
       }),
     ).toBe(true)
   })
@@ -167,14 +167,36 @@ describe('render pump frame plan', () => {
       isTransportSettling: true,
       renderedFrame: 100,
       displayedFrame: 100,
-      renderedFrameBlank: true,
-      displayedFrameBlank: false,
+      probeRenderedFrameBlank: () => true,
+      probeDisplayedFrameBlank: () => false,
     }
 
     expect(shouldRejectBlankTransportHandoff({ ...base, isTransportSettling: false })).toBe(false)
     expect(shouldRejectBlankTransportHandoff({ ...base, displayedFrame: 98 })).toBe(false)
-    expect(shouldRejectBlankTransportHandoff({ ...base, renderedFrameBlank: false })).toBe(false)
-    expect(shouldRejectBlankTransportHandoff({ ...base, displayedFrameBlank: true })).toBe(false)
+    expect(
+      shouldRejectBlankTransportHandoff({ ...base, probeRenderedFrameBlank: () => false }),
+    ).toBe(false)
+    expect(
+      shouldRejectBlankTransportHandoff({ ...base, probeDisplayedFrameBlank: () => true }),
+    ).toBe(false)
+  })
+
+  it('does not sample transport pixels when the frame gate already fails', () => {
+    const probeRenderedFrameBlank = vi.fn(() => true)
+    const probeDisplayedFrameBlank = vi.fn(() => false)
+
+    expect(
+      shouldRejectBlankTransportHandoff({
+        isTransportSettling: false,
+        renderedFrame: 100,
+        displayedFrame: 100,
+        probeRenderedFrameBlank,
+        probeDisplayedFrameBlank,
+      }),
+    ).toBe(false)
+
+    expect(probeRenderedFrameBlank).not.toHaveBeenCalled()
+    expect(probeDisplayedFrameBlank).not.toHaveBeenCalled()
   })
 
   it('keeps a known-good committed frame when a delayed scrub-release render is blank', () => {
@@ -185,18 +207,41 @@ describe('render pump frame plan', () => {
       previewFrame: null,
       isPlaying: false,
       snapshotFrame: 100,
-      renderedFrameBlank: true,
-      snapshotFrameBlank: false,
+      probeRenderedFrameBlank: () => true,
+      probeSnapshotFrameBlank: () => false,
     }
 
     expect(shouldRejectBlankReleasedScrubHandoff(base)).toBe(true)
     expect(shouldRejectBlankReleasedScrubHandoff({ ...base, releaseGuardFrame: null })).toBe(false)
     expect(shouldRejectBlankReleasedScrubHandoff({ ...base, renderedFrame: 101 })).toBe(false)
     expect(shouldRejectBlankReleasedScrubHandoff({ ...base, previewFrame: 101 })).toBe(false)
-    expect(shouldRejectBlankReleasedScrubHandoff({ ...base, renderedFrameBlank: false })).toBe(
-      false,
-    )
-    expect(shouldRejectBlankReleasedScrubHandoff({ ...base, snapshotFrameBlank: true })).toBe(false)
+    expect(
+      shouldRejectBlankReleasedScrubHandoff({ ...base, probeRenderedFrameBlank: () => false }),
+    ).toBe(false)
+    expect(
+      shouldRejectBlankReleasedScrubHandoff({ ...base, probeSnapshotFrameBlank: () => true }),
+    ).toBe(false)
+  })
+
+  it('does not sample scrub-handoff pixels when the frame gate already fails', () => {
+    const probeRenderedFrameBlank = vi.fn(() => true)
+    const probeSnapshotFrameBlank = vi.fn(() => false)
+
+    expect(
+      shouldRejectBlankReleasedScrubHandoff({
+        releaseGuardFrame: 100,
+        renderedFrame: 101,
+        currentFrame: 100,
+        previewFrame: null,
+        isPlaying: false,
+        snapshotFrame: 100,
+        probeRenderedFrameBlank,
+        probeSnapshotFrameBlank,
+      }),
+    ).toBe(false)
+
+    expect(probeRenderedFrameBlank).not.toHaveBeenCalled()
+    expect(probeSnapshotFrameBlank).not.toHaveBeenCalled()
   })
 
   it('bounds committed snapshot ownership so later same-frame edits can take over', () => {
