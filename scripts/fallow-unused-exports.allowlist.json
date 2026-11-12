@@ -132,11 +132,6 @@
     },
     {
       "path": "src/shared/timeline/io-range/index.ts",
-      "exportName": "IO_HANDLE_COLOR",
-      "reason": "barrel-surface: feature barrel defines the public API; current consumers import the underlying module directly."
-    },
-    {
-      "path": "src/shared/timeline/io-range/index.ts",
       "exportName": "IO_HANDLE_WIDTH",
       "reason": "barrel-surface: feature barrel defines the public API; current consumers import the underlying module directly."
     }
