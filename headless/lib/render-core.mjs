@@ -37,54 +37,68 @@ const VIDEO_BITRATE_BY_QUALITY = {
 }
 
 /** Build ClientExportSettings from a job's options (same keys as the CLI flags). */
-function buildSettings(project, opts) {
-  const meta = project.metadata ?? {}
-  const fps = opts.fps ? Number(opts.fps) : (meta.fps ?? 30)
-  let width = meta.width ?? 1920
-  let height = meta.height ?? 1080
-  if (opts.resolution) {
-    const m = /^(\d+)x(\d+)$/.exec(opts.resolution)
-    if (!m)
-      throw new Error(`Invalid resolution "${opts.resolution}" (expected WxH, e.g. 1920x1080)`)
-    width = Number(m[1])
-    height = Number(m[2])
-  }
+const AUDIO_CODEC_BY_CONTAINER = { mp3: 'mp3', wav: 'pcm-s16' }
+
+/** Effective frame size: project metadata unless --resolution overrides it. */
+function resolveFrameSize(meta, resolution) {
+  if (!resolution) return { width: meta.width ?? 1920, height: meta.height ?? 1080 }
+  const match = /^(\d+)x(\d+)$/.exec(resolution)
+  if (!match) throw new Error(`Invalid resolution "${resolution}" (expected WxH, e.g. 1920x1080)`)
+  return { width: Number(match[1]), height: Number(match[2]) }
+}
+
+function assertRenderableFormat(fps, width, height) {
   if (!Number.isFinite(fps) || fps < 1 || fps > 240)
     throw new Error('Effective fps must be between 1 and 240')
   if (![width, height].every((value) => Number.isInteger(value) && value >= 16 && value <= 16384)) {
     throw new Error('Effective resolution dimensions must be integers between 16 and 16384')
   }
-  const quality = opts.quality ?? 'high'
+}
 
-  if (opts.audioOnly) {
-    const container = opts.container ?? 'mp3'
-    return {
-      mode: 'audio',
-      codec: 'avc',
-      audioCodec: container === 'mp3' ? 'mp3' : container === 'wav' ? 'pcm-s16' : 'aac',
-      container,
-      quality,
-      resolution: { width, height },
-      fps,
-      audioBitrate: 192_000,
-    }
+function buildAudioOnlySettings({ container = 'mp3', quality, width, height, fps }) {
+  return {
+    mode: 'audio',
+    codec: 'avc',
+    audioCodec: AUDIO_CODEC_BY_CONTAINER[container] ?? 'aac',
+    container,
+    quality,
+    resolution: { width, height },
+    fps,
+    audioBitrate: 192_000,
   }
+}
 
-  const codecInput = (opts.codec ?? 'h264').toLowerCase()
+function buildVideoSettings({ codecInput, codecOption, container, quality, width, height, fps }) {
   const codec = CODEC_MAP[codecInput]
-  if (!codec) throw new Error(`Unknown codec "${opts.codec}" (use h264|h265|vp9|vp8|av1)`)
-  const container = opts.container ?? DEFAULT_CONTAINER[codec]
+  if (!codec) throw new Error(`Unknown codec "${codecOption}" (use h264|h265|vp9|vp8|av1)`)
+  const effectiveContainer = container ?? DEFAULT_CONTAINER[codec]
   return {
     mode: 'video',
     codec,
-    audioCodec: container === 'webm' ? 'opus' : 'aac',
-    container,
+    audioCodec: effectiveContainer === 'webm' ? 'opus' : 'aac',
+    container: effectiveContainer,
     quality,
     resolution: { width, height },
     fps,
     videoBitrate: VIDEO_BITRATE_BY_QUALITY[quality] ?? 10_000_000,
     audioBitrate: 192_000,
   }
+}
+
+function buildSettings(project, opts) {
+  const meta = project.metadata ?? {}
+  const fps = opts.fps ? Number(opts.fps) : (meta.fps ?? 30)
+  const { width, height } = resolveFrameSize(meta, opts.resolution)
+  assertRenderableFormat(fps, width, height)
+  const common = { quality: opts.quality ?? 'high', width, height, fps }
+  return opts.audioOnly
+    ? buildAudioOnlySettings({ container: opts.container, ...common })
+    : buildVideoSettings({
+        codecInput: (opts.codec ?? 'h264').toLowerCase(),
+        codecOption: opts.codec,
+        container: opts.container,
+        ...common,
+      })
 }
 
 /** Compute the render range (frames) from a job's in/out-sec/duration (seconds). */
@@ -124,8 +138,10 @@ async function ensureHarnessReachable(url) {
  * edit path (no rendering): no media server is started and `mediaUrlOf` is a
  * no-op.
  */
-export async function startHarness({ workspace, devUrl, build }) {
-  const resolveMedia = workspace ? (mediaId) => resolveMediaFile(workspace, mediaId) : undefined
+export async function startHarness({ workspace, devUrl, build, resolveAdditionalMedia }) {
+  const resolveMedia = workspace
+    ? (mediaId) => resolveAdditionalMedia?.(mediaId) ?? resolveMediaFile(workspace, mediaId)
+    : undefined
   if (devUrl) {
     await ensureHarnessReachable(devUrl)
     if (!resolveMedia)

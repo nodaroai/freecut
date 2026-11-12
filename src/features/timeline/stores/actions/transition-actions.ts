@@ -169,43 +169,6 @@ export function updateTransition(id: string, updates: TransitionUpdates): void {
   )
 }
 
-export function updateTransitions(
-  updates: Array<{
-    id: string
-    updates: TransitionUpdates
-  }>,
-): void {
-  if (updates.length === 0) return
-  execute(
-    'UPDATE_TRANSITIONS',
-    () => {
-      let didChange = false
-      for (const { id, updates: u } of updates) {
-        if (u.durationInFrames !== undefined || u.alignment !== undefined) {
-          // Alignment / duration changes need handle validation just like single updates.
-          // Re-read the store on each iteration so duplicate ids see fresh state.
-          const transition = useTransitionsStore.getState().transitions.find((t) => t.id === id)
-          if (
-            transition &&
-            ((u.durationInFrames !== undefined &&
-              u.durationInFrames !== transition.durationInFrames) ||
-              (u.alignment !== undefined && u.alignment !== transition.alignment))
-          ) {
-            if (_validateAndUpdateTransition(id, u)) didChange = true
-            continue
-          }
-        }
-        useTransitionsStore.getState()._updateTransition(id, u)
-        didChange = true
-      }
-      if (didChange) {
-        useTimelineSettingsStore.getState().markDirty()
-      }
-    },
-    { updates },
-  )
-}
-
 export function removeTransition(id: string): void {
   execute(
     'REMOVE_TRANSITION',

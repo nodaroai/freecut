@@ -5,7 +5,8 @@ import { usePlaybackStore } from '@/shared/state/playback'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSourcePlayerStore } from '@/shared/state/source-player'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
+import { splitItem } from '../../stores/timeline-actions'
 import { useTransitionsStore } from '../../stores/transitions-store'
 import { useMarkersStore } from '../../stores/markers-store'
 import { openComposition } from '../../stores/actions/composition-actions'
@@ -124,7 +125,7 @@ export function useTimelineItemPointerHandlers({
         // Build snap targets when Shift is held
         let snapTargets: RazorSnapTarget[] | undefined
         if (e.shiftKey) {
-          const timelineState = useTimelineStore.getState()
+          const timelineState = useItemsStore.getState()
           const transitions = useTransitionsStore.getState().transitions
           const visibleTrackIds = getVisibleTrackIds(timelineState.tracks)
 
@@ -145,10 +146,10 @@ export function useTimelineItemPointerHandlers({
           shiftHeld: e.shiftKey,
           snapTargets,
         })
-        useTimelineStore.getState().splitItem(item.id, splitFrame)
+        splitItem(item.id, splitFrame)
         // Keep selection focused on the split clip so downstream panels
         // (like transitions) immediately evaluate the new adjacency.
-        const items = useTimelineStore.getState().items
+        const items = useItemsStore.getState().items
         const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
         useSelectionStore
           .getState()
@@ -174,7 +175,7 @@ export function useTimelineItemPointerHandlers({
       // Selection tool: handle item selection
       emitUiSound('select')
       const { selectedItemIds, selectItems } = useSelectionStore.getState()
-      const items = useTimelineStore.getState().items
+      const items = useItemsStore.getState().items
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
       const targetIds = linkedSelectionEnabled ? getLinkedItemIds(items, item.id) : [item.id]
       if (e.metaKey || e.ctrlKey) {
@@ -251,7 +252,7 @@ export function useTimelineItemPointerHandlers({
 
       let bodyIntentAtPointer: SmartBodyIntent = null
       if (activeTool === 'trim-edit') {
-        const items = useTimelineStore.getState().items
+        const items = useItemsStore.getState().items
         const transitions = useTransitionsStore.getState().transitions
         const hasLeftNeighbor = !!findHandleNeighborWithTransitions(
           item,

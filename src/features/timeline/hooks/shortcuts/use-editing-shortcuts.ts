@@ -6,7 +6,16 @@ import { useCallback } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useEditorStore } from '@/shared/state/editor'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
+import { useKeyframesStore } from '../../stores/keyframes-store'
+import {
+  joinItems,
+  removeItems,
+  removeMarker,
+  removeTransition,
+  rippleDeleteItems,
+  updateItemsTransformMap,
+} from '../../stores/timeline-actions'
 import { useSelectionStore } from '@/shared/state/selection'
 import { HOTKEY_OPTIONS } from '@/config/hotkeys'
 import { canJoinMultipleItems } from '@/features/timeline/utils/clip-utils'
@@ -31,13 +40,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   const editKeyframePanelOpen = useSelectionStore((s) => s.editKeyframePanelOpen)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
   const selectedKeyframes = useKeyframeSelectionStore((s) => s.selectedKeyframes)
-  const removeItems = useTimelineStore((s) => s.removeItems)
-  const removeMarker = useTimelineStore((s) => s.removeMarker)
-  const removeTransition = useTimelineStore((s) => s.removeTransition)
-  const rippleDeleteItems = useTimelineStore((s) => s.rippleDeleteItems)
-  const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap)
-  const joinItems = useTimelineStore((s) => s.joinItems)
-  const items = useTimelineStore((s) => s.items)
+  const items = useItemsStore((s) => s.items)
   const keyframeEditorShortcutScopeActive = useEditorStore(
     (s) => s.keyframeEditorShortcutScopeActive,
   )
@@ -75,7 +78,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
       if (transforms.size === 0) return
       updateItemsTransformMap(transforms, { operation: 'move' })
     },
-    [selectedItemIds, items, updateItemsTransformMap],
+    [selectedItemIds, items],
   )
 
   // Editing: Delete - Delete selected items, marker, or transition
@@ -393,7 +396,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
 
       event.preventDefault()
 
-      const storeKeyframes = useTimelineStore.getState().keyframes
+      const storeKeyframes = useKeyframesStore.getState().keyframes
       const itemsWithKeyframes = selectedItemIds.filter((itemId) => {
         const itemKeyframes = storeKeyframes.find((k) => k.itemId === itemId)
         return itemKeyframes?.properties.some((p) => p.keyframes.length > 0)

@@ -1,7 +1,7 @@
 import {
   useCompositionsStore,
   useGizmoStore,
-  useTimelineStore,
+  useKeyframesStore,
 } from '@/runtime/composition-runtime/deps/stores'
 import type {
   AudioItem,
@@ -23,9 +23,7 @@ export function resetCompositionContentRuntimeState() {
     mediaDependencyIds: [],
     mediaDependencyVersion: 0,
   })
-  useTimelineStore.setState({ keyframes: [] } as Partial<
-    ReturnType<typeof useTimelineStore.getState>
-  >)
+  useKeyframesStore.setState({ keyframes: [] })
   useGizmoStore.setState({
     activeGizmo: null,
     previewTransform: null,

@@ -280,7 +280,7 @@ export interface HotkeyEventData {
  * Human-readable descriptions for keyboard shortcuts.
  * Used for tooltips, help dialogs, and documentation.
  */
-export const HOTKEY_DESCRIPTIONS: Record<HotkeyKey, string> = {
+const HOTKEY_DESCRIPTIONS: Record<HotkeyKey, string> = {
   // Playback
   PLAY_PAUSE: "Play/Pause",
   PREVIOUS_FRAME: "Previous frame",

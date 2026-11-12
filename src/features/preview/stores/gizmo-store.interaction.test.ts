@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { useGizmoStore } from './gizmo-store'
 import type { Transform } from '../types/gizmo'
 

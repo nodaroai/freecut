@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { TimelineTrack } from '@/types/timeline'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
+import { moveItems, moveItemsWithTrackChanges } from '../stores/timeline-actions'
 import { useSelectionStore } from '@/shared/state/selection'
 import { DRAG_THRESHOLD_PIXELS } from '../constants'
 import {
@@ -51,10 +52,8 @@ export function useTrackDrag(track: TimelineTrack): UseTrackDragReturn {
   const dragStateRef = useRef<DragState | null>(null)
 
   // Get store state with granular selectors
-  const tracks = useTimelineStore((s) => s.tracks)
-  const items = useTimelineStore((s) => s.items)
-  const moveItems = useTimelineStore((s) => s.moveItems)
-  const moveItemsWithTrackChanges = useTimelineStore((s) => s.moveItemsWithTrackChanges)
+  const tracks = useItemsStore((s) => s.tracks)
+  const items = useItemsStore((s) => s.items)
 
   // Selection store
   const selectedTrackIds = useSelectionStore((s) => s.selectedTrackIds)
@@ -75,7 +74,7 @@ export function useTrackDrag(track: TimelineTrack): UseTrackDragReturn {
     selectedTrackIdsRef.current = selectedTrackIds
     moveItemsRef.current = moveItems
     moveItemsWithTrackChangesRef.current = moveItemsWithTrackChanges
-  }, [items, moveItems, moveItemsWithTrackChanges, tracks, selectedTrackIds])
+  }, [items, tracks, selectedTrackIds])
 
   const getCreateNewZoneAtMouseY = useCallback((mouseY: number): 'video' | 'audio' | null => {
     const videoZone = document.querySelector<HTMLElement>('[data-track-header-new-zone="video"]')

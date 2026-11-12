@@ -653,6 +653,18 @@ class ProxyService {
   }
 
   /**
+   * Drop all tracked state for a finished job and pump the queue.
+   */
+  private releaseJobState(proxyKey: string): void {
+    this.activeJobPhaseByKey.delete(proxyKey)
+    this.activeJobPriorityByKey.delete(proxyKey)
+    this.generatingProxyKeys.delete(proxyKey)
+    this.progressByProxyKey.delete(proxyKey)
+    this.clearProgressEmissionState(proxyKey)
+    this.drainQueue()
+  }
+
+  /**
    * Handle messages from the worker
    */
   private handleWorkerMessage(message: ProxyWorkerResponse): void {
@@ -671,12 +683,7 @@ class ProxyService {
 
       case 'complete': {
         const wasCancelled = !this.generatingProxyKeys.has(proxyKey)
-        this.activeJobPhaseByKey.delete(proxyKey)
-        this.activeJobPriorityByKey.delete(proxyKey)
-        this.generatingProxyKeys.delete(proxyKey)
-        this.progressByProxyKey.delete(proxyKey)
-        this.clearProgressEmissionState(proxyKey)
-        this.drainQueue()
+        this.releaseJobState(proxyKey)
         if (wasCancelled) {
           break
         }
@@ -686,23 +693,13 @@ class ProxyService {
       }
 
       case 'cancelled': {
-        this.activeJobPhaseByKey.delete(proxyKey)
-        this.activeJobPriorityByKey.delete(proxyKey)
-        this.generatingProxyKeys.delete(proxyKey)
-        this.progressByProxyKey.delete(proxyKey)
-        this.clearProgressEmissionState(proxyKey)
-        this.drainQueue()
+        this.releaseJobState(proxyKey)
         break
       }
 
       case 'error': {
         const wasCancelled = !this.generatingProxyKeys.has(proxyKey)
-        this.activeJobPhaseByKey.delete(proxyKey)
-        this.activeJobPriorityByKey.delete(proxyKey)
-        this.generatingProxyKeys.delete(proxyKey)
-        this.progressByProxyKey.delete(proxyKey)
-        this.clearProgressEmissionState(proxyKey)
-        this.drainQueue()
+        this.releaseJobState(proxyKey)
         if (wasCancelled) {
           break
         }

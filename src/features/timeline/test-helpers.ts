@@ -1,4 +1,5 @@
 import type { AudioItem, TimelineTrack, VideoItem } from '@/types/timeline'
+import type { TimelineState } from './types'
 import { useItemsStore } from './stores/items-store'
 import { useTimelineSettingsStore } from './stores/timeline-settings-store'
 import { useTransitionsStore } from './stores/transitions-store'
@@ -9,6 +10,8 @@ import { useSequencesStore } from './stores/sequences-store'
 import { useCompositionNavigationStore } from './stores/composition-navigation-store'
 import { useTimelineCommandStore } from './stores/timeline-command-store'
 import { setActiveCompositionId } from './stores/composition-navigation-active'
+import { getActiveInOutMaxFrame } from './stores/in-out-bound'
+import { sanitizeInOutPoints } from './utils/in-out-points'
 
 type TimelineTrackOverrides = Partial<TimelineTrack> & Pick<TimelineTrack, 'id' | 'name' | 'order'>
 
@@ -96,6 +99,53 @@ export function makeTwoVideoTwoAudioTimelineTracks(height = 80): TimelineTrack[]
     makeTimelineTrack({ id: 'a1', name: 'A1', kind: 'audio', order: 2, height }),
     makeTimelineTrack({ id: 'a2', name: 'A2', kind: 'audio', order: 3, height }),
   ]
+}
+
+/**
+ * Seeds every domain store from one combined partial, the way the retired
+ * `useTimelineStore` facade's `setState` did (same domain mapping, same final
+ * in/out re-clamp). Specs that set up several domains at once use this instead
+ * of reaching for a facade that no longer exists.
+ */
+export function setTimelineState(partial: Partial<TimelineState>): void {
+  if (partial.items !== undefined) useItemsStore.getState().setItems(partial.items)
+  if (partial.tracks !== undefined) useItemsStore.getState().setTracks(partial.tracks)
+  if (partial.transitions !== undefined) {
+    useTransitionsStore.getState().setTransitions(partial.transitions)
+  }
+  if (partial.keyframes !== undefined) useKeyframesStore.getState().setKeyframes(partial.keyframes)
+  if (partial.markers !== undefined) useMarkersStore.getState().setMarkers(partial.markers)
+  if (partial.fps !== undefined) useTimelineSettingsStore.getState().setFps(partial.fps)
+  if (partial.scrollPosition !== undefined) {
+    useTimelineSettingsStore.getState().setScrollPosition(partial.scrollPosition)
+  }
+  if (partial.snapEnabled !== undefined) {
+    useTimelineSettingsStore.getState().setSnapEnabled(partial.snapEnabled)
+  }
+  if (partial.audioSkimmingEnabled !== undefined) {
+    useTimelineSettingsStore.getState().setAudioSkimmingEnabled(partial.audioSkimmingEnabled)
+  }
+  if (partial.isDirty !== undefined) useTimelineSettingsStore.getState().setIsDirty(partial.isDirty)
+
+  const touchesInOutOrBounds =
+    partial.inPoint !== undefined ||
+    partial.outPoint !== undefined ||
+    partial.items !== undefined ||
+    partial.fps !== undefined
+  if (!touchesInOutOrBounds) return
+
+  const markersState = useMarkersStore.getState()
+  const sanitizedInOutPoints = sanitizeInOutPoints({
+    inPoint: partial.inPoint !== undefined ? (partial.inPoint ?? null) : markersState.inPoint,
+    outPoint: partial.outPoint !== undefined ? (partial.outPoint ?? null) : markersState.outPoint,
+    maxFrame: getActiveInOutMaxFrame(
+      useItemsStore.getState().items,
+      useTimelineSettingsStore.getState().fps,
+    ),
+  })
+
+  useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint)
+  useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint)
 }
 
 export function resetTimelineItemsTestState() {

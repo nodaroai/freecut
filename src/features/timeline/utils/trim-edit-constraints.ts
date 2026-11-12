@@ -7,30 +7,12 @@ import {
   applyTrimStartPreview,
   type PreviewItemUpdate,
 } from './item-edit-preview'
-import { canAddTransition } from './transition-utils'
+import { canAddTransition, clampDeltaToLastValidValue } from './transition-utils'
 
 type KeyframesByItemId = Record<string, ItemKeyframes | undefined>
 
 function applyUpdate(item: TimelineItem, update: PreviewItemUpdate): TimelineItem {
   return { ...item, ...update }
-}
-
-function clampDeltaToLastValidValue(
-  requestedDelta: number,
-  isValid: (delta: number) => boolean,
-): number {
-  if (!isValid(0)) return 0
-  if (isValid(requestedDelta)) return requestedDelta
-
-  const sign = requestedDelta < 0 ? -1 : 1
-  let low = 0
-  let high = Math.abs(requestedDelta)
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2)
-    if (isValid(sign * mid)) low = mid
-    else high = mid - 1
-  }
-  return sign * low
 }
 
 function collectPreservedKeyframes(

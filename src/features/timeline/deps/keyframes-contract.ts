@@ -23,15 +23,7 @@ export {
   getShapeAnimatableBaseValue,
   resolveAnimatedShapeItem,
 } from '@/features/keyframes/utils/animated-shape-item'
-export {
-  BEZIER_PRESETS,
-  areBezierPointsEqual,
-  findMatchingBezierPreset,
-  clampBezierValue,
-  clampSpringValue,
-  buildEasingConfig,
-} from '@/features/keyframes/utils/easing-presets'
-export type { BezierPresetValue } from '@/features/keyframes/utils/easing-presets'
+export { buildEasingConfig } from '@/features/keyframes/utils/easing-presets'
 export {
   getTransitionBlockedRanges,
   isFrameInTransitionRegion,
@@ -56,6 +48,14 @@ export {
 export { getNiceTickStep } from '@/features/keyframes/components/dopesheet-editor/dopesheet-helpers'
 export { useRafCoalescedValue } from '@/features/keyframes/components/use-raf-coalesced-value'
 export { getAnimatablePropertiesForItem } from '@/features/keyframes/utils/animatable-properties'
+export {
+  findStoredVectorKeyframe,
+  getEditorVectorKeyframeId,
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+  toVectorScalePercent,
+  type VectorPropertyProxy,
+} from '@/features/keyframes/utils/vector-proxy'
 export { getAnimatablePropertyBaseValue } from '@/features/keyframes/utils/animatable-property-base-value'
 export {
   getProceduralBands,

@@ -25,9 +25,6 @@ const testState = vi.hoisted(() => ({
     activeGizmo: null,
     preview: null as Record<string, unknown> | null,
   },
-  timelineState: {
-    keyframes: [] as unknown[],
-  },
 }))
 
 testState.pool = {
@@ -44,7 +41,6 @@ const {
   unregisterDomVideoElementMock,
   playbackState,
   gizmoState,
-  timelineState,
 } = testState
 
 function createStoreHook<TState extends object>(state: TState) {
@@ -110,7 +106,6 @@ vi.mock('@/runtime/composition-runtime/deps/player', () => ({
 vi.mock('@/runtime/composition-runtime/deps/stores', () => ({
   usePlaybackStore: createStoreHook(testState.playbackState),
   useGizmoStore: createStoreHook(testState.gizmoState),
-  useTimelineStore: createStoreHook(testState.timelineState),
 }))
 
 vi.mock('../hooks/use-player-compat', () => ({
@@ -154,7 +149,6 @@ describe('VideoContent pooled handoff', () => {
     playbackState.muted = false
     gizmoState.activeGizmo = null
     gizmoState.preview = null
-    timelineState.keyframes = []
   })
 
   it('keeps the acquired pool element when only itemId changes on the same pool lane', async () => {

@@ -1,1 +1,1 @@
-export { getMixedValue } from './mixed-value'
+export { demixValue, getMixedValue } from './mixed-value'

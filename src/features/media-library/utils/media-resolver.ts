@@ -1,18 +1,13 @@
 import { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
 import { proxyService } from '@/features/media-library/services/proxy-service'
 import { getSharedProxyKey } from '@/features/media-library/utils/proxy-key'
+import { pendingMediaRequests as pendingRequests } from '@/features/media-library/utils/media-resolver-requests'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { registerKeyframeIndex } from '@/shared/utils/keyframe-index-registry'
 import type { TimelineTrack } from '@/types/timeline'
 import { createLogger } from '@/shared/logging/logger'
 
 const logger = createLogger('MediaResolver')
-
-/**
- * Pending requests to prevent concurrent OPFS access to the same file
- * This prevents multiple sync access handle creation for the same OPFS file
- */
-const pendingRequests = new Map<string, Promise<string>>()
 
 /**
  * Resolves a mediaId to a blob URL for use in Composition Player
@@ -187,13 +182,4 @@ export async function resolveMediaUrls(
   }
 
   return resolvedTracks
-}
-
-/**
- * Cleans up all cached blob URLs
- * Call this on component unmount to prevent memory leaks
- */
-export function cleanupBlobUrls(): void {
-  blobUrlManager.releaseAll()
-  pendingRequests.clear()
 }

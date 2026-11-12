@@ -30,6 +30,15 @@ const NUMERIC_TOLERANCE = 0.01
  * // Returns number if all items have same volume, 'mixed' otherwise
  * ```
  */
+/**
+ * Replaces a possibly-mixed display value with its fallback.
+ * Inverse of {@link getMixedValue} for rendering: `demixValue(value, fallback)`
+ * equals `value === 'mixed' ? fallback : value`.
+ */
+export function demixValue<T>(value: T | 'mixed', fallback: T): T {
+  return value === 'mixed' ? fallback : value
+}
+
 export function getMixedValue<TItem, TValue>(
   items: TItem[],
   getter: (item: TItem) => TValue | undefined,

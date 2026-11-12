@@ -6,8 +6,8 @@ import {
   getCompoundClipDeletionImpact,
   getMediaDeletionImpact,
   removeProjectItems,
+  saveTimeline,
   useSequencesStore,
-  useTimelineStore,
 } from '@/features/media-library/deps/timeline-stores'
 
 const logger = createLogger('MediaLibrary')
@@ -168,7 +168,7 @@ export function useMediaLibraryDeletion({
       if (affectedMediaImpact.itemIds.length > 0) {
         const removedTimelineReferences = removeProjectItems(affectedMediaImpact.itemIds)
         if (removedTimelineReferences && currentProjectId) {
-          await useTimelineStore.getState().saveTimeline(currentProjectId)
+          await saveTimeline(currentProjectId)
         }
       }
 

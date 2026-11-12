@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react'
-import { useGizmoStore, useTimelineStore } from '@/runtime/composition-runtime/deps/stores'
+import { useGizmoStore, useKeyframesStore } from '@/runtime/composition-runtime/deps/stores'
 import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
 import type { TextItem } from '@/types/timeline'
 import { resolveSpanStyles, resolveTextStyle } from '@/shared/typography/text-style'
@@ -38,8 +38,8 @@ export const TextContent: React.FC<{ item: TextItem & { _sequenceFrameOffset?: n
   const { fps } = useVideoConfig()
   const sequenceContext = useSequenceContext()
   const contextKeyframes = useItemKeyframesFromContext(item.id)
-  const storeKeyframes = useTimelineStore(
-    useCallback((s) => s.keyframes.find((entry) => entry.itemId === item.id), [item.id]),
+  const storeKeyframes = useKeyframesStore(
+    useCallback((s) => s.keyframesByItemId[item.id], [item.id]),
   )
   const itemKeyframes = contextKeyframes ?? storeKeyframes
   const relativeFrame = (sequenceContext?.localFrame ?? 0) - (item._sequenceFrameOffset ?? 0)

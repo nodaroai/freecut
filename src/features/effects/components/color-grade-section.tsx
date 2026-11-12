@@ -14,7 +14,14 @@ import {
 import { Button } from '@/components/ui/button'
 import type { TimelineItem } from '@/types/timeline'
 import type { ItemEffect, GpuEffect } from '@/types/effects'
-import { useTimelineStore } from '@/features/effects/deps/timeline-contract'
+import {
+  addEffects,
+  applyAutoKeyframeOperations,
+  removeEffect,
+  setItemEffects,
+  toggleEffect,
+  updateEffect,
+} from '@/features/effects/deps/timeline-contract'
 import { useGizmoStore, useThrottledFrame } from '@/features/effects/deps/preview-contract'
 import { useGradeClipboardStore, type GradeClipboardEntry } from '@/shared/state/grade-clipboard'
 import { PropertySection } from '@/shared/ui/property-controls'
@@ -137,12 +144,6 @@ export const ColorGradeSection = memo(function ColorGradeSection({
   onCreateAdjustmentLayer,
 }: ColorGradeSectionProps) {
   const { t } = useTranslation()
-  const addEffects = useTimelineStore((s) => s.addEffects)
-  const setItemEffects = useTimelineStore((s) => s.setItemEffects)
-  const updateEffect = useTimelineStore((s) => s.updateEffect)
-  const removeEffect = useTimelineStore((s) => s.removeEffect)
-  const toggleEffect = useTimelineStore((s) => s.toggleEffect)
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
   const setEffectsPreviewNew = useGizmoStore((s) => s.setEffectsPreviewNew)
   const clearPreview = useGizmoStore((s) => s.clearPreview)
   const colorGradeComparisonMode = useGizmoStore((s) => s.colorGradeComparisonMode)
@@ -251,12 +252,9 @@ export const ColorGradeSection = memo(function ColorGradeSection({
       queueMicrotask(() => clearPreview())
     },
     [
-      addEffects,
-      applyAutoKeyframeOperations,
       clearPreview,
       currentFrame,
       keyframesByItemId,
-      updateEffect,
       visualItems,
     ],
   )
@@ -349,7 +347,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [clearPreview, resolveGradeType, updateEffect, visualItems],
+    [clearPreview, resolveGradeType, visualItems],
   )
 
   const handleToggle = useCallback(
@@ -361,7 +359,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
         if (entry) toggleEffect(item.id, entry.id)
       })
     },
-    [resolveGradeType, toggleEffect, visualItems],
+    [resolveGradeType, visualItems],
   )
 
   const handleRemove = useCallback(
@@ -374,7 +372,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
         if (entry) removeEffect(item.id, entry.id)
       })
     },
-    [removeEffect, resolveGradeType, visualItems],
+    [resolveGradeType, visualItems],
   )
 
   const getKeyframeProperty = useCallback(
@@ -443,7 +441,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
       )
       queueMicrotask(() => clearPreview())
     },
-    [clearPreview, setItemEffects, visualItems],
+    [clearPreview, visualItems],
   )
 
   const handleCopyGrade = useCallback(() => {
@@ -464,7 +462,7 @@ export const ColorGradeSection = memo(function ColorGradeSection({
       })),
     )
     queueMicrotask(() => clearPreview())
-  }, [clearPreview, setItemEffects, visualItems])
+  }, [clearPreview, visualItems])
 
   const wheelsDefinition = getGpuEffect('gpu-color-wheels')
   const curvesDefinition = getGpuEffect('gpu-curves')

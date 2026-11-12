@@ -3,4 +3,5 @@ export {
   makeTimelineTrack,
   resetTimelineCompositionTestState,
   setDefaultRootTimelineTracks,
+  setTimelineState,
 } from '@/features/timeline/test-helpers'

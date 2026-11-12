@@ -41,8 +41,10 @@ async function saveCurrentProjectBeforeReload(): Promise<boolean> {
   }
 
   try {
-    const { useTimelineStore } = await import('@/features/timeline/stores/timeline-store-facade')
-    await useTimelineStore.getState().saveTimeline(projectId)
+    // Lazy import: the timeline persistence graph is heavy and only needed here
+    // (reload-time save), so it stays out of the eager startup bundle.
+    const { saveTimeline } = await import('@/features/timeline/stores/timeline-persistence')
+    await saveTimeline(projectId)
     return true
   } catch (e) {
     log.error('Failed to save before reload:', e)

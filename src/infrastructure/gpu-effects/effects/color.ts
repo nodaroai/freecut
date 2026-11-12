@@ -209,12 +209,12 @@ fn hueShiftFragment(input: VertexOutput) -> @location(0) vec4f {
       animatable: false,
     },
   },
-  packUniforms: (p) =>
+  packUniforms: (p, _width, _height, timelineTimeSeconds = 0) =>
     new Float32Array([
       (p.shift as number) ?? 0,
       (p.span as number) ?? 1,
       (p.flow as number) ?? 0,
-      performance.now() / 1000,
+      timelineTimeSeconds,
     ]),
 }
 

@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { flushSync } from 'react-dom'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItem, useItemsStore } from '@/features/editor/deps/timeline-store'
+import { setTimelineState } from '@/features/editor/deps/timeline-test-helpers-contract'
 import { useGizmoStore } from '@/features/editor/deps/preview'
 import type {
   AudioItem,
@@ -59,7 +61,18 @@ vi.mock('./audio-section', () => ({
 
 vi.mock('./text-section', () => ({
   TextSection: () => <div>Text Body</div>,
-  TextContentSection: () => <div>Text Content Body</div>,
+  TextContentSection: ({ items }: { items: TimelineItem[] }) => {
+    const item = items[0]
+    return item?.type === 'text' ? (
+      <textarea
+        aria-label="Text content"
+        value={item.text}
+        onChange={(event) => updateItem(item.id, { text: event.target.value })}
+      />
+    ) : (
+      <div>Text Content Body</div>
+    )
+  },
   TextEffectsSection: () => <div>Text Effects Body</div>,
 }))
 
@@ -158,11 +171,11 @@ function resetStores(items: TimelineItem[], selectedItemIds: string[]) {
     dragState: null,
   })
 
-  useTimelineStore.setState({
+  setTimelineState({
     fps: 30,
     items,
     keyframes: [],
-  } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+  })
 }
 
 describe('ClipPanel inspector tabs', () => {
@@ -192,6 +205,35 @@ describe('ClipPanel inspector tabs', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('preserves the caret when text is edited in the middle', async () => {
+    const item = {
+      id: 'text-1',
+      type: 'text' as const,
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 90,
+      label: 'Hello',
+      text: 'Hello',
+      color: '#ffffff',
+    }
+    resetStores([item], [item.id])
+    render(
+      <TooltipProvider>
+        <ClipPanel />
+      </TooltipProvider>,
+    )
+
+    const field = (await screen.findByRole('textbox', {
+      name: 'Text content',
+    })) as HTMLTextAreaElement
+    field.focus()
+    fireEvent.change(field, { target: { value: 'HeXllo', selectionStart: 3, selectionEnd: 3 } })
+
+    expect(field.value).toBe('HeXllo')
+    expect(field.selectionStart).toBe(3)
+    expect(field.selectionEnd).toBe(3)
   })
 
   it('keeps the full inspector idle across repeated gizmo translate commits', async () => {

@@ -3,7 +3,8 @@ import { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 // Stores and selectors
-import { useTimelineStore } from '../stores/timeline-store'
+import { useMarkersStore } from '../stores/markers-store'
+import { updateMarker } from '../stores/timeline-actions'
 import { useSelectionStore } from '@/shared/state/selection'
 
 // Utilities and hooks
@@ -25,8 +26,7 @@ import type { ProjectMarker } from '@/types/timeline'
  */
 export const TimelineProjectMarkers = memo(function TimelineProjectMarkers() {
   const { t } = useTranslation()
-  const markers = useTimelineStore((s) => s.markers)
-  const updateMarker = useTimelineStore((s) => s.updateMarker)
+  const markers = useMarkersStore((s) => s.markers)
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId)
   const selectMarker = useSelectionStore((s) => s.selectMarker)
   const { frameToPixels } = useTimelineCommittedZoomContext()
@@ -46,7 +46,7 @@ export const TimelineProjectMarkers = memo(function TimelineProjectMarkers() {
   // Update refs when functions change
   useEffect(() => {
     updateMarkerRef.current = updateMarker
-  }, [updateMarker])
+  }, [])
 
   // Handle drag start and selection
   const handleMouseDown = useCallback(

@@ -15,6 +15,7 @@ import { useEffect } from 'react'
 import { createLogger, createOperationId } from '@/shared/logging/logger'
 import { getNextQueuedJob, useRenderQueueStore } from '../stores/render-queue-store'
 import type { RenderJob } from '../stores/render-queue-store'
+import type { ClientRenderResult } from '../deps/renderer'
 import { registerJobController, unregisterJobController } from '../utils/render-queue-control'
 
 const log = createLogger('RenderQueue')
@@ -39,7 +40,7 @@ async function renderQueuedJob(job: RenderJob): Promise<void> {
   })
 
   const controller = new AbortController()
-  let temporaryResult: import('../utils/client-renderer').ClientRenderResult | null = null
+  let temporaryResult: ClientRenderResult | null = null
   registerJobController(job.id, controller)
   store.markRendering(job.id)
 
@@ -52,7 +53,7 @@ async function renderQueuedJob(job: RenderJob): Promise<void> {
       { resolveMediaUrls },
       { saveExportFile },
     ] = await Promise.all([
-      import('../utils/render-pipeline'),
+      import('../deps/renderer'),
       import('../utils/smart-copy'),
       import('../utils/timeline-to-composition'),
       import('@/features/export/deps/media-library'),
@@ -147,7 +148,7 @@ async function renderQueuedJob(job: RenderJob): Promise<void> {
   } finally {
     try {
       if (temporaryResult) {
-        const { releaseTemporaryExportOutput } = await import('../utils/export-output-target')
+        const { releaseTemporaryExportOutput } = await import('../deps/renderer')
         await releaseTemporaryExportOutput(temporaryResult)
       }
     } finally {

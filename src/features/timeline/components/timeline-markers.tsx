@@ -2,7 +2,9 @@
 import { useCallback, useRef, useState, useEffect, useMemo, memo } from 'react'
 
 // Stores and selectors
-import { useTimelineStore } from '../stores/timeline-store'
+import { useMarkersStore } from '../stores/markers-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { markDirty } from '../stores/timeline-actions'
 import { setInOutPointsWithoutHistory } from '../stores/actions/marker-actions'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useMicRecordingStore, isMicRecordingActive } from '@/shared/state/mic-recording-store'
@@ -120,10 +122,9 @@ export const TimelineMarkers = memo(function TimelineMarkers({
   const editorDensity = useSettingsStore((s) => s.editorDensity)
   const editorLayout = getEditorLayout(editorDensity)
   const { frameToPixels } = useTimelineCommittedZoomContext()
-  const fps = useTimelineStore((s) => s.fps)
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
-  const markDirty = useTimelineStore((s) => s.markDirty)
+  const fps = useTimelineSettingsStore((s) => s.fps)
+  const inPoint = useMarkersStore((s) => s.inPoint)
+  const outPoint = useMarkersStore((s) => s.outPoint)
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame)
   const setScrubFrame = usePlaybackStore((s) => s.setScrubFrame)
   const pause = usePlaybackStore((s) => s.pause)
@@ -177,7 +178,6 @@ export const TimelineMarkers = memo(function TimelineMarkers({
     frameToPixels,
     setCurrentFrame,
     setScrubFrame,
-    markDirty,
     pause,
     fps,
     duration,

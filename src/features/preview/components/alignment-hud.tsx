@@ -17,10 +17,16 @@ import { useRafDeferredValue } from '@/shared/hooks/use-raf-deferred-value'
 import { useSelectionStore } from '@/shared/state/selection'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSettingsStore } from '@/features/preview/deps/settings'
-import { useTimelineStore, useKeyframesStore } from '@/features/preview/deps/timeline-store'
+import {
+  applyAutoKeyframeOperations,
+  updateItemsTransformMap,
+  useItemsStore,
+  useKeyframesStore,
+} from '@/features/preview/deps/timeline-store'
 import { getAutoKeyframeOperation, type AutoKeyframeOperation } from '../deps/keyframes'
 import { useVisualTransforms } from '../hooks/use-visual-transform'
 import type { TransformProperties } from '@/types/transform'
+import type { TimelineItem } from '@/types/timeline'
 
 type AlignmentType =
   | 'left'
@@ -65,7 +71,7 @@ interface AlignmentToolbarProps {
 }
 
 interface DeferredAlignmentToolbarProps extends AlignmentToolbarProps {
-  itemsSnapshot: ReturnType<typeof useTimelineStore.getState>['items']
+  itemsSnapshot: TimelineItem[]
 }
 
 const DeferredAlignmentToolbar = memo(function DeferredAlignmentToolbar({
@@ -77,7 +83,7 @@ const DeferredAlignmentToolbar = memo(function DeferredAlignmentToolbar({
 })
 
 interface AlignmentToolbarCoreProps extends AlignmentToolbarProps {
-  items: ReturnType<typeof useTimelineStore.getState>['items']
+  items: TimelineItem[]
 }
 
 const AlignmentToolbarCore = memo(function AlignmentToolbarCore({
@@ -86,8 +92,6 @@ const AlignmentToolbarCore = memo(function AlignmentToolbarCore({
 }: AlignmentToolbarCoreProps) {
   const { t } = useTranslation()
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
-  const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap)
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
   const canvasSnapEnabled = useSettingsStore((s) => s.canvasSnapEnabled)
   const setSetting = useSettingsStore((s) => s.setSetting)
 
@@ -222,8 +226,6 @@ const AlignmentToolbarCore = memo(function AlignmentToolbarCore({
       selectedVisualItems,
       visualTransformsMap,
       projectSize,
-      updateItemsTransformMap,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -284,7 +286,7 @@ const AlignmentToolbarCore = memo(function AlignmentToolbarCore({
 export const AlignmentToolbar = memo(function AlignmentToolbar({
   projectSize,
 }: AlignmentToolbarProps) {
-  const itemsSnapshot = useTimelineStore((state) => state.items)
+  const itemsSnapshot = useItemsStore((state) => state.items)
   return (
     <DeferredAlignmentToolbar
       itemsSnapshot={itemsSnapshot}

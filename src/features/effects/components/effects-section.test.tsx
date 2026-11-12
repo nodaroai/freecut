@@ -39,7 +39,14 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock('@/features/effects/deps/timeline-contract', () => ({
-  useTimelineStore: (selector: (state: typeof mocks.timelineState) => unknown) =>
+  addEffect: mocks.timelineState.addEffect,
+  addEffects: mocks.timelineState.addEffects,
+  applyAutoKeyframeOperations: mocks.timelineState.applyAutoKeyframeOperations,
+  removeEffect: mocks.timelineState.removeEffect,
+  setItemEffects: mocks.timelineState.setItemEffects,
+  toggleEffect: mocks.timelineState.toggleEffect,
+  updateEffect: mocks.timelineState.updateEffect,
+  useItemsStore: (selector: (state: typeof mocks.timelineState) => unknown) =>
     selector(mocks.timelineState),
 }))
 

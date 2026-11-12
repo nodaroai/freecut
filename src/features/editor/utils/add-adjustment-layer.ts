@@ -10,7 +10,6 @@ import {
   executeTimelineCommand,
   useItemsStore,
   useTimelineSettingsStore,
-  useTimelineStore,
 } from '@/features/editor/deps/timeline-store'
 import {
   createClassicTrack,
@@ -37,7 +36,8 @@ export function addAdjustmentLayer(
   options: AddAdjustmentLayerOptions = {},
 ): boolean {
   // Read all needed state from stores directly to avoid subscriptions
-  const { tracks, items, fps } = useTimelineStore.getState()
+  const { tracks, items } = useItemsStore.getState()
+  const { fps } = useTimelineSettingsStore.getState()
   const { activeTrackId, selectItems } = useSelectionStore.getState()
 
   const referenceTrack = findCompatibleTrackForItemType({

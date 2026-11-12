@@ -16,7 +16,11 @@ jobs:
     # The nightly `schedule` trigger only exists for the preview-sync soak;
     # skip the full quality suite (already run on every PR and push to main).
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    # Pinned to 24.04: on 26.04 (ubuntu-latest since November 2026) the apt
+    # ffmpeg 8 probe reports the conformed final render as yuvj420p, and the
+    # headless lifecycle suite's fixed-profile check expects yuv420p. Move back
+    # to ubuntu-latest once that check passes there.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,7 +29,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
+        uses: voidzero-dev/setup-vp@v1.21.1
         with:
           node-version: '22'
           cache: true
@@ -39,11 +43,21 @@ jobs:
       - name: Check deps contract seams
         run: vp run check:deps-contracts
 
-      - name: Check legacy lib import migration
-        run: vp run check:legacy-lib-imports
+      - name: Check layer boundaries
+        run: vp run check:layer-boundaries
 
       - name: Check deps wrapper health
         run: vp run check:deps-wrapper-health
+
+      # Both dead-code ratchets run against allowlists that are reviewed
+      # baselines, and must stay green on every PR. Invoked through node like
+      # the changed-health ratchet below, because they shell out to the pinned
+      # fallow version and must not depend on the task runner's environment.
+      - name: Check unused exports
+        run: node scripts/check-fallow-unused-exports.mjs
+
+      - name: Check unused class members
+        run: node scripts/check-fallow-unused-class-members.mjs
 
       - name: Generate feature-edge report
         run: node scripts/report-feature-edges.mjs --json > feature-edges-report.json
@@ -75,21 +89,55 @@ jobs:
       - name: Build
         run: vp build
 
+      # lifecycle-e2e synthesises the clip its final-render checkpoint renders,
+      # and the runner image does not ship ffmpeg.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       # Portable Node, Chrome, edit-operation, and generated-media/audio
       # contracts. Reuses dist/ from Build and never requires WebGPU.
       - name: Portable headless contract suite
         run: npm run headless:test:portable
+        env:
+          # Collected here so the quality ratchet below can score headless code
+          # against real coverage instead of assuming zero; the suite is minutes
+          # long, so it must not run a second time just for coverage.
+          NODE_V8_COVERAGE: .coverage/v8
+
+      - name: Convert headless coverage for the ratchet
+        run: node scripts/headless-coverage.mjs --from .coverage/v8
 
       # Quality ratchet: fails only on dead code / complexity / duplication
       # INTRODUCED by the PR (gate new-only), never on inherited issues.
-      # Advisory for now (continue-on-error) — drop that line to enforce once
-      # the current develop-vs-main delta is cleaned up.
+      #
+      # Advisory (continue-on-error) because the new-only attribution is
+      # file-scoped, so a refactor that moves files re-attributes their whole
+      # content. Re-measured 2026-09-21 on the engine/facade pass, per scope:
+      #   origin/staging..HEAD (533 changed files)  dead_code=19 complexity=148 dup=1
+      #   9f109fb6..HEAD     (318 changed files)    dead_code=13 complexity=68  dup=1
+      # Attribution of the 68: 63 are `src/runtime/renderer/**` functions that
+      # only MOVED (unchanged cyclomatic, and CRAP inflates because coverage is
+      # keyed by the old paths); 3 are a new boundary-checker script; the rest
+      # are unchanged functions inside touched files. The 13 dead-code findings
+      # are 10 class members whose call sites go through receivers typed as
+      # interfaces (spot-checked live: edit-2up-panels.tsx, client-render-engine
+      # .ts) and which scripts/fallow-unused-class-members.allowlist.json already
+      # reviews, plus 3 real unused types that this pass then deleted.
+      # duplication=1 is a clone pair inside src/runtime/composition-runtime/
+      # utils/audio-scene.ts, last changed in 39b89488 - an ancestor of the base,
+      # i.e. present before the changeset.
+      # So the verdict cannot go green for a move-heavy PR, and dropping
+      # continue-on-error would block refactors on artifacts rather than on
+      # quality. The blocking gates for this dimension are the two allowlist
+      # ratchets above (check:unused-exports / check:unused-class-members) and
+      # check:layer-boundaries; revisit this flag only with a per-symbol
+      # (rename-aware) metric.
       - name: Fallow quality ratchet
         if: github.event_name == 'pull_request'
         continue-on-error: true
-        run: |
-          npm install -g fallow
-          fallow audit --base "origin/${{ github.base_ref }}" --gate new-only --ci
+        # Goes through the repo script so the pinned Fallow version and the
+        # headless coverage feed are the same ones developers get locally.
+        run: node scripts/check-fallow-changed-health.mjs --base "origin/${{ github.base_ref }}"
 
   # Repeatedly re-runs the preview-sync suite from cold to surface ordering /
   # stale-render flakes in the fast-scrub state machine. Kept OFF the common PR
@@ -132,7 +180,7 @@ jobs:
 
       - name: Setup Vite+
         if: steps.gate.outputs.run == 'true'
-        uses: voidzero-dev/setup-vp@v1
+        uses: voidzero-dev/setup-vp@v1.21.1
         with:
           node-version: '22'
           cache: true

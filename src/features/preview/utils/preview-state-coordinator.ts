@@ -38,7 +38,7 @@ export interface PreviewTransitionDecision {
   preloadBurstTrigger: PreloadBurstTrigger
 }
 
-export function getPreviewRuntimeSnapshot(state: PreviewRuntimeState): PreviewRuntimeSnapshot {
+function getPreviewRuntimeSnapshot(state: PreviewRuntimeState): PreviewRuntimeSnapshot {
   const mode = getPreviewInteractionMode({
     isPlaying: state.isPlaying,
     previewFrame: state.previewFrame,
@@ -56,7 +56,7 @@ export function getPreviewRuntimeSnapshot(state: PreviewRuntimeState): PreviewRu
   }
 }
 
-export function getPreviewRuntimeStateFromPlaybackState(
+function getPreviewRuntimeStateFromPlaybackState(
   state: PreviewPlaybackState,
   isGizmoInteracting: boolean,
 ): PreviewRuntimeState {

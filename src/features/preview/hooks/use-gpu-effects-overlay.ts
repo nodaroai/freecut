@@ -154,6 +154,34 @@ function isTextMotionActiveInWindow(
   return false
 }
 
+/**
+ * Windowed overlay-content check shared by the per-frame overlay predicates:
+ * enabled GPU effects (preview-overridden), non-normal blend modes, corner
+ * pins, and text motion active inside `[startFrame, endFrameExclusive)`.
+ */
+function itemNeedsWindowedOverlayContent(
+  item: TimelineItem,
+  startFrame: number,
+  endFrameExclusive: number,
+  previewEffectsByItemId?: ReadonlyMap<string, ItemEffect[]>,
+): boolean {
+  const effectiveEffects = previewEffectsByItemId?.get(item.id) ?? item.effects
+  if (hasEnabledGpuEffect(effectiveEffects)) return true
+  if (hasRenderableBlendMode(item)) return true
+  if (hasCornerPin(item.cornerPin)) return true
+  // Keep the continuous GPU overlay on while a text clip's motion window is
+  // active — otherwise playback falls to the DOM Player, which cannot render
+  // per-glyph motion (fps is unused by isTextMotionActive).
+  if (
+    item.type === 'text' &&
+    item.textMotion !== undefined &&
+    isTextMotionActiveInWindow(item, startFrame, endFrameExclusive)
+  ) {
+    return true
+  }
+  return false
+}
+
 export function buildContinuousPreviewOverlayIndex(
   items: TimelineItem[],
   transitions: Transition[],
@@ -226,14 +254,8 @@ export function shouldForceContinuousPreviewOverlayFromIndex(
     ) {
       return false
     }
-    const effectiveEffects = previewEffectsByItemId?.get(item.id) ?? item.effects
-    if (hasEnabledGpuEffect(effectiveEffects)) return true
-    if (hasRenderableBlendMode(item)) return true
-    if (hasCornerPin(item.cornerPin)) return true
     if (
-      item.type === 'text' &&
-      item.textMotion !== undefined &&
-      isTextMotionActiveInWindow(item, startFrame, endFrameExclusive)
+      itemNeedsWindowedOverlayContent(item, startFrame, endFrameExclusive, previewEffectsByItemId)
     ) {
       return true
     }
@@ -357,17 +379,8 @@ export function shouldForceContinuousPreviewOverlayInWindow(
     ) {
       return false
     }
-    const effectiveEffects = previewEffectsByItemId?.get(item.id) ?? item.effects
-    if (hasEnabledGpuEffect(effectiveEffects)) return true
-    if (hasRenderableBlendMode(item)) return true
-    if (hasCornerPin(item.cornerPin)) return true
-    // Keep the continuous GPU overlay on while a text clip's motion window is
-    // active — otherwise playback falls to the DOM Player, which cannot render
-    // per-glyph motion (fps is unused by isTextMotionActive).
     if (
-      item.type === 'text' &&
-      item.textMotion !== undefined &&
-      isTextMotionActiveInWindow(item, startFrame, endFrameExclusive)
+      itemNeedsWindowedOverlayContent(item, startFrame, endFrameExclusive, previewEffectsByItemId)
     ) {
       return true
     }

@@ -5,7 +5,7 @@ import type { TimelineItem, TimelineTrack, VideoItem } from '@/types/timeline'
 
 const saveTranscriptMock = vi.fn()
 const getTranscriptMock = vi.fn()
-const useTimelineStoreGetStateMock = vi.fn()
+const timelineStateMock = vi.fn()
 const useCompositionsStoreGetStateMock = vi.fn()
 const useCompositionNavigationStoreGetStateMock = vi.fn()
 const useCompositionNavigationStoreSetStateMock = vi.fn()
@@ -46,19 +46,31 @@ vi.mock('@/features/media-library/deps/projects', () => ({
   },
 }))
 
-vi.mock('@/features/media-library/deps/timeline-stores', () => ({
-  removeTimelineItemsExact: removeTimelineItemsExactMock,
-  useTimelineStore: {
-    getState: useTimelineStoreGetStateMock,
-  },
-  useCompositionsStore: {
-    getState: useCompositionsStoreGetStateMock,
-  },
-  useCompositionNavigationStore: {
-    getState: useCompositionNavigationStoreGetStateMock,
-    setState: useCompositionNavigationStoreSetStateMock,
-  },
-}))
+vi.mock('@/features/media-library/deps/timeline-stores', () => {
+  // The service now reads domain stores directly; the mock keeps one combined
+  // fixture object so specs can seed items/tracks/fps (and the action spies the
+  // service invokes) in a single call.
+  return {
+    removeTimelineItemsExact: removeTimelineItemsExactMock,
+    useItemsStore: {
+      getState: timelineStateMock,
+    },
+    useTimelineSettingsStore: {
+      getState: timelineStateMock,
+    },
+    setTracks: (...args: unknown[]) => timelineStateMock()?.setTracks?.(...args),
+    addItems: (...args: unknown[]) => timelineStateMock()?.addItems?.(...args),
+    removeItems: (...args: unknown[]) => timelineStateMock()?.removeItems?.(...args),
+    updateItem: (...args: unknown[]) => timelineStateMock()?.updateItem?.(...args),
+    useCompositionsStore: {
+      getState: useCompositionsStoreGetStateMock,
+    },
+    useCompositionNavigationStore: {
+      getState: useCompositionNavigationStoreGetStateMock,
+      setState: useCompositionNavigationStoreSetStateMock,
+    },
+  }
+})
 
 vi.mock('@/features/media-library/deps/settings-contract', () => ({
   useSettingsStore: {
@@ -207,7 +219,7 @@ describe('mediaTranscriptionService.insertTranscriptAsCaptions', () => {
     const removeItems = vi.fn()
     const addItems = vi.fn()
 
-    useTimelineStoreGetStateMock.mockReturnValue({
+    timelineStateMock.mockReturnValue({
       fps: 30,
       tracks: initialTracks,
       items: [
@@ -310,7 +322,7 @@ describe('mediaTranscriptionService.insertTranscriptAsCaptions', () => {
     const removeItems = vi.fn()
     const addItems = vi.fn()
 
-    useTimelineStoreGetStateMock.mockReturnValue({
+    timelineStateMock.mockReturnValue({
       fps: 30,
       tracks: initialTracks,
       items: [clip, legacyCaptionOnAudioTrack],
@@ -415,7 +427,7 @@ describe('mediaTranscriptionService.insertTranscriptAsCaptions', () => {
     const removeItems = vi.fn()
     const addItems = vi.fn()
 
-    useTimelineStoreGetStateMock.mockReturnValue({
+    timelineStateMock.mockReturnValue({
       fps: 30,
       tracks: [captionTrack, videoTrack, audioTrack],
       items: [clip, linkedAudio, existingTranscript],
@@ -541,7 +553,7 @@ describe('mediaTranscriptionService.enableTranscriptCaptions', () => {
     const addItems = vi.fn()
     const updateItem = vi.fn()
 
-    useTimelineStoreGetStateMock.mockReturnValue({
+    timelineStateMock.mockReturnValue({
       fps: 30,
       tracks: [
         makeTrack('track-captions', 0),
@@ -634,7 +646,7 @@ describe('mediaTranscriptionService.enableTranscriptCaptions', () => {
     }
     const updateItem = vi.fn()
 
-    useTimelineStoreGetStateMock.mockReturnValue({
+    timelineStateMock.mockReturnValue({
       fps: 30,
       tracks: [makeTrack('track-video', 0)],
       items: [clip],
@@ -682,7 +694,7 @@ describe('mediaTranscriptionService.transcribeMedia', () => {
     transcribeCollectMock.mockResolvedValue([{ text: ' hello ', start: 0, end: 1.2 }])
     startPreviewAudioConformMock.mockResolvedValue(undefined)
     resolvePreviewAudioConformUrlMock.mockResolvedValue(null)
-    useTimelineStoreGetStateMock.mockReturnValue({ items: [], updateItem: vi.fn() })
+    timelineStateMock.mockReturnValue({ items: [], updateItem: vi.fn() })
   })
 
   it('transcribes the original file for browser-decodable codecs', async () => {
@@ -725,7 +737,7 @@ describe('mediaTranscriptionService.transcribeMedia', () => {
         style: { color: '#ffcc00', fontSize: 48 },
       },
     }
-    useTimelineStoreGetStateMock.mockReturnValue({ items: [clip], updateItem })
+    timelineStateMock.mockReturnValue({ items: [clip], updateItem })
     getMediaMock.mockResolvedValue({
       id: 'media-1',
       fileName: 'clip.mp3',
@@ -802,7 +814,7 @@ describe('mediaTranscriptionService.transcribeMedia', () => {
       stashStack: [{ compositionId: 'inner-comp', items: [stashedClip] }],
       mainHolder: null,
     })
-    useTimelineStoreGetStateMock.mockReturnValue({ items: [], updateItem: vi.fn() })
+    timelineStateMock.mockReturnValue({ items: [], updateItem: vi.fn() })
     getMediaMock.mockResolvedValue({
       id: 'media-1',
       fileName: 'clip.mp3',

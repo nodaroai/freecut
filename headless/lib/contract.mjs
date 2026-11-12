@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { z } from 'zod'
 
 export const HEADLESS_API_VERSION = 1
@@ -7,6 +8,9 @@ const id = z.string().min(1)
 const transitionDirection = z.enum(['from-left', 'from-right', 'from-top', 'from-bottom'])
 const portableIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
 const revisionSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/)
+const uuidV7Schema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
 const finite = z.number().finite()
 const frame = z.number().int().nonnegative()
 const positiveFrames = z.number().int().positive()
@@ -127,10 +131,7 @@ const easing = z.enum([
 const easingConfigSchema = z
   .object({
     type: easing,
-    bezier: z
-      .object({ x1: finite, y1: finite, x2: finite, y2: finite })
-      .strict()
-      .optional(),
+    bezier: z.object({ x1: finite, y1: finite, x2: finite, y2: finite }).strict().optional(),
     spring: z
       .object({
         tension: z.number().min(0).max(500),
@@ -207,10 +208,30 @@ const opSchemas = [
     })
     .strict(),
   z.object({ op: z.literal('moveItem'), id, from: frame, trackId: id.optional() }).strict(),
-  z.object({ op: z.literal('removeItems'), ids: z.array(id).min(1) }).strict(),
-  z.object({ op: z.literal('split'), id, frame }).strict(),
-  z.object({ op: z.literal('trimStart'), id, amount: positiveFrames }).strict(),
-  z.object({ op: z.literal('trimEnd'), id, amount: positiveFrames }).strict(),
+  z
+    .object({
+      op: z.literal('removeItems'),
+      ids: z.array(id).min(1),
+      linked: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ op: z.literal('split'), id, frame, linked: z.boolean().optional() }).strict(),
+  z
+    .object({
+      op: z.literal('trimStart'),
+      id,
+      amount: positiveFrames,
+      linked: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('trimEnd'),
+      id,
+      amount: positiveFrames,
+      linked: z.boolean().optional(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal('addTransition'),
@@ -550,6 +571,38 @@ export const mediaProbeRequestSchema = z
     path: ['expectedRevision'],
   })
 
+/** No NUL, no backslashes, no absolute/UNC/drive paths, no empty or dot segments. */
+function refineWorkspaceRelativePath(value, ctx) {
+  const invalid =
+    value.includes('\0') ||
+    value.includes('\\') ||
+    value.startsWith('/') ||
+    /^[A-Za-z]:/.test(value) ||
+    value.startsWith('//') ||
+    value.split('/').some((part) => part === '' || part === '.' || part === '..')
+  if (invalid) ctx.addIssue({ code: 'custom', message: 'must be a safe workspace-relative path' })
+}
+
+const workspaceRelativeMediaPathSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .superRefine(refineWorkspaceRelativePath)
+
+export const mediaImportRequestSchema = z
+  .object({
+    mediaId: portableIdSchema,
+    sourceRelativePath: workspaceRelativeMediaPathSchema,
+    expectedByteSize: z
+      .number()
+      .int()
+      .positive()
+      .max(20 * 1024 ** 3),
+    expectedSha256: revisionSchema,
+    projectId: portableIdSchema.optional(),
+  })
+  .strict()
+
 const RENDER_OPTIONS = {
   codecs: ['h264', 'h265', 'vp9', 'vp8', 'av1'],
   containers: ['mp4', 'webm', 'mov', 'mkv', 'mp3', 'wav', 'm4a'],
@@ -622,6 +675,335 @@ export const layoutRequestSchema = z
     path: ['project'],
   })
 
+export const CHECKPOINT_RECIPE_SCHEMA_VERSION = '1.1'
+
+const checkpointReferenceSchema = z
+  .object({
+    $ref: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}#\/detail(?:\/[A-Za-z0-9_-]+)+$/),
+  })
+  .strict()
+const checkpointResourceSchema = z.union([portableIdSchema, checkpointReferenceSchema])
+
+const checkpointRecipeOperationSchema = z.discriminatedUnion('op', [
+  z
+    .object({
+      callerId: portableIdSchema,
+      op: z.literal('addTrack'),
+      kind: z.enum(['video', 'audio']).optional(),
+      order: finite.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      callerId: portableIdSchema,
+      op: z.literal('addClip'),
+      mediaId: portableIdSchema,
+      from: frame.optional(),
+      trackId: checkpointResourceSchema.optional(),
+      durationInFrames: positiveFrames.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      callerId: portableIdSchema,
+      op: z.literal('moveItem'),
+      id: checkpointResourceSchema,
+      from: frame,
+      trackId: checkpointResourceSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      callerId: portableIdSchema,
+      op: z.literal('removeItems'),
+      ids: z.array(checkpointResourceSchema).min(1),
+      linked: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      callerId: portableIdSchema,
+      op: z.literal('split'),
+      id: checkpointResourceSchema,
+      frame,
+      linked: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      callerId: portableIdSchema,
+      op: z.literal('trimStart'),
+      id: checkpointResourceSchema,
+      amount: positiveFrames,
+      linked: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      callerId: portableIdSchema,
+      op: z.literal('trimEnd'),
+      id: checkpointResourceSchema,
+      amount: positiveFrames,
+      linked: z.boolean(),
+    })
+    .strict(),
+])
+
+const checkpointRecipeSchema = z
+  .object({
+    schemaVersion: z.literal(CHECKPOINT_RECIPE_SCHEMA_VERSION),
+    operations: z.array(checkpointRecipeOperationSchema).min(1).max(1000),
+    render: z
+      .object({
+        codec: z.enum(RENDER_OPTIONS.codecs).optional(),
+        container: z.enum(RENDER_OPTIONS.containers).optional(),
+        resolution: z
+          .string()
+          .regex(/^(\d{1,5})x(\d{1,5})$/)
+          .refine((value) => {
+            const [width, height] = value.split('x').map(Number)
+            return width >= 16 && height >= 16 && width <= 16384 && height <= 16384
+          }, 'resolution dimensions must be between 16 and 16384')
+          .optional(),
+        fps: finite.min(1).max(240).optional(),
+        quality: z.enum(RENDER_OPTIONS.qualities).optional(),
+        inSec: finite.nonnegative().optional(),
+        outSec: finite.positive().optional(),
+        duration: finite.positive().optional(),
+        audioOnly: z.boolean().optional(),
+        strict: z.boolean().optional(),
+      })
+      .strict()
+      .refine((value) => !(value.outSec !== undefined && value.duration !== undefined), {
+        message: 'outSec and duration are mutually exclusive',
+        path: ['outSec'],
+      })
+      .refine((value) => value.outSec === undefined || value.outSec > (value.inSec ?? 0), {
+        message: 'outSec must be greater than inSec',
+        path: ['outSec'],
+      })
+      .refine(
+        (value) =>
+          !value.audioOnly || !value.container || ['mp3', 'wav', 'm4a'].includes(value.container),
+        { message: 'audioOnly requires an audio container', path: ['container'] },
+      )
+      .refine(
+        (value) =>
+          value.audioOnly || !value.container || !['mp3', 'wav', 'm4a'].includes(value.container),
+        { message: 'audio containers require audioOnly', path: ['container'] },
+      ),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const callers = new Map()
+    const referenceTargets = {
+      addTrack: [/^\/detail\/trackId$/],
+      addClip: [/^\/detail\/created\/[0-9]+\/id$/],
+      moveItem: [/^\/detail\/id$/],
+      split: [/^\/detail\/(?:leftId|rightId)$/],
+      trimStart: [/^\/detail\/id$/],
+      trimEnd: [/^\/detail\/id$/],
+    }
+    const inspectReference = (entry, path) => {
+      if (Array.isArray(entry)) {
+        entry.forEach((item, index) => inspectReference(item, [...path, index]))
+        return
+      }
+      if (!entry || typeof entry !== 'object') return
+      if ('$ref' in entry) {
+        const [callerId, pointer] = typeof entry.$ref === 'string' ? entry.$ref.split('#', 2) : []
+        const priorOperation = callers.get(callerId)
+        const allowedPointers = referenceTargets[priorOperation?.op] ?? []
+        if (!priorOperation || !allowedPointers.some((pattern) => pattern.test(pointer))) {
+          ctx.addIssue({
+            code: 'custom',
+            message: 'reference must target a known ID result from a prior recipe operation',
+            path,
+          })
+        }
+        return
+      }
+      for (const [key, item] of Object.entries(entry)) inspectReference(item, [...path, key])
+    }
+    value.operations.forEach((operation, index) => {
+      inspectReference(operation, ['operations', index])
+      if (callers.has(operation.callerId)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'callerId must be unique',
+          path: ['operations', index, 'callerId'],
+        })
+      }
+      callers.set(operation.callerId, operation)
+    })
+  })
+
+export function canonicalJsonBytes(value) {
+  const normalize = (entry) => {
+    if (Array.isArray(entry)) return entry.map(normalize)
+    if (entry && typeof entry === 'object') {
+      return Object.fromEntries(
+        Object.keys(entry)
+          .sort()
+          .map((key) => [key, normalize(entry[key])]),
+      )
+    }
+    return entry
+  }
+  return Buffer.from(JSON.stringify(normalize(value)))
+}
+
+export const qualifiedSha256 = (bytes) =>
+  `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`
+
+export const checkpointRecipeJsonSchema = z.toJSONSchema(checkpointRecipeSchema, {
+  target: 'draft-7',
+})
+export const CHECKPOINT_RECIPE_SCHEMA_SHA256 = qualifiedSha256(
+  canonicalJsonBytes(checkpointRecipeJsonSchema),
+)
+
+const checkpointLegacyOperationRequestSchema = z
+  .object({
+    operationId: uuidV7Schema,
+    projectId: portableIdSchema,
+    expectedRevision: revisionSchema,
+    recipe: checkpointRecipeSchema,
+    recipeSha256: revisionSchema,
+    outputRelativePath: z.string().min(1).max(1024),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (qualifiedSha256(canonicalJsonBytes(value.recipe)) !== value.recipeSha256) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'recipeSha256 does not match the canonical recipe bytes',
+        path: ['recipeSha256'],
+      })
+    }
+  })
+
+export const FINAL_RENDER_PROFILE = Object.freeze({
+  id: 'shorts-h264-high-v1',
+  codec: 'h264',
+  container: 'mp4',
+  quality: 'high',
+  width: 1080,
+  height: 1920,
+  pixelFormat: 'yuv420p',
+  frameRate: Object.freeze({ numerator: 25, denominator: 1 }),
+  audioCodec: 'aac',
+  audioSampleRateHz: 48000,
+  audioChannels: 2,
+})
+export const FINAL_RENDER_PROFILE_SHA256 = qualifiedSha256(canonicalJsonBytes(FINAL_RENDER_PROFILE))
+
+const finalRenderOperationRequestSchema = z
+  .object({
+    kind: z.literal('final_render'),
+    operationId: uuidV7Schema,
+    projectId: portableIdSchema,
+    expectedRevision: revisionSchema,
+    renderProfile: z
+      .object({
+        id: z.literal(FINAL_RENDER_PROFILE.id),
+        codec: z.literal(FINAL_RENDER_PROFILE.codec),
+        container: z.literal(FINAL_RENDER_PROFILE.container),
+        quality: z.literal(FINAL_RENDER_PROFILE.quality),
+        width: z.literal(FINAL_RENDER_PROFILE.width),
+        height: z.literal(FINAL_RENDER_PROFILE.height),
+        pixelFormat: z.literal(FINAL_RENDER_PROFILE.pixelFormat),
+        frameRate: z
+          .object({
+            numerator: z.literal(FINAL_RENDER_PROFILE.frameRate.numerator),
+            denominator: z.literal(FINAL_RENDER_PROFILE.frameRate.denominator),
+          })
+          .strict(),
+        audioCodec: z.literal(FINAL_RENDER_PROFILE.audioCodec),
+        audioSampleRateHz: z.literal(FINAL_RENDER_PROFILE.audioSampleRateHz),
+        audioChannels: z.literal(FINAL_RENDER_PROFILE.audioChannels),
+      })
+      .strict(),
+    renderProfileSha256: z.literal(FINAL_RENDER_PROFILE_SHA256),
+    approvalBindingSha256: revisionSchema,
+    outputRelativePath: z.string().min(1).max(1024),
+  })
+  .strict()
+
+const withPortableOutputPath = (schema) =>
+  schema.superRefine((value, ctx) => {
+    const candidate = value.outputRelativePath
+    const normalized = candidate.replace(/\\/g, '/')
+    if (
+      candidate.includes('\0') ||
+      candidate.includes('\\') ||
+      candidate.startsWith('/') ||
+      /^\/?(?:[A-Za-z]:|\/{2}|[?.]\/{2})/.test(normalized) ||
+      !normalized.startsWith('artifacts/') ||
+      normalized.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'outputRelativePath must be a contained portable relative path',
+        path: ['outputRelativePath'],
+      })
+    }
+  })
+
+const portableCheckpointLegacyOperationRequestSchema = withPortableOutputPath(
+  checkpointLegacyOperationRequestSchema,
+)
+const portableFinalRenderOperationRequestSchema = withPortableOutputPath(
+  finalRenderOperationRequestSchema.superRefine((value, ctx) => {
+    if (!value.outputRelativePath.endsWith('.mp4')) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'final render outputRelativePath must end in .mp4',
+        path: ['outputRelativePath'],
+      })
+    }
+  }),
+)
+
+export const checkpointOperationRequestSchema = z.union([
+  portableCheckpointLegacyOperationRequestSchema,
+  portableFinalRenderOperationRequestSchema,
+])
+
+const FINAL_RENDER_OPERATION_JSON_SCHEMA = Object.freeze({
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  type: 'object',
+  properties: {
+    kind: { const: 'final_render' },
+    operationId: {
+      type: 'string',
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+    },
+    projectId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' },
+    expectedRevision: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
+    renderProfile: { const: FINAL_RENDER_PROFILE },
+    renderProfileSha256: { const: FINAL_RENDER_PROFILE_SHA256 },
+    approvalBindingSha256: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
+    outputRelativePath: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 1024,
+      pattern: '^artifacts/(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*\\u0000).+\\.mp4$',
+    },
+  },
+  required: [
+    'kind',
+    'operationId',
+    'projectId',
+    'expectedRevision',
+    'renderProfile',
+    'renderProfileSha256',
+    'approvalBindingSha256',
+    'outputRelativePath',
+  ],
+  additionalProperties: false,
+})
+
 export function normalizeRenderInput(value) {
   const out = { ...value }
   if (out.in !== undefined) out.inSec = Number(out.in)
@@ -675,10 +1057,46 @@ export function capabilities() {
       projectUpdate: z.toJSONSchema(projectUpdateRequestSchema, { target: 'draft-7' }),
       lifecycleEdit: z.toJSONSchema(lifecycleEditRequestSchema, { target: 'draft-7' }),
       mediaProbe: z.toJSONSchema(mediaProbeRequestSchema, { target: 'draft-7' }),
+      mediaImport: z.toJSONSchema(mediaImportRequestSchema, { target: 'draft-7' }),
+      checkpointOperation: z.toJSONSchema(portableCheckpointLegacyOperationRequestSchema, {
+        target: 'draft-7',
+      }),
+      finalRenderOperation: FINAL_RENDER_OPERATION_JSON_SCHEMA,
+    },
+    checkpointRecipe: {
+      schemaVersion: CHECKPOINT_RECIPE_SCHEMA_VERSION,
+      schemaSha256: CHECKPOINT_RECIPE_SCHEMA_SHA256,
+      schema: checkpointRecipeJsonSchema,
+      canonicalization: 'sorted-object-keys-json-utf8',
+    },
+    finalRender: {
+      kind: 'final_render',
+      renderProfileSha256: FINAL_RENDER_PROFILE_SHA256,
+      approvalBinding: 'sha256',
+      phases: [
+        'queued',
+        'revision_verified',
+        'rendering',
+        'artifact_committed',
+        'succeeded',
+        'failed',
+      ],
+      artifactMediaProbeKeys: [
+        'width',
+        'height',
+        'durationMillis',
+        'videoCodec',
+        'pixelFormat',
+        'frameRate',
+        'audioCodec',
+        'audioSampleRateHz',
+        'audioChannels',
+      ],
     },
     lifecycle: {
       routes: [
         'GET /v1/capabilities',
+        'GET /v1/status',
         'POST /v1/projects',
         'GET /v1/projects',
         'GET /v1/projects/:id',
@@ -686,13 +1104,22 @@ export function capabilities() {
         'PATCH /v1/projects/:id',
         'POST /v1/projects/:id/edit',
         'GET /v1/media',
+        'POST /v1/media/import',
         'GET /v1/media/:id',
         'POST /v1/media/:id/probe',
         'POST /v1/render',
+        'POST /v1/checkpoint-operations',
+        'GET /v1/checkpoint-operations/:id',
       ],
       httpMediaUpload: false,
+      workspaceMediaImport: true,
       deleteProject: false,
       writerMode: 'exclusive',
+      status: {
+        transport: 'poll',
+        route: 'GET /v1/status',
+        renderProgress: true,
+      },
       limits: {
         projectJsonBytes: 16 * 1024 * 1024,
         mediaMetadataBytes: 2 * 1024 * 1024,

@@ -6,7 +6,7 @@ import {
 import { useVideoConfig, useIsPlaying } from '../../hooks/use-player-compat'
 import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
 import { usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
-import { useTimelineStore } from '@/runtime/composition-runtime/deps/stores'
+import { useKeyframesStore } from '@/runtime/composition-runtime/deps/stores'
 import { useItemKeyframesFromContext } from '../../contexts/keyframes-context'
 import {
   getPropertyKeyframes,
@@ -75,11 +75,8 @@ export function useAudioPlaybackState({
   const masterBusDb = usePlaybackStore((state) => state.masterBusDb)
 
   const contextKeyframes = useItemKeyframesFromContext(itemId)
-  const storeKeyframes = useTimelineStore(
-    useCallback(
-      (state) => state.keyframes.find((keyframes) => keyframes.itemId === itemId),
-      [itemId],
-    ),
+  const storeKeyframes = useKeyframesStore(
+    useCallback((state) => state.keyframesByItemId[itemId], [itemId]),
   )
   const itemKeyframes = contextKeyframes ?? storeKeyframes
 

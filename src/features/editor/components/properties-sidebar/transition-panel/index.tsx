@@ -5,10 +5,15 @@ import { i18n } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { Trash2, Zap, RotateCcw, ChevronDown } from 'lucide-react'
 import { HexColorPicker } from 'react-colorful'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  removeTransition,
+  updateTransition,
+  useItemsStore,
+  useTimelineSettingsStore,
+  useTransitionsStore,
+} from '@/features/editor/deps/timeline-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { PropertySection, PropertyRow, SliderInput } from '../components'
-import type { TimelineState, TimelineActions } from '@/features/editor/deps/timeline-store'
 import type { SelectionState, SelectionActions } from '@/shared/state/selection'
 import {
   TRANSITION_CONFIGS,
@@ -225,11 +230,9 @@ export function TransitionPanel() {
   // Granular selectors (Zustand v5 best practice)
   const selectedTransitionId = useSelectionStore((s: SelectionState) => s.selectedTransitionId)
   const clearSelection = useSelectionStore((s: SelectionActions) => s.clearSelection)
-  const transitions = useTimelineStore((s: TimelineState) => s.transitions)
-  const updateTransition = useTimelineStore((s: TimelineActions) => s.updateTransition)
-  const removeTransition = useTimelineStore((s: TimelineActions) => s.removeTransition)
-  const fps = useTimelineStore((s: TimelineState) => s.fps)
-  const items = useTimelineStore((s: TimelineState) => s.items)
+  const transitions = useTransitionsStore((s) => s.transitions)
+  const fps = useTimelineSettingsStore((s) => s.fps)
+  const items = useItemsStore((s) => s.items)
 
   // Derive selected transition
   const selectedTransition = useMemo<Transition | undefined>(
@@ -351,7 +354,6 @@ export function TransitionPanel() {
       selectedTransition?.direction,
       selectedTransition?.presentation,
       selectedTransition?.timing,
-      updateTransition,
     ],
   )
 
@@ -450,7 +452,7 @@ export function TransitionPanel() {
         updateTransition(selectedTransitionId, { durationInFrames: clamped })
       }
     },
-    [selectedTransitionId, transitionConfig, updateTransition, minDuration, maxDuration],
+    [selectedTransitionId, transitionConfig, minDuration, maxDuration],
   )
 
   // Prefer the registry-declared default; clamp into the allowable range.
@@ -465,7 +467,6 @@ export function TransitionPanel() {
   }, [
     selectedTransitionId,
     transitionConfig,
-    updateTransition,
     defaultDuration,
     minDuration,
     maxDuration,
@@ -486,7 +487,7 @@ export function TransitionPanel() {
 
       updateTransition(selectedTransitionId, { alignment })
     },
-    [fps, leftClip, rightClip, selectedTransition, selectedTransitionId, updateTransition],
+    [fps, leftClip, rightClip, selectedTransition, selectedTransitionId],
   )
 
   // Handle timing change
@@ -496,7 +497,7 @@ export function TransitionPanel() {
         updateTransition(selectedTransitionId, { timing })
       }
     },
-    [selectedTransitionId, updateTransition],
+    [selectedTransitionId],
   )
 
   const directionOptions = useMemo(() => {
@@ -512,7 +513,7 @@ export function TransitionPanel() {
         updateTransition(selectedTransitionId, { direction })
       }
     },
-    [selectedTransitionId, updateTransition],
+    [selectedTransitionId],
   )
 
   const handleParameterChange = useCallback(
@@ -528,7 +529,7 @@ export function TransitionPanel() {
         },
       })
     },
-    [selectedTransition, selectedTransitionId, updateTransition],
+    [selectedTransition, selectedTransitionId],
   )
 
   const handleParameterReset = useCallback(
@@ -541,7 +542,7 @@ export function TransitionPanel() {
         },
       })
     },
-    [selectedTransition, selectedTransitionId, updateTransition],
+    [selectedTransition, selectedTransitionId],
   )
 
   // Handle delete
@@ -550,7 +551,7 @@ export function TransitionPanel() {
       removeTransition(selectedTransitionId)
       clearSelection()
     }
-  }, [selectedTransitionId, removeTransition, clearSelection])
+  }, [selectedTransitionId, clearSelection])
 
   // Format duration for display
   const formatDuration = useCallback(

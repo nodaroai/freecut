@@ -2,8 +2,10 @@ import { memo, useCallback, useEffect, useRef, type PointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   setInOutPointsWithoutHistory,
+  setInPoint,
+  setOutPoint,
+  useMarkersStore,
   useTimelineSettingsStore,
-  useTimelineStore,
 } from '@/features/editor/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import type { TimelineAnnotationModel } from '@/shared/timeline/timeline-annotations'
@@ -38,11 +40,9 @@ export const MiniTimelineIoLane = memo(function MiniTimelineIoLane({
   testIdPrefix: string
 }) {
   const { t } = useTranslation()
-  const setInPoint = useTimelineStore((s) => s.setInPoint)
-  const setOutPoint = useTimelineStore((s) => s.setOutPoint)
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
-  const fps = useTimelineStore((s) => s.fps)
+  const inPoint = useMarkersStore((s) => s.inPoint)
+  const outPoint = useMarkersStore((s) => s.outPoint)
+  const fps = useTimelineSettingsStore((s) => s.fps)
 
   const laneRef = useRef<HTMLDivElement>(null)
   // Lane pixel width — the ratios above render fluidly, but the handles need the

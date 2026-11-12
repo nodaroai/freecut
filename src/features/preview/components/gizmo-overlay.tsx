@@ -6,10 +6,14 @@ import { useShallow } from 'zustand/react/shallow'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useSettingsStore } from '@/features/preview/deps/settings'
 import {
+  applyAutoKeyframeOperations,
+  updateItem,
+  updateItemsTransformMap,
+  updateItemTransform,
+  updateVectorKeyframe,
   useItemsStore,
   useKeyframesStore,
   useTimelineSettingsStore,
-  useTimelineStore,
 } from '@/features/preview/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
@@ -232,14 +236,9 @@ export function GizmoOverlay({
       itemsWithLiveTransforms.filter((item) => item.type !== 'audio' && item.type !== 'adjustment'),
     [itemsWithLiveTransforms],
   )
-  const tracks = useTimelineStore((s) => s.tracks)
+  const tracks = useItemsStore((s) => s.tracks)
   const fps = useTimelineSettingsStore((s) => s.fps)
   const canvasSnapEnabled = useSettingsStore((s) => s.canvasSnapEnabled)
-  const updateItemTransform = useTimelineStore((s) => s.updateItemTransform)
-  const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap)
-  const updateItem = useTimelineStore((s) => s.updateItem)
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
-  const updateVectorKeyframe = useTimelineStore((s) => s.updateVectorKeyframe)
 
   // Ref to track if we just finished a drag (to prevent background click from deselecting)
   const justFinishedDragRef = useRef(false)
@@ -298,7 +297,7 @@ export function GizmoOverlay({
       } else {
         // During playback, only update when crossing a clip boundary
         // Read items on-demand for fresh clip edges (avoids re-subscribing on items change)
-        const currentItems = useTimelineStore.getState().items
+        const currentItems = useItemsStore.getState().items
         const minFrame = Math.min(prevFrame, currentFrame)
         const maxFrame = Math.max(prevFrame, currentFrame)
 
@@ -614,7 +613,6 @@ export function GizmoOverlay({
       projectSize.width,
       replaceItemPreview,
       setTransformPreview,
-      updateVectorKeyframe,
       visualItems,
     ],
   )
@@ -705,7 +703,6 @@ export function GizmoOverlay({
       markMotionPathInteractionFinished,
       projectSize.height,
       projectSize.width,
-      updateVectorKeyframe,
       visualItems,
     ],
   )
@@ -720,7 +717,7 @@ export function GizmoOverlay({
       focusMotionPathFrame(point.frame)
       updateVectorKeyframe(itemId, 'position', point.keyframeId, { spatial })
     },
-    [focusMotionPathFrame, updateVectorKeyframe],
+    [focusMotionPathFrame],
   )
 
   // Motion paths describe the whole clip and are independent of the current
@@ -999,7 +996,6 @@ export function GizmoOverlay({
     [
       visualItems,
       keyframesByItemId,
-      updateItemTransform,
       setOtherItemBounds,
       fps,
       projectSize.width,
@@ -1046,14 +1042,7 @@ export function GizmoOverlay({
       }
       setForceUpdate((value) => value + 1)
     },
-    [
-      applyAutoKeyframeOperations,
-      projectSize.height,
-      projectSize.width,
-      setOtherItemBounds,
-      updateItem,
-      visualItems,
-    ],
+    [projectSize.height, projectSize.width, setOtherItemBounds, visualItems],
   )
 
   // Handle group transform end - commit transforms for all items as a single undo operation
@@ -1146,7 +1135,6 @@ export function GizmoOverlay({
     [
       visualItems,
       keyframesByItemId,
-      updateItemsTransformMap,
       setOtherItemBounds,
       fps,
       projectSize.width,

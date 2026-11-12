@@ -40,16 +40,16 @@ import {
   renderComposition,
   renderAudioOnly,
   renderSingleFrame,
-} from '@/features/export/utils/canvas-render-orchestrator'
-import { getAnimatedTransform, buildKeyframesMap } from '@/features/export/utils/canvas-keyframes'
-import type { ClientExportSettings, RenderProgress } from '@/features/export/utils/client-renderer'
+} from '@/runtime/renderer/canvas-render-orchestrator'
+import { getAnimatedTransform, buildKeyframesMap } from '@/runtime/renderer/canvas-keyframes'
+import type { ClientExportSettings, RenderProgress } from '@/runtime/renderer/client-renderer'
 import {
   getSupportedCodecs,
   selectFallbackVideoCodec,
   getPreferredContainerForCodec,
   getDefaultAudioCodec,
-} from '@/features/export/utils/client-renderer'
-import type { ClientVideoContainer } from '@/features/export/utils/client-renderer'
+} from '@/runtime/renderer/client-renderer'
+import type { ClientVideoContainer } from '@/runtime/renderer/client-renderer'
 import { resolveMediaUrls } from '@/features/media-library/utils/media-resolver'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import {
@@ -65,7 +65,7 @@ import {
   collectTransformParentFindings,
   hasAudioCapableItems,
 } from './validation'
-import { hasAudioContent } from '@/features/export/utils/canvas-audio'
+import { hasAudioContent } from '@/runtime/renderer/canvas-audio'
 import { ensureFontsLoaded } from '@/shared/typography/font-loader'
 import {
   collectVisibleTextFontFamilies,
@@ -873,7 +873,7 @@ interface MigratedTimelineView {
 }
 
 /** Migrate a raw project and extract the fields the composition builder needs. */
-// Thin ??-default mapping; exercised end-to-end by the headless chrome contract suite
+// Keep this declarative default mapping together instead of splitting assignments into helpers.
 // fallow-ignore-next-line complexity
 function extractTimeline(rawProject: Project): MigratedTimelineView {
   const { project, warnings: projectWarnings } = migrateProject(rawProject)

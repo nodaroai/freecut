@@ -7,7 +7,7 @@ import type { Transition } from '@/types/transition'
 import {
   CANVAS_FALLBACK_PRESENTATIONS,
   resolveTransitionRenderPath,
-} from '@/features/export/utils/canvas-transitions'
+} from '@/runtime/renderer/canvas-transitions'
 import { transitionRegistry } from '@/shared/timeline/transitions/registry'
 import { getGpuTransitionIds } from '@/infrastructure/gpu-transitions'
 import {

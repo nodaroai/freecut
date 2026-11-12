@@ -11,6 +11,7 @@
  * Only top-level text layers are handled — nested precomp assets are out of scope.
  */
 import { applyLottieColorOverrides } from './lottie-color'
+import { parseLottieJsonObject as parseJson } from './lottie-json'
 import { fetchLottieAnimation, fetchLottieThemeData } from './lottie-metadata'
 
 /** A single editable text layer discovered in a Lottie animation. */
@@ -37,17 +38,6 @@ interface LottieLayer {
 interface SlotDef {
   p?: { a?: unknown; k?: unknown; p?: { t?: unknown } }
   nm?: unknown
-}
-
-function parseJson(json: unknown): Record<string, unknown> | null {
-  if (typeof json === 'string') {
-    try {
-      return JSON.parse(json) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }
-  return json && typeof json === 'object' ? (json as Record<string, unknown>) : null
 }
 
 function firstTextString(layer: LottieLayer): string | null {

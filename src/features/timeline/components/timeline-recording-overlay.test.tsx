@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { useMicRecordingStore } from '@/shared/state/mic-recording-store'
 import { usePlaybackStore } from '@/shared/state/playback'
 
-import { useTimelineStore } from '../stores/timeline-store'
+import { setTimelineState } from '../test-helpers'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
 import { TimelineRecordingOverlay } from './timeline-recording-overlay'
 
@@ -13,7 +13,7 @@ describe('TimelineRecordingOverlay', () => {
     _resetZoomStoreForTest()
     useMicRecordingStore.getState().reset()
     usePlaybackStore.setState({ currentFrame: 0 })
-    useTimelineStore.setState({ fps: 30 })
+    setTimelineState({ fps: 30 })
   })
 
   it('renders nothing while recording is idle', () => {

@@ -201,7 +201,7 @@ Brave may disable the File System Access API. To enable it:
 - [WebGPU](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API) for effects, compositing, transitions, masks, scopes, and AI acceleration
 - [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) for preview and export pipelines
 - [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) + OPFS for workspace-backed persistence and caches
-- [Zustand](https://github.com/pmndrs/zustand) + [Zundo](https://github.com/charkour/zundo) for state management and undo/redo
+- [Zustand](https://github.com/pmndrs/zustand) for state management, with a snapshot-diff command store for undo/redo
 - [TanStack Router](https://tanstack.com/router) for file-based, type-safe routing
 - [Tailwind CSS 4](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/) + shadcn-style components
 - [Mediabunny](https://mediabunny.dev/) for media decoding, metadata, and audio encoding support
@@ -234,6 +234,12 @@ built-harness Chrome regression, every public edit operation, and generated
 media/audio rendering. Real-GPU effects remain an explicit operator/release
 gate because hosted PR CI does not provide a portable WebGPU adapter.
 
+`renderFrame` and `dumpLayout` share project migration and timeline extraction in
+`src/headless/main.ts`. Timeline collections and canvas metadata use nullish
+defaults; missing timelines are rejected, and migration warnings remain visible
+to callers (or fail strict mode). After building, run
+`node headless/test.mjs --skip-build` to exercise both APIs in Chrome.
+
 ### Performance Checks
 
 - `npm run dev` is best for correctness and iteration, but includes React/Vite dev overhead, HMR, and debug instrumentation.
@@ -252,12 +258,13 @@ VITE_SHOW_DEBUG_PANEL=true   # Show debug panel in dev
 The `src/` tree is organized into a few layers:
 
 - **`features/`** — user-facing UI modules (editor, timeline, preview, media library, effects, keyframes, export, projects, settings, scene browser, and more)
-- **`runtime/`** — playback and rendering engines (composition runtime, player, clock) that are not user-facing UI
+- **`runtime/`** — playback and rendering engines (composition runtime, player, clock, canvas/WebGPU renderer) that are not user-facing UI
 - **`infrastructure/`** — platform adapters for GPU (effects, transitions, compositor, masks, text, scopes), analysis, audio, browser, storage, and thumbnails
 - **`shared/`** — framework-agnostic primitives and cross-feature state (transition engine, schema migrations, Zustand stores, utils)
 - **`app/`, `components/`, `config/`, `routes/`, `types/`** — bootstrap, shadcn/ui components, configuration, file-based routes, and shared types
 
-Feature modules use their local `deps/` adapters for cross-feature imports.
+Feature modules use their local `deps/` adapters for cross-feature imports, and a
+runtime engine reaches feature state only through `runtime/<engine>/deps/*-contract.ts`.
 Platform-coupled code (GPU, ML, audio, storage, browser) lives in
 `@/infrastructure/*` and is imported directly; there is no separate `lib/`
 layer.

@@ -12,9 +12,10 @@ import { Diamond } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { cn } from '@/shared/ui/cn'
 import {
+  addKeyframes,
+  removeKeyframes,
   useItemsStore,
   useKeyframesStore,
-  useTimelineStore,
   useTransitionsStore,
 } from '@/features/keyframes/deps/timeline'
 import { useThrottledFrame } from '@/features/keyframes/deps/preview-contract'
@@ -49,8 +50,6 @@ interface KeyframeToggleTargetState {
   keyframeAtFrame: Keyframe | undefined
   transitionBlockedRange: ReturnType<typeof isFrameInTransitionRegion>
 }
-
-type TimelineStoreState = ReturnType<typeof useTimelineStore.getState>
 
 function getRelevantTransitions(transitions: Transition[], itemIds: string[]): Transition[] {
   if (itemIds.length === 0) return []
@@ -97,13 +96,13 @@ function toggleTargetKeyframes(
   currentValue: number,
   getCurrentValue: (() => number) | undefined,
   currentValuesByItemId: Readonly<Record<string, number>> | undefined,
-  removeKeyframes: TimelineStoreState['removeKeyframes'],
-  addKeyframes: TimelineStoreState['addKeyframes'],
+  removeKeyframesAction: typeof removeKeyframes,
+  addKeyframesAction: typeof addKeyframes,
 ): void {
   const allHaveKeyframes =
     states.length > 0 && states.every((state) => state.keyframeAtFrame !== undefined)
   if (allHaveKeyframes) {
-    removeKeyframes(
+    removeKeyframesAction(
       states.flatMap((state) =>
         state.keyframeAtFrame
           ? [{ itemId: state.itemId, property, keyframeId: state.keyframeAtFrame.id }]
@@ -114,7 +113,7 @@ function toggleTargetKeyframes(
   }
 
   const resolvedCurrentValue = getCurrentValue?.() ?? currentValue
-  addKeyframes(
+  addKeyframesAction(
     states.flatMap((state) =>
       state.keyframeAtFrame
         ? []
@@ -306,8 +305,6 @@ export function KeyframeToggle({
 }: KeyframeToggleProps) {
   // Get current frame (throttled to reduce re-renders during playback)
   const currentFrame = useThrottledFrame()
-  const addKeyframes = useTimelineStore((s) => s.addKeyframes)
-  const removeKeyframes = useTimelineStore((s) => s.removeKeyframes)
 
   const selectedItemKeyframes = useKeyframesStore(
     useShallow(useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId]), [itemIds])),
@@ -379,8 +376,6 @@ export function KeyframeToggle({
     isOutsideBounds,
     property,
     targetStates,
-    removeKeyframes,
-    addKeyframes,
     currentValuesByItemId,
     currentValue,
     getCurrentValue,

@@ -44,6 +44,9 @@ export const useRippleEditPreviewStore = createEditPreviewStore<
 >({
   initialState: createInitialState,
   createActions: (set) => ({
-    setDeltas: (delta, trimDelta) => set({ delta, trimDelta }),
+    setDeltas: (delta, trimDelta) =>
+      set((state) =>
+        state.delta === delta && state.trimDelta === trimDelta ? state : { delta, trimDelta },
+      ),
   }),
 })

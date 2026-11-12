@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { CompositionControlDefinition } from '@/types/composition-controls'
 import type { CompositionItem, TimelineItem } from '@/types/timeline'
-import { useCompositionsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useCompositionsStore, updateItem } from '@/features/editor/deps/timeline-store'
 import { getCompositionControlSourceValue } from '@/shared/utils/composition-controls'
 import { ColorPicker, PropertyRow, PropertySection } from '../components'
 
@@ -103,7 +103,6 @@ function CompositionOverrideRow({
 
 export function CompositionControlsSection({ items }: { items: TimelineItem[] }) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((state) => state.updateItem)
   const compositionItem =
     items.length === 1 && items[0]?.type === 'composition' ? (items[0] as CompositionItem) : null
   const composition = useCompositionsStore((state) =>

@@ -1,7 +1,10 @@
 import { useMemo } from 'react'
 import type { TimelineItem } from '@/types/timeline'
 import type { ResolvedTransform } from '@/types/transform'
-import { useTimelineStore } from '@/features/keyframes/deps/timeline'
+import {
+  useItemsStore,
+  useKeyframesStore,
+} from '@/features/keyframes/deps/timeline'
 import { useResolvedPlaybackFrame } from '@/shared/state/playback/use-resolved-playback-frame'
 import {
   resolveTransform,
@@ -76,11 +79,11 @@ export function useAnimatedTransform(
   item: TimelineItem,
   projectSize: ProjectSize,
 ): AnimatedTransformResult {
-  // Important: avoid selectors that close over item.id here.
-  // The timeline facade memoizes by snapshot reference, so changing item.id due
-  // to a different store (selection) can otherwise return stale keyframes.
-  const allKeyframes = useTimelineStore((s) => s.keyframes)
-  const allItems = useTimelineStore((s) => s.items)
+  // Important: avoid selectors that close over item.id here. Reading the whole
+  // arrays keeps this hook keyed to store contents rather than to the current
+  // item, so a different item id cannot surface a stale per-item slice.
+  const allKeyframes = useKeyframesStore((s) => s.keyframes)
+  const allItems = useItemsStore((s) => s.items)
   const itemKeyframes = useMemo(
     () => allKeyframes.find((k) => k.itemId === item.id),
     [allKeyframes, item.id],
@@ -129,8 +132,8 @@ export function useAnimatedTransforms(
   projectSize: ProjectSize,
 ): Map<string, ResolvedTransform> {
   // Get all keyframes
-  const allKeyframes = useTimelineStore((s) => s.keyframes)
-  const allItems = useTimelineStore((s) => s.items)
+  const allKeyframes = useKeyframesStore((s) => s.keyframes)
+  const allItems = useItemsStore((s) => s.items)
 
   const animationFrame = useResolvedPlaybackFrame()
 

@@ -2,10 +2,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import {
   useItemsStore,
+  useKeyframesStore,
   useTimelineSettingsStore,
-  useTimelineStore,
   useTransitionsStore,
 } from '@/features/preview/deps/timeline-store'
+import { setTimelineState } from '@/features/preview/deps/timeline-test-helpers-contract'
 import { useMaskEditorStore } from '../stores/mask-editor-store'
 import { useGizmoStore } from '../stores/gizmo-store'
 import { MaskEditorOverlay } from './mask-editor-overlay'
@@ -72,7 +73,7 @@ function resetStores() {
   useMaskEditorStore.getState().stopEditing()
   useGizmoStore.getState().clearInteraction()
   useGizmoStore.getState().clearPreview()
-  useTimelineStore.setState({ keyframes: [] })
+  setTimelineState({ keyframes: [] })
   useTransitionsStore.getState().setTransitions([])
   useItemsStore.getState().setItems([])
   useItemsStore.getState().setTracks([
@@ -935,7 +936,7 @@ describe('MaskEditorOverlay edit mode', () => {
         },
       },
     ])
-    useTimelineStore.setState({
+    setTimelineState({
       keyframes: [
         {
           itemId: 'path-1',
@@ -961,7 +962,7 @@ describe('MaskEditorOverlay edit mode', () => {
     expect(updatedItem?.transform?.width).toBeCloseTo(100)
     expect(updatedItem?.transform?.height).toBeCloseTo(60)
 
-    const updatedKeyframes = useTimelineStore
+    const updatedKeyframes = useKeyframesStore
       .getState()
       .keyframes.find((entry) => entry.itemId === 'path-1')
     const xKeyframe = updatedKeyframes?.properties.find((property) => property.property === 'x')
@@ -1019,7 +1020,7 @@ describe('MaskEditorOverlay edit mode', () => {
         },
       },
     ])
-    useTimelineStore.setState({
+    setTimelineState({
       keyframes: [
         {
           itemId: 'path-1',
@@ -1063,7 +1064,7 @@ describe('MaskEditorOverlay edit mode', () => {
     expect(updatedItem?.transform?.width).toBeCloseTo(100)
     expect(updatedItem?.transform?.height).toBeCloseTo(60)
 
-    const updatedKeyframes = useTimelineStore
+    const updatedKeyframes = useKeyframesStore
       .getState()
       .keyframes.find((entry) => entry.itemId === 'path-1')
     const xKeyframes =
@@ -1161,7 +1162,7 @@ describe('MaskEditorOverlay edit mode', () => {
       },
     ])
 
-    useTimelineStore.setState({
+    setTimelineState({
       keyframes: [
         {
           itemId: 'path-1',
@@ -1190,7 +1191,7 @@ describe('MaskEditorOverlay edit mode', () => {
     expect(updatedItem?.transform?.y).not.toBeCloseTo(5)
 
     // Keyframe count should NOT have increased — no new keyframes in transition region
-    const updatedKeyframes = useTimelineStore
+    const updatedKeyframes = useKeyframesStore
       .getState()
       .keyframes.find((entry) => entry.itemId === 'path-1')
     const xKeyframes =

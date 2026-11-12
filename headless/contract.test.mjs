@@ -11,6 +11,7 @@ import {
   editRequestSchema,
   frameRequestSchema,
   layoutRequestSchema,
+  mediaImportRequestSchema,
   normalizeRenderInput,
   renderRequestSchema,
   validate,
@@ -40,7 +41,12 @@ const samples = {
     alignment: 0.4,
     properties: { intensity: 2 },
   },
-  updateTransition: { op: 'updateTransition', id: 't', presentation: 'wipe', direction: 'from-top' },
+  updateTransition: {
+    op: 'updateTransition',
+    id: 't',
+    presentation: 'wipe',
+    direction: 'from-top',
+  },
   removeTransition: { op: 'removeTransition', id: 't' },
   addTrack: { op: 'addTrack', kind: 'audio', order: 2 },
   addClip: { op: 'addClip', mediaId: 'm', from: 0 },
@@ -81,6 +87,10 @@ test('every published edit discriminator has a valid strict schema', () => {
     false,
   )
   assert.equal(editOpSchema.safeParse({ op: 'updateItem', id: 'i', updates: {} }).success, false)
+  for (const op of ['removeItems', 'split', 'trimStart', 'trimEnd']) {
+    assert.equal(editOpSchema.safeParse({ ...samples[op], linked: false }).success, true, op)
+    assert.equal(editOpSchema.safeParse({ ...samples[op], linked: 'false' }).success, false, op)
+  }
   assert.equal(
     editOpSchema.safeParse({ op: 'setTransform', id: 'i', transform: {} }).success,
     false,
@@ -149,13 +159,15 @@ test('frame and layout requests reject invalid targets and frame options', () =>
     { project: 'p', height: 10.5 },
     { project: 'p', projectObject: {}, frame: 0 },
     { frame: 0 },
-  ]) assert.equal(frameRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid))
+  ])
+    assert.equal(frameRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid))
 
   for (const invalid of [
     { project: 'p', frame: '12' },
     { project: 'p', at: '1.5' },
     { project: 'p', format: 'png' },
-  ]) assert.equal(layoutRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid))
+  ])
+    assert.equal(layoutRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid))
 })
 
 test('validation errors and capabilities are machine-readable and bounded', () => {
@@ -173,7 +185,26 @@ test('validation errors and capabilities are machine-readable and bounded', () =
   assert.ok(result.schemas.render)
   assert.ok(result.schemas.frame)
   assert.ok(result.schemas.layout)
-  assert.ok(JSON.stringify(result).length < 32_000)
+  assert.ok(result.schemas.mediaImport)
+  assert.ok(result.lifecycle.routes.includes('POST /v1/media/import'))
+  assert.equal(result.lifecycle.httpMediaUpload, false)
+  assert.equal(result.lifecycle.workspaceMediaImport, true)
+  assert.ok(JSON.stringify(result).length < 34_000)
+})
+
+test('media import contract is strict and requires qualified content identity', () => {
+  const request = {
+    mediaId: 'media_1',
+    sourceRelativePath: 'recording/source.mp4',
+    expectedByteSize: 10,
+    expectedSha256: `sha256:${'a'.repeat(64)}`,
+  }
+  assert.equal(mediaImportRequestSchema.safeParse(request).success, true)
+  assert.equal(mediaImportRequestSchema.safeParse({ ...request, extra: true }).success, false)
+  assert.equal(
+    mediaImportRequestSchema.safeParse({ ...request, expectedSha256: 'a'.repeat(64) }).success,
+    false,
+  )
 })
 
 test('CLI rejects unknown options and normalizes aliases', () => {

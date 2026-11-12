@@ -1,6 +1,10 @@
 import type { AudioItem } from '@/types/timeline'
 import type { MediaMetadata } from '@/types/storage'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  addItemOnNewTrack,
+  useItemsStore,
+  useTimelineSettingsStore,
+} from '@/features/editor/deps/timeline-store'
 import { createClassicTrack } from '@/features/editor/deps/timeline-utils'
 import { useSelectionStore } from '@/shared/state/selection'
 
@@ -13,7 +17,8 @@ export function insertGeneratedAudioOnNewTrack(
   blobUrl: string,
   playheadFrame: number,
 ): boolean {
-  const { tracks, fps, addItemOnNewTrack } = useTimelineStore.getState()
+  const { tracks } = useItemsStore.getState()
+  const { fps } = useTimelineSettingsStore.getState()
   const from = Number.isFinite(playheadFrame) ? Math.max(0, Math.round(playheadFrame)) : 0
   const sourceFps = media.fps || fps
   const durationInFrames = Math.max(1, Math.round(media.duration * fps))
@@ -41,7 +46,7 @@ export function insertGeneratedAudioOnNewTrack(
 
   addItemOnNewTrack(audioItem, [...tracks, newTrack])
 
-  const added = useTimelineStore.getState().items.some((item) => item.id === audioItem.id)
+  const added = useItemsStore.getState().items.some((item) => item.id === audioItem.id)
   if (added) {
     useSelectionStore.getState().selectItems([audioItem.id])
   }

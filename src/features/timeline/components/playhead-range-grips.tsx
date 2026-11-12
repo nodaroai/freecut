@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { beginIoPointerDrag } from '@/shared/timeline/io-range'
 import { formatTimecodeCompact } from '@/shared/utils/time-utils'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useMarkersStore } from '../stores/markers-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { clearInOutPoints, setInPoint, setOutPoint } from '../stores/timeline-actions'
 import {
   useTimelineCommittedZoomContext,
   useTimelineZoomContext,
@@ -109,8 +111,8 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
   rulerRef,
 }: PlayheadRangeGripsProps) {
   const { t } = useTranslation()
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
+  const inPoint = useMarkersStore((s) => s.inPoint)
+  const outPoint = useMarkersStore((s) => s.outPoint)
   const { frameToPixels } = useTimelineZoomContext()
   // Range-mode layout uses the committed zoom, matching the ruler's range
   // strip and the tracks highlight so all three always agree on pixels.
@@ -166,8 +168,8 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
       const { clientX, target } = event as MouseEvent
       if (target instanceof Element && target.closest('[data-range-flag]')) return
 
-      const timeline = useTimelineStore.getState()
-      const points = [timeline.inPoint, timeline.outPoint].filter(
+      const markers = useMarkersStore.getState()
+      const points = [markers.inPoint, markers.outPoint].filter(
         (point): point is number => point !== null,
       )
       const ruler = rulerRef.current
@@ -175,7 +177,7 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
 
       const frame = Math.round(pixelsToFrameNow(clientX - ruler.getBoundingClientRect().left))
       if (frame < Math.min(...points) || frame > Math.max(...points)) {
-        timeline.clearInOutPoints()
+        clearInOutPoints()
       }
     }
 
@@ -188,12 +190,12 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
       const ruler = rulerRef.current
       if (!ruler) return
 
-      const timeline = useTimelineStore.getState()
+      const markers = useMarkersStore.getState()
       const playheadFrame = Math.max(0, usePlaybackStore.getState().currentFrame)
       // The opposite side stays anchored: at its marked point, or at the
       // playhead when starting from the docked state.
       const anchorFrame =
-        side === 'in' ? (timeline.outPoint ?? playheadFrame) : (timeline.inPoint ?? playheadFrame)
+        side === 'in' ? (markers.outPoint ?? playheadFrame) : (markers.inPoint ?? playheadFrame)
 
       const startClientX = event.clientX
       let moved = false
@@ -216,15 +218,14 @@ export const PlayheadRangeGrips = memo(function PlayheadRangeGrips({
           lastFrame = frame
           // Out first so the in <= out sanitizer never has to intervene.
           if (frame !== anchorFrame) {
-            const store = useTimelineStore.getState()
-            store.setOutPoint(Math.max(frame, anchorFrame))
-            store.setInPoint(Math.min(frame, anchorFrame))
+            setOutPoint(Math.max(frame, anchorFrame))
+            setInPoint(Math.min(frame, anchorFrame))
           }
           // Camtasia transport: the real playhead travels with the dragged
           // flag, so the preview shows the frame being extended over and the
           // line parks beside this flag on release.
           usePlaybackStore.getState().setScrubFrame(frame)
-          return formatTimecodeCompact(frame, useTimelineStore.getState().fps)
+          return formatTimecodeCompact(frame, useTimelineSettingsStore.getState().fps)
         },
         () => {
           document.body.style.cursor = ''

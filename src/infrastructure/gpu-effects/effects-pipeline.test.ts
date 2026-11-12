@@ -157,6 +157,18 @@ describe('EffectsPipeline pass planning', () => {
     ])
     expect(beginRenderPass).toHaveBeenCalledTimes(3)
 
+    // Both fused and standalone passes must receive the requested frame time.
+    const hue = GPU_EFFECT_REGISTRY.get('gpu-hue-shift')!
+    const glitch = GPU_EFFECT_REGISTRY.get('gpu-color-glitch')!
+    const huePack = vi.spyOn(hue, 'packUniforms')
+    const glitchPack = vi.spyOn(glitch, 'packUniforms')
+    run([
+      { ...effect('gpu-hue-shift'), timelineTimeSeconds: 5.125 },
+      { ...effect('gpu-color-glitch'), timelineTimeSeconds: 5.125 },
+    ])
+    expect(huePack).toHaveBeenLastCalledWith({}, 1920, 1080, 5.125)
+    expect(glitchPack).toHaveBeenLastCalledWith({}, 1920, 1080, 5.125)
+
     beginRenderPass.mockClear()
     Object.assign(pipeline, {
       colorBatchPipeline: null,

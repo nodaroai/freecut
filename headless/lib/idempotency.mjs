@@ -74,7 +74,15 @@ function assertCapacity(records, limits) {
 
 export async function withIdempotency(
   workspace,
-  { key, method, route, requestBytes, limits = IDEMPOTENCY_LIMITS, now = () => Date.now() },
+  {
+    key,
+    method,
+    route,
+    requestBytes,
+    limits = IDEMPOTENCY_LIMITS,
+    now = () => Date.now(),
+    recoverPending,
+  },
   operation,
 ) {
   validateIdempotencyKey(key)
@@ -121,18 +129,30 @@ export async function withIdempotency(
     // A pending record created by this invocation has the same timestamp and
     // request. Any older pending record is crash-left and must not be replayed.
     if (!created) {
-      throw new HttpError(
-        409,
-        'IDEMPOTENCY_INDETERMINATE',
-        'A previous request with this key may have committed',
-      )
+      const recovered = await recoverPending?.({ requestHash })
+      if (!recovered)
+        throw new HttpError(
+          409,
+          'IDEMPOTENCY_INDETERMINATE',
+          'A previous request with this key may have committed',
+        )
+      const complete = {
+        ...existing,
+        state: 'complete',
+        updatedAt: now(),
+        status: recovered.status,
+        response: recovered.response,
+      }
+      await atomicWriteFile(file, Buffer.from(`${JSON.stringify(complete, null, 2)}\n`))
+      return { replayed: true, ...recovered }
     }
 
     let result
     try {
-      result = await operation()
+      result = await operation({ requestHash })
     } catch (error) {
-      await fs.promises.rm(file, { force: true }).catch(() => {})
+      if (error?.idempotencyCommitState !== 'may-have-committed')
+        await fs.promises.rm(file, { force: true }).catch(() => {})
       throw error
     }
     const serializedResponseBytes = Buffer.byteLength(JSON.stringify(result.response ?? null))

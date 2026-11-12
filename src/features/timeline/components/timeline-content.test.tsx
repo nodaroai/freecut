@@ -9,7 +9,7 @@ import { useSelectionStore } from '@/shared/state/selection'
 import type { TimelineTrack, VideoItem } from '@/types/timeline'
 
 import { _resetViewportThrottle, useTimelineViewportStore } from '../stores/timeline-viewport-store'
-import { useTimelineStore } from '../stores/timeline-store'
+import { setTimelineState } from '../test-helpers'
 import { useItemsStore } from '../stores/items-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
 import { TIMELINE_RULER_HEIGHT, ZOOM_MAX, ZOOM_MIN } from '../constants'
@@ -174,7 +174,7 @@ function resetStores() {
 
   resetPlaybackPreviewState()
 
-  useTimelineStore.setState({
+  setTimelineState({
     fps: 30,
     items: [VIDEO_ITEM],
     tracks: [VIDEO_TRACK],
@@ -723,7 +723,7 @@ describe('TimelineContent playback selection behavior', () => {
       { ...VIDEO_TRACK, id: 'track-video-3', name: 'V3', order: 2 },
     ]
 
-    useTimelineStore.setState({
+    setTimelineState({
       tracks: videoTracks,
       items: [],
     })
@@ -836,7 +836,7 @@ describe('TimelineContent playback selection behavior', () => {
       },
     ]
 
-    useTimelineStore.setState({
+    setTimelineState({
       tracks,
       items: [],
     })

@@ -1,19 +1,27 @@
 import React from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, configure, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+
 import type { TimelineItem } from '@/types/timeline'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import {
+  updateEffect,
   useCompositionsStore,
   useItemsStore,
-  useTimelineStore,
   useTimelineSettingsStore,
   useTransitionsStore,
 } from '@/features/preview/deps/timeline-store'
+import { setTimelineState } from '@/features/preview/deps/timeline-test-helpers-contract'
 import { useMediaLibraryStore } from '@/features/preview/deps/media-library'
 import { useGizmoStore } from '../stores/gizmo-store'
 import { useMaskEditorStore } from '../stores/mask-editor-store'
+
+// This suite's waits cover animation-frame chains plus async render work, which under
+// coverage instrumentation on a loaded runner legitimately exceed the 1s async-util
+// default. Scoped to this file: every other suite keeps the strict default, so an
+// unrelated async failure still fails within a second. Real hangs still fail, later.
+configure({ asyncUtilTimeout: 5_000 })
 
 const DEFAULT_PROJECT = { width: 1920, height: 1080, backgroundColor: '#000000' }
 
@@ -290,6 +298,7 @@ vi.mock('@/infrastructure/browser/blob-url-manager', async () => {
       },
       subscribe: mockState.subscribeVersion,
       getSnapshot: () => mockState.version.current,
+      onRevoke: () => () => {},
     },
     useBlobUrlVersion: () =>
       React.useSyncExternalStore(mockState.subscribeVersion, () => mockState.version.current),
@@ -562,7 +571,7 @@ function resetStores() {
   useItemsStore.getState().setTracks([])
   useItemsStore.getState().setItems([])
   useCompositionsStore.getState().setCompositions([])
-  useTimelineStore.setState({ keyframes: [] })
+  setTimelineState({ keyframes: [] })
   useTransitionsStore.getState().setTransitions([])
   useTimelineSettingsStore.setState({
     fps: 30,
@@ -895,7 +904,11 @@ function setDocumentVisibility(hidden: boolean) {
   })
 }
 
-describe('VideoPreview sync behavior', () => {
+// These tests drive a real renderer through several awaited render/warm cycles; under
+// coverage instrumentation on a loaded runner the 5s default is a ceiling they hit while
+// doing correct work (not a target). Scoped to this suite so a hang elsewhere still fails
+// in five seconds.
+describe('VideoPreview sync behavior', { timeout: 15_000 }, () => {
   beforeEach(() => {
     mockedPlayerFrame = 0
     mockedPlayerIsPlaying = false
@@ -2327,7 +2340,7 @@ describe('VideoPreview sync behavior', () => {
     renderer.renderFrame.mockClear()
 
     act(() => {
-      useTimelineStore.getState().updateEffect('item-previewed', 'effect-preview', {
+      updateEffect('item-previewed', 'effect-preview', {
         effect: {
           type: 'gpu-effect',
           gpuEffectType: 'gpu-sepia',
@@ -3396,6 +3409,34 @@ describe('VideoPreview sync behavior', () => {
     expect(scrubCanvas.style.visibility).toBe('visible')
   })
 
+  it('presents the frame the paused lookahead already prepared when the ruler hovers it', async () => {
+    setSingleCompoundItemWithGpuEffectAtFrame(47)
+    const { scrubCanvas, renderer } = await renderReadySingleRendererPreview(47)
+
+    // The pump prepares the frame after the paused playhead offscreen, deferred
+    // behind an idle window. Nothing else may request 48 while the playhead is
+    // paused and no ruler hover exists, so the first 48 render is that
+    // speculative lookahead — and it must not move the display off the
+    // committed frame.
+    await waitFor(() => {
+      expect(renderer.renderFrame).toHaveBeenCalledWith(48)
+      expect(getDisplayedFrame()).toBe(47)
+    })
+
+    act(() => {
+      usePlaybackStore.getState().setPreviewFrame(48)
+    })
+
+    // Hovering the frame the lookahead prepared is an explicit presentation
+    // request. Its requested-frame slot is consumed when the render is
+    // dequeued, so dropping the presentation here would leave the overlay on
+    // the committed frame until the next pointer move.
+    await waitFor(() => {
+      expect(getDisplayedFrame()).toBe(48)
+      expect(scrubCanvas.style.visibility).toBe('visible')
+    })
+  })
+
   it('keeps the last valid front buffer visible until a fast ruler swipe settles', async () => {
     setSingleVideoItemAtFrame({ id: 'item-fast-swipe-release' }, 47)
     const { scrubCanvas, renderer } = await renderReadySingleRendererPreview(47, {
@@ -4110,7 +4151,7 @@ describe('VideoPreview sync behavior', () => {
         },
       } as unknown as ReturnType<typeof useItemsStore.getState>['items'][number],
     ])
-    useTimelineStore.setState({
+    setTimelineState({
       keyframes: [
         {
           itemId: 'text-1',
@@ -4169,7 +4210,7 @@ describe('VideoPreview sync behavior', () => {
         },
       } as unknown as ReturnType<typeof useItemsStore.getState>['items'][number],
     ])
-    useTimelineStore.setState({ keyframes: [] })
+    setTimelineState({ keyframes: [] })
 
     const { scrubCanvas } = await renderPreviewAfterInitialSeek()
 
@@ -4718,7 +4759,7 @@ describe('VideoPreview sync behavior', () => {
         transform: { x: 0, y: 0, width: 100, height: 60, rotation: 0, opacity: 1 },
       } as unknown as ReturnType<typeof useItemsStore.getState>['items'][number],
     ])
-    useTimelineStore.setState({
+    setTimelineState({
       keyframes: [
         {
           itemId: 'item-1',

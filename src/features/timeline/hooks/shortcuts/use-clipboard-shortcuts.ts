@@ -5,7 +5,10 @@
 import { useHotkeys } from 'react-hotkeys-hook'
 import { toast } from 'sonner'
 import { usePlaybackStore } from '@/shared/state/playback'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
+import { useTransitionsStore } from '../../stores/transitions-store'
+import { useTimelineSettingsStore } from '../../stores/timeline-settings-store'
+import { addItems, removeItems, updateTransition } from '../../stores/timeline-actions'
 import { useZoomStore } from '../../stores/zoom-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useClipboardStore } from '@/shared/state/clipboard'
@@ -33,7 +36,8 @@ function revealPastedItems(itemIds: readonly string[]): void {
       return
     }
 
-    const { items, fps } = useTimelineStore.getState()
+    const { items } = useItemsStore.getState()
+    const { fps } = useTimelineSettingsStore.getState()
     const { pixelsPerSecond } = useZoomStore.getState()
     const pastedItems = items.filter((item) => itemIds.includes(item.id))
     if (pastedItems.length === 0 || fps <= 0) {
@@ -71,12 +75,9 @@ export function useClipboardShortcuts() {
   const selectItems = useSelectionStore((s) => s.selectItems)
   const clearItemSelection = useSelectionStore((s) => s.clearItemSelection)
   const activeTrackId = useSelectionStore((s) => s.activeTrackId)
-  const items = useTimelineStore((s) => s.items)
-  const transitions = useTimelineStore((s) => s.transitions)
-  const tracks = useTimelineStore((s) => s.tracks)
-  const addItems = useTimelineStore((s) => s.addItems)
-  const removeItems = useTimelineStore((s) => s.removeItems)
-  const updateTransition = useTimelineStore((s) => s.updateTransition)
+  const items = useItemsStore((s) => s.items)
+  const transitions = useTransitionsStore((s) => s.transitions)
+  const tracks = useItemsStore((s) => s.tracks)
   const copyTransition = useClipboardStore((s) => s.copyTransition)
   const transitionClipboard = useClipboardStore((s) => s.transitionClipboard)
   const copyItems = useClipboardStore((s) => s.copyItems)
@@ -178,7 +179,7 @@ export function useClipboardShortcuts() {
       if (itemsClipboard && itemsClipboard.items.length > 0) {
         event.preventDefault()
         const currentFrame = usePlaybackStore.getState().currentFrame
-        const storeItems = useTimelineStore.getState().items
+        const storeItems = useItemsStore.getState().items
         const newItemIds: string[] = []
         const newItems: TimelineItem[] = []
         const usedTrackIds = new Set<string>()

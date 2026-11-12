@@ -2,7 +2,7 @@ import { memo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useMicRecordingStore } from '@/shared/state/mic-recording-store'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useZoomStore } from '../stores/zoom-store'
 
 /**
@@ -19,7 +19,7 @@ export const TimelineRecordingOverlay = memo(function TimelineRecordingOverlay()
   const { t } = useTranslation()
   const status = useMicRecordingStore((s) => s.status)
   const recordStartFrame = useMicRecordingStore((s) => s.recordStartFrame)
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const barRef = useRef<HTMLDivElement>(null)
   const labelRef = useRef<HTMLDivElement>(null)
 

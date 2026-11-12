@@ -82,4 +82,67 @@ describe('audio scrub preview', () => {
 
     expect(first.source.stop).toHaveBeenCalledTimes(1)
   })
+
+  it('evicts decoded buffers beyond the byte budget and re-decodes on demand', async () => {
+    const fake = makeFakeAudioContext()
+    const decodedBuffer = {
+      duration: 10,
+      length: 100,
+      numberOfChannels: 2,
+    } as AudioBuffer
+    const decodeAudioData = vi.fn(async () => decodedBuffer)
+    const context = {
+      ...fake.context,
+      decodeAudioData,
+    } as unknown as AudioContext
+    const fetchArrayBuffer = vi.fn(async (url: string) =>
+      url === 'blob:audio-1' ? new ArrayBuffer(8) : new ArrayBuffer(16),
+    )
+    const scrub = createAudioScrubPreview({
+      createAudioContext: () => context,
+      fetchArrayBuffer,
+      // One buffer is 800 bytes (100 frames × 2 channels × 4 bytes).
+      maxCachedBufferBytes: 800,
+    })
+
+    await scrub.scrub({ mediaId: 'audio-1', mediaUrl: 'blob:audio-1', timeSeconds: 1 })
+    await scrub.scrub({ mediaId: 'audio-2', mediaUrl: 'blob:audio-2', timeSeconds: 1 })
+
+    expect(fetchArrayBuffer).toHaveBeenCalledTimes(2)
+
+    // audio-1 was evicted when audio-2 pushed the cache over budget.
+    await scrub.scrub({ mediaId: 'audio-1', mediaUrl: 'blob:audio-1', timeSeconds: 2 })
+
+    const audioOneFetches = fetchArrayBuffer.mock.calls.filter(([url]) => url === 'blob:audio-1')
+    expect(audioOneFetches).toHaveLength(2)
+    expect(decodeAudioData).toHaveBeenCalledTimes(3)
+  })
+
+  it('drops failed decodes so a later scrub can retry', async () => {
+    const fake = makeFakeAudioContext()
+    let remainingFailures = 1
+    const decodeAudioData = vi.fn(async () => {
+      if (remainingFailures > 0) {
+        remainingFailures -= 1
+        throw new Error('decode failed')
+      }
+      return fake.buffer
+    })
+    const context = {
+      ...fake.context,
+      decodeAudioData,
+    } as unknown as AudioContext
+    const scrub = createAudioScrubPreview({
+      createAudioContext: () => context,
+      fetchArrayBuffer: vi.fn(async () => new ArrayBuffer(8)),
+    })
+
+    await expect(
+      scrub.scrub({ mediaId: 'audio-1', mediaUrl: 'blob:audio-1', timeSeconds: 1 }),
+    ).rejects.toThrow('decode failed')
+
+    await scrub.scrub({ mediaId: 'audio-1', mediaUrl: 'blob:audio-1', timeSeconds: 1 })
+
+    expect(decodeAudioData).toHaveBeenCalledTimes(2)
+  })
 })

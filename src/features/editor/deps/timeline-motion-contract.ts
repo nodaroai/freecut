@@ -13,7 +13,6 @@ export {
   KEYFRAME_DIAMOND_RENDERED_WIDTH_PX,
   ROW_HEIGHT,
   getAnimatablePropertiesForItem,
-  getEffectPropertyBaseValue,
   getProceduralBands,
   getPropertyAccordionGroups,
   getPropertyDisplayGroups,
@@ -65,10 +64,12 @@ export {
 export type { CreateCompositeCompositionOptions } from '@/features/timeline/stores/actions/composition-actions'
 export { buildDroppedCompositionTimelineItems } from '@/features/timeline/utils/dropped-composition'
 export {
+  buildDroppedMediaTimelineItem,
   buildDroppedMediaTimelineItems,
   getDroppedMediaDurationInFrames,
 } from '@/features/timeline/utils/dropped-media'
 export { resolveDroppedMediaEntriesFromPayload } from '@/features/timeline/utils/drop-execution'
+export type { DroppedMediaEntry } from '@/features/timeline/utils/drop-execution'
 export {
   createDefaultControllerItem,
   createDefaultGradientItem,

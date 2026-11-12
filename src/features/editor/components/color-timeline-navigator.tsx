@@ -1,7 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useTranslation } from 'react-i18next'
-import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  useItemsStore,
+  useMarkersStore,
+  useTimelineSettingsStore,
+} from '@/features/editor/deps/timeline-store'
 import type { GpuEffectInstance } from '@/infrastructure/gpu-effects'
 import type { GpuEffect, ItemEffect } from '@/types/effects'
 import { renderGradedTileFrame } from '@/features/editor/utils/color-grade-tile-renderer'
@@ -260,13 +264,13 @@ const ColorFilmTile = memo(function ColorFilmTile({
 export const ColorTimelineNavigator = memo(function ColorTimelineNavigator() {
   const { t } = useTranslation()
   const { items, tracks } = useItemsStore(useShallow((s) => ({ items: s.items, tracks: s.tracks })))
-  const { markers, inPoint, outPoint } = useTimelineStore(
+  const { markers, inPoint, outPoint } = useMarkersStore(
     useShallow((s) => ({ markers: s.markers, inPoint: s.inPoint, outPoint: s.outPoint })),
   )
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame)
   const setPreviewFrame = usePlaybackStore((s) => s.setPreviewFrame)
   const pausePlayback = usePlaybackStore((s) => s.pause)
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId)
   const selectItems = useSelectionStore((s) => s.selectItems)

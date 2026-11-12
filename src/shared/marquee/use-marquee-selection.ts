@@ -31,7 +31,7 @@ export interface MarqueeItem {
   getBoundingRect: () => Rect | null
 }
 
-export interface ResolvedMarqueeItem {
+interface ResolvedMarqueeItem {
   id: string
   rect: Rect | null
 }

@@ -8,7 +8,7 @@ import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
-import { useTimelineStore } from '../stores/timeline-store'
+import { removeSilenceFromItems } from '../stores/timeline-actions'
 import { useSilenceRemovalDialogStore } from '../stores/silence-removal-dialog-store'
 import {
   analyzeSilenceForItems,
@@ -350,7 +350,7 @@ export function SilenceRemovalDialog() {
 
     let result: RemoveSilenceResult | null = null
     try {
-      result = useTimelineStore.getState().removeSilenceFromItems(itemIds, rangesByMediaId)
+      result = removeSilenceFromItems(itemIds, rangesByMediaId)
     } finally {
       clearSilencePreviewOverlays(itemIds)
       close()

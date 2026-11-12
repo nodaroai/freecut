@@ -9,14 +9,15 @@
  * - Event emission
  */
 
-import { useCallback, useRef, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useMemo, useState } from 'react'
 import { PlayerEmitter, usePlayerEmitter } from './event-emitter'
 import {
-  useBridgedTimelineContext,
+  useBridgedTimelinePlayback,
   useBridgedSetTimelineContext,
   useBridgedSetTimelineFrame,
   useBridgedActualLastFrame,
   useBridgedActualFirstFrame,
+  useClock,
 } from './clock'
 
 // Type definitions for the hook return value
@@ -56,32 +57,39 @@ export function usePlayer(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { loop: _loop = false, onEnded: _onEnded } = options
 
-  // Get context values
+  // Get context values. The frame is intentionally NOT read from context here:
+  // doing so subscribed every usePlayer caller to per-frame re-renders.
   const {
     playing: isPlayingState,
     imperativePlaying,
     playbackRate,
     setPlaybackRate: setClockPlaybackRate,
-  } = useBridgedTimelineContext()
+  } = useBridgedTimelinePlayback()
   const { setPlaying } = useBridgedSetTimelineContext()
   const setTimelineFrame = useBridgedSetTimelineFrame()
   const emitter = usePlayerEmitter()
+  const clock = useClock()
 
   // Track if user has played at least once
   const [hasPlayed, setHasPlayed] = useState(false)
 
   // Refs for tracking state without causing re-renders
   const playStart = useRef(0)
-  const frameRef = useRef(0)
+  const frameRef = useRef(clock.currentFrame)
   const bufferingRef = useRef(false)
+
+  // Keep the imperative frame ref synced from clock events. The clock emits
+  // 'framechange' for both ticks and seeks (see Clock.seekToFrame).
+  useEffect(() => {
+    frameRef.current = clock.currentFrame
+    return clock.onFrameChange((frame) => {
+      frameRef.current = frame
+    })
+  }, [clock])
 
   // Calculate boundaries
   const lastFrame = useBridgedActualLastFrame(durationInFrames)
   const firstFrame = useBridgedActualFirstFrame()
-
-  // Sync frame ref with current frame from context
-  const currentFrame = useBridgedTimelineContext().frame
-  frameRef.current = currentFrame
 
   /**
    * Seek to a specific frame

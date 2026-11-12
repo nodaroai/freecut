@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
-import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useItemsStore } from '@/features/editor/deps/timeline-store'
+import { setTimelineState } from '@/features/editor/deps/timeline-test-helpers-contract'
 import { useGizmoStore } from '@/features/editor/deps/preview'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
@@ -70,7 +71,7 @@ describe('ColorTimelineNavigator', () => {
   beforeEach(() => {
     useItemsStore.getState().setTracks([VIDEO_TRACK, AUDIO_TRACK])
     useItemsStore.getState().setItems([VIDEO_ITEM])
-    useTimelineStore.setState({
+    setTimelineState({
       fps: 24,
       markers: [],
       inPoint: null,
@@ -183,7 +184,7 @@ describe('ColorTimelineNavigator', () => {
   })
 
   it('renders timeline markers and the in/out range in the color timeline view', () => {
-    useTimelineStore.setState({
+    setTimelineState({
       inPoint: 60,
       outPoint: 180,
       markers: [
@@ -202,7 +203,7 @@ describe('ColorTimelineNavigator', () => {
   })
 
   it('selects a marker and seeks to its frame from the color timeline', () => {
-    useTimelineStore.setState({
+    setTimelineState({
       markers: [{ id: 'marker-1', frame: 96, color: '#f97316', label: 'Warm pass' }],
     })
     useSelectionStore.getState().selectItems(['clip-1'])

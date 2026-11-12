@@ -4,7 +4,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { MapPin, Trash2 } from 'lucide-react'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  removeMarker,
+  updateMarker,
+  useMarkersStore,
+  useTimelineSettingsStore,
+} from '@/features/editor/deps/timeline-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { formatTimecodeDotFrames } from '@/shared/utils/time-utils'
 import { getMarkerOrdinals } from '@/shared/timeline/marker-names'
@@ -32,10 +37,8 @@ export function MarkerPanel() {
   // Granular selectors (Zustand v5 best practice)
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId)
   const clearSelection = useSelectionStore((s) => s.clearSelection)
-  const markers = useTimelineStore((s) => s.markers)
-  const updateMarker = useTimelineStore((s) => s.updateMarker)
-  const removeMarker = useTimelineStore((s) => s.removeMarker)
-  const fps = useTimelineStore((s) => s.fps)
+  const markers = useMarkersStore((s) => s.markers)
+  const fps = useTimelineSettingsStore((s) => s.fps)
 
   // Derive selected marker
   const selectedMarker = useMemo(
@@ -58,7 +61,7 @@ export function MarkerPanel() {
         updateMarker(selectedMarkerId, { frame: Math.max(0, Math.round(frame)) })
       }
     },
-    [selectedMarkerId, updateMarker],
+    [selectedMarkerId],
   )
 
   // Handle label change
@@ -69,7 +72,7 @@ export function MarkerPanel() {
         updateMarker(selectedMarkerId, { label: e.target.value || undefined })
       }
     },
-    [selectedMarkerId, updateMarker],
+    [selectedMarkerId],
   )
 
   // Handle color change
@@ -79,7 +82,7 @@ export function MarkerPanel() {
         updateMarker(selectedMarkerId, { color })
       }
     },
-    [selectedMarkerId, updateMarker],
+    [selectedMarkerId],
   )
 
   // Handle delete
@@ -88,14 +91,14 @@ export function MarkerPanel() {
       removeMarker(selectedMarkerId)
       clearSelection()
     }
-  }, [selectedMarkerId, removeMarker, clearSelection])
+  }, [selectedMarkerId, clearSelection])
 
   // Handle reset color to default
   const handleResetColor = useCallback(() => {
     if (selectedMarkerId && selectedMarker?.color !== DEFAULT_MARKER_COLOR) {
       updateMarker(selectedMarkerId, { color: DEFAULT_MARKER_COLOR })
     }
-  }, [selectedMarkerId, selectedMarker?.color, updateMarker])
+  }, [selectedMarkerId, selectedMarker?.color])
 
   if (!selectedMarker) {
     return (

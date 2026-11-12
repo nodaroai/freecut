@@ -76,6 +76,8 @@ export default defineConfig({
     '*.{js,ts,tsx,json}': 'vp check --fix',
   },
   test: {
+    // Preserve Vitest 4's mock history; adopt Vitest 5 clearing separately.
+    clearMocks: false,
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
@@ -148,13 +150,18 @@ export default defineConfig({
             normalizedId.endsWith('/src/components/ui/accordion.tsx') ||
             normalizedId.endsWith('/src/components/ui/button.tsx') ||
             normalizedId.endsWith('/src/components/ui/button-variants.ts') ||
-            normalizedId.endsWith('/src/components/ui/global-tooltip.tsx')
+            normalizedId.endsWith('/src/components/ui/global-tooltip.tsx') ||
+            // TooltipProvider wraps the whole app in App, so the Radix tooltip
+            // primitive must live in the shell. Without this pin, the chunker
+            // places it in feature-editing-core (majority importer) and the
+            // entire 1.2MB editor chunk loads on the landing page.
+            normalizedId.endsWith('/src/components/ui/tooltip.tsx')
 
           // Logger must be in its own chunk to avoid circular chunk TDZ errors.
           // Without this, Rollup places it in composition-runtime which has a
           // circular import with media-library, causing "Cannot access before
           // initialization" in production builds.
-          if (id.endsWith('src/shared/logging/logger.ts')) {
+          if (normalizedId.endsWith('/src/shared/logging/logger.ts')) {
             return 'core-logger'
           }
 
@@ -164,8 +171,7 @@ export default defineConfig({
             normalizedId.includes('/src/app/error-boundary') ||
             normalizedId.includes('/src/app/pwa-install-prompt') ||
             isWorkspaceGateShell ||
-            (normalizedId.includes('/src/i18n/') &&
-              !normalizedId.includes('/src/i18n/locales/partials/'))
+            (normalizedId.includes('/src/i18n/') && !normalizedId.includes('/src/i18n/locales/'))
           ) {
             return 'app-shell'
           }
@@ -173,10 +179,7 @@ export default defineConfig({
           // Timeline bridge modules that re-export UI must live with the UI
           // chunk; otherwise core ends up importing UI, which creates a
           // feature-editing-core <-> feature-editing-ui TDZ cycle at startup.
-          if (
-            id.includes('/src/features/timeline/contracts/editor.ts') ||
-            id.includes('/src/features/timeline/index.ts')
-          ) {
+          if (normalizedId.includes('/src/features/timeline/index.ts')) {
             return 'feature-editing-ui'
           }
 
@@ -220,75 +223,79 @@ export default defineConfig({
             return 'timeline-keyframe-graph'
           }
           if (
-            id.includes('/src/features/timeline/components/bento-layout-dialog') ||
-            id.includes('/src/features/timeline/components/reverse-conform-dialog') ||
-            id.includes('/src/features/timeline/components/silence-removal-dialog') ||
-            id.includes('/src/features/timeline/components/filler-removal-dialog')
+            normalizedId.includes('/src/features/timeline/components/bento-layout-dialog') ||
+            normalizedId.includes('/src/features/timeline/components/reverse-conform-dialog') ||
+            normalizedId.includes('/src/features/timeline/components/silence-removal-dialog') ||
+            normalizedId.includes('/src/features/timeline/components/filler-removal-dialog')
           ) {
             return 'timeline-dialogs'
           }
           if (
-            id.includes('/src/features/timeline/') ||
-            id.includes('/src/features/media-library/')
+            normalizedId.includes('/src/features/timeline/') ||
+            normalizedId.includes('/src/features/media-library/')
           ) {
-            if (id.includes('/components/')) {
+            if (normalizedId.includes('/components/')) {
               return 'feature-editing-ui'
             }
             return 'feature-editing-core'
           }
-          if (id.includes('/src/features/effects/')) {
+          if (normalizedId.includes('/src/features/effects/')) {
             return 'feature-effects'
           }
-          // Composition-runtime shares deeply coupled deps with editing-core
-          // (timeline stores, keyframes, export utils). Merging them into one
-          // chunk eliminates the circular chunk dependency that causes TDZ
-          // errors ("Cannot access before initialization") in production builds.
-          if (id.includes('/src/features/composition-runtime/')) {
-            return 'feature-editing-core'
-          }
+          // `src/runtime/composition-runtime/**` deliberately has no rule here.
+          // A rule pinning it to `feature-editing-core` used to exist but matched
+          // a path the code no longer lives at, so it was inert; the current
+          // graph has no chunk cycle to break (feature-editing-core imports only
+          // rolldown-runtime and app-shell), while re-pinning it would move ~130
+          // modules into that 1.6MB chunk.
 
           // React must be in its own chunk, loaded first to ensure proper initialization
           // This prevents "Cannot set properties of undefined" errors with React 19.2 features
-          if (id.includes('node_modules/react-dom')) {
+          if (normalizedId.includes('/node_modules/react-dom/')) {
             return 'react-vendor'
           }
-          if (id.includes('node_modules/react/')) {
+          if (normalizedId.includes('/node_modules/react/')) {
             return 'react-vendor'
           }
-          // Router framework
-          if (id.includes('@tanstack/react-router')) {
+          // Router framework — router-core/history are separate packages, so
+          // they need their own matchers or they leak into app-shell.
+          if (
+            normalizedId.includes('/node_modules/@tanstack/react-router/') ||
+            normalizedId.includes('/node_modules/@tanstack/router-core/') ||
+            normalizedId.includes('/node_modules/@tanstack/history/')
+          ) {
             return 'router-vendor'
           }
-          if (normalizedId.includes('sonner')) {
+          if (normalizedId.includes('/node_modules/sonner/')) {
             return 'toast-vendor'
           }
           // State management
-          if (id.includes('/node_modules/zustand/') || id.includes('/node_modules/zundo/')) {
+          if (normalizedId.includes('/node_modules/zustand/')) {
             return 'state-vendor'
           }
           // Media processing - loaded on demand
-          if (id.includes('@mediabunny/ac3')) {
+          if (normalizedId.includes('/node_modules/@mediabunny/ac3/')) {
             return 'media-ac3-decoder'
           }
-          if (id.includes('@mediabunny/mp3-encoder')) {
+          if (normalizedId.includes('/node_modules/@mediabunny/mp3-encoder/')) {
             return 'media-mp3-encoder'
           }
-          if (id.includes('/node_modules/mediabunny/')) {
+          if (normalizedId.includes('/node_modules/mediabunny/')) {
             return 'media-bunny-core'
           }
-          if (id.includes('@mediabunny/')) {
+          if (normalizedId.includes('/node_modules/@mediabunny/')) {
             return 'media-processing'
           }
           // Audio/video processing helpers
-          if (id.includes('/node_modules/gifuct-js/')) {
+          if (normalizedId.includes('/node_modules/gifuct-js/')) {
             return 'gif-processing'
           }
           // UI framework
-          if (id.includes('@radix-ui/')) {
+          if (normalizedId.includes('/node_modules/@radix-ui/')) {
             return 'vendor-ui'
           }
           // Icons - keep lucide-react in separate chunk for better caching
-          if (id.includes('lucide-react')) {
+          if (normalizedId.includes('/node_modules/lucide-react/')) {
             return 'vendor-icons'
           }
           // Animation - keep motion in its own chunk for better caching

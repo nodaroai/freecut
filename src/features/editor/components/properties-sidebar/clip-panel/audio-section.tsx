@@ -1,10 +1,13 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Music, RotateCcw, Volume2 } from 'lucide-react'
-import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import type { TimelineItem } from '@/types/timeline'
-import { useKeyframesStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  applyAutoKeyframeOperations,
+  updateItem,
+  useItemsStore,
+} from '@/features/editor/deps/timeline-store'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
 import {
   getAutoKeyframeOperation,
@@ -14,8 +17,9 @@ import {
   KeyframeToggle,
 } from '@/features/editor/deps/keyframes'
 import { PropertyRow, PropertySection, SliderInput } from '../components'
-import { getMixedValue } from '../utils'
+import { demixValue, getMixedValue } from '../utils'
 import { getAudioSectionItems } from './audio-section-utils'
+import { useKeyframesByItemId } from './use-keyframes-by-item-id'
 import { AudioEqPanelContent } from './audio-eq-panel-content'
 import {
   AUDIO_PITCH_CENTS_MAX,
@@ -41,12 +45,10 @@ const AUDIO_PITCH_LIVE_THROTTLE_MS = 50
  */
 export function AudioSection({ items }: AudioSectionProps) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s) => s.updateItem)
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew)
   const clearPreview = useGizmoStore((s) => s.clearPreview)
   const clearPreviewForItems = useGizmoStore((s) => s.clearPreviewForItems)
   const currentFrame = useThrottledFrame()
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
 
   const pitchPreviewOpRef = useRef(0)
 
@@ -57,18 +59,7 @@ export function AudioSection({ items }: AudioSectionProps) {
     () => new Map(audioItems.map((item) => [item.id, item])),
     [audioItems],
   )
-  const itemKeyframes = useKeyframesStore(
-    useShallow(
-      useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId] ?? null), [itemIds]),
-    ),
-  )
-  const keyframesByItemId = useMemo(() => {
-    const map = new Map<string, (typeof itemKeyframes)[number]>()
-    for (const [index, itemId] of itemIds.entries()) {
-      map.set(itemId, itemKeyframes[index] ?? null)
-    }
-    return map
-  }, [itemIds, itemKeyframes])
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   const volume = useMemo(() => {
     if (audioItems.length === 0) return 0 as number | 'mixed'
@@ -139,7 +130,7 @@ export function AudioSection({ items }: AudioSectionProps) {
       }
       queueMicrotask(() => clearPreview())
     },
-    [applyAutoKeyframeOperations, autoKeyframeVolume, clearPreview, itemIds, updateItem],
+    [autoKeyframeVolume, clearPreview, itemIds],
   )
 
   const handleFadeInLiveChange = useCallback(
@@ -158,7 +149,7 @@ export function AudioSection({ items }: AudioSectionProps) {
       itemIds.forEach((id) => updateItem(id, { audioFadeIn: value }))
       queueMicrotask(() => clearPreview())
     },
-    [clearPreview, itemIds, updateItem],
+    [clearPreview, itemIds],
   )
 
   const handleFadeOutLiveChange = useCallback(
@@ -177,7 +168,7 @@ export function AudioSection({ items }: AudioSectionProps) {
       itemIds.forEach((id) => updateItem(id, { audioFadeOut: value }))
       queueMicrotask(() => clearPreview())
     },
-    [clearPreview, itemIds, updateItem],
+    [clearPreview, itemIds],
   )
 
   const handleAudioPitchLiveChange = useCallback(
@@ -223,7 +214,7 @@ export function AudioSection({ items }: AudioSectionProps) {
         schedule(() => {
           if (pitchPreviewOpRef.current !== opId) return
 
-          const currentItems = useTimelineStore.getState().items
+          const currentItems = useItemsStore.getState().items
           const commitLanded = currentItems.every(
             (item) => !itemIds.includes(item.id) || (item[field] ?? 0) === value,
           )
@@ -241,61 +232,61 @@ export function AudioSection({ items }: AudioSectionProps) {
         })
       })
     },
-    [clearPreviewForItems, itemIds, setPropertiesPreviewNew, updateItem],
+    [clearPreviewForItems, itemIds, setPropertiesPreviewNew],
   )
 
   const handleResetVolume = useCallback(() => {
     const tolerance = 0.1
-    const currentItems = useTimelineStore.getState().items
+    const currentItems = useItemsStore.getState().items
     const needsUpdate = currentItems.some(
       (item) => itemIds.includes(item.id) && Math.abs(item.volume ?? 0) > tolerance,
     )
     if (needsUpdate) {
       itemIds.forEach((id) => updateItem(id, { volume: 0 }))
     }
-  }, [itemIds, updateItem])
+  }, [itemIds])
 
   const handleResetFadeIn = useCallback(() => {
     const tolerance = 0.01
-    const currentItems = useTimelineStore.getState().items
+    const currentItems = useItemsStore.getState().items
     const needsUpdate = currentItems.some(
       (item) => itemIds.includes(item.id) && (item.audioFadeIn ?? 0) > tolerance,
     )
     if (needsUpdate) {
       itemIds.forEach((id) => updateItem(id, { audioFadeIn: 0 }))
     }
-  }, [itemIds, updateItem])
+  }, [itemIds])
 
   const handleResetFadeOut = useCallback(() => {
     const tolerance = 0.01
-    const currentItems = useTimelineStore.getState().items
+    const currentItems = useItemsStore.getState().items
     const needsUpdate = currentItems.some(
       (item) => itemIds.includes(item.id) && (item.audioFadeOut ?? 0) > tolerance,
     )
     if (needsUpdate) {
       itemIds.forEach((id) => updateItem(id, { audioFadeOut: 0 }))
     }
-  }, [itemIds, updateItem])
+  }, [itemIds])
 
   const handleResetPitchSemitones = useCallback(() => {
-    const currentItems = useTimelineStore.getState().items
+    const currentItems = useItemsStore.getState().items
     const needsUpdate = currentItems.some(
       (item) => itemIds.includes(item.id) && (item.audioPitchSemitones ?? 0) !== 0,
     )
     if (needsUpdate) {
       itemIds.forEach((id) => updateItem(id, { audioPitchSemitones: 0 }))
     }
-  }, [itemIds, updateItem])
+  }, [itemIds])
 
   const handleResetPitchCents = useCallback(() => {
-    const currentItems = useTimelineStore.getState().items
+    const currentItems = useItemsStore.getState().items
     const needsUpdate = currentItems.some(
       (item) => itemIds.includes(item.id) && (item.audioPitchCents ?? 0) !== 0,
     )
     if (needsUpdate) {
       itemIds.forEach((id) => updateItem(id, { audioPitchCents: 0 }))
     }
-  }, [itemIds, updateItem])
+  }, [itemIds])
 
   if (audioItems.length === 0) return null
 
@@ -317,7 +308,7 @@ export function AudioSection({ items }: AudioSectionProps) {
             <KeyframeToggle
               itemIds={itemIds}
               property="volume"
-              currentValue={volume === 'mixed' ? 0 : volume}
+              currentValue={demixValue(volume, 0)}
             />
             <Button
               variant="ghost"

@@ -49,15 +49,3 @@ export async function enumerateAudioInputs(): Promise<AudioInputDevice[]> {
     label: device.label || `Microphone ${index + 1}`,
   }))
 }
-
-/** Subscribe to device add/remove events (e.g. plugging in a USB mic). */
-export function onAudioInputDevicesChanged(callback: () => void): () => void {
-  if (!hasMediaDevices()) {
-    return () => {}
-  }
-
-  navigator.mediaDevices.addEventListener('devicechange', callback)
-  return () => {
-    navigator.mediaDevices.removeEventListener('devicechange', callback)
-  }
-}

@@ -26,6 +26,7 @@ import {
   LFM_SCENE_CAPTION_PROMPT,
   parseSceneCaptionResponse,
 } from './captioning/scene-caption-format'
+import { createModelLoadProgressCallback } from './model-load-progress'
 
 const MODEL_ID = 'LiquidAI/LFM2.5-VL-450M-ONNX'
 
@@ -60,7 +61,6 @@ async function loadModel(): Promise<void> {
     post({ type: 'progress', stage: 'loading-transformers', percent: 0 })
     post({ type: 'progress', stage: 'loading-model', percent: 5 })
 
-    let lastPct = 5
     const loadedProcessor = await AutoProcessor.from_pretrained(MODEL_ID)
 
     if (disposed || thisGen !== loadGeneration) return
@@ -72,17 +72,7 @@ async function loadModel(): Promise<void> {
         decoder_model_merged: 'q4',
       },
       device: 'webgpu',
-      progress_callback: disposed
-        ? undefined
-        : (info: { status?: string; total?: number; loaded?: number }) => {
-            if (info.status === 'progress' && info.total && info.loaded) {
-              const pct = 5 + (info.loaded / info.total) * 90
-              if (pct - lastPct > 2) {
-                lastPct = pct
-                post({ type: 'progress', stage: 'loading-model', percent: Math.round(pct) })
-              }
-            }
-          },
+      progress_callback: disposed ? undefined : createModelLoadProgressCallback(post),
     })
 
     if (disposed || thisGen !== loadGeneration) {

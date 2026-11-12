@@ -28,8 +28,11 @@ interface BlobUrlEntry {
  */
 class BlobUrlManager {
   private entries = new Map<string, BlobUrlEntry>()
+  /** Reverse index so per-message URL lookups don't scan every entry. */
+  private mediaIdByUrl = new Map<string, string>()
   private version = 0
   private listeners = new Set<() => void>()
+  private revokeListeners = new Set<(url: string) => void>()
 
   /** Notify React subscribers that blob URLs have changed */
   private notify(): void {
@@ -43,6 +46,16 @@ class BlobUrlManager {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /**
+   * Subscribe to individual URL revocations. URL-keyed caches (e.g. the
+   * decoder prewarm blob/bitmap caches) use this to drop entries whose Blob
+   * would otherwise be retained for the whole session.
+   */
+  onRevoke = (listener: (url: string) => void): (() => void) => {
+    this.revokeListeners.add(listener)
+    return () => this.revokeListeners.delete(listener)
   }
 
   /** Get current version snapshot (for useSyncExternalStore) */
@@ -67,6 +80,7 @@ class BlobUrlManager {
     const url = URL.createObjectURL(blob)
     registerObjectUrl(url, blob, metadata)
     this.entries.set(mediaId, { url, refCount: 1, blob, metadata })
+    this.mediaIdByUrl.set(url, mediaId)
     this.notify()
     return url
   }
@@ -87,6 +101,7 @@ class BlobUrlManager {
       return existing.url
     }
     this.entries.set(mediaId, { url, refCount: 1, external: true })
+    this.mediaIdByUrl.set(url, mediaId)
     this.notify()
     return url
   }
@@ -111,10 +126,7 @@ class BlobUrlManager {
    * Returns null if the URL is not tracked.
    */
   getMediaIdByUrl(url: string): string | null {
-    for (const [mediaId, entry] of this.entries) {
-      if (entry.url === url) return mediaId
-    }
-    return null
+    return this.mediaIdByUrl.get(url) ?? null
   }
 
   /**
@@ -126,6 +138,7 @@ class BlobUrlManager {
     if (!entry) return
     this.revokeEntry(entry)
     this.entries.delete(mediaId)
+    this.mediaIdByUrl.delete(entry.url)
     this.notify()
   }
 
@@ -134,6 +147,9 @@ class BlobUrlManager {
     if (entry.external) return
     unregisterObjectUrl(entry.url)
     URL.revokeObjectURL(entry.url)
+    for (const listener of this.revokeListeners) {
+      listener(entry.url)
+    }
   }
 
   /**
@@ -148,6 +164,7 @@ class BlobUrlManager {
     if (entry.refCount <= 0) {
       this.revokeEntry(entry)
       this.entries.delete(mediaId)
+      this.mediaIdByUrl.delete(entry.url)
       this.notify()
       logger.debug(`Revoked blob URL for media ${mediaId}`)
     }
@@ -163,6 +180,7 @@ class BlobUrlManager {
       this.revokeEntry(entry)
     }
     this.entries.clear()
+    this.mediaIdByUrl.clear()
     this.notify()
   }
 
@@ -175,6 +193,7 @@ class BlobUrlManager {
       logger.debug(`Revoked blob URL for media ${mediaId}`)
     }
     this.entries.clear()
+    this.mediaIdByUrl.clear()
     this.notify()
   }
 

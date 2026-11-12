@@ -8,7 +8,7 @@ import {
   resolveCornerPinForSize,
   withCornerPinReferenceSize,
 } from '@/features/editor/deps/composition-runtime'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItem } from '@/features/editor/deps/timeline-store'
 import { useCornerPinStore } from '@/features/editor/deps/preview'
 import { PropertySection, PropertyRow, NumberInput } from '../components'
 
@@ -38,13 +38,10 @@ const CORNER_LABELS: Record<CornerKey, string> = {
  */
 export const CornerPinSection = memo(function CornerPinSection({ items }: CornerPinSectionProps) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s) => s.updateItem)
-  const {
-    isEditing: isCornerPinEditing,
-    editingItemId,
-    startEditing,
-    stopEditing,
-  } = useCornerPinStore()
+  const isCornerPinEditing = useCornerPinStore((s) => s.isEditing)
+  const editingItemId = useCornerPinStore((s) => s.editingItemId)
+  const startEditing = useCornerPinStore((s) => s.startEditing)
+  const stopEditing = useCornerPinStore((s) => s.stopEditing)
 
   const item = items.length === 1 ? items[0]! : null
   const cornerPin = useMemo(() => {
@@ -105,14 +102,14 @@ export const CornerPinSection = memo(function CornerPinSection({ items }: Corner
         ),
       })
     },
-    [item, updateItem],
+    [item],
   )
 
   // Reset all corners to [0, 0]
   const handleReset = useCallback(() => {
     if (!item) return
     updateItem(item.id, { cornerPin: undefined })
-  }, [item, updateItem])
+  }, [item])
 
   // Toggle interactive editing
   const toggleEditMode = useCallback(() => {

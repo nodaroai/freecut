@@ -5,14 +5,6 @@ import { createLogger } from '@/shared/logging/logger'
 import { rebrandDeep } from '@/shared/branding'
 import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGE_CODES, resolveSupportedLanguage } from './languages'
 import en from './locales/en.json'
-import es from './locales/es.json'
-import fr from './locales/fr.json'
-import de from './locales/de.json'
-import ptBR from './locales/pt-BR.json'
-import tr from './locales/tr.json'
-import ja from './locales/ja.json'
-import ko from './locales/ko.json'
-import zh from './locales/zh.json'
 
 const log = createLogger('i18n')
 
@@ -20,17 +12,16 @@ export const I18N_STORAGE_KEY = 'freecut-language'
 
 type LocaleTree = Record<string, unknown>
 
-const baseLocales: Record<string, LocaleTree> = {
-  en: en as LocaleTree,
-  es: es as LocaleTree,
-  fr: fr as LocaleTree,
-  de: de as LocaleTree,
-  'pt-BR': ptBR as LocaleTree,
-  tr: tr as LocaleTree,
-  ja: ja as LocaleTree,
-  ko: ko as LocaleTree,
-  zh: zh as LocaleTree,
-}
+// English is the fallback language and must be available synchronously at
+// module init. Every other base locale loads on demand in
+// loadLanguageResources() — non-English users already await that before first
+// render, so this only removes dead weight from the initial bundle.
+const enBase: LocaleTree = en as LocaleTree
+
+const lazyBaseLocaleModules = import.meta.glob<{ default: LocaleTree }>([
+  './locales/*.json',
+  '!./locales/en.json',
+])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -60,27 +51,28 @@ const enPartialModules = import.meta.glob<{ default: LocaleTree }>('./locales/pa
   eager: true,
 })
 
-// Lazy: all language partial dirs — loaded on demand when switching language.
-const lazyPartialModules = import.meta.glob<{ default: LocaleTree }>('./locales/partials/*/*.json')
+// Lazy: non-English partial dirs — loaded on demand when switching language.
+// English partials stay out: they are bundled eagerly above, and
+// loadLanguageResources() early-returns for the default language anyway.
+const lazyPartialModules = import.meta.glob<{ default: LocaleTree }>([
+  './locales/partials/*/*.json',
+  '!./locales/partials/en/*.json',
+])
 
 // Build the merged English tree eagerly.
-const enMerged: LocaleTree = structuredClone(baseLocales.en ?? {})
+const enMerged: LocaleTree = structuredClone(enBase)
 for (const [path, mod] of Object.entries(enPartialModules).sort(([a], [b]) => a.localeCompare(b))) {
   deepMerge(enMerged, normalizePartialSlice(path, mod.default ?? {}))
 }
 
-// Resources: full merged en tree + base-only trees for other languages.
-// Base-only ensures untranslated-yet feature strings fall back to English.
-const resources = Object.fromEntries(
-  SUPPORTED_LANGUAGE_CODES.map((lang) => [
-    lang,
-    {
-      translation: rebrandDeep(
-        lang === DEFAULT_LANGUAGE ? enMerged : structuredClone(baseLocales[lang] ?? {}),
-      ),
-    },
-  ]),
-)
+// Only English ships in the initial resources: it is the fallback language,
+// and every other language is added by loadLanguageResources() before the
+// first render or on language switch.
+const resources = {
+  [DEFAULT_LANGUAGE]: {
+    translation: rebrandDeep(enMerged),
+  },
+}
 
 void i18n
   .use(LanguageDetector)
@@ -114,17 +106,18 @@ function syncDocumentLanguage(lng: string): void {
 syncDocumentLanguage(i18n.resolvedLanguage ?? i18n.language ?? DEFAULT_LANGUAGE)
 i18n.on('languageChanged', syncDocumentLanguage)
 
-// Track which languages have had their partials fully loaded.
+// Track which languages have been fully loaded (base locale + partials).
 const loadedLanguages = new Set<string>([DEFAULT_LANGUAGE])
 
 export async function loadLanguageResources(lang: string): Promise<void> {
   const resolved = resolveSupportedLanguage(lang)
   if (loadedLanguages.has(resolved)) return
+  const baseLoader = lazyBaseLocaleModules[`./locales/${resolved}.json`]
+  const tree: LocaleTree = baseLoader ? structuredClone((await baseLoader()).default ?? {}) : {}
   const prefix = `./locales/partials/${resolved}/`
   const entries = Object.entries(lazyPartialModules)
     .filter(([path]) => path.startsWith(prefix))
     .sort(([a], [b]) => a.localeCompare(b))
-  const tree = structuredClone(baseLocales[resolved] ?? {})
   for (const [path, loader] of entries) {
     const mod = await loader()
     deepMerge(tree, normalizePartialSlice(path, mod.default ?? {}))

@@ -4,7 +4,8 @@
 
 import { useHotkeys } from 'react-hotkeys-hook'
 import { usePlaybackStore } from '@/shared/state/playback'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
+import { splitItem } from '../../stores/timeline-actions'
 import { useSelectionStore } from '@/shared/state/selection'
 import { HOTKEY_OPTIONS } from '@/config/hotkeys'
 import type { TimelineShortcutCallbacks } from '../use-timeline-shortcuts'
@@ -56,7 +57,7 @@ export function useToolShortcuts(callbacks: TimelineShortcutCallbacks) {
       event.preventDefault()
       const { previewFrame, previewItemId, currentFrame } = usePlaybackStore.getState()
       const splitFrame = previewFrame ?? currentFrame
-      const { items, splitItem } = useTimelineStore.getState()
+      const { items } = useItemsStore.getState()
 
       // If hovering over a specific item, split only that item
       if (previewItemId) {

@@ -57,7 +57,7 @@ export function flushTrackHeightOverrides(): void {
 }
 
 /** Base row height for tracks with no override, from the saved Track Size preset. */
-export function getPresetTrackHeight(): number {
+function getPresetTrackHeight(): number {
   return TRACK_SIZE_PRESET_HEIGHTS[useEditorStore.getState().trackSizePreset]
 }
 

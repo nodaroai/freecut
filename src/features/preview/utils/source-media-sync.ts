@@ -1,6 +1,6 @@
 const SOURCE_MONITOR_PLAYING_RESYNC_THRESHOLD_FRAMES = 6
 
-export function shouldResyncPlayingMedia(
+function shouldResyncPlayingMedia(
   currentTime: number,
   targetTime: number,
   fps: number,

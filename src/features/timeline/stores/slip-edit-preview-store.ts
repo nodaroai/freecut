@@ -28,6 +28,7 @@ export const useSlipEditPreviewStore = createEditPreviewStore<
 >({
   initialState: createInitialState,
   createActions: (set) => ({
-    setSlipDelta: (slipDelta) => set({ slipDelta }),
+    setSlipDelta: (slipDelta) =>
+      set((state) => (state.slipDelta === slipDelta ? state : { slipDelta })),
   }),
 })

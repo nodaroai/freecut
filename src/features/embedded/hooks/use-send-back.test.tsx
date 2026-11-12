@@ -5,6 +5,10 @@ import { useSendBack } from './use-send-back'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { exportProjectJson } from '../deps/project-bundle-contract'
 
+const { saveTimeline } = vi.hoisted(() => ({
+  saveTimeline: vi.fn(async (_projectId: string) => {}),
+}))
+
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: {
     getState: () => ({
@@ -15,9 +19,7 @@ vi.mock('../deps/projects-contract', () => ({
 vi.mock('../deps/project-bundle-contract', () => ({
   exportProjectJson: vi.fn(async () => ({ version: 2, items: [] })),
 }))
-vi.mock('../deps/timeline-contract', () => ({
-  useTimelineStore: { getState: () => ({ saveTimeline: vi.fn(async () => {}) }) },
-}))
+vi.mock('../deps/timeline-contract', () => ({ saveTimeline }))
 
 // The client render as Save & Exit's renderer sees it. Tests move it through
 // its states the way a real render would.
@@ -70,6 +72,8 @@ describe('useSendBack (save & exit)', () => {
       inputMetadata: null,
     })
     clientRender.startExport.mockClear()
+    saveTimeline.mockClear()
+    vi.mocked(exportProjectJson).mockClear()
   })
 
   it.each([
@@ -96,6 +100,11 @@ describe('useSendBack (save & exit)', () => {
       expect(clientRender.startExport).not.toHaveBeenCalled()
       expect(result.current.renderer).toBeNull()
       expect(useEmbeddedStore.getState().sendBackStatus).toBe('sent')
+      // The project handed back carries the latest edits: the timeline is saved first.
+      expect(saveTimeline).toHaveBeenCalledWith('p1')
+      const [saved] = saveTimeline.mock.invocationCallOrder
+      const [read] = vi.mocked(exportProjectJson).mock.invocationCallOrder
+      expect(saved).toBeLessThan(read!)
       postSpy.mockRestore()
     },
   )

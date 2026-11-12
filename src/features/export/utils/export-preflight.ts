@@ -3,7 +3,7 @@ import type { TimelineTrack } from '@/types/timeline'
 import { framesToSeconds } from '@/shared/utils/time-utils'
 import { isGifUrl, isWebpUrl } from '@/shared/utils/media-utils'
 import { ensureAudioEncoderSupport } from '@/shared/media/audio-encoder-support'
-import type { ClientCodec, ClientExportSettings, ClientVideoContainer } from './client-renderer'
+import type { ClientCodec, ClientExportSettings, ClientVideoContainer } from '../deps/renderer'
 import {
   getPreferredContainerForCodec,
   getSupportedCodecs,
@@ -13,8 +13,8 @@ import {
   getDefaultAudioCodec,
   getAudioBitrateForQuality,
   estimateFileSize,
-} from './client-renderer'
-import { mapRequestedClientSettings } from './render-pipeline'
+} from '../deps/renderer'
+import { mapRequestedClientSettings } from '../deps/renderer'
 import type { SmartCopyAssessment } from './smart-copy'
 
 export type ExportPreflightSeverity = 'ok' | 'info' | 'warning' | 'error'

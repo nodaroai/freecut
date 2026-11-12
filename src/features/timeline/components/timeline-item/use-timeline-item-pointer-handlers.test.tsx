@@ -4,7 +4,7 @@ import type { CompositionItem, TextItem, VideoItem } from '@/types/timeline'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSourcePlayerStore } from '@/shared/state/source-player'
-import { useTimelineStore } from '../../stores/timeline-store'
+import * as timelineActions from '../../stores/timeline-actions'
 import { useCompositionNavigationStore } from '../../stores/composition-navigation-store'
 import {
   useTimelineItemPointerHandlers,
@@ -142,7 +142,7 @@ describe('useTimelineItemPointerHandlers', () => {
     })
 
     it('splits the item at the cursor with the razor tool', () => {
-      const splitItem = vi.spyOn(useTimelineStore.getState(), 'splitItem')
+      const splitItem = vi.spyOn(timelineActions, 'splitItem')
       const handlers = renderHandlers(makeInput({ activeTool: 'razor' }))
 
       handlers.handleClick(makeMouseEvent())

@@ -20,6 +20,7 @@ import {
   RawImage,
   env,
 } from '@huggingface/transformers'
+import { createModelLoadProgressCallback } from './model-load-progress'
 
 const MODEL_ID = 'onnx-community/gemma-4-E4B-it-ONNX'
 
@@ -53,7 +54,6 @@ async function loadModel(): Promise<void> {
     post({ type: 'progress', stage: 'loading-transformers', percent: 0 })
     post({ type: 'progress', stage: 'loading-model', percent: 5 })
 
-    let lastPct = 5
     const loadedProcessor = await AutoProcessor.from_pretrained(MODEL_ID)
 
     if (disposed || thisGen !== loadGeneration) return
@@ -68,17 +68,7 @@ async function loadModel(): Promise<void> {
     const loadedModel = await Gemma4ForConditionalGeneration.from_pretrained(MODEL_ID, {
       dtype: 'q4f16',
       device: 'webgpu',
-      progress_callback: disposed
-        ? undefined
-        : (info: { status?: string; total?: number; loaded?: number }) => {
-            if (info.status === 'progress' && info.total && info.loaded) {
-              const pct = 5 + (info.loaded / info.total) * 90
-              if (pct - lastPct > 2) {
-                lastPct = pct
-                post({ type: 'progress', stage: 'loading-model', percent: Math.round(pct) })
-              }
-            }
-          },
+      progress_callback: disposed ? undefined : createModelLoadProgressCallback(post),
     })
 
     if (disposed || thisGen !== loadGeneration) {

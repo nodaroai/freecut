@@ -1,7 +1,11 @@
 import { useProjectStore } from '@/features/media-library/deps/projects'
 import {
+  addItems,
+  removeItems,
   removeTimelineItemsExact,
-  useTimelineStore,
+  setTracks,
+  useItemsStore,
+  useTimelineSettingsStore,
 } from '@/features/media-library/deps/timeline-stores'
 import { useSelectionStore } from '@/shared/state/selection'
 import {
@@ -109,11 +113,12 @@ class SubtitleSidecarService {
     track: EmbeddedSubtitleTrack,
     trackLabel: string,
   ): number {
-    const timeline = useTimelineStore.getState()
+    const { items, tracks } = useItemsStore.getState()
+    const { fps } = useTimelineSettingsStore.getState()
     const project = useProjectStore.getState().currentProject
     const canvasWidth = project?.metadata.width ?? DEFAULT_PROJECT_WIDTH
     const canvasHeight = project?.metadata.height ?? DEFAULT_PROJECT_HEIGHT
-    const clips = findCaptionTargetClipsForMedia(timeline.items, media.id)
+    const clips = findCaptionTargetClipsForMedia(items, media.id)
     if (clips.length === 0) return 0
 
     // Drop any subtitle segments already attached to one of the target
@@ -122,7 +127,7 @@ class SubtitleSidecarService {
     // legacy per-cue caption text items linked to those same clipIds —
     // they'd otherwise sit underneath the new segment with stale text.
     const clipIdSet = new Set(clips.map((c) => c.id))
-    const obsoleteIds = timeline.items
+    const obsoleteIds = items
       .filter((item) => isSubtitleForClip(item, clipIdSet))
       .map((item) => item.id)
 
@@ -132,7 +137,7 @@ class SubtitleSidecarService {
         trackId: clip.trackId,
         cues: track.cues,
         clip,
-        timelineFps: timeline.fps,
+        timelineFps: fps,
         canvasWidth,
         canvasHeight,
         label: `${media.fileName} — ${trackLabel}`,
@@ -165,19 +170,19 @@ class SubtitleSidecarService {
       startFrame: s.from,
       endFrame: s.from + s.durationInFrames,
     }))
-    let nextTracks: TimelineTrack[] = [...timeline.tracks]
+    let nextTracks: TimelineTrack[] = [...tracks]
     // After removing the obsolete items, look up the timeline state again so
     // findCompatibleCaptionTrackForRanges sees the post-removal items.
-    const refreshed = useTimelineStore.getState()
+    const refreshed = useItemsStore.getState()
     let target = findCompatibleCaptionTrackForRanges(nextTracks, refreshed.items, ranges)
     if (!target) {
       target = buildCaptionTrack(nextTracks)
       nextTracks = [...nextTracks, target].sort((a, b) => a.order - b.order)
-      refreshed.setTracks(nextTracks)
+      setTracks(nextTracks)
     }
     const placedSegments = segments.map((segment) => ({ ...segment, trackId: target.id }))
 
-    refreshed.addItems(placedSegments)
+    addItems(placedSegments)
     useSelectionStore.getState().selectItems(placedSegments.map((s) => s.id))
     return placedSegments.length
   }
@@ -195,16 +200,17 @@ class SubtitleSidecarService {
     segmentsCreated: number
     cuesConsolidated: number
   } {
-    const timeline = useTimelineStore.getState()
+    const { items } = useItemsStore.getState()
+    const { fps } = useTimelineSettingsStore.getState()
     const { segments, consumedItemIds } = consolidateCaptionTextItemsToSegments(
-      timeline.items,
-      timeline.fps,
+      items,
+      fps,
       { onlyClipId: options.clipId },
     )
     if (segments.length === 0) return { segmentsCreated: 0, cuesConsolidated: 0 }
 
-    timeline.removeItems(consumedItemIds)
-    timeline.addItems(segments)
+    removeItems(consumedItemIds)
+    addItems(segments)
     useSelectionStore.getState().selectItems(segments.map((s) => s.id))
     return {
       segmentsCreated: segments.length,
