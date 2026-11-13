@@ -106,6 +106,16 @@ function runAgent(args) {
 // and the HTTP server; on a loaded CI runner that took longer than 10 s.
 const SHUTDOWN_WAIT_MS = 45_000
 
+// The first of `promise` and `ms` elapsing (then `fallback`). The timer is cleared, so a
+// promise that settles early never keeps the script alive for the rest of the wait.
+function within(promise, ms, fallback) {
+  let timer
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 const service = spawn(
   process.execPath,
   ['headless/serve.mjs', '--workspace', workspace, '--port', String(port)],
@@ -387,10 +397,7 @@ try {
 } finally {
   const exited = new Promise((resolve) => service.once('exit', () => resolve(true)))
   service.kill('SIGTERM')
-  const didExit = await Promise.race([
-    exited,
-    new Promise((resolve) => setTimeout(() => resolve(false), SHUTDOWN_WAIT_MS)),
-  ])
+  const didExit = await within(exited, SHUTDOWN_WAIT_MS, false)
   assert.equal(didExit, true, 'service did not exit after SIGTERM')
   // Windows TerminateProcess does not run Node exit hooks. The test owns this
   // workspace and has confirmed the writer PID exited, so its lock is stale.
@@ -448,10 +455,7 @@ try {
 } finally {
   const exited = new Promise((resolve) => restartedService.once('exit', () => resolve(true)))
   restartedService.kill('SIGTERM')
-  const didExit = await Promise.race([
-    exited,
-    new Promise((resolve) => setTimeout(() => resolve(false), SHUTDOWN_WAIT_MS)),
-  ])
+  const didExit = await within(exited, SHUTDOWN_WAIT_MS, false)
   assert.equal(didExit, true, 'restarted service did not exit after SIGTERM')
   if (process.platform === 'win32')
     fs.rmSync(path.join(workspace, '.freecut-headless', 'writer.lock'), { force: true })
@@ -537,10 +541,11 @@ try {
   corruptService.stderr.on('data', (chunk) => {
     corruptLog += chunk
   })
-  const exitCode = await Promise.race([
+  const exitCode = await within(
     new Promise((resolve) => corruptService.once('exit', resolve)),
-    new Promise((resolve) => setTimeout(() => resolve('timeout'), 15_000)),
-  ])
+    15_000,
+    'timeout',
+  )
   if (exitCode === 'timeout') corruptService.kill('SIGKILL')
   assert.notEqual(exitCode, 'timeout', 'service became stuck on corrupt checkpoint state')
   assert.notEqual(exitCode, 0, `service became ready with corrupt checkpoint state:\n${corruptLog}`)
