@@ -101,6 +101,11 @@ function runAgent(args) {
   return JSON.parse(result.stdout)
 }
 
+// How long a SIGTERM'd service may take to exit. Its graceful shutdown drains the
+// queue (up to its 30 s --shutdown-timeout-ms default), then closes the browser
+// and the HTTP server; on a loaded CI runner that took longer than 10 s.
+const SHUTDOWN_WAIT_MS = 45_000
+
 const service = spawn(
   process.execPath,
   ['headless/serve.mjs', '--workspace', workspace, '--port', String(port)],
@@ -384,7 +389,7 @@ try {
   service.kill('SIGTERM')
   const didExit = await Promise.race([
     exited,
-    new Promise((resolve) => setTimeout(() => resolve(false), 10_000)),
+    new Promise((resolve) => setTimeout(() => resolve(false), SHUTDOWN_WAIT_MS)),
   ])
   assert.equal(didExit, true, 'service did not exit after SIGTERM')
   // Windows TerminateProcess does not run Node exit hooks. The test owns this
@@ -445,7 +450,7 @@ try {
   restartedService.kill('SIGTERM')
   const didExit = await Promise.race([
     exited,
-    new Promise((resolve) => setTimeout(() => resolve(false), 10_000)),
+    new Promise((resolve) => setTimeout(() => resolve(false), SHUTDOWN_WAIT_MS)),
   ])
   assert.equal(didExit, true, 'restarted service did not exit after SIGTERM')
   if (process.platform === 'win32')
