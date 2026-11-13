@@ -2,9 +2,10 @@
 // Embed-protocol smoke test. A parent page on another localhost origin frames
 // the editor and plays the Nodaro side of the postMessage protocol, the way
 // the Nodaro app and its Studio do, then checks the round trip:
-// FREECUT_READY (with `timeline-add`), NODARO_LOAD_VIDEO, NODARO_IMPORT_FILES
-// with NODARO_ADD_TO_TIMELINE, the export hand-off (FREECUT_EXPORT_COMPLETE
-// carrying a real MP4) and Save & Exit (FREECUT_SAVE_EXIT).
+// FREECUT_READY (with its capabilities), NODARO_LOAD_VIDEO, NODARO_IMPORT_FILES
+// with NODARO_ADD_TO_TIMELINE, the edit-operations requests (NODARO_GET_TIMELINE,
+// NODARO_APPLY_OPS, NODARO_UNDO_EDIT, NODARO_PLAYBACK), the export hand-off
+// (FREECUT_EXPORT_COMPLETE carrying a real MP4) and Save & Exit (FREECUT_SAVE_EXIT).
 //
 // Usage: node scripts/nodaro-embed-smoke.mjs [editorUrl]
 //   With no editorUrl it serves this checkout's dist/ (run `npm run build`
@@ -160,6 +161,101 @@ const itemCount = async () => {
 const b64 = (file) => fs.readFileSync(file).toString('base64')
 const screenshot = path.join(workDir, 'final.png')
 
+// One request and its reply, matched by request id.
+let requestSeq = 0
+async function ask(type, payload, replyType) {
+  const requestId = `smoke-${++requestSeq}`
+  await page.evaluate(([msg]) => window.__send(msg), [{ type, payload: { ...payload, requestId } }])
+  const reply = await waitFor(() => msgOf(replyType, (m) => m.payload?.requestId === requestId), { timeout: 30_000 })
+  return reply?.payload ?? null
+}
+const videoSpan = (timeline) =>
+  (timeline?.items ?? []).filter((i) => i.type === 'video').reduce((sum, i) => sum + i.durationInFrames, 0)
+
+// The edit-operations protocol on the real editor: read the timeline, cut media
+// time out (one undo step, undone by the parent), caption the clip, place an
+// imported file. Every request answers with the timeline it left.
+async function editOpsChecks(ready) {
+  const caps = ready?.capabilities ?? []
+  check(
+    'READY advertises edit-ops, timeline-read and playback',
+    ['edit-ops', 'timeline-read', 'playback'].every((c) => caps.includes(c)),
+    JSON.stringify(caps),
+  )
+
+  const start = (await ask('NODARO_GET_TIMELINE', {}, 'FREECUT_TIMELINE'))?.timeline
+  const video = start?.items?.find((i) => i.type === 'video')
+  check('NODARO_GET_TIMELINE lists the video with its media id and source span', !!video?.mediaId && video.sourceEnd > 0, JSON.stringify(video))
+  if (!video?.mediaId) return
+  const mediaId = video.mediaId
+  const startSpan = videoSpan(start)
+  const startCount = start.items.length
+
+  const cut = await ask(
+    'NODARO_APPLY_OPS',
+    { label: 'Cut the pauses', ops: [{ op: 'removeSourceRanges', mediaId, ranges: [{ start: 0.4, end: 0.8 }, { start: 1.2, end: 1.4 }] }] },
+    'FREECUT_OPS_RESULT',
+  )
+  const cutSpan = videoSpan(cut?.timeline)
+  check('removeSourceRanges cuts 0.6 s out of the video and closes the gaps', cut?.ok === true && startSpan - cutSpan >= 14 && startSpan - cutSpan <= 16, `ok=${cut?.ok} frames ${startSpan} -> ${cutSpan} ${cut?.error ? JSON.stringify(cut.error) : ''}`)
+
+  const undo = await ask('NODARO_UNDO_EDIT', { label: 'Cut the pauses' }, 'FREECUT_UNDO_RESULT')
+  check('NODARO_UNDO_EDIT reverts the whole step at once', undo?.undone === true && videoSpan(undo.timeline) === startSpan && undo.timeline.items.length === startCount, `undone=${undo?.undone} frames ${videoSpan(undo?.timeline)} items ${undo?.timeline?.items?.length}/${startCount}`)
+
+  const again = await ask('NODARO_UNDO_EDIT', { label: 'Cut the pauses' }, 'FREECUT_UNDO_RESULT')
+  check('NODARO_UNDO_EDIT leaves an older entry alone', again?.undone === false, `undone=${again?.undone}`)
+
+  const recut = await ask('NODARO_APPLY_OPS', { label: 'Cut the pauses', ops: [{ op: 'removeSourceRanges', mediaId, ranges: [{ start: 0.4, end: 0.8 }] }] }, 'FREECUT_OPS_RESULT')
+  const before = await itemCount()
+  const captions = await ask(
+    'NODARO_APPLY_OPS',
+    { label: 'Captions', ops: [{ op: 'addTranscriptCaptions', mediaId, cues: [{ text: 'A smoke test', start: 0.1, end: 0.35 }, { text: 'with captions', start: 0.9, end: 1.6 }] }] },
+    'FREECUT_OPS_RESULT',
+  )
+  const shown = await waitFor(async () => (await itemCount()) > before, { timeout: 15_000 })
+  check('addTranscriptCaptions captions every piece, and the captions show on the timeline', recut?.ok === true && captions?.ok === true && captions.results?.[0]?.insertedItemCount >= 2 && !!shown, `ok=${captions?.ok} inserted=${captions?.results?.[0]?.insertedItemCount} dom ${before} -> ${await itemCount()} ${captions?.error ? JSON.stringify(captions.error) : ''}`)
+
+  await page.evaluate(([data]) => {
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
+    window.__send({ type: 'NODARO_IMPORT_FILES', payload: { files: [{ ref: 'music', name: 'music.wav', type: 'audio/wav', buffer: bytes.buffer }] } }, [bytes.buffer])
+  }, [b64(media.tone)])
+  const music = await ask('NODARO_APPLY_OPS', { label: 'Music', ops: [{ op: 'placeAudio', ref: 'music', from: 0, newTrack: true, volumeDb: -14, fadeOutSeconds: 0.3 }] }, 'FREECUT_OPS_RESULT')
+  const placed = music?.timeline?.items?.find((i) => i.id === music?.results?.[0]?.id)
+  check('placeAudio puts an imported audio file on a new track by its ref', music?.ok === true && placed?.type === 'audio' && placed.from === 0, `ok=${music?.ok} ${JSON.stringify(placed ?? music?.error)}`)
+
+  await page.evaluate(() => window.__send({ type: 'NODARO_PLAYBACK', payload: { action: 'seek', frame: 10 } }))
+
+  // A named cursor on the first video piece, and one on the preview; they must render, then clear.
+  const firstVideo = music?.timeline?.items?.find((i) => i.type === 'video')
+  await page.evaluate(([itemId]) => {
+    window.__send({
+      type: 'NODARO_PRESENCE',
+      payload: {
+        cursors: [
+          { id: 'cutter', name: 'Cutter', color: '#ff7a5c', item: itemId, note: 'Cutting 1 of 1' },
+          { id: 'framer', name: 'Framer', color: '#5ccfe0', preview: { x: 0.5, y: 0.4 } },
+        ],
+        highlights: [{ id: 'h1', color: '#ff7a5c', item: itemId }],
+      },
+    })
+  }, [firstVideo?.id])
+  const frame = editorFrame()
+  const shownCursors = await waitFor(
+    async () => {
+      const visible = await frame.evaluate(() =>
+        [...document.querySelectorAll('[data-presence-cursor]')].filter((el) => getComputedStyle(el).opacity === '1').length,
+      )
+      return visible === 2 ? visible : null
+    },
+    { timeout: 10_000 },
+  )
+  await page.screenshot({ path: path.join(workDir, 'presence.png') })
+  check('NODARO_PRESENCE draws named cursors over the timeline and the preview', shownCursors === 2, `visible cursors: ${shownCursors ?? 0}`)
+  await page.evaluate(() => window.__send({ type: 'NODARO_PRESENCE', payload: {} }))
+  const cleared = await waitFor(async () => (await frame.locator('[data-presence-cursor]').count()) === 0, { timeout: 5_000 })
+  check('an empty NODARO_PRESENCE clears them', !!cleared)
+}
+
 try {
   await page.goto(`http://localhost:${PARENT_PORT}/`)
 
@@ -193,6 +289,8 @@ try {
   check('NODARO_ADD_TO_TIMELINE answers FREECUT_TIMELINE_ADDED', added?.type === 'FREECUT_TIMELINE_ADDED', JSON.stringify(added?.payload))
   const grew = await waitFor(async () => (await itemCount()) > before, { timeout: 15_000 })
   check('the added file appears on the timeline', !!grew, `items: ${before} -> ${await itemCount()}`)
+
+  await editOpsChecks(ready)
 
   // Export: the toolbar's Export, then the dialog's Export Video; the finished video must reach the parent.
   const frame = editorFrame()

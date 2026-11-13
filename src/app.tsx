@@ -14,6 +14,12 @@ const LazyToaster = lazy(async () => {
   return { default: Toaster }
 })
 
+// A parent's collaborators drawn over the editor (NODARO_PRESENCE); embedded mode only.
+const LazyPresenceOverlay = lazy(async () => {
+  const { PresenceOverlay } = await import('@/features/embedded/components/presence-overlay')
+  return { default: PresenceOverlay }
+})
+
 // Synchronous init — NOT dynamic import — because the message listener must be registered
 // before Nodaro's 500ms timeout sends NODARO_LOAD_VIDEO. Any async gap risks missing
 // the message. The bundle cost is acceptable since embedded mode is the primary use case
@@ -23,6 +29,8 @@ if (isEmbedded()) {
     openEditor: (projectId) => {
       void router.navigate({ to: '/editor/$projectId', params: { projectId } })
     },
+    // The edit-operations engine is loaded the first time a parent sends edits.
+    loadEditOps: () => import('@/app/embedded-edit-ops').then((m) => m.embeddedEditOpEngine),
   })
 }
 
@@ -90,6 +98,11 @@ export function App() {
         )}
         <GlobalTooltip />
         <PwaInstallPrompt />
+        {isEmbedded() && (
+          <Suspense fallback={null}>
+            <LazyPresenceOverlay />
+          </Suspense>
+        )}
         {showToaster && (
           <Suspense fallback={null}>
             <LazyToaster />
