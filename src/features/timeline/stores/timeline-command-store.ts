@@ -13,6 +13,9 @@ import { emitUiSound } from '@/shared/ui/ui-sound'
  */
 export const ROOT_HISTORY_CONTEXT = '__root__'
 
+/** How many executeBatch calls are running; while above zero, execute records no entry of its own. */
+let batchDepth = 0
+
 function historyContextKey(compositionId: string | null): string {
   return compositionId ?? ROOT_HISTORY_CONTEXT
 }
@@ -56,6 +59,14 @@ interface CommandStoreActions {
    * @returns The return value of the action function
    */
   execute: <T>(command: TimelineCommand, action: () => T) => T
+
+  /**
+   * Run several actions as ONE history entry, so one undo press reverts them
+   * all. Commands executed inside the batch record nothing of their own. When
+   * the action throws, the timeline is restored to where the batch started and
+   * the error is rethrown: a batch lands whole or not at all.
+   */
+  executeBatch: <T>(command: TimelineCommand, action: () => T) => T
 
   /**
    * Undo the last command.
@@ -125,6 +136,9 @@ export const useTimelineCommandStore = create<CommandStoreState & CommandStoreAc
 
     // Execute a command
     execute: <T>(command: TimelineCommand, action: () => T): T => {
+      // Inside a batch the batch records the history entry.
+      if (batchDepth > 0) return action()
+
       const beforeSnapshot = captureSnapshot()
 
       // Execute the action
@@ -147,6 +161,24 @@ export const useTimelineCommandStore = create<CommandStoreState & CommandStoreAc
         }))
       }
 
+      return result
+    },
+
+    executeBatch: <T>(command: TimelineCommand, action: () => T): T => {
+      if (batchDepth > 0) return action()
+
+      const beforeSnapshot = captureSnapshot()
+      let result: T
+      batchDepth += 1
+      try {
+        result = action()
+      } catch (error) {
+        restoreSnapshot(beforeSnapshot)
+        throw error
+      } finally {
+        batchDepth -= 1
+      }
+      get().addUndoEntry(command, beforeSnapshot)
       return result
     },
 
