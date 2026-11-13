@@ -30,19 +30,34 @@ const attr = (name: string, value: string) => `[${name}="${CSS.escape(value)}"]`
  * showing: its box and its `from` / `durationInFrames` give both the scale and
  * the origin, whatever the zoom and scroll.
  */
+// The item the last frame measured the scale from, tried first: the scan over
+// every item runs only when that one is gone or off screen.
+let anchorItemId: string | null = null
+
 function measure() {
   const timeline = document.querySelector('[data-timeline-scroll-container]')
   const timelineBox = toBox(timeline)
   const itemBox = (id: string) => toBox(timeline?.querySelector(attr('data-item-id', id)) ?? null)
   const trackBox = (id: string) => toBox(timeline?.querySelector(attr('data-track-id', id)) ?? null)
 
-  let scale: { origin: number; perFrame: number } | null = null
-  for (const item of useItemsStore.getState().items) {
+  const { items, itemById } = useItemsStore.getState()
+  const scaleFrom = (item: (typeof items)[number] | undefined) => {
+    if (!item || item.durationInFrames <= 0) return null
     const box = itemBox(item.id)
-    if (!box || item.durationInFrames <= 0) continue
+    if (!box) return null
     const perFrame = box.width / item.durationInFrames
-    scale = { origin: box.left - item.from * perFrame, perFrame }
-    break
+    return { origin: box.left - item.from * perFrame, perFrame }
+  }
+  let scale = anchorItemId ? scaleFrom(itemById[anchorItemId]) : null
+  if (!scale) {
+    anchorItemId = null
+    for (const item of items) {
+      scale = scaleFrom(item)
+      if (scale) {
+        anchorItemId = item.id
+        break
+      }
+    }
   }
   const frameX = (frame: number) => (scale ? scale.origin + frame * scale.perFrame : null)
 

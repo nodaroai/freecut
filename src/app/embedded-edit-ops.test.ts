@@ -160,10 +160,10 @@ describe('addTranscriptCaptions', () => {
   })
 })
 
-describe('placeMedia', () => {
+describe('placeAudio', () => {
   it('puts an audio file on a new audio track at the frame, trimmed and at the asked volume', async () => {
     const result = (await apply({
-      op: 'placeMedia',
+      op: 'placeAudio',
       mediaId: 'music-1',
       from: 0,
       durationInFrames: 300,
@@ -176,7 +176,7 @@ describe('placeMedia', () => {
   })
 
   it('refuses media that is not in Media', async () => {
-    await expect(apply({ op: 'placeMedia', mediaId: 'missing' })).rejects.toThrow(
+    await expect(apply({ op: 'placeAudio', mediaId: 'missing' })).rejects.toThrow(
       'Media missing is not in Media',
     )
   })

@@ -16,8 +16,10 @@
  * - `addTranscriptCaptions { mediaId, cues: [{ text, start, end }], stylePresetId? }`:
  *   caption every clip of the media from cues in media seconds (the same
  *   caption segments as Insert transcript as captions).
- * - `placeMedia { mediaId, from?, durationInFrames?, volumeDb?, newTrack? }`:
- *   put a media file on the timeline at a frame, built as a media-bin drop is.
+ * - `placeAudio { mediaId, from?, durationInFrames?, volumeDb?, fadeOutSeconds?, newTrack? }`:
+ *   put an audio file on an audio track at a frame (a new track below the
+ *   others when asked or when none has room), built as a media-bin drop is.
+ *   A video file is refused: placing one would need its linked audio as well.
  */
 import type { EditOp, EditOpEngine } from '@/features/embedded/services/edit-ops-bridge'
 import { mediaLibraryService } from '@/features/media-library/services/media-library-service'
@@ -113,6 +115,9 @@ function applyRemoveSourceRanges(op: EditOp): unknown {
     clipsOf(mediaId).map((clip) => clip.id),
     { [mediaId]: ranges },
   )
+  if (result.removedRangeCount === 0) {
+    throw new Error('None of the ranges could be cut from the clips on the timeline')
+  }
   return { removedRangeCount: result.removedRangeCount, removedItemCount: result.removedItemCount }
 }
 
@@ -201,81 +206,83 @@ function applyAddTranscriptCaptions(op: EditOp): unknown {
   return { insertedItemCount: inserted.length, ids: inserted.map((item) => item.id) }
 }
 
-// ── placeMedia ───────────────────────────────────────────────────────────────
+// ── placeAudio ───────────────────────────────────────────────────────────────
 
-interface PreparedMedia {
+interface PreparedAudio {
   media: MediaMetadata
   blobUrl: string
-  thumbnailUrl: string | null
 }
 
-const preparedMedia = new WeakMap<EditOp, PreparedMedia>()
+const preparedAudio = new WeakMap<EditOp, PreparedAudio>()
 
-async function preparePlaceMedia(op: EditOp): Promise<EditOp> {
+async function preparePlaceAudio(op: EditOp): Promise<EditOp> {
   const mediaId = requireString(op, 'mediaId')
   const media = await mediaLibraryService.getMedia(mediaId)
   if (!media) throw new Error(`Media ${mediaId} is not in Media`)
+  if (getMediaType(media.mimeType) !== 'audio') {
+    throw new Error(`placeAudio places an audio file; ${media.fileName} is not one`)
+  }
   const blobUrl = await resolveMediaUrl(mediaId)
   if (!blobUrl) throw new Error(`Media ${mediaId} could not be read`)
-  const thumbnailUrl = await mediaLibraryService.getThumbnailBlobUrl(mediaId).catch(() => null)
   const prepared = { ...op }
-  preparedMedia.set(prepared, { media, blobUrl, thumbnailUrl })
+  preparedAudio.set(prepared, { media, blobUrl })
   return prepared
 }
 
-/** A track of the kind with room for the whole span at `from`, or a new one below the others. */
-function trackFor(
-  kind: 'video' | 'audio',
-  from: number,
-  durationInFrames: number,
-  forceNew: boolean,
-) {
+/** An audio track with room for the whole span at `from`, or a new one below the others. */
+function audioTrackFor(from: number, durationInFrames: number, forceNew: boolean) {
   const { tracks, items } = useItemsStore.getState()
   if (!forceNew) {
     const free = tracks
-      .filter((track) => !track.isGroup && !track.locked && getTrackKind(track) === kind)
+      .filter((track) => !track.isGroup && !track.locked && getTrackKind(track) === 'audio')
       .toSorted((a, b) => a.order - b.order)
       .find((track) => findNearestAvailableSpace(from, durationInFrames, track.id, items) === from)
     if (free) return free.id
   }
   const order = tracks.reduce((max, track) => Math.max(max, track.order), -1) + 1
-  const track = createClassicTrack({ tracks, kind, order })
+  const track = createClassicTrack({ tracks, kind: 'audio', order })
   setTracks([...tracks, track])
   return track.id
 }
 
-function applyPlaceMedia(op: EditOp): unknown {
-  const prepared = preparedMedia.get(op)
-  if (!prepared) throw new Error('placeMedia was not prepared')
-  const { media, blobUrl, thumbnailUrl } = prepared
+function applyPlaceAudio(op: EditOp): unknown {
+  const prepared = preparedAudio.get(op)
+  if (!prepared) throw new Error('placeAudio was not prepared')
+  const { media, blobUrl } = prepared
   const metadata = projectCanvas()
   const fps = useTimelineSettingsStore.getState().fps || metadata.fps
-  const mediaType = getMediaType(media.mimeType)
-  if (mediaType !== 'video' && mediaType !== 'audio') {
-    throw new Error(`placeMedia places video or audio; ${media.fileName} is ${mediaType}`)
-  }
   const from = Math.max(0, Math.round(optionalNumber(op, 'from') ?? 0))
-  const fullLength = getDroppedMediaDurationInFrames(media, mediaType, fps)
+  const fullLength = getDroppedMediaDurationInFrames(media, 'audio', fps)
   const asked = optionalNumber(op, 'durationInFrames')
   const durationInFrames = Math.max(1, Math.min(fullLength, Math.round(asked ?? fullLength)))
-  const trackId = trackFor(mediaType, from, durationInFrames, op.newTrack === true)
+  const trackId = audioTrackFor(from, durationInFrames, op.newTrack === true)
 
   const item = buildDroppedMediaTimelineItem({
     media,
     mediaId: media.id,
-    mediaType,
+    mediaType: 'audio',
     label: typeof op.label === 'string' && op.label ? op.label : media.fileName,
     timelineFps: fps,
     blobUrl,
-    thumbnailUrl,
     canvasWidth: metadata.width,
     canvasHeight: metadata.height,
     placement: { trackId, from, durationInFrames },
   })
   const volumeDb = optionalNumber(op, 'volumeDb')
-  const placed = volumeDb === undefined ? item : ({ ...item, volume: volumeDb } as TimelineItem)
-  addItem(placed)
-  return { id: placed.id, trackId, from, durationInFrames }
+  const fadeOut = optionalNumber(op, 'fadeOutSeconds')
+  addItem({
+    ...item,
+    ...(volumeDb === undefined ? {} : { volume: volumeDb }),
+    ...(fadeOut === undefined ? {} : { audioFadeOut: Math.max(0, fadeOut) }),
+  } as TimelineItem)
+  // Placement may move an item off an overlap: answer where it actually went.
+  const placed = useItemsStore.getState().itemById[item.id]
+  return {
+    id: item.id,
+    trackId: placed?.trackId ?? trackId,
+    from: placed?.from ?? from,
+    durationInFrames: placed?.durationInFrames ?? durationInFrames,
+  }
 }
 
 // ── the engine ───────────────────────────────────────────────────────────────
@@ -288,7 +295,7 @@ interface ForkOperation {
 const OPERATIONS: Record<string, ForkOperation> = {
   removeSourceRanges: { apply: applyRemoveSourceRanges },
   addTranscriptCaptions: { apply: applyAddTranscriptCaptions },
-  placeMedia: { prepare: preparePlaceMedia, apply: applyPlaceMedia },
+  placeAudio: { prepare: preparePlaceAudio, apply: applyPlaceAudio },
 }
 
 const operationFor = (op: EditOp): ForkOperation | undefined =>

@@ -10,7 +10,8 @@ const MAX_NAME = 40
 const MAX_NOTE = 80
 
 // A color a parent may give: hex, rgb()/rgba() or hsl()/hsla(). Nothing else reaches a style.
-const COLOR = /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|hsla?\([\d\s.,%deg]+\))$/i
+const COLOR =
+  /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\(\s*\d[\d\s.,%]*\)|hsla?\(\s*\d[\d\s.,%deg]*\))$/i
 
 const text = (value: unknown, max: number): string | undefined =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim().slice(0, max) : undefined
@@ -62,11 +63,23 @@ function parseHighlight(value: unknown): PresenceHighlight | null {
   return null
 }
 
-const parseList = <T>(value: unknown, parse: (entry: unknown) => T | null, max: number): T[] =>
-  (Array.isArray(value) ? value : [])
-    .slice(0, max)
-    .map(parse)
-    .filter((entry): entry is T => entry !== null)
+/** The valid entries, first of each id, at most `max` of them. */
+function parseList<T extends { id: string }>(
+  value: unknown,
+  parse: (entry: unknown) => T | null,
+  max: number,
+): T[] {
+  const seen = new Set<string>()
+  const kept: T[] = []
+  for (const raw of Array.isArray(value) ? value : []) {
+    if (kept.length >= max) break
+    const entry = parse(raw)
+    if (!entry || seen.has(entry.id)) continue
+    seen.add(entry.id)
+    kept.push(entry)
+  }
+  return kept
+}
 
 /**
  * NODARO_PRESENCE { cursors, highlights }: what the parent's collaborators are

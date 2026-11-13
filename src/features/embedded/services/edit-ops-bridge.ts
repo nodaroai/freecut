@@ -8,6 +8,7 @@ import {
 import { useProjectStore } from '../deps/projects-contract'
 import { useMediaLibraryStore } from '../deps/media-library-contract'
 import { mediaIdForRef } from './imported-refs'
+import { waitUntilEditable } from './edit-readiness'
 
 const log = createLogger('embedded-edit-ops')
 
@@ -77,7 +78,7 @@ function sourceFields(item: TimelineItem) {
 }
 
 /** What a parent sees of the timeline: enough to plan edits, nothing the editor keeps private. */
-export function readTimeline() {
+function readTimeline() {
   const { tracks, items } = useItemsStore.getState()
   const metadata = useProjectStore.getState().currentProject?.metadata
   return {
@@ -145,6 +146,7 @@ const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'The operation failed'
 
 async function applyRequest(ops: EditOp[], label: unknown) {
+  const projectId = await waitUntilEditable()
   const loaded = await getEngine()
   const prepared: EditOp[] = []
   for (const [index, op] of ops.entries()) {
@@ -155,18 +157,29 @@ async function applyRequest(ops: EditOp[], label: unknown) {
     }
   }
 
+  // Preparing awaited storage: the editor may have moved on since. The checks
+  // and the batch below run with no await between them, so they hold together.
+  if ((await waitUntilEditable()) !== projectId) {
+    throw new Error('The project changed while the edit was being prepared')
+  }
+
   const command = {
     type: 'APPLY_EDIT_OPS',
     payload: { count: ops.length, ...(typeof label === 'string' && label ? { label } : {}) },
   }
+  const history = useTimelineCommandStore.getState()
+  const topBefore = history.undoStack.at(-1)
   let index = 0
   try {
-    return useTimelineCommandStore.getState().executeBatch(command, () =>
+    const results = history.executeBatch(command, () =>
       prepared.map((op, i) => {
         index = i
         return loaded.apply(op)
       }),
     )
+    // A request that changed nothing makes no undo entry, and says so.
+    const recorded = useTimelineCommandStore.getState().undoStack.at(-1) !== topBefore
+    return { results, recorded }
   } catch (error) {
     throw new OpFailure(messageOf(error), index)
   }
@@ -210,14 +223,15 @@ export function handleApplyOps(event: MessageEvent): Promise<void> {
   }
 
   const run = async () => {
-    if (!useProjectStore.getState().currentProject) return refuse('No project is open')
+    let outcome: Awaited<ReturnType<typeof applyRequest>>
     try {
-      const results = await applyRequest(ops as EditOp[], label)
-      reply('FREECUT_OPS_RESULT', { ok: true, results, timeline: readTimeline() })
+      outcome = await applyRequest(ops as EditOp[], label)
     } catch (error) {
       log.warn('NODARO_APPLY_OPS rolled back:', error)
-      refuse(messageOf(error), error instanceof OpFailure ? error.index : undefined)
+      return refuse(messageOf(error), error instanceof OpFailure ? error.index : undefined)
     }
+    // The edit has landed: a failure to send the reply is not a rollback.
+    reply('FREECUT_OPS_RESULT', { ok: true, ...outcome, timeline: readTimeline() })
   }
   queue = queue.then(run, run)
   return queue

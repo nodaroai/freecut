@@ -19,6 +19,7 @@ vi.mock('@/infrastructure/storage', async (importOriginal) => {
 import { resetTimelineCompositionTestState, setTimelineState } from '../test-helpers'
 import { useItemsStore } from './items-store'
 import { useTimelineCommandStore } from './timeline-command-store'
+import { captureSnapshot } from './commands/snapshot'
 import { updateItem } from './actions/item-actions'
 
 function seedOneClip() {
@@ -99,6 +100,24 @@ describe('timeline-command-store executeBatch', () => {
 
     expect(result).toBe('unchanged')
     expect(undoDepth()).toBe(before)
+  })
+
+  it('folds a pre-captured entry made inside the batch into the batch', () => {
+    const before = undoDepth()
+    const store = useTimelineCommandStore.getState()
+
+    store.executeBatch(BATCH, () => {
+      updateItem('audio-1', { volume: -6 })
+      const dragStart = captureSnapshot()
+      useItemsStore.getState()._updateItem('audio-1', { label: 'dragged.wav' })
+      store.addUndoEntry({ type: 'DRAG' }, dragStart)
+    })
+
+    expect(undoDepth()).toBe(before + 1)
+    useTimelineCommandStore.getState().undo()
+    const item = useItemsStore.getState().itemById['audio-1']
+    expect(item?.volume).toBe(0)
+    expect(item?.label).toBe('voiceover.wav')
   })
 
   it('records ordinary commands again once the batch is over', () => {

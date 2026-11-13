@@ -219,9 +219,9 @@ async function editOpsChecks(ready) {
     const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
     window.__send({ type: 'NODARO_IMPORT_FILES', payload: { files: [{ ref: 'music', name: 'music.wav', type: 'audio/wav', buffer: bytes.buffer }] } }, [bytes.buffer])
   }, [b64(media.tone)])
-  const music = await ask('NODARO_APPLY_OPS', { label: 'Music', ops: [{ op: 'placeMedia', ref: 'music', from: 0, newTrack: true, volumeDb: -14 }] }, 'FREECUT_OPS_RESULT')
+  const music = await ask('NODARO_APPLY_OPS', { label: 'Music', ops: [{ op: 'placeAudio', ref: 'music', from: 0, newTrack: true, volumeDb: -14, fadeOutSeconds: 0.3 }] }, 'FREECUT_OPS_RESULT')
   const placed = music?.timeline?.items?.find((i) => i.id === music?.results?.[0]?.id)
-  check('placeMedia puts an imported file on a new track by its ref', music?.ok === true && placed?.type === 'audio' && placed.from === 0, `ok=${music?.ok} ${JSON.stringify(placed ?? music?.error)}`)
+  check('placeAudio puts an imported audio file on a new track by its ref', music?.ok === true && placed?.type === 'audio' && placed.from === 0, `ok=${music?.ok} ${JSON.stringify(placed ?? music?.error)}`)
 
   await page.evaluate(() => window.__send({ type: 'NODARO_PLAYBACK', payload: { action: 'seek', frame: 10 } }))
 

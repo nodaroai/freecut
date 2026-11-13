@@ -62,9 +62,10 @@ interface CommandStoreActions {
 
   /**
    * Run several actions as ONE history entry, so one undo press reverts them
-   * all. Commands executed inside the batch record nothing of their own. When
-   * the action throws, the timeline is restored to where the batch started and
-   * the error is rethrown: a batch lands whole or not at all.
+   * all. Nothing executed inside the batch records an entry of its own
+   * (neither `execute` nor `addUndoEntry`). When the action throws, the
+   * timeline is restored to where the batch started and the error is
+   * rethrown: a batch lands whole or not at all.
    */
   executeBatch: <T>(command: TimelineCommand, action: () => T) => T
 
@@ -178,7 +179,13 @@ export const useTimelineCommandStore = create<CommandStoreState & CommandStoreAc
       } finally {
         batchDepth -= 1
       }
-      get().addUndoEntry(command, beforeSnapshot)
+      try {
+        get().addUndoEntry(command, beforeSnapshot)
+      } catch (error) {
+        // A change with no history entry could never be undone: take it back.
+        restoreSnapshot(beforeSnapshot)
+        throw error
+      }
       return result
     },
 
@@ -265,6 +272,9 @@ export const useTimelineCommandStore = create<CommandStoreState & CommandStoreAc
 
     // Add pre-captured snapshot to undo stack (for drag operations)
     addUndoEntry: (command: TimelineCommand, beforeSnapshot: TimelineSnapshot) => {
+      // Inside a batch the batch records the history entry, as for execute.
+      if (batchDepth > 0) return
+
       const afterSnapshot = captureSnapshot()
 
       // Only add to history if state actually changed

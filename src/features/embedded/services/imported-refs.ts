@@ -5,6 +5,9 @@
  */
 const importedByRef = new Map<string, Promise<string | null>>()
 
+/** How long a request waits for a ref's import before treating the ref as unknown. */
+const IMPORT_WAIT_MS = 120_000
+
 /** Settles one claimed ref with the media id it was imported as, or null when the import failed. */
 export type SettleImportedRef = (mediaId: string | null) => void
 
@@ -20,7 +23,20 @@ export function claimImportedRef(ref: string): SettleImportedRef {
   return settle
 }
 
-/** The media id a ref was imported as: null when unknown or failed, after any running import. */
-export async function mediaIdForRef(ref: string): Promise<string | null> {
-  return (await importedByRef.get(ref)) ?? null
+/**
+ * The media id a ref was imported as: null when the ref is unknown, its import
+ * failed, or the import has not finished after a while.
+ */
+export async function mediaIdForRef(ref: string, waitMs = IMPORT_WAIT_MS): Promise<string | null> {
+  const pending = importedByRef.get(ref)
+  if (!pending) return null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), waitMs)
+  })
+  try {
+    return (await Promise.race([pending, timeout])) ?? null
+  } finally {
+    clearTimeout(timer)
+  }
 }

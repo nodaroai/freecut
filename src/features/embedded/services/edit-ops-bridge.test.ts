@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // calling it (the batch's own undo and rollback are covered by the store test).
 const executeBatch = vi.fn((_command: unknown, action: () => unknown) => action())
 const project = vi.hoisted(() => ({
-  current: { metadata: { width: 1080, height: 1920, fps: 30 } } as unknown,
+  current: { id: 'p1', metadata: { width: 1080, height: 1920, fps: 30 } } as unknown,
 }))
 const history = vi.hoisted(() => ({
   undoStack: [] as Array<{ command: { type: string; payload?: Record<string, unknown> } }>,
@@ -82,7 +82,7 @@ function engineOf(apply: (op: EditOp) => unknown, prepare?: (op: EditOp) => Prom
 
 beforeEach(() => {
   executeBatch.mockClear()
-  project.current = { metadata: { width: 1080, height: 1920, fps: 30 } }
+  project.current = { id: 'p1', metadata: { width: 1080, height: 1920, fps: 30 } }
   post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -160,12 +160,12 @@ describe('NODARO_APPLY_OPS', () => {
   it('names the operation whose preparation failed, and applies nothing', async () => {
     const apply = vi.fn()
     engineOf(apply, async (op) => {
-      if (op.op === 'placeMedia') throw new Error('Media x is not in Media')
+      if (op.op === 'placeAudio') throw new Error('Media x is not in Media')
       return op
     })
 
     await handleApplyOps(
-      message('NODARO_APPLY_OPS', { requestId: 'r4', ops: [{ op: 'a' }, { op: 'placeMedia' }] }),
+      message('NODARO_APPLY_OPS', { requestId: 'r4', ops: [{ op: 'a' }, { op: 'placeAudio' }] }),
     )
 
     expect(lastReply()[0].payload).toEqual({
@@ -183,10 +183,10 @@ describe('NODARO_APPLY_OPS', () => {
     claimImportedRef('music')('media-music')
 
     await handleApplyOps(
-      message('NODARO_APPLY_OPS', { requestId: 'r5', ops: [{ op: 'placeMedia', ref: 'music' }] }),
+      message('NODARO_APPLY_OPS', { requestId: 'r5', ops: [{ op: 'placeAudio', ref: 'music' }] }),
     )
 
-    expect(seen[0]).toMatchObject({ op: 'placeMedia', ref: 'music', mediaId: 'media-music' })
+    expect(seen[0]).toMatchObject({ op: 'placeAudio', ref: 'music', mediaId: 'media-music' })
   })
 
   it('refuses when no project is open', async () => {

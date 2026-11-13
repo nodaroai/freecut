@@ -405,17 +405,22 @@ async function handleImportFiles(event: MessageEvent) {
   if (!files?.length) return
   const settleFor = claimRefs(files)
 
-  await ensureEmbeddedWorkspaceMounted()
+  try {
+    await ensureEmbeddedWorkspaceMounted()
 
-  const projectId = useProjectStore.getState().currentProject?.id
-  if (!projectId) {
-    log.warn('No current project for NODARO_IMPORT_FILES')
+    const projectId = useProjectStore.getState().currentProject?.id
+    if (!projectId) {
+      log.warn('No current project for NODARO_IMPORT_FILES')
+      return
+    }
+
+    for (const file of files) {
+      settleFor(file)(await importFile(file, projectId))
+    }
+  } finally {
+    // Every claim settles, whatever happened above: a request waiting on a ref
+    // must never wait forever. Settling an already settled claim does nothing.
     files.forEach((file) => settleFor(file)(null))
-    return
-  }
-
-  for (const file of files) {
-    settleFor(file)(await importFile(file, projectId))
   }
 
   // Refresh the media library UI (lazy-import to avoid circular deps)
@@ -462,8 +467,14 @@ const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | 
 
 function handleMessage(event: MessageEvent) {
   const type = event.data?.type
-  const handler = type ? EMBEDDED_MESSAGE_HANDLERS[type] : undefined
+  const handler =
+    typeof type === 'string' && Object.hasOwn(EMBEDDED_MESSAGE_HANDLERS, type)
+      ? EMBEDDED_MESSAGE_HANDLERS[type]
+      : undefined
   if (!handler) return
+
+  // Commands come from the page that frames this editor, and from no other window.
+  if (event.source !== window.parent) return
 
   if (!isAllowedOrigin(event.origin)) {
     log.warn(`Rejected ${type} from disallowed origin:`, event.origin)
