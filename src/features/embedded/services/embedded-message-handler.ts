@@ -7,6 +7,17 @@ import { mediaLibraryService, mediaProcessorService } from '../deps/media-librar
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
 import { addMediaToTimelineAtPlayhead } from './timeline-add'
 import {
+  editOpsAvailable,
+  handleApplyOps,
+  handleGetTimeline,
+  handleUndoEdit,
+  setEditOpsLoader,
+  type LoadEditOps,
+} from './edit-ops-bridge'
+import { claimImportedRef, mediaIdForRef, type SettleImportedRef } from './imported-refs'
+import { handlePlayback } from './playback-control'
+import { handlePresence } from './presence-message'
+import {
   updateProject as updateProjectDB,
   getProject as getProjectDB,
 } from '@/infrastructure/storage'
@@ -20,6 +31,11 @@ const log = createLogger('embedded-message-handler')
  */
 export interface EmbeddedMessageHandlerDeps {
   readonly openEditor: (projectId: string) => void
+  /**
+   * Loads the operations engine for NODARO_APPLY_OPS on first use (it is kept
+   * out of the first paint). Without it the editor does not offer `edit-ops`.
+   */
+  readonly loadEditOps?: LoadEditOps
 }
 
 let openEditor: EmbeddedMessageHandlerDeps['openEditor'] = (projectId) => {
@@ -336,16 +352,22 @@ function handleResetProject() {
 
 /**
  * What the parent can ask of this editor beyond the basics, announced in
- * FREECUT_READY: `timeline-add` — NODARO_ADD_TO_TIMELINE places a file it
- * imported (named by its `ref`) on the timeline at the playhead (Studio's
- * Soundtrack popover, D36). A parent that reads no capabilities offers none.
+ * FREECUT_READY. A parent that reads no capabilities offers none.
+ * - `timeline-add`: NODARO_ADD_TO_TIMELINE places a file it imported (named by
+ *   its `ref`) on the timeline at the playhead (Studio's Soundtrack popover, D36).
+ * - `timeline-read`: NODARO_GET_TIMELINE answers the tracks, items and media.
+ * - `playback`: NODARO_PLAYBACK seeks, plays and pauses.
+ * - `presence`: NODARO_PRESENCE draws the parent's collaborators over the
+ *   editor: named cursors and tinted spans of the timeline.
+ * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
+ *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
+ *   passed the operations engine in).
  */
-const EMBEDDED_CAPABILITIES = ['timeline-add'] as const
+const EMBEDDED_CAPABILITIES = ['timeline-add', 'timeline-read', 'playback', 'presence'] as const
 
-// The media id each parent `ref` was imported as — a promise while the import
-// is still running, so a placement asked for right after the hand-off waits
-// for it rather than missing it.
-const importedByRef = new Map<string, Promise<string | null>>()
+function readyCapabilities(): string[] {
+  return [...EMBEDDED_CAPABILITIES, ...(editOpsAvailable() ? ['edit-ops'] : [])]
+}
 
 interface ImportFile {
   readonly name: string
@@ -354,16 +376,14 @@ interface ImportFile {
   readonly ref?: unknown
 }
 
-type Settle = (mediaId: string | null) => void
-
-// Claim each file's ref at once — before the (async) import — so a placement
+// Claim each file's ref at once — before the (async) import — so a request
 // that arrives mid-import finds it. Answers how to settle each file's claim.
-function claimRefs(files: ReadonlyArray<ImportFile>): (file: ImportFile) => Settle {
-  const settlers = new Map<string, Settle>()
+function claimRefs(files: ReadonlyArray<ImportFile>): (file: ImportFile) => SettleImportedRef {
+  const settlers = new Map<string, SettleImportedRef>()
   for (const file of files) {
     const ref = file.ref
     if (typeof ref !== 'string' || !ref) continue
-    importedByRef.set(ref, new Promise((resolve) => settlers.set(ref, resolve)))
+    settlers.set(ref, claimImportedRef(ref))
   }
   return (file) => (typeof file.ref === 'string' && settlers.get(file.ref)) || (() => {})
 }
@@ -385,17 +405,22 @@ async function handleImportFiles(event: MessageEvent) {
   if (!files?.length) return
   const settleFor = claimRefs(files)
 
-  await ensureEmbeddedWorkspaceMounted()
+  try {
+    await ensureEmbeddedWorkspaceMounted()
 
-  const projectId = useProjectStore.getState().currentProject?.id
-  if (!projectId) {
-    log.warn('No current project for NODARO_IMPORT_FILES')
+    const projectId = useProjectStore.getState().currentProject?.id
+    if (!projectId) {
+      log.warn('No current project for NODARO_IMPORT_FILES')
+      return
+    }
+
+    for (const file of files) {
+      settleFor(file)(await importFile(file, projectId))
+    }
+  } finally {
+    // Every claim settles, whatever happened above: a request waiting on a ref
+    // must never wait forever. Settling an already settled claim does nothing.
     files.forEach((file) => settleFor(file)(null))
-    return
-  }
-
-  for (const file of files) {
-    settleFor(file)(await importFile(file, projectId))
   }
 
   // Refresh the media library UI (lazy-import to avoid circular deps)
@@ -415,7 +440,7 @@ async function handleAddToTimeline(event: MessageEvent) {
   const reply = (type: string, payload: Record<string, unknown>) =>
     window.parent.postMessage({ type, payload: { requestId, ...payload } }, event.origin)
   try {
-    const mediaId = typeof ref === 'string' ? await importedByRef.get(ref) : null
+    const mediaId = typeof ref === 'string' ? await mediaIdForRef(ref) : null
     if (!mediaId) throw new Error('That track is not in Media')
     const placed = await addMediaToTimelineAtPlayhead(mediaId)
     reply('FREECUT_TIMELINE_ADDED', { track: placed.track, at: placed.at })
@@ -433,12 +458,23 @@ const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | 
   NODARO_RESET_PROJECT: () => handleResetProject(),
   NODARO_IMPORT_FILES: handleImportFiles,
   NODARO_ADD_TO_TIMELINE: handleAddToTimeline,
+  NODARO_APPLY_OPS: handleApplyOps,
+  NODARO_GET_TIMELINE: handleGetTimeline,
+  NODARO_PLAYBACK: handlePlayback,
+  NODARO_UNDO_EDIT: handleUndoEdit,
+  NODARO_PRESENCE: handlePresence,
 }
 
 function handleMessage(event: MessageEvent) {
   const type = event.data?.type
-  const handler = type ? EMBEDDED_MESSAGE_HANDLERS[type] : undefined
+  const handler =
+    typeof type === 'string' && Object.hasOwn(EMBEDDED_MESSAGE_HANDLERS, type)
+      ? EMBEDDED_MESSAGE_HANDLERS[type]
+      : undefined
   if (!handler) return
+
+  // Commands come from the page that frames this editor, and from no other window.
+  if (event.source !== window.parent) return
 
   if (!isAllowedOrigin(event.origin)) {
     log.warn(`Rejected ${type} from disallowed origin:`, event.origin)
@@ -450,14 +486,12 @@ function handleMessage(event: MessageEvent) {
 
 export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
   openEditor = deps.openEditor
+  setEditOpsLoader(deps.loadEditOps ?? null)
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.
   void ensureEmbeddedWorkspaceMounted()
   window.addEventListener('message', handleMessage)
   // Signal readiness to parent (uses '*' because parent origin unknown yet, no sensitive payload)
   // — with what this editor can do beyond the basics (EMBEDDED_CAPABILITIES).
-  window.parent.postMessage(
-    { type: 'FREECUT_READY', capabilities: [...EMBEDDED_CAPABILITIES] },
-    '*',
-  )
+  window.parent.postMessage({ type: 'FREECUT_READY', capabilities: readyCapabilities() }, '*')
   log.info('Embedded message handler initialized, FREECUT_READY sent')
 }

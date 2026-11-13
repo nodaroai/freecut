@@ -29,6 +29,8 @@ describe('NODARO_LOAD_VIDEO opens the editor through the app shell', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         origin: 'https://app.nodaro.ai',
+        // The framing page is the sender; under jsdom the window is its own parent.
+        source: window,
         data: { type: 'NODARO_LOAD_VIDEO', payload: {} },
       }),
     )

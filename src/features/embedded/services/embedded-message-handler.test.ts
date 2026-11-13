@@ -173,8 +173,11 @@ describe('saveExit on the wire', () => {
     initEmbeddedMessageHandler({ openEditor: vi.fn() })
   })
 
+  // The framing page is the sender; under jsdom the window is its own parent.
   function send(type: string, payload?: Record<string, unknown>) {
-    window.dispatchEvent(new MessageEvent('message', { data: { type, payload }, origin: PARENT }))
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type, payload }, origin: PARENT, source: window }),
+    )
   }
 
   // The handler marks the import before its first await and clears it when done.
@@ -210,9 +213,31 @@ describe('saveExit on the wire', () => {
       new MessageEvent('message', {
         data: { type: 'NODARO_LOAD_VIDEO', payload: { saveExit: 'video' } },
         origin: 'https://evil.example.com',
+        source: window,
       }),
     )
     expect(useEmbeddedStore.getState().isImporting).toBe(false)
     expect(useEmbeddedStore.getState().saveExitMode).toBe('project')
+  })
+
+  it('takes nothing from a window other than the framing page, whatever its origin', async () => {
+    await loadVideo({ saveExit: 'project' })
+    const other = document.createElement('iframe')
+    document.body.appendChild(other)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'NODARO_LOAD_VIDEO', payload: { saveExit: 'video' } },
+        origin: PARENT,
+        source: other.contentWindow,
+      }),
+    )
+    other.remove()
+    expect(useEmbeddedStore.getState().isImporting).toBe(false)
+    expect(useEmbeddedStore.getState().saveExitMode).toBe('project')
+  })
+
+  it('ignores a message type named after a property of every object', () => {
+    expect(() => send('__proto__')).not.toThrow()
+    expect(() => send('constructor')).not.toThrow()
   })
 })
