@@ -7,10 +7,12 @@
  *   above the footage; an audio file goes on an audio track (see
  *   `track-placement.ts`). A ref that is still being imported is waited for.
  *   Answers `{ id, trackId, from, durationInFrames }`.
+ * - `fitItem { id, durationInFrames, fadeOutSeconds? }`: trim or extend an item
+ *   (up to its media), and set its fade-out again.
  */
 import type { EditOp } from '@/features/embedded/services/edit-ops-bridge'
 import { useItemsStore } from '@/features/timeline/stores/items-store'
-import { addItem } from '@/features/timeline/stores/timeline-actions'
+import { addItem, trimItemEnd, updateItem } from '@/features/timeline/stores/timeline-actions'
 import { buildMediaTimelineItem } from '@/features/timeline/utils/media-timeline-item-builder'
 import type { TimelineItem } from '@/types/timeline'
 import { prepareMedia, preparedData, type PreparedMedia } from './media-prep'
@@ -23,7 +25,7 @@ import {
   requireNumber,
   requireString,
 } from './op-fields'
-import { projectCanvas, timelineFps } from './timeline-context'
+import { projectCanvas, requireTimelineItem, timelineFps } from './timeline-context'
 import { trackFor } from './track-placement'
 
 const IMAGE_SECONDS = 3
@@ -146,4 +148,21 @@ export function applyPlaceMedia(op: EditOp): unknown {
     from: placed?.from ?? timing.from,
     durationInFrames: placed?.durationInFrames ?? timing.durationInFrames,
   }
+}
+
+// ── fitItem ──────────────────────────────────────────────────────────────────
+
+export function applyFitItem(op: EditOp): unknown {
+  const id = requireString(op, 'id')
+  const target = Math.round(requireNumber(op, 'durationInFrames'))
+  if (target < 1) fail(op, '`durationInFrames` must be 1 or more')
+  const fadeOut = readNonNegative(op, 'fadeOutSeconds')
+  const item = requireTimelineItem(op.op, id)
+  // The editor's own trim: it stops at the end of the media and at the next
+  // item on the track, and moves a linked companion along.
+  if (target !== item.durationInFrames) trimItemEnd(id, target - item.durationInFrames)
+  if (fadeOut !== undefined) {
+    updateItem(id, item.type === 'audio' ? { audioFadeOut: fadeOut } : { fadeOut })
+  }
+  return { id, durationInFrames: requireTimelineItem(op.op, id).durationInFrames }
 }

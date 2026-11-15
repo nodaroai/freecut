@@ -243,3 +243,44 @@ describe('placeMedia', () => {
     ).rejects.toThrow('placeMedia: track "v1" has no room for 30 frames at frame 0')
   })
 })
+
+describe('fitItem', () => {
+  it('trims an item and sets its fade-out', async () => {
+    const [placed] = (await batch({
+      op: 'placeMedia',
+      mediaId: 'music',
+      from: 0,
+      durationInFrames: 600,
+    })) as [Placed]
+
+    const [fitted] = await batch({
+      op: 'fitItem',
+      id: placed.id,
+      durationInFrames: 240,
+      fadeOutSeconds: 2,
+    })
+
+    expect(fitted).toEqual({ id: placed.id, durationInFrames: 240 })
+    expect(itemOf(placed.id)).toMatchObject({ durationInFrames: 240, audioFadeOut: 2 })
+  })
+
+  it('extends an item no further than its media', async () => {
+    const [placed] = (await batch({
+      op: 'placeMedia',
+      mediaId: 'music',
+      from: 0,
+      durationInFrames: 300,
+      sourceStartSeconds: 50,
+    })) as [Placed]
+
+    const [fitted] = await batch({ op: 'fitItem', id: placed.id, durationInFrames: 900 })
+
+    expect(fitted).toEqual({ id: placed.id, durationInFrames: 300 })
+  })
+
+  it('refuses an item that is not on the timeline', async () => {
+    await expect(batch({ op: 'fitItem', id: 'nope', durationInFrames: 10 })).rejects.toThrow(
+      'fitItem: item "nope" is not on the timeline',
+    )
+  })
+})
