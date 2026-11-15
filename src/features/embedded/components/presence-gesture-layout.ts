@@ -129,6 +129,32 @@ function layoutBadge(value: number, box: Box | null, els: GestureElements): void
   if (els.bar) els.bar.style.width = `${Math.round(value * 100)}%`
 }
 
+function layoutDrag(
+  gesture: Extract<PresenceGesture, { kind: 'drag' }>,
+  base: Point | null,
+  t: number,
+  m: Measured,
+  els: GestureElements,
+): Point | null {
+  const to = placePoint(gesture.to, m)
+  // Dropped: the carried chip is let go.
+  if (els.chip) els.chip.style.opacity = t >= 1 ? '0' : '1'
+  return base && to ? lerp(base, to, ease(t)) : base
+}
+
+/** The selection grows over its frames, the cursor at its moving edge. */
+function layoutMarquee(
+  gesture: Extract<PresenceGesture, { kind: 'marquee' }>,
+  t: number,
+  m: Measured,
+  els: GestureElements,
+): Point | null {
+  const span = spanBox(gesture.trackId, gesture.from, gesture.to, m)
+  const grown = span ? { ...span, width: Math.max(2, span.width * ease(t)) } : null
+  place(els.marquee, grown)
+  return grown ? { x: grown.left + grown.width, y: grown.top + grown.height / 2 } : null
+}
+
 /**
  * Draw one frame of a gesture and answer where its cursor is: `base` (where
  * the cursor points) for gestures that leave it there, or the moving point.
@@ -146,22 +172,14 @@ export function layoutGesture(
     case 'click':
       place(els.outline, cursorBox(cursor, m))
       return base
-    case 'drag': {
-      const to = placePoint(gesture.to, m)
-      // Dropped: the carried chip is let go.
-      if (els.chip) els.chip.style.opacity = t >= 1 ? '0' : '1'
-      return base && to ? lerp(base, to, ease(t)) : base
-    }
+    case 'drag':
+      return layoutDrag(gesture, base, t, m, els)
     case 'type':
       if (els.typed)
         els.typed.textContent = gesture.text.slice(0, Math.ceil(t * gesture.text.length))
       return base
-    case 'marquee': {
-      const span = spanBox(gesture.trackId, gesture.from, gesture.to, m)
-      const grown = span ? { ...span, width: Math.max(2, span.width * ease(t)) } : null
-      place(els.marquee, grown)
-      return grown ? { x: grown.left + grown.width, y: grown.top + grown.height / 2 } : base
-    }
+    case 'marquee':
+      return layoutMarquee(gesture, t, m, els) ?? base
     case 'lasso':
       return layoutLasso(gesture, t, m, els) ?? base
     case 'slide':

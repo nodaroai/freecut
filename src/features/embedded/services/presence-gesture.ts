@@ -43,66 +43,70 @@ type GestureBody = PresenceGesture extends infer G
     : never
   : never
 
+/** One reader per gesture the editor draws: its fields, or null when they do not make one. */
+const GESTURES: Readonly<Record<string, (raw: Raw) => GestureBody | null>> = {
+  click: () => ({ kind: 'click' }),
+  drag: (raw) => {
+    const to = place(raw.to)
+    const label = text(raw.label, MAX_LABEL)
+    if (!to) return null
+    return {
+      kind: 'drag',
+      to,
+      ...(label ? { label } : {}),
+      durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.drag),
+    }
+  },
+  type: (raw) => {
+    const typed = text(raw.text, MAX_TEXT)
+    if (!typed) return null
+    return {
+      kind: 'type',
+      text: typed,
+      durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.type),
+    }
+  },
+  marquee: (raw) => {
+    const trackId = text(raw.trackId, 128)
+    const from = frame(raw.from)
+    const to = frame(raw.to)
+    if (!trackId || from === undefined || to === undefined || to <= from) return null
+    return { kind: 'marquee', trackId, from, to }
+  },
+  lasso: (raw) => {
+    const shape = points(raw.points)
+    if (!shape) return null
+    return {
+      kind: 'lasso',
+      points: shape,
+      durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.lasso),
+    }
+  },
+  slide: (raw) => {
+    const from = fraction(raw.from)
+    const to = fraction(raw.to)
+    if (from === undefined || to === undefined) return null
+    return {
+      kind: 'slide',
+      from,
+      to,
+      durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.slide),
+    }
+  },
+  progress: (raw) => {
+    const value = fraction(raw.value)
+    const label = text(raw.label, MAX_LABEL)
+    if (value === undefined) return null
+    return { kind: 'progress', value, ...(label ? { label } : {}) }
+  },
+}
+
 function body(raw: Raw): GestureBody | null {
-  switch (raw.kind) {
-    case 'click':
-      return { kind: 'click' }
-    case 'drag': {
-      const to = place(raw.to)
-      const label = text(raw.label, MAX_LABEL)
-      if (!to) return null
-      return {
-        kind: 'drag',
-        to,
-        ...(label ? { label } : {}),
-        durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.drag),
-      }
-    }
-    case 'type': {
-      const typed = text(raw.text, MAX_TEXT)
-      if (!typed) return null
-      return {
-        kind: 'type',
-        text: typed,
-        durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.type),
-      }
-    }
-    case 'marquee': {
-      const trackId = text(raw.trackId, 128)
-      const from = frame(raw.from)
-      const to = frame(raw.to)
-      if (!trackId || from === undefined || to === undefined || to <= from) return null
-      return { kind: 'marquee', trackId, from, to }
-    }
-    case 'lasso': {
-      const shape = points(raw.points)
-      if (!shape) return null
-      return {
-        kind: 'lasso',
-        points: shape,
-        durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.lasso),
-      }
-    }
-    case 'slide': {
-      const from = fraction(raw.from)
-      const to = fraction(raw.to)
-      if (from === undefined || to === undefined) return null
-      return {
-        kind: 'slide',
-        from,
-        to,
-        durationMs: duration(raw.durationMs, DEFAULT_DURATION_MS.slide),
-      }
-    }
-    case 'progress': {
-      const value = fraction(raw.value)
-      const label = text(raw.label, MAX_LABEL)
-      if (value === undefined) return null
-      return { kind: 'progress', value, ...(label ? { label } : {}) }
-    }
-    default:
-      return null
-  }
+  const read =
+    typeof raw.kind === 'string' && Object.hasOwn(GESTURES, raw.kind)
+      ? GESTURES[raw.kind]
+      : undefined
+  return read ? read(raw) : null
 }
 
 /**
