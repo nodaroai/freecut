@@ -1,14 +1,8 @@
 import { createLogger } from '@/shared/logging/logger'
-import type { TimelineItem } from '@/types/timeline'
-import {
-  useItemsStore,
-  useTimelineCommandStore,
-  useTimelineSettingsStore,
-} from '../deps/timeline-contract'
-import { useProjectStore } from '../deps/projects-contract'
-import { useMediaLibraryStore } from '../deps/media-library-contract'
+import { useTimelineCommandStore } from '../deps/timeline-contract'
 import { mediaIdForRef } from './imported-refs'
 import { waitUntilEditable } from './edit-readiness'
+import { readTimeline } from './timeline-report'
 
 const log = createLogger('embedded-edit-ops')
 
@@ -64,58 +58,6 @@ type Reply = (type: string, payload: Record<string, unknown>) => void
 function replyTo(event: MessageEvent, requestId: string): Reply {
   return (type, payload) =>
     window.parent.postMessage({ type, payload: { requestId, ...payload } }, event.origin)
-}
-
-/** Where a video or audio item's footage starts and ends, so a parent can map media time to the timeline. */
-function sourceFields(item: TimelineItem) {
-  if (item.type !== 'video' && item.type !== 'audio') return {}
-  return {
-    ...(item.sourceStart === undefined ? {} : { sourceStart: item.sourceStart }),
-    ...(item.sourceEnd === undefined ? {} : { sourceEnd: item.sourceEnd }),
-    ...(item.sourceFps === undefined ? {} : { sourceFps: item.sourceFps }),
-    ...(item.speed === undefined ? {} : { speed: item.speed }),
-  }
-}
-
-/** What a parent sees of the timeline: enough to plan edits, nothing the editor keeps private. */
-function readTimeline() {
-  const { tracks, items } = useItemsStore.getState()
-  const metadata = useProjectStore.getState().currentProject?.metadata
-  return {
-    fps: useTimelineSettingsStore.getState().fps || metadata?.fps || 30,
-    width: metadata?.width ?? null,
-    height: metadata?.height ?? null,
-    durationInFrames: items.reduce(
-      (end, item) => Math.max(end, item.from + item.durationInFrames),
-      0,
-    ),
-    tracks: tracks.map((track) => ({
-      id: track.id,
-      name: track.name,
-      kind: track.kind ?? null,
-      order: track.order,
-    })),
-    items: items.map((item) => ({
-      id: item.id,
-      type: item.type,
-      trackId: item.trackId,
-      from: item.from,
-      durationInFrames: item.durationInFrames,
-      ...(item.label ? { label: item.label } : {}),
-      ...('mediaId' in item && item.mediaId ? { mediaId: item.mediaId } : {}),
-      ...('text' in item && typeof item.text === 'string' ? { text: item.text } : {}),
-      ...sourceFields(item),
-    })),
-    media: useMediaLibraryStore.getState().mediaItems.map((media) => ({
-      id: media.id,
-      fileName: media.fileName,
-      mimeType: media.mimeType,
-      duration: media.duration,
-      width: media.width,
-      height: media.height,
-      fps: media.fps,
-    })),
-  }
 }
 
 /** The first entry that is not an operation, or -1 when every entry is one. */

@@ -35,27 +35,31 @@ vi.mock('../deps/timeline-contract', () => ({
   useTimelineCommandStore: {
     getState: () => ({ executeBatch, undoStack: history.undoStack, undo: history.undo }),
   },
+  useMarkersStore: { getState: () => ({ markers: [] }) },
+  useCompositionsStore: { getState: () => ({ compositionById: {} }) },
+  useSequencesStore: { getState: () => ({ topLevelSequenceIds: [] }) },
+  useCompositionNavigationStore: {
+    getState: () => ({ breadcrumbs: [{ compositionId: null }], activeCompositionId: null }),
+  },
+  getActiveTabId: () => null,
 }))
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ currentProject: project.current }) },
 }))
-vi.mock('../deps/media-library-contract', () => ({
-  useMediaLibraryStore: {
-    getState: () => ({
-      mediaItems: [
-        {
-          id: 'm1',
-          fileName: 'take.mp4',
-          mimeType: 'video/mp4',
-          duration: 4,
-          width: 1920,
-          height: 1080,
-          fps: 30,
-        },
-      ],
-    }),
-  },
-}))
+vi.mock('../deps/media-library-contract', () => {
+  const take = {
+    id: 'm1',
+    fileName: 'take.mp4',
+    mimeType: 'video/mp4',
+    duration: 4,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+  }
+  return {
+    useMediaLibraryStore: { getState: () => ({ mediaItems: [take], mediaById: { m1: take } }) },
+  }
+})
 
 import {
   handleApplyOps,
@@ -287,7 +291,8 @@ describe('NODARO_GET_TIMELINE', () => {
         width: 1080,
         height: 1920,
         durationInFrames: 120,
-        tracks: [{ id: 'v1', name: 'V1', kind: 'video', order: 0 }],
+        currentFrame: 0,
+        tracks: [{ id: 'v1', name: 'V1', kind: 'video', order: 0, syncLock: true }],
         items: [
           {
             id: 'clip-1',
@@ -300,6 +305,9 @@ describe('NODARO_GET_TIMELINE', () => {
             sourceStart: 0,
             sourceEnd: 120,
             sourceFps: 30,
+            volumeDb: 0,
+            // No transform of its own: the 16:9 take fitted to the 9:16 canvas.
+            transform: { x: 0, y: 0, width: 1080, height: 607.5 },
           },
         ],
         media: [
@@ -313,6 +321,8 @@ describe('NODARO_GET_TIMELINE', () => {
             fps: 30,
           },
         ],
+        markers: [],
+        sequences: [],
       },
     })
   })
