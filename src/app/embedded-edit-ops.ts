@@ -13,7 +13,8 @@
  * operations' fields):
  * - media time: `removeSourceRanges`, `addTranscriptCaptions`;
  * - placing files: `placeAudio`;
- * - the project: `setCanvas`, `addMarkers`, `removeMarkers`.
+ * - the project: `setCanvas`, `addMarkers`, `removeMarkers`;
+ * - timeline tabs: `createSequence`, `removeSequence`.
  */
 import type { EditOp, EditOpEngine } from '@/features/embedded/services/edit-ops-bridge'
 import { applyOp } from '@/headless/edit-ops'
@@ -21,6 +22,11 @@ import { setEditCanvas, type EditOp as HeadlessEditOp } from '@/headless/edit-op
 import { applyAddMarkers, applyRemoveMarkers, applySetCanvas } from './embedded-ops/canvas-markers'
 import { applyAddTranscriptCaptions } from './embedded-ops/captions'
 import { applyPlaceAudio, preparePlaceAudio } from './embedded-ops/place-audio'
+import {
+  applyCreateSequence,
+  applyRemoveSequence,
+  prepareCreateSequence,
+} from './embedded-ops/sequences'
 import { applyRemoveSourceRanges } from './embedded-ops/source-ranges'
 import { projectCanvas } from './embedded-ops/timeline-context'
 
@@ -36,6 +42,8 @@ const OPERATIONS: Record<string, ForkOperation> = {
   setCanvas: { apply: applySetCanvas },
   addMarkers: { apply: applyAddMarkers },
   removeMarkers: { apply: applyRemoveMarkers },
+  createSequence: { prepare: prepareCreateSequence, apply: applyCreateSequence },
+  removeSequence: { apply: applyRemoveSequence },
 }
 
 const operationFor = (op: EditOp): ForkOperation | undefined =>
