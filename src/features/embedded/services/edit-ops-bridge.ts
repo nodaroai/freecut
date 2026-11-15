@@ -6,6 +6,7 @@ import {
 } from '../deps/timeline-contract'
 import { mediaIdForRef } from './imported-refs'
 import { waitUntilEditable } from './edit-readiness'
+import { executeWithoutHistory, HistoryFreeRefusal } from './history-free-batch'
 import { readTimeline } from './timeline-report'
 
 const log = createLogger('embedded-edit-ops')
@@ -101,7 +102,7 @@ class OpFailure extends Error {
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'The operation failed'
 
-async function applyRequest(ops: EditOp[], label: unknown) {
+async function applyRequest(ops: EditOp[], label: unknown, withHistory: boolean) {
   const projectId = await waitUntilEditable()
   const tab = openTab()
   const loaded = await getEngine()
@@ -130,31 +131,38 @@ async function applyRequest(ops: EditOp[], label: unknown) {
   }
   const history = useTimelineCommandStore.getState()
   const topBefore = history.undoStack.at(-1)
+  const batch = withHistory ? history.executeBatch : executeWithoutHistory
   let index = 0
   try {
-    const results = history.executeBatch(command, () =>
+    const results = batch(command, () =>
       prepared.map((op, i) => {
         index = i
         return loaded.apply(op)
       }),
     )
     // A request that changed nothing makes no undo entry, and says so.
-    const recorded = useTimelineCommandStore.getState().undoStack.at(-1) !== topBefore
+    const recorded =
+      withHistory && useTimelineCommandStore.getState().undoStack.at(-1) !== topBefore
     return { results, recorded }
   } catch (error) {
+    if (error instanceof HistoryFreeRefusal) throw error
     throw new OpFailure(messageOf(error), index)
   }
 }
 
 /**
- * NODARO_APPLY_OPS { requestId, label?, ops } → FREECUT_OPS_RESULT.
+ * NODARO_APPLY_OPS { requestId, label?, history?, ops } → FREECUT_OPS_RESULT.
  * The operations apply in order as ONE undo entry. When one fails, the whole
  * request is rolled back and the reply names the failing operation's index.
+ * With `history: false` the request makes no undo entry (`recorded: false`):
+ * for adding and removing timeline tabs that are not open (see
+ * `executeWithoutHistory`).
  */
 export function handleApplyOps(event: MessageEvent): Promise<void> {
-  const { requestId, label, ops } = (event.data?.payload ?? {}) as {
+  const { requestId, label, history, ops } = (event.data?.payload ?? {}) as {
     requestId?: unknown
     label?: unknown
+    history?: unknown
     ops?: unknown
   }
   if (typeof requestId !== 'string') return Promise.resolve()
@@ -186,7 +194,7 @@ export function handleApplyOps(event: MessageEvent): Promise<void> {
   const answer = async () => {
     let outcome: Awaited<ReturnType<typeof applyRequest>>
     try {
-      outcome = await applyRequest(ops as EditOp[], label)
+      outcome = await applyRequest(ops as EditOp[], label, history !== false)
     } catch (error) {
       log.warn('NODARO_APPLY_OPS rolled back:', error)
       return refuse(messageOf(error), error instanceof OpFailure ? error.index : undefined)

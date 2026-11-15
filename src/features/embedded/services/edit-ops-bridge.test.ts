@@ -44,6 +44,13 @@ vi.mock('../deps/timeline-contract', () => ({
   },
   getActiveTabId: () => nav.tab,
 }))
+const withoutHistory = vi.hoisted(() =>
+  vi.fn((_command: unknown, action: () => unknown) => action()),
+)
+vi.mock('./history-free-batch', () => ({
+  executeWithoutHistory: withoutHistory,
+  HistoryFreeRefusal: class extends Error {},
+}))
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ currentProject: project.current }) },
 }))
@@ -225,6 +232,28 @@ describe('NODARO_APPLY_OPS', () => {
 
     expect(seen).toEqual([true, true])
     expect(editRequestPending()).toBe(false)
+  })
+
+  it('applies a request with history: false without an undo entry, and says so', async () => {
+    engineOf(() => ({ sequenceId: 's1' }))
+    withoutHistory.mockClear()
+
+    await handleApplyOps(
+      message('NODARO_APPLY_OPS', {
+        requestId: 'r11',
+        history: false,
+        ops: [{ op: 'createSequence' }],
+      }),
+    )
+
+    expect(withoutHistory).toHaveBeenCalledTimes(1)
+    expect(executeBatch).not.toHaveBeenCalled()
+    expect(lastReply()[0].payload).toMatchObject({
+      requestId: 'r11',
+      ok: true,
+      recorded: false,
+      results: [{ sequenceId: 's1' }],
+    })
   })
 
   it('refuses when no project is open', async () => {

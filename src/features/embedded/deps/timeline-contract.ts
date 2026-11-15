@@ -17,3 +17,8 @@ export {
 export { useCompositionsStore } from '@/features/timeline/stores/compositions-store'
 export { useMarkersStore } from '@/features/timeline/stores/markers-store'
 export { useSequencesStore } from '@/features/timeline/stores/sequences-store'
+export {
+  captureSnapshot,
+  restoreSnapshot,
+  snapshotsEqual,
+} from '@/features/timeline/stores/commands/snapshot'
