@@ -14,13 +14,15 @@
  * - media time: `removeSourceRanges`, `addTranscriptCaptions`;
  * - placing files: `placeMedia`, `placeAudio`, `fitItem`, `replaceMedia`;
  * - the project: `setCanvas`, `addMarkers`, `removeMarkers`;
- * - timeline tabs: `createSequence`, `removeSequence`.
+ * - timeline tabs: `createSequence`, `removeSequence`;
+ * - color: `applyLook`, `removeEffects`.
  */
 import type { EditOp, EditOpEngine } from '@/features/embedded/services/edit-ops-bridge'
 import { applyOp } from '@/headless/edit-ops'
 import { setEditCanvas, type EditOp as HeadlessEditOp } from '@/headless/edit-op-support'
 import { applyAddMarkers, applyRemoveMarkers, applySetCanvas } from './embedded-ops/canvas-markers'
 import { applyAddTranscriptCaptions } from './embedded-ops/captions'
+import { applyApplyLook, applyRemoveEffects } from './embedded-ops/looks'
 import { applyPlaceAudio, preparePlaceAudio } from './embedded-ops/place-audio'
 import { applyFitItem, applyPlaceMedia, preparePlaceMedia } from './embedded-ops/place-media'
 import { applyReplaceMedia, prepareReplaceMedia } from './embedded-ops/replace-media'
@@ -49,6 +51,8 @@ const OPERATIONS: Record<string, ForkOperation> = {
   removeMarkers: { apply: applyRemoveMarkers },
   createSequence: { prepare: prepareCreateSequence, apply: applyCreateSequence },
   removeSequence: { apply: applyRemoveSequence },
+  applyLook: { apply: applyApplyLook },
+  removeEffects: { apply: applyRemoveEffects },
 }
 
 const operationFor = (op: EditOp): ForkOperation | undefined =>
