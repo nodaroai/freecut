@@ -362,11 +362,18 @@ function handleResetProject() {
  * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
  *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
  *   passed the operations engine in).
+ * - `edit-ops-2`: the second set of operations (setCanvas, addMarkers and
+ *   removeMarkers, createSequence and removeSequence, replaceMedia, placeMedia,
+ *   fitItem, applyLook and removeEffects), with edit-ops.
+ * - `captions-word-highlight`: addTranscriptCaptions lights up the spoken word
+ *   (`highlight` and per-cue `words`), with edit-ops.
  */
 const EMBEDDED_CAPABILITIES = ['timeline-add', 'timeline-read', 'playback', 'presence'] as const
 
+const EDIT_OPS_CAPABILITIES = ['edit-ops', 'edit-ops-2', 'captions-word-highlight'] as const
+
 function readyCapabilities(): string[] {
-  return [...EMBEDDED_CAPABILITIES, ...(editOpsAvailable() ? ['edit-ops'] : [])]
+  return [...EMBEDDED_CAPABILITIES, ...(editOpsAvailable() ? EDIT_OPS_CAPABILITIES : [])]
 }
 
 interface ImportFile {

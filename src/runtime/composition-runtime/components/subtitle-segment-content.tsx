@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 
 import { useSequenceContext } from '@/runtime/composition-runtime/deps/player'
-import { parseSubtitleCueText } from '@/shared/utils/subtitle-cue-format'
+import { parseSubtitleCueText, subtitleSpanLayout } from '@/shared/utils/subtitle-cue-format'
 import type { SubtitleSegmentItem, TextItem } from '@/types/timeline'
 
 import { useVideoConfig } from '../hooks/use-player-compat'
@@ -55,6 +55,8 @@ export const SubtitleSegmentContent: React.FC<{
       // fragments inside one cue. TextContent prefers spans over `text`
       // when both are present.
       textSpans: parsed?.spans,
+      // A colored word flows inline so it stays in its place on the line.
+      spanLayout: parsed ? subtitleSpanLayout(parsed.spans) : undefined,
       fontSize: item.fontSize,
       fontFamily: item.fontFamily,
       fontWeight: item.fontWeight,

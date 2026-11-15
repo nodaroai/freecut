@@ -9,7 +9,7 @@
  */
 
 import type { SubtitleSegmentItem, TextItem } from '@/types/timeline'
-import { parseSubtitleCueText } from '@/shared/utils/subtitle-cue-format'
+import { parseSubtitleCueText, subtitleSpanLayout } from '@/shared/utils/subtitle-cue-format'
 import {
   layoutTextBlock,
   lineInkWidth,
@@ -506,6 +506,8 @@ export function renderSubtitleSegmentItem(
     mediaId: item.mediaId,
     text: parsed.plainText,
     textSpans: parsed.spans,
+    // A colored word flows inline so it stays in its place on the line.
+    spanLayout: subtitleSpanLayout(parsed.spans),
     fontSize: item.fontSize,
     fontFamily: item.fontFamily,
     fontWeight: item.fontWeight,
