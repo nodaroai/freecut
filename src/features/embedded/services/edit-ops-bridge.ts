@@ -1,5 +1,9 @@
 import { createLogger } from '@/shared/logging/logger'
-import { useTimelineCommandStore } from '../deps/timeline-contract'
+import {
+  getActiveTabId,
+  useCompositionNavigationStore,
+  useTimelineCommandStore,
+} from '../deps/timeline-contract'
 import { mediaIdForRef } from './imported-refs'
 import { waitUntilEditable } from './edit-readiness'
 import { readTimeline } from './timeline-report'
@@ -32,6 +36,16 @@ let loadEngine: LoadEditOps | null = null
 let engine: Promise<EditOpEngine> | null = null
 // Requests run one at a time, in arrival order: each reads the timeline the previous one left.
 let queue: Promise<void> = Promise.resolve()
+// Edit requests accepted and not yet answered.
+let pendingEdits = 0
+
+/** True while an edit request is waiting or being applied: the open tab must not change under it. */
+export function editRequestPending(): boolean {
+  return pendingEdits > 0
+}
+
+/** The open timeline tab (null for Main); a request is refused when it changed under it. */
+const openTab = () => getActiveTabId(useCompositionNavigationStore.getState().breadcrumbs)
 
 export function setEditOpsLoader(load: LoadEditOps | null): void {
   loadEngine = load
@@ -89,6 +103,7 @@ const messageOf = (error: unknown) =>
 
 async function applyRequest(ops: EditOp[], label: unknown) {
   const projectId = await waitUntilEditable()
+  const tab = openTab()
   const loaded = await getEngine()
   const prepared: EditOp[] = []
   for (const [index, op] of ops.entries()) {
@@ -103,6 +118,10 @@ async function applyRequest(ops: EditOp[], label: unknown) {
   // and the batch below run with no await between them, so they hold together.
   if ((await waitUntilEditable()) !== projectId) {
     throw new Error('The project changed while the edit was being prepared')
+  }
+  // Undo history is kept per tab: an edit prepared for one tab never lands on another.
+  if (openTab() !== tab) {
+    throw new Error('The open timeline tab changed while the edit was being prepared')
   }
 
   const command = {
@@ -164,7 +183,7 @@ export function handleApplyOps(event: MessageEvent): Promise<void> {
     return Promise.resolve()
   }
 
-  const run = async () => {
+  const answer = async () => {
     let outcome: Awaited<ReturnType<typeof applyRequest>>
     try {
       outcome = await applyRequest(ops as EditOp[], label)
@@ -175,6 +194,14 @@ export function handleApplyOps(event: MessageEvent): Promise<void> {
     // The edit has landed: a failure to send the reply is not a rollback.
     reply('FREECUT_OPS_RESULT', { ok: true, ...outcome, timeline: readTimeline() })
   }
+  const run = async () => {
+    try {
+      await answer()
+    } finally {
+      pendingEdits -= 1
+    }
+  }
+  pendingEdits += 1
   queue = queue.then(run, run)
   return queue
 }

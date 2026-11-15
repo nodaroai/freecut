@@ -7,6 +7,7 @@ const executeBatch = vi.fn((_command: unknown, action: () => unknown) => action(
 const project = vi.hoisted(() => ({
   current: { id: 'p1', metadata: { width: 1080, height: 1920, fps: 30 } } as unknown,
 }))
+const nav = vi.hoisted(() => ({ tab: null as string | null }))
 const history = vi.hoisted(() => ({
   undoStack: [] as Array<{ command: { type: string; payload?: Record<string, unknown> } }>,
   undo: vi.fn(),
@@ -41,7 +42,7 @@ vi.mock('../deps/timeline-contract', () => ({
   useCompositionNavigationStore: {
     getState: () => ({ breadcrumbs: [{ compositionId: null }], activeCompositionId: null }),
   },
-  getActiveTabId: () => null,
+  getActiveTabId: () => nav.tab,
 }))
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ currentProject: project.current }) },
@@ -62,6 +63,7 @@ vi.mock('../deps/media-library-contract', () => {
 })
 
 import {
+  editRequestPending,
   handleApplyOps,
   handleGetTimeline,
   handleUndoEdit,
@@ -191,6 +193,38 @@ describe('NODARO_APPLY_OPS', () => {
     )
 
     expect(seen[0]).toMatchObject({ op: 'placeAudio', ref: 'music', mediaId: 'media-music' })
+  })
+
+  it('refuses an edit whose timeline tab changed while it was being prepared', async () => {
+    const apply = vi.fn()
+    engineOf(apply, async (op) => {
+      nav.tab = 'sequence-2'
+      return op
+    })
+
+    await handleApplyOps(message('NODARO_APPLY_OPS', { requestId: 'r9', ops: [{ op: 'split' }] }))
+    nav.tab = null
+
+    expect(lastReply()[0].payload).toEqual({
+      requestId: 'r9',
+      ok: false,
+      error: { message: 'The open timeline tab changed while the edit was being prepared' },
+    })
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('counts a request as pending from its arrival until its answer', async () => {
+    const seen: boolean[] = []
+    engineOf(() => seen.push(editRequestPending()))
+
+    const done = handleApplyOps(
+      message('NODARO_APPLY_OPS', { requestId: 'r10', ops: [{ op: 'a' }] }),
+    )
+    seen.push(editRequestPending())
+    await done
+
+    expect(seen).toEqual([true, true])
+    expect(editRequestPending()).toBe(false)
   })
 
   it('refuses when no project is open', async () => {

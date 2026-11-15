@@ -25,6 +25,10 @@ vi.mock('../deps/timeline-contract', () => ({
     getState: () => ({ requestScrollToFrame: (frame: number) => state.scrolledTo.push(frame) }),
   },
 }))
+const opened = vi.hoisted(() => [] as unknown[])
+vi.mock('./open-sequence', () => ({
+  openSequence: (sequenceId: unknown) => opened.push(sequenceId),
+}))
 
 import { handlePlayback } from './playback-control'
 
@@ -50,6 +54,12 @@ describe('NODARO_PLAYBACK', () => {
     handlePlayback(message({ action: 'pause' }))
     expect(state.playing).toBe(false)
     expect(state.scrolledTo).toEqual([])
+  })
+
+  it('opens the timeline tab a parent names, and does nothing else', () => {
+    handlePlayback(message({ action: 'open-sequence', sequenceId: 'main', frame: 40 }))
+    expect(opened).toEqual(['main'])
+    expect(state.frame).toBe(0)
   })
 
   it('ignores a frame that is not a number', () => {
