@@ -30,6 +30,7 @@ vi.mock('./open-sequence', () => ({
   openSequence: (sequenceId: unknown) => opened.push(sequenceId),
 }))
 
+import { useCompareStore } from '../stores/compare-store'
 import { handlePlayback } from './playback-control'
 
 const message = (payload: unknown) =>
@@ -60,6 +61,17 @@ describe('NODARO_PLAYBACK', () => {
     handlePlayback(message({ action: 'open-sequence', sequenceId: 'main', frame: 40 }))
     expect(opened).toEqual(['main'])
     expect(state.frame).toBe(0)
+  })
+
+  it('shows the original beside the edit when asked, and ignores a mode it does not know', () => {
+    handlePlayback(message({ action: 'compare', mode: 'split', split: 0.3 }))
+    expect(useCompareStore.getState()).toMatchObject({ offered: true, mode: 'split', split: 0.3 })
+
+    handlePlayback(message({ action: 'compare', mode: 'sideways' }))
+    expect(useCompareStore.getState().mode).toBe('split')
+
+    handlePlayback(message({ action: 'compare', mode: 'program' }))
+    expect(useCompareStore.getState()).toMatchObject({ mode: 'program', split: 0.3 })
   })
 
   it('ignores a frame that is not a number', () => {

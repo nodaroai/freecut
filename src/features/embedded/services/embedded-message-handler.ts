@@ -362,6 +362,8 @@ function handleResetProject() {
  * - `presence-targets`: a cursor may point at a named part of the editor
  *   (`target`) and carry a drawn `gesture` (click, drag, type, marquee, lasso,
  *   slide, progress).
+ * - `compare`: NODARO_PLAYBACK { action: 'compare', mode, split? } shows the
+ *   original media beside the edit, with an Original | Split | Edited control.
  * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
  *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
  *   passed the operations engine in).
@@ -377,6 +379,7 @@ const EMBEDDED_CAPABILITIES = [
   'playback',
   'presence',
   'presence-targets',
+  'compare',
 ] as const
 
 const EDIT_OPS_CAPABILITIES = ['edit-ops', 'edit-ops-2', 'captions-word-highlight'] as const

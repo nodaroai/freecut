@@ -14,10 +14,11 @@ const LazyToaster = lazy(async () => {
   return { default: Toaster }
 })
 
-// A parent's collaborators drawn over the editor (NODARO_PRESENCE); embedded mode only.
-const LazyPresenceOverlay = lazy(async () => {
-  const { PresenceOverlay } = await import('@/features/embedded/components/presence-overlay')
-  return { default: PresenceOverlay }
+// What a parent draws over the editor (NODARO_PRESENCE collaborators, the NODARO_PLAYBACK
+// compare view); embedded mode only.
+const LazyEmbeddedOverlays = lazy(async () => {
+  const { EmbeddedOverlays } = await import('@/features/embedded/components/embedded-overlays')
+  return { default: EmbeddedOverlays }
 })
 
 // Synchronous init — NOT dynamic import — because the message listener must be registered
@@ -100,7 +101,7 @@ export function App() {
         <PwaInstallPrompt />
         {isEmbedded() && (
           <Suspense fallback={null}>
-            <LazyPresenceOverlay />
+            <LazyEmbeddedOverlays />
           </Suspense>
         )}
         {showToaster && (

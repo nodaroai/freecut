@@ -1,0 +1,12 @@
+{
+  "embedded": {
+    "compare": {
+      "label": "Comparer avec l'original",
+      "original": "Original",
+      "split": "Partagé",
+      "edited": "Monté",
+      "viewOnly": "Original · lecture seule",
+      "divider": "Position de la séparation"
+    }
+  }
+}

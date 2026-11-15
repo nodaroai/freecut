@@ -1,0 +1,12 @@
+{
+  "embedded": {
+    "compare": {
+      "label": "Orijinalle karşılaştır",
+      "original": "Orijinal",
+      "split": "Bölünmüş",
+      "edited": "Düzenlenmiş",
+      "viewOnly": "Orijinal · yalnızca görüntüleme",
+      "divider": "Bölme konumu"
+    }
+  }
+}
