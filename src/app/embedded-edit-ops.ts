@@ -16,7 +16,8 @@
  * - the project: `setCanvas`, `addMarkers`, `removeMarkers`;
  * - timeline tabs: `createSequence`, `removeSequence`;
  * - color: `applyLook`, `removeEffects`;
- * - `removeItems`: exactly the items named, never the items linked to them.
+ * - `removeItems`: exactly the items named, never the items linked to them;
+ * - `duplicateItems`, `splitItems`: a silent copy of clips, and clips split at frames.
  */
 import type { EditOp, EditOpEngine } from '@/features/embedded/services/edit-ops-bridge'
 import { useSettingsStore } from '@/features/settings/stores/settings-store'
@@ -35,6 +36,7 @@ import {
   applyRemoveSequence,
   prepareCreateSequence,
 } from './embedded-ops/sequences'
+import { applySplitItems } from './embedded-ops/split-items'
 import { applyRemoveSourceRanges } from './embedded-ops/source-ranges'
 import { projectCanvas } from './embedded-ops/timeline-context'
 
@@ -47,6 +49,7 @@ const OPERATIONS: Record<string, ForkOperation> = {
   removeSourceRanges: { apply: applyRemoveSourceRanges },
   removeItems: { apply: applyRemoveItems },
   duplicateItems: { apply: applyDuplicateItems },
+  splitItems: { apply: applySplitItems },
   addTranscriptCaptions: { apply: applyAddTranscriptCaptions },
   placeAudio: { prepare: preparePlaceAudio, apply: applyPlaceAudio },
   placeMedia: { prepare: preparePlaceMedia, apply: applyPlaceMedia },
