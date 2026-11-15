@@ -48,7 +48,9 @@ export function CursorGestureParts({ gesture, color, reduceMotion, register }: G
   if (gesture.kind === 'drag') {
     return (
       <div
+        ref={(chip) => register({ chip })}
         style={{
+          transition: 'opacity 200ms',
           position: 'absolute',
           left: 14,
           top: -26,
@@ -74,6 +76,7 @@ export function CursorGestureParts({ gesture, color, reduceMotion, register }: G
           position: 'absolute',
           left: 15,
           top: 44,
+          width: 'max-content',
           maxWidth: 260,
           padding: '6px 9px',
           borderRadius: 6,
@@ -122,22 +125,21 @@ export function GestureLayer({ gesture, color, reduceMotion, register }: Gesture
       )
     case 'lasso':
       return (
-        <svg
-          ref={(lasso) => register({ lasso })}
-          viewBox="0 0 1 1"
-          preserveAspectRatio="none"
-          style={{ ...FLOATING, overflow: 'visible' }}
-        >
+        <svg ref={(lasso) => register({ lasso })} style={{ ...FLOATING, overflow: 'visible' }}>
+          {/* Its points, in the preview's own pixels, are set by the overlay. */}
           <polyline
             ref={(lassoLine) => register({ lassoLine })}
-            points={gesture.points.map((p) => `${p.x},${p.y}`).join(' ')}
             pathLength={1}
             fill={`color-mix(in srgb, ${color} 14%, transparent)`}
             stroke={color}
             strokeWidth={2}
+            strokeLinejoin="round"
             strokeDasharray="1"
-            strokeDashoffset={reduceMotion ? 0 : 1}
-            vectorEffect="non-scaling-stroke"
+            style={{
+              strokeDashoffset: reduceMotion ? 0 : 1,
+              fillOpacity: 0,
+              transition: 'fill-opacity 250ms',
+            }}
           />
         </svg>
       )

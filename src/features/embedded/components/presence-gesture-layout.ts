@@ -23,6 +23,7 @@ export interface GestureElements {
   badge?: HTMLDivElement | null
   bar?: HTMLDivElement | null
   typed?: HTMLSpanElement | null
+  chip?: HTMLDivElement | null
 }
 
 /** How long a gesture plays before it rests in its final state. */
@@ -80,10 +81,23 @@ function layoutLasso(
   m: Measured,
   els: GestureElements,
 ): Point | null {
-  place(els.lasso, m.previewBox)
-  if (els.lassoLine) els.lassoLine.style.strokeDashoffset = String(1 - t)
   const box = m.previewBox
+  place(els.lasso, box)
   if (!box) return null
+  // Drawn in the preview's own pixels: a scaled drawing would scale the dashes
+  // that reveal the line as it is drawn.
+  const viewBox = `0 0 ${box.width} ${box.height}`
+  if (els.lasso && els.lasso.getAttribute('viewBox') !== viewBox) {
+    els.lasso.setAttribute('viewBox', viewBox)
+    els.lassoLine?.setAttribute(
+      'points',
+      gesture.points.map((p) => `${p.x * box.width},${p.y * box.height}`).join(' '),
+    )
+  }
+  if (els.lassoLine) {
+    els.lassoLine.style.strokeDashoffset = String(1 - t)
+    els.lassoLine.style.fillOpacity = t >= 1 ? '1' : '0'
+  }
   const at = along(gesture.points, t)
   return { x: box.left + at.x * box.width, y: box.top + at.y * box.height }
 }
@@ -134,6 +148,8 @@ export function layoutGesture(
       return base
     case 'drag': {
       const to = placePoint(gesture.to, m)
+      // Dropped: the carried chip is let go.
+      if (els.chip) els.chip.style.opacity = t >= 1 ? '0' : '1'
       return base && to ? lerp(base, to, ease(t)) : base
     }
     case 'type':
