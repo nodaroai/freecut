@@ -16,8 +16,10 @@ import {
   useCompositionsStore,
   type SubComposition,
 } from '@/features/timeline/stores/compositions-store'
+import { useItemsStore } from '@/features/timeline/stores/items-store'
 import { useSequencesStore } from '@/features/timeline/stores/sequences-store'
 import { deleteCompoundClips } from '@/features/timeline/stores/timeline-actions'
+import { useTimelineCommandStore } from '@/features/timeline/stores/timeline-command-store'
 import { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
 import { createClassicTrack } from '@/features/timeline/utils/classic-tracks'
 import { buildMediaTimelineItems } from '@/features/timeline/utils/media-timeline-item-builder'
@@ -222,6 +224,30 @@ export function applyRemoveSequence(op: EditOp): unknown {
   if (breadcrumbs.some((crumb) => crumb.compositionId === sequenceId)) {
     fail(op, `sequence "${sequenceId}" is open in the editor`)
   }
-  if (!deleteCompoundClips([sequenceId])) fail(op, `sequence "${sequenceId}" could not be removed`)
+  if (usedAsClip(sequenceId)) {
+    // Its clips go with it, as the tab menu's Delete sequence removes them.
+    if (!deleteCompoundClips([sequenceId]))
+      fail(op, `sequence "${sequenceId}" could not be removed`)
+    return { sequenceId }
+  }
+  // Nothing uses it: only the tab and its own history go, and every other
+  // sequence is left exactly as it was.
+  useCompositionsStore.getState().removeComposition(sequenceId)
+  useSequencesStore.getState().removeTopLevelSequence(sequenceId)
+  useTimelineCommandStore.getState().removeContext(sequenceId)
+  useTimelineSettingsStore.getState().markDirty()
   return { sequenceId }
+}
+
+/** Whether any timeline, open or held aside, has the sequence as a clip. */
+function usedAsClip(sequenceId: string): boolean {
+  const uses = (items: readonly TimelineItem[]) =>
+    items.some((item) => item.compositionId === sequenceId)
+  const { mainHolder, stashStack } = useCompositionNavigationStore.getState()
+  return (
+    uses(useItemsStore.getState().items) ||
+    useCompositionsStore.getState().compositions.some((sequence) => uses(sequence.items)) ||
+    (mainHolder !== null && uses(mainHolder.items)) ||
+    stashStack.some((stash) => uses(stash.items))
+  )
 }

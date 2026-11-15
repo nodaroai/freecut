@@ -95,12 +95,14 @@ export function executeWithoutHistory<T>(command: Command, action: () => T): T {
       'history: false only adds or removes timeline tabs that are not open; this request changed more',
     )
   }
+  // The batch may have dropped a removed tab's own parked history: keep that.
+  const parked = useTimelineCommandStore.getState().stacksByContext
   useTimelineCommandStore.setState({
     ...saved,
     undoStack: rebaseEntries(saved.undoStack, change),
     redoStack: rebaseEntries(saved.redoStack, change),
     stacksByContext: Object.fromEntries(
-      Object.entries(saved.stacksByContext).map(([key, stacks]) => [
+      Object.entries(parked).map(([key, stacks]) => [
         key,
         {
           undoStack: rebaseEntries(stacks.undoStack, change),
