@@ -86,7 +86,7 @@ export interface SecondsRange {
 }
 
 /** A `{ start, end }` span in seconds: start ≥ 0 and end after it. */
-export function readRange(op: EditOp, entry: unknown, path: string): SecondsRange {
+function readRange(op: EditOp, entry: unknown, path: string): SecondsRange {
   const { start, end } = (entry ?? {}) as { start?: unknown; end?: unknown }
   if (typeof start !== 'number' || typeof end !== 'number' || !(end > start) || start < 0) {
     fail(op, `${path} needs a start and a later end, in seconds`)

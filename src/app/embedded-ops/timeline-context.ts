@@ -12,7 +12,7 @@ const isMediaClip = (item: TimelineItem, mediaId: string): item is MediaClip =>
   (item.type === 'video' || item.type === 'audio') && item.mediaId === mediaId
 
 /** The video and audio clips of one media file, possibly none. */
-export function mediaClipsOf(mediaId: string): MediaClip[] {
+function mediaClipsOf(mediaId: string): MediaClip[] {
   return useItemsStore.getState().items.filter((item) => isMediaClip(item, mediaId))
 }
 

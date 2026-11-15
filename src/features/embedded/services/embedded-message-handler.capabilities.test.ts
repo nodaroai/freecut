@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+// Starting the handler mounts storage, which the test environment does not have.
+vi.mock('./embedded-workspace', () => ({
+  ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}),
+}))
+
 import { initEmbeddedMessageHandler } from './embedded-message-handler'
 import type { EditOpEngine } from './edit-ops-bridge'
 

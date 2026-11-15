@@ -59,7 +59,7 @@ export function measure() {
 export type Measured = ReturnType<typeof measure>
 
 /** A frame of the timeline, on a track when given (else just under the ruler). */
-export function framePoint(frame: number, trackId: string | undefined, m: Measured): Point | null {
+function framePoint(frame: number, trackId: string | undefined, m: Measured): Point | null {
   const lane = m.timelineBox
   const x = m.frameX(frame)
   if (!lane || x === null) return null
