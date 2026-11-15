@@ -182,6 +182,33 @@ export function GestureLayer({ gesture, color, reduceMotion, register }: Gesture
           </div>
         </div>
       )
+    case 'cut':
+      return (
+        <div
+          ref={(cut) => register({ cut })}
+          style={{
+            ...FLOATING,
+            boxSizing: 'border-box',
+            borderLeft: '2px solid #ff3b4e',
+            borderRight: '2px solid #ff3b4e',
+            background: 'rgba(255, 59, 78, 0.38)',
+            transition: 'opacity 160ms',
+          }}
+        />
+      )
+    case 'frame':
+      return (
+        <div
+          ref={(frame) => register({ frame })}
+          style={{
+            ...FLOATING,
+            boxSizing: 'border-box',
+            border: `2px solid ${color}`,
+            borderRadius: 3,
+            boxShadow: `0 0 0 1px rgba(0,0,0,0.5), 0 0 18px ${color}`,
+          }}
+        />
+      )
     default:
       return null
   }

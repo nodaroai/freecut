@@ -97,9 +97,17 @@ export function applyAddTranscriptCaptions(op: EditOp): unknown {
   const metadata = projectCanvas()
   const clips = clipsOf(mediaId)
   // Caption the picture; an audio-only media file is captioned on its audio clips.
-  const targets = clips.some((clip) => clip.type === 'video')
+  const pictured = clips.some((clip) => clip.type === 'video')
     ? clips.filter((clip) => clip.type === 'video')
     : clips
+  // The same moment shown twice (a copy of a clip, for a layout) is captioned once.
+  const seen = new Set<string>()
+  const targets = pictured.filter((clip) => {
+    const moment = `${clip.from}:${clip.durationInFrames}`
+    if (seen.has(moment)) return false
+    seen.add(moment)
+    return true
+  })
   const fps = timelineFps()
   const presetId =
     typeof op.stylePresetId === 'string'

@@ -15,16 +15,20 @@
  * - placing files: `placeMedia`, `placeAudio`, `fitItem`, `replaceMedia`;
  * - the project: `setCanvas`, `addMarkers`, `removeMarkers`;
  * - timeline tabs: `createSequence`, `removeSequence`;
- * - color: `applyLook`, `removeEffects`.
+ * - color: `applyLook`, `removeEffects`;
+ * - `removeItems`: exactly the items named, never the items linked to them.
  */
 import type { EditOp, EditOpEngine } from '@/features/embedded/services/edit-ops-bridge'
+import { useSettingsStore } from '@/features/settings/stores/settings-store'
 import { applyOp } from '@/headless/edit-ops'
 import { setEditCanvas, type EditOp as HeadlessEditOp } from '@/headless/edit-op-support'
 import { applyAddMarkers, applyRemoveMarkers, applySetCanvas } from './embedded-ops/canvas-markers'
 import { applyAddTranscriptCaptions } from './embedded-ops/captions'
+import { applyDuplicateItems } from './embedded-ops/duplicate-items'
 import { applyApplyLook, applyRemoveEffects } from './embedded-ops/looks'
 import { applyPlaceAudio, preparePlaceAudio } from './embedded-ops/place-audio'
 import { applyFitItem, applyPlaceMedia, preparePlaceMedia } from './embedded-ops/place-media'
+import { applyRemoveItems } from './embedded-ops/remove-items'
 import { applyReplaceMedia, prepareReplaceMedia } from './embedded-ops/replace-media'
 import {
   applyCreateSequence,
@@ -41,6 +45,8 @@ interface ForkOperation {
 
 const OPERATIONS: Record<string, ForkOperation> = {
   removeSourceRanges: { apply: applyRemoveSourceRanges },
+  removeItems: { apply: applyRemoveItems },
+  duplicateItems: { apply: applyDuplicateItems },
   addTranscriptCaptions: { apply: applyAddTranscriptCaptions },
   placeAudio: { prepare: preparePlaceAudio, apply: applyPlaceAudio },
   placeMedia: { prepare: preparePlaceMedia, apply: applyPlaceMedia },
@@ -53,6 +59,21 @@ const OPERATIONS: Record<string, ForkOperation> = {
   removeSequence: { apply: applyRemoveSequence },
   applyLook: { apply: applyApplyLook },
   removeEffects: { apply: applyRemoveEffects },
+}
+
+/**
+ * A parent's edit can be many undo entries (a cut each, a file each), and it
+ * undoes them all by label later. The history must hold them: an entry that
+ * falls off the end can never be undone. So the history keeps at least this
+ * many entries while a parent edits (a person's own higher setting stands).
+ */
+const PARENT_EDIT_HISTORY = 200
+
+function keepHistoryRoom(): void {
+  const settings = useSettingsStore.getState()
+  if (settings.maxUndoHistory < PARENT_EDIT_HISTORY) {
+    useSettingsStore.setState({ maxUndoHistory: PARENT_EDIT_HISTORY })
+  }
 }
 
 const operationFor = (op: EditOp): ForkOperation | undefined =>
@@ -71,6 +92,7 @@ export const embeddedEditOpEngine: EditOpEngine = {
     return prepare ? prepare(op) : op
   },
   apply: (op) => {
+    keepHistoryRoom()
     const operation = operationFor(op)
     return operation ? operation.apply(op) : applyHeadless(op)
   },

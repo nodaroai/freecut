@@ -24,6 +24,8 @@ export interface GestureElements {
   bar?: HTMLDivElement | null
   typed?: HTMLSpanElement | null
   chip?: HTMLDivElement | null
+  cut?: HTMLDivElement | null
+  frame?: HTMLDivElement | null
 }
 
 /** How long a gesture plays before it rests in its final state. */
@@ -38,7 +40,9 @@ export const movesCursor = (gesture: PresenceGesture) =>
   gesture.kind === 'drag' ||
   gesture.kind === 'lasso' ||
   gesture.kind === 'slide' ||
-  gesture.kind === 'marquee'
+  gesture.kind === 'marquee' ||
+  gesture.kind === 'cut' ||
+  gesture.kind === 'frame'
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
 
@@ -155,6 +159,52 @@ function layoutMarquee(
   return grown ? { x: grown.left + grown.width, y: grown.top + grown.height / 2 } : null
 }
 
+/** The share of a cut's time its blades take to drop; the rest closes the range. */
+const BLADE_SHARE = 0.4
+
+/** Blades drop at both ends of the range, then the range closes toward its start. */
+function layoutCut(
+  gesture: Extract<PresenceGesture, { kind: 'cut' }>,
+  t: number,
+  m: Measured,
+  els: GestureElements,
+): Point | null {
+  const span = spanBox(gesture.trackId, gesture.from, gesture.to, m)
+  if (!span) {
+    place(els.cut, null)
+    return null
+  }
+  const dropped = Math.min(1, t / BLADE_SHARE)
+  const closed = t <= BLADE_SHARE ? 0 : ease((t - BLADE_SHARE) / (1 - BLADE_SHARE))
+  const height = Math.max(2, span.height * dropped)
+  const width = Math.max(0, span.width * (1 - closed))
+  place(els.cut, { left: span.left, top: span.top, width, height })
+  if (els.cut) els.cut.style.opacity = t >= 1 ? '0' : '1'
+  return { x: span.left + width, y: span.top + height }
+}
+
+/** A frame on the preview, moving from one rectangle to another, the cursor at its corner. */
+function layoutFrame(
+  gesture: Extract<PresenceGesture, { kind: 'frame' }>,
+  t: number,
+  m: Measured,
+  els: GestureElements,
+): Point | null {
+  const box = m.previewBox
+  if (!box) {
+    place(els.frame, null)
+    return null
+  }
+  const at = ease(t)
+  const mix = (a: number, b: number) => a + (b - a) * at
+  const left = box.left + mix(gesture.from.x, gesture.to.x) * box.width
+  const top = box.top + mix(gesture.from.y, gesture.to.y) * box.height
+  const width = mix(gesture.from.w, gesture.to.w) * box.width
+  const height = mix(gesture.from.h, gesture.to.h) * box.height
+  place(els.frame, { left, top, width, height })
+  return { x: left + width, y: top + height }
+}
+
 /**
  * Draw one frame of a gesture and answer where its cursor is: `base` (where
  * the cursor points) for gestures that leave it there, or the moving point.
@@ -187,5 +237,9 @@ export function layoutGesture(
     case 'progress':
       layoutBadge(gesture.value, cursorBox(cursor, m), els)
       return base
+    case 'cut':
+      return layoutCut(gesture, t, m, els) ?? base
+    case 'frame':
+      return layoutFrame(gesture, t, m, els) ?? base
   }
 }

@@ -50,7 +50,30 @@ export type PresenceGesture = { readonly key: string } & (
       readonly durationMs: number
     }
   | { readonly kind: 'progress'; readonly value: number; readonly label?: string }
+  /** A range of a track cut out: blades drop at both ends, then the range closes. */
+  | {
+      readonly kind: 'cut'
+      readonly trackId: string
+      readonly from: number
+      readonly to: number
+      readonly durationMs: number
+    }
+  /** A frame drawn on the preview that moves from one rectangle to another (fractions of the picture). */
+  | {
+      readonly kind: 'frame'
+      readonly from: PresenceRect
+      readonly to: PresenceRect
+      readonly durationMs: number
+    }
 )
+
+/** A rectangle on the preview, in fractions of the picture. */
+export interface PresenceRect {
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+}
 
 /**
  * A collaborator's cursor that a parent draws over the editor

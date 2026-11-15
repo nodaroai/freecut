@@ -6,7 +6,7 @@ import {
 import { parseGesture } from './presence-gesture'
 import { color, fraction, frame, targetName, text } from './presence-values'
 
-const MAX_CURSORS = 12
+const MAX_CURSORS = 24
 const MAX_HIGHLIGHTS = 64
 const MAX_NAME = 40
 const MAX_NOTE = 80
