@@ -12,7 +12,7 @@
  * it lands exactly as the matching UI action does (each module documents its
  * operations' fields):
  * - media time: `removeSourceRanges`, `addTranscriptCaptions`;
- * - placing files: `placeAudio`, `replaceMedia`;
+ * - placing files: `placeMedia`, `placeAudio`, `replaceMedia`;
  * - the project: `setCanvas`, `addMarkers`, `removeMarkers`;
  * - timeline tabs: `createSequence`, `removeSequence`.
  */
@@ -22,6 +22,7 @@ import { setEditCanvas, type EditOp as HeadlessEditOp } from '@/headless/edit-op
 import { applyAddMarkers, applyRemoveMarkers, applySetCanvas } from './embedded-ops/canvas-markers'
 import { applyAddTranscriptCaptions } from './embedded-ops/captions'
 import { applyPlaceAudio, preparePlaceAudio } from './embedded-ops/place-audio'
+import { applyPlaceMedia, preparePlaceMedia } from './embedded-ops/place-media'
 import { applyReplaceMedia, prepareReplaceMedia } from './embedded-ops/replace-media'
 import {
   applyCreateSequence,
@@ -40,6 +41,7 @@ const OPERATIONS: Record<string, ForkOperation> = {
   removeSourceRanges: { apply: applyRemoveSourceRanges },
   addTranscriptCaptions: { apply: applyAddTranscriptCaptions },
   placeAudio: { prepare: preparePlaceAudio, apply: applyPlaceAudio },
+  placeMedia: { prepare: preparePlaceMedia, apply: applyPlaceMedia },
   replaceMedia: { prepare: prepareReplaceMedia, apply: applyReplaceMedia },
   setCanvas: { apply: applySetCanvas },
   addMarkers: { apply: applyAddMarkers },
