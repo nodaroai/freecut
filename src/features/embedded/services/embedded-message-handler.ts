@@ -359,6 +359,9 @@ function handleResetProject() {
  * - `playback`: NODARO_PLAYBACK seeks, plays and pauses.
  * - `presence`: NODARO_PRESENCE draws the parent's collaborators over the
  *   editor: named cursors and tinted spans of the timeline.
+ * - `presence-targets`: a cursor may point at a named part of the editor
+ *   (`target`) and carry a drawn `gesture` (click, drag, type, marquee, lasso,
+ *   slide, progress).
  * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
  *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
  *   passed the operations engine in).
@@ -368,7 +371,13 @@ function handleResetProject() {
  * - `captions-word-highlight`: addTranscriptCaptions lights up the spoken word
  *   (`highlight` and per-cue `words`), with edit-ops.
  */
-const EMBEDDED_CAPABILITIES = ['timeline-add', 'timeline-read', 'playback', 'presence'] as const
+const EMBEDDED_CAPABILITIES = [
+  'timeline-add',
+  'timeline-read',
+  'playback',
+  'presence',
+  'presence-targets',
+] as const
 
 const EDIT_OPS_CAPABILITIES = ['edit-ops', 'edit-ops-2', 'captions-word-highlight'] as const
 

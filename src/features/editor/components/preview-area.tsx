@@ -570,6 +570,7 @@ export const PreviewArea = memo(function PreviewArea({
             ref={previewContainerRef}
             className="flex-1 min-h-0 relative overflow-hidden"
             aria-label="Preview canvas region"
+            data-presence-target="preview"
           >
             <ProgramPreviewSurface
               project={liveProject}

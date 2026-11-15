@@ -294,7 +294,7 @@ export function AudioSection({ items }: AudioSectionProps) {
     <>
       <PropertySection title={t('editor.audioSection.audio')} icon={Volume2} defaultOpen={true}>
         <PropertyRow label={t('editor.audioSection.gain')}>
-          <div className="flex items-center gap-1 w-full">
+          <div className="flex items-center gap-1 w-full" data-presence-target="prop.gain">
             <SliderInput
               value={volume}
               onChange={handleVolumeChange}

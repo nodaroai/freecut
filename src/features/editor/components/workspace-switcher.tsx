@@ -41,6 +41,7 @@ export const WorkspaceSwitcher = memo(function WorkspaceSwitcher() {
             role="tab"
             aria-selected={isActive}
             onClick={() => setWorkspace(id)}
+            data-presence-target={`workspace.${id}`}
             className={cn(
               'flex h-7 items-center gap-1.5 rounded-[5px] px-3 text-xs font-medium transition-colors',
               isActive

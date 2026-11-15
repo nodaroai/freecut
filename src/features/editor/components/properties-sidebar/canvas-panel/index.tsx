@@ -300,7 +300,7 @@ export const CanvasPanel = memo(function CanvasPanel() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-presence-target="prop.canvas">
       {/* Project canvas in Edit; authored composition canvas in Motion. */}
       <PropertySection
         title={
