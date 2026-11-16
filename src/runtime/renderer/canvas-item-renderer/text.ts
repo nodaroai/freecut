@@ -15,6 +15,7 @@ import {
   lineInkWidth,
   type LaidOutLine,
 } from '@/shared/typography/text-block-layout'
+import { visualOrder } from '@/shared/typography/visual-order'
 import {
   applyCanvasLetterSpacing,
   createCanvasTextMeasurer,
@@ -167,6 +168,27 @@ function paintLaidOutLine(
     return
   }
 
+  // Right-to-left text: a run's place on the line is not its place in the
+  // string, so its characters are drawn one by one where they sit.
+  const visual = visualOrder(line.text)
+  if (visual) {
+    const colors = line.runs.flatMap((run) => Array.from(run.text, () => run.color))
+    const underlined = line.runs.flatMap((run) => Array.from(run.text, () => run.underline))
+    applyCanvasLetterSpacing(ctx, 0)
+    let currentX = x
+    for (const index of visual.order) {
+      const char = visual.chars[index]!
+      const advance = ctx.measureText(char).width
+      const color = colors[index] ?? line.color
+      ctx.fillStyle = color
+      ctx.fillText(char, currentX, y)
+      if (underlined[index])
+        drawUnderline(ctx, { ...line, width: advance + line.letterSpacing, color }, currentX, y)
+      currentX += advance + line.letterSpacing
+    }
+    return
+  }
+
   // Inline span flow: same geometry as the whole-line draw (runs are
   // prefix-measured offsets), painted per-run for color/underline.
   for (const run of line.runs) {
@@ -310,8 +332,13 @@ function paintTextBlockWithMotion(
     const runColorByChar = line.runs?.flatMap((run) => Array.from(run.text, () => run.color))
     const baselineY = originY + line.baselineY
     let currentX = originX + line.startX
-    let charIndex = 0
-    for (const char of line.text) {
+    // Glyphs are laid from the left in the order they sit on the line (right-to-left
+    // text is not in string order); each keeps its index in the string, which is
+    // what its color and its motion unit are keyed by.
+    const visual = visualOrder(line.text)
+    const chars = visual?.chars ?? Array.from(line.text)
+    for (const charIndex of visual?.order ?? chars.keys()) {
+      const char = chars[charIndex]!
       const advance = ctx.measureText(char).width
       if (char !== ' ') {
         const glyphMotion = evaluate(lineUnits?.[charIndex] ?? null, line.fontSize)
@@ -333,7 +360,6 @@ function paintTextBlockWithMotion(
         }
       }
       currentX += advance + line.letterSpacing
-      charIndex++
     }
 
     if (line.underline) {
