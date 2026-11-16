@@ -15,7 +15,7 @@
  * - placing files: `placeMedia`, `placeAudio`, `fitItem`, `replaceMedia`;
  * - the project: `setCanvas`, `addMarkers`, `removeMarkers`;
  * - timeline tabs: `createSequence`, `removeSequence`;
- * - color: `applyLook`, `removeEffects`;
+ * - color: `applyLook`, `removeEffects`, `blurItems`;
  * - `removeItems`: exactly the items named, never the items linked to them;
  * - `duplicateItems`, `splitItems`: a silent copy of clips, and clips split at frames.
  */
@@ -26,7 +26,7 @@ import { setEditCanvas, type EditOp as HeadlessEditOp } from '@/headless/edit-op
 import { applyAddMarkers, applyRemoveMarkers, applySetCanvas } from './embedded-ops/canvas-markers'
 import { applyAddTranscriptCaptions } from './embedded-ops/captions'
 import { applyDuplicateItems } from './embedded-ops/duplicate-items'
-import { applyApplyLook, applyRemoveEffects } from './embedded-ops/looks'
+import { applyApplyLook, applyBlurItems, applyRemoveEffects } from './embedded-ops/looks'
 import { applyPlaceAudio, preparePlaceAudio } from './embedded-ops/place-audio'
 import { applyFitItem, applyPlaceMedia, preparePlaceMedia } from './embedded-ops/place-media'
 import { applyRemoveItems } from './embedded-ops/remove-items'
@@ -62,6 +62,7 @@ const OPERATIONS: Record<string, ForkOperation> = {
   removeSequence: { apply: applyRemoveSequence },
   applyLook: { apply: applyApplyLook },
   removeEffects: { apply: applyRemoveEffects },
+  blurItems: { apply: applyBlurItems },
 }
 
 /**

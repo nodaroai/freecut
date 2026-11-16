@@ -133,3 +133,44 @@ describe('removeEffects', () => {
     ).rejects.toThrow('removeEffects: effect "nope" is not on item "v-a"')
   })
 })
+
+describe('blurItems', () => {
+  const blurOf = (id: string) =>
+    effectsOf(id)
+      .map((e) => e.effect as GpuEffect)
+      .filter((e) => e.gpuEffectType === 'gpu-gaussian-blur')
+
+  it('blurs the named clips only and answers the effect ids', async () => {
+    const [result] = (await batch({ op: 'blurItems', ids: ['v-a'], radius: 30 })) as [Applied]
+
+    expect(result.effects).toEqual([{ itemId: 'v-a', effectId: effectsOf('v-a')[0]!.id }])
+    expect(blurOf('v-a')[0]!.params.radius).toBe(30)
+    expect(effectsOf('v-b')).toEqual([])
+  })
+
+  it('keeps one blur per clip: a new radius replaces the old one, and a look stays', async () => {
+    await batch({ op: 'applyLook', mediaId: 'take', look: 'bw' })
+    await batch({ op: 'blurItems', ids: ['v-a'], radius: 30 })
+    await batch({ op: 'blurItems', ids: ['v-a'], radius: 12 })
+
+    expect(blurOf('v-a').map((e) => e.params.radius)).toEqual([12])
+    expect(effectsOf('v-a')).toHaveLength(3)
+  })
+
+  it('takes the blur off with radius 0, and does nothing to a clip that has none', async () => {
+    await batch({ op: 'blurItems', ids: ['v-a'], radius: 30 })
+    const [result] = (await batch({ op: 'blurItems', ids: ['v-a', 'v-b'], radius: 0 })) as [Applied]
+
+    expect(result.effects).toEqual([])
+    expect(effectsOf('v-a')).toEqual([])
+  })
+
+  it('refuses a sound clip and a radius out of range', async () => {
+    await expect(batch({ op: 'blurItems', ids: ['a-a'], radius: 10 })).rejects.toThrow(
+      'blurItems: item a-a is not a picture clip',
+    )
+    await expect(batch({ op: 'blurItems', ids: ['v-a'], radius: 80 })).rejects.toThrow(
+      'blurItems: `radius` must be from 0 to 50',
+    )
+  })
+})
