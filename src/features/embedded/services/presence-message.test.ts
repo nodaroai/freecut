@@ -62,6 +62,22 @@ describe('NODARO_PRESENCE', () => {
   })
 })
 
+describe('NODARO_PRESENCE mood', () => {
+  it('keeps a mood the editor draws and drops any other', () => {
+    presence({
+      cursors: [
+        { id: 'a', name: 'Snip', color: '#ff4d9d', frame: 10, mood: 'waiting' },
+        { id: 'b', name: 'Pix', color: '#38bdf8', frame: 10, mood: 'needs-you' },
+        { id: 'c', name: 'Bass', color: '#34d399', frame: 10, mood: 'dancing' },
+      ],
+    })
+    const [a, b, c] = usePresenceStore.getState().cursors
+    expect(a?.mood).toBe('waiting')
+    expect(b?.mood).toBe('needs-you')
+    expect(c && 'mood' in c).toBe(false)
+  })
+})
+
 describe('NODARO_PRESENCE targets and gestures', () => {
   it('keeps a named target and each gesture the editor draws', () => {
     presence({

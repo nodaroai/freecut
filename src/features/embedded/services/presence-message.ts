@@ -2,6 +2,7 @@ import {
   usePresenceStore,
   type PresenceCursor,
   type PresenceHighlight,
+  type PresenceMood,
 } from '../stores/presence-store'
 import { parseGesture } from './presence-gesture'
 import { color, fraction, frame, targetName, text } from './presence-values'
@@ -10,6 +11,15 @@ const MAX_CURSORS = 24
 const MAX_HIGHLIGHTS = 64
 const MAX_NAME = 40
 const MAX_NOTE = 80
+const MOODS: ReadonlySet<string> = new Set<PresenceMood>([
+  'working',
+  'waiting',
+  'done',
+  'needs-you',
+])
+
+const mood = (value: unknown): PresenceMood | undefined =>
+  typeof value === 'string' && MOODS.has(value) ? (value as PresenceMood) : undefined
 
 function parseCursor(value: unknown): PresenceCursor | null {
   const raw = (value ?? {}) as Record<string, unknown>
@@ -26,6 +36,7 @@ function parseCursor(value: unknown): PresenceCursor | null {
   const trackId = text(raw.trackId, 128)
   const note = text(raw.note, MAX_NOTE)
   const gesture = parseGesture(raw.gesture)
+  const state = mood(raw.mood)
   return {
     id,
     name,
@@ -37,6 +48,7 @@ function parseCursor(value: unknown): PresenceCursor | null {
     ...(x === undefined || y === undefined ? {} : { preview: { x, y } }),
     ...(note ? { note } : {}),
     ...(gesture ? { gesture } : {}),
+    ...(state ? { mood: state } : {}),
   }
 }
 
