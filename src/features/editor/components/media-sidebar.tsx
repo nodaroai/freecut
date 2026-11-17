@@ -589,7 +589,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
   }, [])
 
   return (
-    <div className="flex h-full flex-shrink-0">
+    <div className="flex h-full flex-shrink-0" data-editor-pane="media">
       {/* Vertical Category Bar */}
       <div
         className="panel-header border-r border-border flex flex-col items-center flex-shrink-0"
