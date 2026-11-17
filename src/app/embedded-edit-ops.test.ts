@@ -25,7 +25,7 @@ vi.mock('@/features/media-library/utils/media-resolver', () => ({
   resolveMediaUrl: vi.fn(async () => 'blob:music'),
 }))
 
-import type { VideoItem } from '@/types/timeline'
+import type { SubtitleSegmentItem, VideoItem } from '@/types/timeline'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useProjectStore } from '@/features/projects/stores/project-store'
@@ -147,6 +147,58 @@ describe('addTranscriptCaptions', () => {
     // The second cue starts 0.5 s into the second piece, which now starts at 2 s.
     expect(captions[1]!.from).toBe(75)
     expect(useItemsStore.getState().tracks.length).toBe(2)
+  })
+
+  it('lights up the spoken word, one cue per word, when asked to', async () => {
+    const result = (await apply({
+      op: 'addTranscriptCaptions',
+      mediaId: 'media-1',
+      highlight: { color: '#FFD400' },
+      cues: [
+        {
+          text: 'Here is how',
+          start: 1,
+          end: 2,
+          words: [
+            { text: 'Here', start: 1, end: 1.3 },
+            { text: 'is', start: 1.3, end: 1.5 },
+            { text: 'how', start: 1.5, end: 2 },
+          ],
+        },
+        { text: 'No words here', start: 3, end: 4 },
+      ],
+    })) as { ids: string[] }
+
+    const caption = items().find((item) => item.id === result.ids[0]) as SubtitleSegmentItem
+    expect(caption.cues.map((cue) => cue.text)).toEqual([
+      '<font color="#FFD400">Here</font> is how',
+      'Here <font color="#FFD400">is</font> how',
+      'Here is <font color="#FFD400">how</font>',
+      'No words here',
+    ])
+    // The word cues follow one another, so the caption never blinks.
+    expect(caption.cues[0]!.endSeconds).toBeCloseTo(caption.cues[1]!.startSeconds)
+    expect(caption.cues[1]!.endSeconds).toBeCloseTo(caption.cues[2]!.startSeconds)
+  })
+
+  it('keeps one cue per caption without a highlight, and refuses a highlight that is not a hex color', async () => {
+    const words = [{ text: 'Plain', start: 1, end: 1.5 }]
+    const result = (await apply({
+      op: 'addTranscriptCaptions',
+      mediaId: 'media-1',
+      cues: [{ text: 'Plain caption', start: 1, end: 2, words }],
+    })) as { ids: string[] }
+    const caption = items().find((item) => item.id === result.ids[0]) as SubtitleSegmentItem
+    expect(caption.cues.map((cue) => cue.text)).toEqual(['Plain caption'])
+
+    await expect(
+      apply({
+        op: 'addTranscriptCaptions',
+        mediaId: 'media-1',
+        highlight: { color: 'yellow; x' },
+        cues: [{ text: 'Plain caption', start: 1, end: 2, words }],
+      }),
+    ).rejects.toThrow('addTranscriptCaptions: `highlight.color` must be a hex color')
   })
 
   it('refuses cues that fall outside every clip', async () => {

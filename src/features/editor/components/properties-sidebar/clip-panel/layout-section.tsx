@@ -380,12 +380,7 @@ export const LayoutSection = memo(function LayoutSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [
-      itemIds,
-      onTransformChange,
-      clearPreview,
-      getAutoKeyframeOperation,
-    ],
+    [itemIds, onTransformChange, clearPreview, getAutoKeyframeOperation],
   )
 
   // Live preview for Y position (during scrub)
@@ -412,12 +407,7 @@ export const LayoutSection = memo(function LayoutSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [
-      itemIds,
-      onTransformChange,
-      clearPreview,
-      getAutoKeyframeOperation,
-    ],
+    [itemIds, onTransformChange, clearPreview, getAutoKeyframeOperation],
   )
 
   // Live preview for width (during scrub)
@@ -469,14 +459,7 @@ export const LayoutSection = memo(function LayoutSection({
       }
       queueMicrotask(() => clearPreview())
     },
-    [
-      itemIds,
-      clearPreview,
-      aspectLocked,
-      height,
-      currentAspectRatio,
-      getAutoKeyframeOperation,
-    ],
+    [itemIds, clearPreview, aspectLocked, height, currentAspectRatio, getAutoKeyframeOperation],
   )
 
   // Live preview for height (during scrub)
@@ -528,14 +511,7 @@ export const LayoutSection = memo(function LayoutSection({
       }
       queueMicrotask(() => clearPreview())
     },
-    [
-      itemIds,
-      clearPreview,
-      aspectLocked,
-      width,
-      currentAspectRatio,
-      getAutoKeyframeOperation,
-    ],
+    [itemIds, clearPreview, aspectLocked, width, currentAspectRatio, getAutoKeyframeOperation],
   )
 
   // Live preview for rotation (during drag)
@@ -562,12 +538,7 @@ export const LayoutSection = memo(function LayoutSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [
-      itemIds,
-      onTransformChange,
-      clearPreview,
-      getAutoKeyframeOperation,
-    ],
+    [itemIds, onTransformChange, clearPreview, getAutoKeyframeOperation],
   )
 
   const handleAnchorXLiveChange = useCallback(
@@ -594,12 +565,7 @@ export const LayoutSection = memo(function LayoutSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [
-      clearPreview,
-      getAutoKeyframeOperation,
-      mediaTransformItemIds,
-      onTransformChange,
-    ],
+    [clearPreview, getAutoKeyframeOperation, mediaTransformItemIds, onTransformChange],
   )
 
   const handleAnchorYLiveChange = useCallback(
@@ -626,12 +592,7 @@ export const LayoutSection = memo(function LayoutSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [
-      clearPreview,
-      getAutoKeyframeOperation,
-      mediaTransformItemIds,
-      onTransformChange,
-    ],
+    [clearPreview, getAutoKeyframeOperation, mediaTransformItemIds, onTransformChange],
   )
 
   // Get media items for fallback source dimensions lookup
@@ -760,7 +721,7 @@ export const LayoutSection = memo(function LayoutSection({
     <PropertySection title={t('editor.layoutSection.transform')} icon={Move} defaultOpen={true}>
       {/* Position */}
       <PropertyRow label={t('editor.layoutSection.position')}>
-        <div className="flex items-start gap-1 w-full">
+        <div className="flex items-start gap-1 w-full" data-presence-target="prop.position">
           <div className="grid grid-cols-2 gap-1 flex-1">
             <PositionAxisControl
               axis="x"
@@ -791,7 +752,7 @@ export const LayoutSection = memo(function LayoutSection({
 
       {/* Dimensions */}
       <PropertyRow label={t('editor.layoutSection.size')}>
-        <div className="flex items-center gap-1 w-full">
+        <div className="flex items-center gap-1 w-full" data-presence-target="prop.size">
           <NumberInput
             value={width}
             onChange={handleWidthChange}

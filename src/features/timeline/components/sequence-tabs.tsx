@@ -79,7 +79,10 @@ export const SequenceTabs = memo(function SequenceTabs() {
   const isMainActive = activeTabId === null
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-background/60 backdrop-blur-sm text-xs overflow-x-auto">
+    <div
+      data-presence-target="tabs.sequences"
+      className="flex items-center gap-1 px-2 py-1 border-b border-border bg-background/60 backdrop-blur-sm text-xs overflow-x-auto"
+    >
       <button
         type="button"
         onClick={() => switchToSequence(null)}
@@ -180,6 +183,7 @@ export const SequenceTabs = memo(function SequenceTabs() {
       <button
         type="button"
         aria-label="New sequence"
+        data-presence-target="tabs.new"
         title="New sequence"
         onClick={() => createSequence()}
         className="ml-0.5 flex items-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"

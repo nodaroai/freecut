@@ -523,6 +523,7 @@ export const TimelineHeader = memo(function TimelineHeader({
                   : ''
               }
               onClick={() => setActiveTool('select')}
+              data-presence-target="tool.select"
               aria-label={t('timeline.header.selectTool')}
               data-tooltip={t('timeline.header.selectToolTooltip')}
             >
@@ -555,6 +556,7 @@ export const TimelineHeader = memo(function TimelineHeader({
                   : ''
               }
               onClick={() => setActiveTool(activeTool === 'razor' ? 'select' : 'razor')}
+              data-presence-target="tool.razor"
               aria-label={t('timeline.header.razorTool')}
               data-tooltip={t('timeline.header.razorToolTooltip')}
             >

@@ -7,6 +7,7 @@ const executeBatch = vi.fn((_command: unknown, action: () => unknown) => action(
 const project = vi.hoisted(() => ({
   current: { id: 'p1', metadata: { width: 1080, height: 1920, fps: 30 } } as unknown,
 }))
+const nav = vi.hoisted(() => ({ tab: null as string | null }))
 const history = vi.hoisted(() => ({
   undoStack: [] as Array<{ command: { type: string; payload?: Record<string, unknown> } }>,
   undo: vi.fn(),
@@ -35,29 +36,41 @@ vi.mock('../deps/timeline-contract', () => ({
   useTimelineCommandStore: {
     getState: () => ({ executeBatch, undoStack: history.undoStack, undo: history.undo }),
   },
+  useMarkersStore: { getState: () => ({ markers: [] }) },
+  useCompositionsStore: { getState: () => ({ compositionById: {} }) },
+  useSequencesStore: { getState: () => ({ topLevelSequenceIds: [] }) },
+  useCompositionNavigationStore: {
+    getState: () => ({ breadcrumbs: [{ compositionId: null }], activeCompositionId: null }),
+  },
+  getActiveTabId: () => nav.tab,
+}))
+const withoutHistory = vi.hoisted(() =>
+  vi.fn((_command: unknown, action: () => unknown) => action()),
+)
+vi.mock('./history-free-batch', () => ({
+  executeWithoutHistory: withoutHistory,
+  HistoryFreeRefusal: class extends Error {},
 }))
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ currentProject: project.current }) },
 }))
-vi.mock('../deps/media-library-contract', () => ({
-  useMediaLibraryStore: {
-    getState: () => ({
-      mediaItems: [
-        {
-          id: 'm1',
-          fileName: 'take.mp4',
-          mimeType: 'video/mp4',
-          duration: 4,
-          width: 1920,
-          height: 1080,
-          fps: 30,
-        },
-      ],
-    }),
-  },
-}))
+vi.mock('../deps/media-library-contract', () => {
+  const take = {
+    id: 'm1',
+    fileName: 'take.mp4',
+    mimeType: 'video/mp4',
+    duration: 4,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+  }
+  return {
+    useMediaLibraryStore: { getState: () => ({ mediaItems: [take], mediaById: { m1: take } }) },
+  }
+})
 
 import {
+  editRequestPending,
   handleApplyOps,
   handleGetTimeline,
   handleUndoEdit,
@@ -189,6 +202,60 @@ describe('NODARO_APPLY_OPS', () => {
     expect(seen[0]).toMatchObject({ op: 'placeAudio', ref: 'music', mediaId: 'media-music' })
   })
 
+  it('refuses an edit whose timeline tab changed while it was being prepared', async () => {
+    const apply = vi.fn()
+    engineOf(apply, async (op) => {
+      nav.tab = 'sequence-2'
+      return op
+    })
+
+    await handleApplyOps(message('NODARO_APPLY_OPS', { requestId: 'r9', ops: [{ op: 'split' }] }))
+    nav.tab = null
+
+    expect(lastReply()[0].payload).toEqual({
+      requestId: 'r9',
+      ok: false,
+      error: { message: 'The open timeline tab changed while the edit was being prepared' },
+    })
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('counts a request as pending from its arrival until its answer', async () => {
+    const seen: boolean[] = []
+    engineOf(() => seen.push(editRequestPending()))
+
+    const done = handleApplyOps(
+      message('NODARO_APPLY_OPS', { requestId: 'r10', ops: [{ op: 'a' }] }),
+    )
+    seen.push(editRequestPending())
+    await done
+
+    expect(seen).toEqual([true, true])
+    expect(editRequestPending()).toBe(false)
+  })
+
+  it('applies a request with history: false without an undo entry, and says so', async () => {
+    engineOf(() => ({ sequenceId: 's1' }))
+    withoutHistory.mockClear()
+
+    await handleApplyOps(
+      message('NODARO_APPLY_OPS', {
+        requestId: 'r11',
+        history: false,
+        ops: [{ op: 'createSequence' }],
+      }),
+    )
+
+    expect(withoutHistory).toHaveBeenCalledTimes(1)
+    expect(executeBatch).not.toHaveBeenCalled()
+    expect(lastReply()[0].payload).toMatchObject({
+      requestId: 'r11',
+      ok: true,
+      recorded: false,
+      results: [{ sequenceId: 's1' }],
+    })
+  })
+
   it('refuses when no project is open', async () => {
     engineOf(vi.fn())
     project.current = null
@@ -287,7 +354,8 @@ describe('NODARO_GET_TIMELINE', () => {
         width: 1080,
         height: 1920,
         durationInFrames: 120,
-        tracks: [{ id: 'v1', name: 'V1', kind: 'video', order: 0 }],
+        currentFrame: 0,
+        tracks: [{ id: 'v1', name: 'V1', kind: 'video', order: 0, syncLock: true }],
         items: [
           {
             id: 'clip-1',
@@ -300,6 +368,9 @@ describe('NODARO_GET_TIMELINE', () => {
             sourceStart: 0,
             sourceEnd: 120,
             sourceFps: 30,
+            volumeDb: 0,
+            // No transform of its own: the 16:9 take fitted to the 9:16 canvas.
+            transform: { x: 0, y: 0, width: 1080, height: 607.5 },
           },
         ],
         media: [
@@ -313,6 +384,8 @@ describe('NODARO_GET_TIMELINE', () => {
             fps: 30,
           },
         ],
+        markers: [],
+        sequences: [],
       },
     })
   })

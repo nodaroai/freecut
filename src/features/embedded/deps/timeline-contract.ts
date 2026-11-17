@@ -10,3 +10,15 @@ export { saveTimeline } from '@/features/timeline/stores/timeline-persistence'
 export { useTimelineCommandStore } from '@/features/timeline/stores/timeline-command-store'
 export { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
 export { useTimelineViewportStore } from '@/features/timeline/stores/timeline-viewport-store'
+export {
+  getActiveTabId,
+  useCompositionNavigationStore,
+} from '@/features/timeline/stores/composition-navigation-store'
+export { useCompositionsStore } from '@/features/timeline/stores/compositions-store'
+export { useMarkersStore } from '@/features/timeline/stores/markers-store'
+export { useSequencesStore } from '@/features/timeline/stores/sequences-store'
+export {
+  captureSnapshot,
+  restoreSnapshot,
+  snapshotsEqual,
+} from '@/features/timeline/stores/commands/snapshot'

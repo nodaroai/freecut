@@ -249,6 +249,7 @@ export function PlaybackControls({ totalFrames, fps }: PlaybackControlsProps) {
           className="flex-shrink-0"
           style={btnSize}
           onClick={togglePlayPause}
+          data-presence-target="transport.play"
           data-tooltip={
             isPlaying ? t('preview.controls.pauseTooltip') : t('preview.controls.playTooltip')
           }

@@ -5,6 +5,7 @@ import {
   buildCueText,
   getCueFormatFlags,
   parseSubtitleCueText,
+  subtitleSpanLayout,
   toggleCueFormat,
 } from './subtitle-cue-format'
 
@@ -103,5 +104,20 @@ describe('parseSubtitleCueText', () => {
   it('reports empty for whitespace/markup-only cues', () => {
     const result = parseSubtitleCueText('<i></i>')
     expect(result.isEmpty).toBe(true)
+  })
+})
+
+describe('subtitleSpanLayout', () => {
+  const layoutOf = (text: string) => subtitleSpanLayout(parseSubtitleCueText(text).spans)
+
+  it('flows a colored word inline, in its place on the line', () => {
+    expect(layoutOf('Here <font color="#FFD400">is</font> how')).toBe('inline')
+    expect(layoutOf('Here <u>is</u> how')).toBe('inline')
+  })
+
+  it('keeps plain cues and font changes stacked, as before', () => {
+    expect(layoutOf('Hello world')).toBeUndefined()
+    expect(layoutOf('<i>Hello</i> world')).toBeUndefined()
+    expect(layoutOf('<b>Hello</b> <font color="#fff">world</font>')).toBeUndefined()
   })
 })
