@@ -10,7 +10,7 @@
  *    `timeline.track:<trackId>` and `timeline.item:<itemId>`;
  * 3. a few stable parts the editor already marks: timeline.playhead,
  *    panel.clip and preview.canvas;
- * 4. a lane: `lane.<kind of clip>` (lane.text, lane.image, lane.video,
+ * 4. a lane: `lane.<kind of clip>` (lane.text, lane.subtitle, lane.image, lane.video,
  *    lane.audio, lane.adjustment) is the header of the first track that holds
  *    that kind of clip, else the first track on the same side (sound or
  *    picture), so an agent always has a home on the timeline.

@@ -187,3 +187,116 @@ body {
 [data-timeline-item][data-selected='true'] {
   box-shadow: 0 0 0 1px #ffffff, 0 0 16px rgb(255 0 115 / 0.55);
 }
+
+/*
+ * The pro look, stage 5: every track is a lane of one kind of clip, coloured
+ * and named like the agents' timeline: titles in amber, captions in pink, pictures
+ * in sky blue, footage in lilac, sound in green, a look in orange, graphics in
+ * violet. `data-lane` is written by the embedded lane painter
+ * (features/embedded/components/lane-painter.ts) from the clips a track holds;
+ * nothing upstream changes.
+ */
+[data-lane] {
+  --lane: #8b8bd9;
+  --lane-name: 'footage';
+}
+[data-lane='text'] {
+  --lane: #f5b942;
+  --lane-name: 'titles';
+}
+[data-lane='subtitle'] {
+  --lane: #ff4fa3;
+  --lane-name: 'captions';
+}
+[data-lane='image'] {
+  --lane: #38bdf8;
+  --lane-name: 'pictures';
+}
+[data-lane='audio'] {
+  --lane: #34d399;
+  --lane-name: 'sound';
+}
+[data-lane='adjustment'] {
+  --lane: #fb923c;
+  --lane-name: 'look';
+}
+[data-lane='shape'],
+[data-lane='composition'] {
+  --lane: #c084fc;
+  --lane-name: 'graphics';
+}
+
+/* The header: a wash and a bar in the lane's colour, its name tinted, and
+   what the lane holds written under it. */
+[data-track-kind][data-lane] {
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--lane) 16%, transparent), transparent 70%);
+}
+[data-track-kind][data-lane]::after {
+  background: var(--lane);
+  box-shadow: 0 0 8px var(--lane);
+}
+[data-track-kind][data-lane] .font-mono {
+  color: color-mix(in srgb, var(--lane) 75%, white);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--lane) 55%, transparent);
+}
+[data-track-kind][data-lane]::before {
+  content: var(--lane-name);
+  position: absolute;
+  left: 10px;
+  bottom: 5px;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lane);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+/* The row: a faint tint of its lane behind the clips. */
+[data-timeline-scroll-container] [data-track-id][data-lane] {
+  background-color: color-mix(in srgb, var(--lane) 4%, transparent);
+}
+
+/* Clips in their lane's colour: titles and captions as amber chips, pictures
+   ringed in blue, sound green with a green waveform, a look striped orange. */
+[data-timeline-item][data-item-type='text'] {
+  background-color: rgb(245 185 66 / 0.16);
+  color: #ffd98a;
+  box-shadow: inset 0 0 0 1px rgb(245 185 66 / 0.75), 0 0 12px rgb(245 185 66 / 0.25);
+  border-radius: 5px;
+}
+[data-timeline-item][data-item-type='subtitle'] {
+  background-color: rgb(255 79 163 / 0.16);
+  color: #ffc2e0;
+  box-shadow: inset 0 0 0 1px rgb(255 79 163 / 0.75), 0 0 12px rgb(255 79 163 / 0.25);
+  border-radius: 5px;
+}
+[data-timeline-item][data-item-type='image'] {
+  box-shadow: inset 0 0 0 1px rgb(56 189 248 / 0.8), 0 0 14px rgb(56 189 248 / 0.3);
+  border-radius: 5px;
+}
+[data-timeline-item][data-item-type='audio'] canvas {
+  filter: hue-rotate(-125deg) saturate(1.8) brightness(1.25);
+}
+[data-timeline-item][data-item-type='adjustment'] {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgb(251 146 60 / 0.22) 0 7px,
+    transparent 7px 14px
+  );
+  box-shadow: inset 0 0 0 1px rgb(251 146 60 / 0.75), 0 0 12px rgb(251 146 60 / 0.25);
+}
+[data-timeline-item][data-item-type='shape'] {
+  box-shadow: inset 0 0 0 1px rgb(192 132 252 / 0.8), 0 0 12px rgb(192 132 252 / 0.3);
+}
+[data-timeline-item][data-selected='true'] {
+  box-shadow: 0 0 0 1px #ffffff, 0 0 16px rgb(255 0 115 / 0.55);
+}
+
+/* Panel titles read like an instrument's: small mono capitals. */
+[data-editor-pane] h2 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
