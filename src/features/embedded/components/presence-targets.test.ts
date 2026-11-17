@@ -58,7 +58,12 @@ describe('presence targets', () => {
       }),
     )
 
-    expect(targetBox('panel.media')).toEqual({ left: 10, top: 10, width: 200, height: 300 })
+    expect(targetBox('panel.media')).toEqual({
+      left: 10,
+      top: 10,
+      width: 200,
+      height: 300,
+    })
     expect(targetBox('tool.select')).toBeNull()
   })
 
@@ -92,7 +97,12 @@ describe('presence targets', () => {
     timeline.append(track, item)
     root.append(timeline)
 
-    expect(targetBox('media.item:m "1"')).toEqual({ left: 5, top: 5, width: 80, height: 60 })
+    expect(targetBox('media.item:m "1"')).toEqual({
+      left: 5,
+      top: 5,
+      width: 80,
+      height: 60,
+    })
     // A track wider than the lane is pointed at in the middle of the part on screen.
     expect(targetPoint('timeline.track:v1', targetBox('timeline.track:v1')!)).toEqual({
       x: 500,
@@ -106,9 +116,71 @@ describe('presence targets', () => {
 
   it('knows the parts the editor already marks', () => {
     root.append(
-      element('<div data-player-container></div>', { left: 300, top: 50, width: 640, height: 360 }),
+      element('<div data-player-container></div>', {
+        left: 300,
+        top: 50,
+        width: 640,
+        height: 360,
+      }),
     )
 
-    expect(targetBox('preview.canvas')).toEqual({ left: 300, top: 50, width: 640, height: 360 })
+    expect(targetBox('preview.canvas')).toEqual({
+      left: 300,
+      top: 50,
+      width: 640,
+      height: 360,
+    })
+  })
+
+  describe('lanes', () => {
+    const header = (id: string, kind: string, top: number) =>
+      element(`<div data-track-id="${id}" data-track-kind="${kind}"></div>`, {
+        left: 0,
+        top,
+        width: 200,
+        height: 60,
+      })
+
+    function timelineWith(rows: ReadonlyArray<[trackId: string, itemType: string]>) {
+      const timeline = document.createElement('div')
+      timeline.setAttribute('data-timeline-scroll-container', '')
+      timeline.innerHTML = rows
+        .map(
+          ([id, type]) =>
+            `<div data-track-id="${id}"><div data-timeline-item data-item-type="${type}"></div></div>`,
+        )
+        .join('')
+      return timeline
+    }
+
+    it('is the header of the track that holds that kind of clip', () => {
+      root.append(header('v1', 'video', 100), header('t1', 'video', 40), header('a1', 'audio', 160))
+      root.append(
+        timelineWith([
+          ['v1', 'video'],
+          ['t1', 'text'],
+          ['a1', 'audio'],
+        ]),
+      )
+      expect(targetBox('lane.text')?.top).toBe(40)
+      expect(targetBox('lane.audio')?.top).toBe(160)
+    })
+
+    it('falls back to the first track on the same side when no track holds it yet', () => {
+      root.append(header('v1', 'video', 100), header('a1', 'audio', 160))
+      root.append(
+        timelineWith([
+          ['v1', 'video'],
+          ['a1', 'audio'],
+        ]),
+      )
+      expect(targetBox('lane.image')?.top).toBe(100)
+      expect(targetBox('lane.adjustment')?.top).toBe(100)
+    })
+
+    it('seats an agent on the right of the header, clear of the track name', () => {
+      const box = { left: 0, top: 100, width: 200, height: 60 }
+      expect(targetPoint('lane.video', box)).toEqual({ x: 154, y: 112 })
+    })
   })
 })
