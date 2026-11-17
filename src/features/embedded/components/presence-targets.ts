@@ -82,12 +82,21 @@ function laneBox(kind: string): Box | null {
   const sameSide = headers.filter((h) => h.getAttribute('data-track-kind') === side)
   // Only a header the track list shows: one scrolled out of it is no home.
   const list = boxOf(document.querySelector(TIMELINE))
-  const shown = (box: Box) =>
-    !list ||
-    Math.min(box.top + box.height, list.top + list.height) - Math.max(box.top, list.top) >= 30
+  const shown = (header: Element, box: Box) => {
+    if (
+      list &&
+      Math.min(box.top + box.height, list.top + list.height) - Math.max(box.top, list.top) < 30
+    ) {
+      return false
+    }
+    // What is on screen at its middle is the header itself, not what covers or clips it.
+    if (typeof document.elementFromPoint !== 'function') return true
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+    return hit === null || header.contains(hit)
+  }
   for (const header of [own, ...sameSide, ...headers]) {
-    const box = boxOf(header)
-    if (box && shown(box)) return box
+    const box = header ? boxOf(header) : null
+    if (header && box && shown(header, box)) return box
   }
   return null
 }
