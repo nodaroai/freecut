@@ -1,0 +1,7 @@
+export { SourceMonitor } from '@/features/preview/components/source-monitor'
+export { ColorScopesView } from '@/features/preview/components/color-scopes-view'
+export { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
+export { useProjectStore } from '@/features/projects/stores/project-store'
+export { useItemsStore } from '@/features/timeline/stores/items-store'
+export { usePlaybackStore } from '@/shared/state/playback'
+export { useEditorStore } from '@/shared/state/editor/store'

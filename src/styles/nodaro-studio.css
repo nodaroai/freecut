@@ -1,0 +1,452 @@
+/**
+ * The studio layout (decided 2026-11-18), on only when the parent asks for it
+ * (NODARO_STUDIO sets `data-nodaro-studio` on <html>):
+ *
+ *   top bar     brand · project · crew · agents live · Edit with AI · export
+ *   work row    media | source over agent activity | program | scopes | side slot
+ *   timeline    across the whole width, with a big timecode in its bar
+ *   status bar
+ *
+ * The panels we add live in src/features/embedded/components/studio; every
+ * upstream part is reached through what it already renders (roles, the
+ * `data-editor-pane` marks), so no upstream file changes.
+ */
+
+html[data-nodaro-studio] {
+  --studio-bg: #07070b;
+  --studio-bar: #0b0b11;
+  --studio-panel-top: #14141d;
+  --studio-panel-bottom: #101017;
+  --studio-line: #262633;
+  --studio-line-soft: #1a1a24;
+  --studio-label: #a3a3b8;
+  --studio-dim: #7f7f96;
+  --studio-pink: #ff0073;
+  --studio-pink-soft: #ff4d9d;
+  --studio-green: #34d399;
+  --studio-gap: 8px;
+}
+
+html[data-nodaro-studio] [role='application'] {
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgb(255 0 115 / 0.08), transparent 60%),
+    var(--studio-bg);
+}
+
+/* ---------- top bar ---------- */
+
+html[data-nodaro-studio] [role='application'] [role='toolbar'] {
+  height: 46px !important;
+  gap: 18px;
+  padding: 0 14px;
+  background: var(--studio-bar);
+  border-bottom: 1px solid #22222d;
+  position: relative;
+  overflow: hidden;
+}
+html[data-nodaro-studio] [role='application'] [role='toolbar']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 25%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--studio-pink), transparent);
+  animation: nodaro-studio-sweep 3.2s linear infinite;
+  pointer-events: none;
+}
+@keyframes nodaro-studio-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.nodaro-studio-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.nodaro-studio-brand-mark {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: var(--studio-pink);
+  box-shadow: 0 0 14px rgb(255 0 115 / 0.67);
+}
+.nodaro-studio-brand-name {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: #ececf3;
+}
+.nodaro-studio-brand-ai {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--studio-pink-soft);
+  border: 1px solid rgb(255 0 115 / 0.4);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* The workspace switch reads as the bar's menu. */
+html[data-nodaro-studio] [role='toolbar'] [role='tablist'] {
+  background: transparent;
+  gap: 4px;
+}
+html[data-nodaro-studio] [role='toolbar'] [role='tablist'] [role='tab'] {
+  font-size: 12px;
+  color: #b9b9cb;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-nodaro-studio] [role='toolbar'] [role='tablist'] [role='tab'][aria-selected='true'] {
+  color: var(--studio-pink-soft);
+  font-weight: 600;
+}
+
+.nodaro-studio-crewbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.nodaro-studio-crew {
+  display: flex;
+  align-items: center;
+  height: 34px;
+}
+.nodaro-studio-crew-face {
+  display: block;
+  width: 30px;
+  height: 34px;
+  margin-left: -4px;
+  overflow: visible;
+}
+.nodaro-studio-crew-face > [data-presence-character] {
+  transform: scale(0.68);
+  transform-origin: 0 0;
+}
+.nodaro-studio-live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid #1f6b4f;
+  background: #0b2a1f;
+  color: #6ee7b7;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  box-shadow: 0 0 18px rgb(52 211 153 / 0.13);
+}
+.nodaro-studio-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--studio-green);
+  animation: nodaro-studio-pulse 1.6s infinite;
+}
+@keyframes nodaro-studio-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(52 211 153 / 0.4); }
+  50% { box-shadow: 0 0 0 5px rgb(52 211 153 / 0); }
+}
+.nodaro-studio-ai-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+  color: #ffffff;
+  border: 1px solid var(--studio-pink);
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.nodaro-studio-ai-button[aria-pressed='true'] {
+  background: var(--studio-pink);
+  box-shadow: 0 0 18px rgb(255 0 115 / 0.45);
+}
+.nodaro-studio-icon-button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--studio-label);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.nodaro-studio-icon-button:hover {
+  color: #ececf3;
+  border-color: #2c2c3a;
+}
+
+/* ---------- work row ---------- */
+
+html[data-nodaro-studio] :has(> [data-editor-pane='preview']) {
+  gap: var(--studio-gap);
+  padding: var(--studio-gap);
+  box-sizing: border-box;
+  background: transparent;
+}
+
+/* Every panel of the row: a dark slab with a hairline and a top light. */
+html[data-nodaro-studio] [data-editor-pane='media'],
+html[data-nodaro-studio] [data-editor-pane='preview'],
+html[data-nodaro-studio] [data-editor-pane='properties'],
+.nodaro-studio-panel,
+html[data-nodaro-studio] .nodaro-studio-scopes > div {
+  background: linear-gradient(180deg, var(--studio-panel-top), var(--studio-panel-bottom)) !important;
+  border: 1px solid var(--studio-line) !important;
+  border-radius: 7px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  overflow: hidden;
+}
+
+/* The program monitor alone: an opened source shows in our source panel. */
+html[data-nodaro-studio] [data-editor-pane='preview'] > :not([aria-label='Program monitor']) {
+  display: none !important;
+}
+html[data-nodaro-studio] [data-editor-pane='preview'] > [aria-label='Program monitor'] {
+  width: auto !important;
+  flex: 1 1 auto;
+}
+html[data-nodaro-studio] [data-editor-pane='preview'] {
+  flex: 1.25 1 0 !important;
+  position: relative;
+  padding-top: 26px;
+}
+html[data-nodaro-studio] [data-editor-pane='preview']::before {
+  content: 'PROGRAM';
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--studio-label);
+}
+
+[data-studio-host='monitor'] {
+  flex: 1 1 0;
+  min-width: 240px;
+  display: flex;
+}
+[data-studio-host='scopes'] {
+  flex: 0 0 300px;
+  display: flex;
+}
+[data-studio-host='side'] {
+  flex: none;
+  display: flex;
+}
+[data-studio-host='side']:has(> .nodaro-studio-side[style*='width: 0']) {
+  margin-left: calc(-1 * var(--studio-gap));
+}
+
+/* While the parent's side panel is open it takes the properties' place. */
+html[data-nodaro-side-open] :has(> [data-editor-pane='properties']) {
+  display: none !important;
+}
+
+.nodaro-studio-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--studio-gap);
+}
+.nodaro-studio-source {
+  flex: 1.15 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.nodaro-studio-activity {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  gap: 6px;
+}
+.nodaro-studio-panel-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--studio-label);
+}
+.nodaro-studio-panel-note {
+  color: #6ee7b7;
+}
+.nodaro-studio-empty {
+  margin: auto;
+  font-size: 11px;
+  color: var(--studio-dim);
+  text-align: center;
+}
+.nodaro-studio-activity-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 17px;
+  display: flex;
+  flex-direction: column;
+}
+.nodaro-studio-activity-list > :first-child {
+  margin-top: auto;
+}
+.nodaro-studio-activity-line {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+  color: #c9c9d8;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.nodaro-studio-activity-line:last-child {
+  background: rgb(255 0 115 / 0.08);
+  color: #ffffff;
+}
+.nodaro-studio-activity-time {
+  color: var(--studio-dim);
+}
+.nodaro-studio-activity-agent {
+  width: 64px;
+  flex: none;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nodaro-studio-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-nodaro-studio] .nodaro-studio-scopes > div {
+  padding: 10px !important;
+}
+
+/* ---------- timeline ---------- */
+
+html[data-nodaro-studio] [data-editor-pane='timeline'] {
+  background: var(--studio-bar);
+  border-top: 1px solid #22222d;
+}
+[data-studio-host='timecode'] {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.nodaro-studio-timecode {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+}
+.nodaro-studio-timecode-now {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--studio-pink-soft);
+  text-shadow: 0 0 12px var(--studio-pink);
+}
+.nodaro-studio-editing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6ee7b7;
+  white-space: nowrap;
+}
+
+/* ---------- status bar ---------- */
+
+[data-studio-host='status'] {
+  order: 99;
+  flex: none;
+}
+.nodaro-studio-status {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 14px;
+  border-top: 1px solid var(--studio-line-soft);
+  background: var(--studio-bar);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: #8f8fa6;
+  white-space: nowrap;
+}
+.nodaro-studio-status-ok {
+  color: #6ee7b7;
+}
+.nodaro-studio-status-gap {
+  flex: 1;
+}
+.nodaro-studio-status-busy {
+  color: #6ee7b7;
+}
+.nodaro-studio-status-brand {
+  color: var(--studio-pink-soft);
+}
+
+/* ---------- order of the work row, and the scopes stacked ---------- */
+
+html[data-nodaro-studio] :has(> [data-editor-pane='preview']) > :has([data-editor-pane='media']) {
+  order: 0;
+}
+[data-studio-host='monitor'] {
+  order: 1;
+}
+html[data-nodaro-studio] :has(> [data-editor-pane='preview']) > [data-editor-pane='preview'] {
+  order: 2;
+}
+[data-studio-host='scopes'] {
+  order: 3;
+}
+html[data-nodaro-studio] :has(> [data-editor-pane='preview']) > :has([data-editor-pane='properties']) {
+  order: 4;
+}
+[data-studio-host='side'] {
+  order: 5;
+}
+
+/* The upstream scopes float over the program; here they fill their column,
+   the waveform over the vectorscope. */
+html[data-nodaro-studio] .nodaro-studio-scopes > div {
+  position: static !important;
+  inset: auto !important;
+  pointer-events: auto !important;
+  backdrop-filter: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+html[data-nodaro-studio] .nodaro-studio-scopes .grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 12px;
+}
+html[data-nodaro-studio] .nodaro-studio-scopes [class*='w-[220px]'] {
+  width: 100% !important;
+  height: 132px !important;
+}
+html[data-nodaro-studio] .nodaro-studio-scopes [class*='w-[160px]'] {
+  margin: 0 auto;
+  width: 170px !important;
+  height: 170px !important;
+  border-radius: 50%;
+}
