@@ -379,6 +379,33 @@ describe('createImportActions', () => {
     expect(proxyServiceMocks.setProxyKey).toHaveBeenCalledWith('remote-1', 'proxy-remote-1')
   })
 
+  it('hands a pasted link to the parent when embedded, which confirms the rights and fetches it', async () => {
+    const realTop = Object.getOwnPropertyDescriptor(window, 'top')
+    Object.defineProperty(window, 'top', { configurable: true, get: () => ({}) })
+    const post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
+    try {
+      const harness = createImportActionsHarness()
+      const result = await harness.actions.importMediaFromUrl('  https://youtu.be/abcdefghijk ')
+      expect(result).toEqual([])
+      expect(mediaLibraryServiceMocks.importMediaFromUrl).not.toHaveBeenCalled()
+      expect(post).toHaveBeenCalledWith(
+        {
+          type: 'FREECUT_REQUEST_IMPORT',
+          payload: {
+            accept: 'video/*,audio/*,image/*',
+            multiple: true,
+            link: 'https://youtu.be/abcdefghijk',
+          },
+        },
+        '*',
+      )
+      expect(harness.currentState.error).toBeNull()
+    } finally {
+      post.mockRestore()
+      if (realTop) Object.defineProperty(window, 'top', realTop)
+    }
+  })
+
   it('shows an info notification when a URL import resolves to an existing media item', async () => {
     const duplicate = makeMedia({ id: 'existing-1', storageType: 'opfs', fileName: 'clip.mp4' })
     mediaLibraryServiceMocks.importMediaFromUrl.mockResolvedValue({
