@@ -68,3 +68,51 @@
   --color-timeline-marker: #38bdf8;
   --color-video-preview-background: #050508;
 }
+
+/*
+ * The pro look, stage 2: what is live glows. The playhead and the running
+ * timecode carry the accent's glow, and each track header carries a bar in
+ * its kind's colour (footage, sound) with its name tinted to match. Hooks:
+ * `data-timeline-playhead`, `data-timecode-current`, `data-track-kind`.
+ */
+[data-timeline-playhead] {
+  filter: drop-shadow(0 0 3px rgb(255 0 115 / 0.9)) drop-shadow(0 0 10px rgb(255 0 115 / 0.45));
+}
+
+[data-timecode-current] {
+  text-shadow: 0 0 10px rgb(255 0 115 / 0.7);
+}
+
+[data-track-kind]::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+[data-track-kind='video']::after {
+  background: #8b8bd9;
+  box-shadow: 0 0 8px #8b8bd9;
+}
+
+[data-track-kind='audio']::after {
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+}
+
+[data-track-kind='video'] .font-mono {
+  color: #c7c7f5;
+}
+
+[data-track-kind='audio'] .font-mono {
+  color: #8ff0c8;
+}
+
+[data-track-disabled='true']::after {
+  opacity: 0.35;
+  box-shadow: none;
+}
