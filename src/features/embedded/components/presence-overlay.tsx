@@ -62,7 +62,7 @@ function gestureProgress(cursor: PresenceCursor, clock: GestureClock, now: numbe
 }
 
 /** An agent at its home on a lane, waiting or done: drawn smaller, with no name tag. */
-export const isAtHome = (cursor: PresenceCursor) =>
+const isAtHome = (cursor: PresenceCursor) =>
   !cursor.gesture &&
   (cursor.target?.startsWith('lane.') ?? false) &&
   (cursor.mood === 'waiting' || cursor.mood === 'done')
@@ -76,7 +76,7 @@ const SEATS_PER_ROW = 4
  * Where each agent sits among the others at the same home, so a crowded lane
  * shows them side by side instead of one on top of the other.
  */
-export function seatOffsets(
+function seatOffsets(
   cursors: readonly PresenceCursor[],
   homeOf: (cursor: PresenceCursor) => string | null,
 ): Map<string, { dx: number; dy: number }> {
