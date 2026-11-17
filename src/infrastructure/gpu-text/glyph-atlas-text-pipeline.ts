@@ -1,6 +1,7 @@
 import type { TextItem } from '@/types/timeline'
 import type { TextMotionSpec } from '@/types/text-motion'
 import { layoutTextBlock, lineInkWidth } from '@/shared/typography/text-block-layout'
+import { visualOrder } from '@/shared/typography/visual-order'
 import { parseFontSizePx, type TextMeasurer } from '@/shared/typography/text-measurer'
 import {
   evaluateGlyphMotion,
@@ -410,13 +411,18 @@ export class GlyphAtlasTextPipeline {
       const lineUnits = motionSegmentation?.lineUnitIndices[lineIndex]
       const baselineY = line.baselineY
       let currentX = line.startX
-      let charIndex = 0
-      for (const char of line.text) {
+      // Glyphs are laid from the left in the order they sit on the line
+      // (right-to-left text is not in string order); each keeps its index in
+      // the string, which its color and its motion unit are keyed by.
+      const visual = visualOrder(line.text)
+      const chars = visual?.chars ?? Array.from(line.text)
+      for (const charIndex of visual?.order ?? chars.keys()) {
+        const char = chars[charIndex]!
         const metrics = this.ensureGlyph(char, line.cssFont, line.fontSize)
         if (!metrics) return null
         if (char !== ' ') {
-          // `lineUnits` is parallel to the line's code points — exactly what
-          // this `for (const char of ...)` walk iterates.
+          // `lineUnits` is parallel to the line's code points, which is what
+          // `charIndex` indexes.
           const glyphMotion = motionSegmentation
             ? evaluateMotion(lineUnits?.[charIndex] ?? null, line.fontSize)
             : undefined
@@ -452,7 +458,6 @@ export class GlyphAtlasTextPipeline {
           }
         }
         currentX += metrics.advance + line.letterSpacing
-        charIndex++
       }
       const underlineWidth = lineInkWidth(line)
       if (line.underline && underlineWidth > 0) {

@@ -1,14 +1,13 @@
 import { createLogger } from '@/shared/logging/logger'
-import type { TimelineItem } from '@/types/timeline'
 import {
-  useItemsStore,
+  getActiveTabId,
+  useCompositionNavigationStore,
   useTimelineCommandStore,
-  useTimelineSettingsStore,
 } from '../deps/timeline-contract'
-import { useProjectStore } from '../deps/projects-contract'
-import { useMediaLibraryStore } from '../deps/media-library-contract'
 import { mediaIdForRef } from './imported-refs'
 import { waitUntilEditable } from './edit-readiness'
+import { executeWithoutHistory, HistoryFreeRefusal } from './history-free-batch'
+import { readTimeline } from './timeline-report'
 
 const log = createLogger('embedded-edit-ops')
 
@@ -38,6 +37,16 @@ let loadEngine: LoadEditOps | null = null
 let engine: Promise<EditOpEngine> | null = null
 // Requests run one at a time, in arrival order: each reads the timeline the previous one left.
 let queue: Promise<void> = Promise.resolve()
+// Edit requests accepted and not yet answered.
+let pendingEdits = 0
+
+/** True while an edit request is waiting or being applied: the open tab must not change under it. */
+export function editRequestPending(): boolean {
+  return pendingEdits > 0
+}
+
+/** The open timeline tab (null for Main); a request is refused when it changed under it. */
+const openTab = () => getActiveTabId(useCompositionNavigationStore.getState().breadcrumbs)
 
 export function setEditOpsLoader(load: LoadEditOps | null): void {
   loadEngine = load
@@ -64,58 +73,6 @@ type Reply = (type: string, payload: Record<string, unknown>) => void
 function replyTo(event: MessageEvent, requestId: string): Reply {
   return (type, payload) =>
     window.parent.postMessage({ type, payload: { requestId, ...payload } }, event.origin)
-}
-
-/** Where a video or audio item's footage starts and ends, so a parent can map media time to the timeline. */
-function sourceFields(item: TimelineItem) {
-  if (item.type !== 'video' && item.type !== 'audio') return {}
-  return {
-    ...(item.sourceStart === undefined ? {} : { sourceStart: item.sourceStart }),
-    ...(item.sourceEnd === undefined ? {} : { sourceEnd: item.sourceEnd }),
-    ...(item.sourceFps === undefined ? {} : { sourceFps: item.sourceFps }),
-    ...(item.speed === undefined ? {} : { speed: item.speed }),
-  }
-}
-
-/** What a parent sees of the timeline: enough to plan edits, nothing the editor keeps private. */
-function readTimeline() {
-  const { tracks, items } = useItemsStore.getState()
-  const metadata = useProjectStore.getState().currentProject?.metadata
-  return {
-    fps: useTimelineSettingsStore.getState().fps || metadata?.fps || 30,
-    width: metadata?.width ?? null,
-    height: metadata?.height ?? null,
-    durationInFrames: items.reduce(
-      (end, item) => Math.max(end, item.from + item.durationInFrames),
-      0,
-    ),
-    tracks: tracks.map((track) => ({
-      id: track.id,
-      name: track.name,
-      kind: track.kind ?? null,
-      order: track.order,
-    })),
-    items: items.map((item) => ({
-      id: item.id,
-      type: item.type,
-      trackId: item.trackId,
-      from: item.from,
-      durationInFrames: item.durationInFrames,
-      ...(item.label ? { label: item.label } : {}),
-      ...('mediaId' in item && item.mediaId ? { mediaId: item.mediaId } : {}),
-      ...('text' in item && typeof item.text === 'string' ? { text: item.text } : {}),
-      ...sourceFields(item),
-    })),
-    media: useMediaLibraryStore.getState().mediaItems.map((media) => ({
-      id: media.id,
-      fileName: media.fileName,
-      mimeType: media.mimeType,
-      duration: media.duration,
-      width: media.width,
-      height: media.height,
-      fps: media.fps,
-    })),
-  }
 }
 
 /** The first entry that is not an operation, or -1 when every entry is one. */
@@ -145,8 +102,9 @@ class OpFailure extends Error {
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'The operation failed'
 
-async function applyRequest(ops: EditOp[], label: unknown) {
+async function applyRequest(ops: EditOp[], label: unknown, withHistory: boolean) {
   const projectId = await waitUntilEditable()
+  const tab = openTab()
   const loaded = await getEngine()
   const prepared: EditOp[] = []
   for (const [index, op] of ops.entries()) {
@@ -162,6 +120,10 @@ async function applyRequest(ops: EditOp[], label: unknown) {
   if ((await waitUntilEditable()) !== projectId) {
     throw new Error('The project changed while the edit was being prepared')
   }
+  // Undo history is kept per tab: an edit prepared for one tab never lands on another.
+  if (openTab() !== tab) {
+    throw new Error('The open timeline tab changed while the edit was being prepared')
+  }
 
   const command = {
     type: 'APPLY_EDIT_OPS',
@@ -169,31 +131,38 @@ async function applyRequest(ops: EditOp[], label: unknown) {
   }
   const history = useTimelineCommandStore.getState()
   const topBefore = history.undoStack.at(-1)
+  const batch = withHistory ? history.executeBatch : executeWithoutHistory
   let index = 0
   try {
-    const results = history.executeBatch(command, () =>
+    const results = batch(command, () =>
       prepared.map((op, i) => {
         index = i
         return loaded.apply(op)
       }),
     )
     // A request that changed nothing makes no undo entry, and says so.
-    const recorded = useTimelineCommandStore.getState().undoStack.at(-1) !== topBefore
+    const recorded =
+      withHistory && useTimelineCommandStore.getState().undoStack.at(-1) !== topBefore
     return { results, recorded }
   } catch (error) {
+    if (error instanceof HistoryFreeRefusal) throw error
     throw new OpFailure(messageOf(error), index)
   }
 }
 
 /**
- * NODARO_APPLY_OPS { requestId, label?, ops } → FREECUT_OPS_RESULT.
+ * NODARO_APPLY_OPS { requestId, label?, history?, ops } → FREECUT_OPS_RESULT.
  * The operations apply in order as ONE undo entry. When one fails, the whole
  * request is rolled back and the reply names the failing operation's index.
+ * With `history: false` the request makes no undo entry (`recorded: false`):
+ * for adding and removing timeline tabs that are not open (see
+ * `executeWithoutHistory`).
  */
 export function handleApplyOps(event: MessageEvent): Promise<void> {
-  const { requestId, label, ops } = (event.data?.payload ?? {}) as {
+  const { requestId, label, history, ops } = (event.data?.payload ?? {}) as {
     requestId?: unknown
     label?: unknown
+    history?: unknown
     ops?: unknown
   }
   if (typeof requestId !== 'string') return Promise.resolve()
@@ -222,10 +191,10 @@ export function handleApplyOps(event: MessageEvent): Promise<void> {
     return Promise.resolve()
   }
 
-  const run = async () => {
+  const answer = async () => {
     let outcome: Awaited<ReturnType<typeof applyRequest>>
     try {
-      outcome = await applyRequest(ops as EditOp[], label)
+      outcome = await applyRequest(ops as EditOp[], label, history !== false)
     } catch (error) {
       log.warn('NODARO_APPLY_OPS rolled back:', error)
       return refuse(messageOf(error), error instanceof OpFailure ? error.index : undefined)
@@ -233,6 +202,14 @@ export function handleApplyOps(event: MessageEvent): Promise<void> {
     // The edit has landed: a failure to send the reply is not a rollback.
     reply('FREECUT_OPS_RESULT', { ok: true, ...outcome, timeline: readTimeline() })
   }
+  const run = async () => {
+    try {
+      await answer()
+    } finally {
+      pendingEdits -= 1
+    }
+  }
+  pendingEdits += 1
   queue = queue.then(run, run)
   return queue
 }

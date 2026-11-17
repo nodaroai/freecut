@@ -1,126 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { useItemsStore } from '../deps/timeline-contract'
+import { usePresenceStore, type PresenceCursor } from '../stores/presence-store'
 import {
-  usePresenceStore,
-  type PresenceCursor,
-  type PresenceHighlight,
-} from '../stores/presence-store'
-
-interface Box {
-  left: number
-  top: number
-  width: number
-  height: number
-}
-
-const toBox = (el: Element | null): Box | null => {
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return r.width > 0 && r.height > 0
-    ? { left: r.left, top: r.top, width: r.width, height: r.height }
-    : null
-}
-
-const attr = (name: string, value: string) => `[${name}="${CSS.escape(value)}"]`
-
-/**
- * Where things are on screen right now. The timeline has no fixed frame-to-pixel
- * origin a feature can read, so it is measured from any item the timeline is
- * showing: its box and its `from` / `durationInFrames` give both the scale and
- * the origin, whatever the zoom and scroll.
- */
-// The item the last frame measured the scale from, tried first: the scan over
-// every item runs only when that one is gone or off screen.
-let anchorItemId: string | null = null
-
-function measure() {
-  const timeline = document.querySelector('[data-timeline-scroll-container]')
-  const timelineBox = toBox(timeline)
-  const itemBox = (id: string) => toBox(timeline?.querySelector(attr('data-item-id', id)) ?? null)
-  const trackBox = (id: string) => toBox(timeline?.querySelector(attr('data-track-id', id)) ?? null)
-
-  const { items, itemById } = useItemsStore.getState()
-  const scaleFrom = (item: (typeof items)[number] | undefined) => {
-    if (!item || item.durationInFrames <= 0) return null
-    const box = itemBox(item.id)
-    if (!box) return null
-    const perFrame = box.width / item.durationInFrames
-    return { origin: box.left - item.from * perFrame, perFrame }
-  }
-  let scale = anchorItemId ? scaleFrom(itemById[anchorItemId]) : null
-  if (!scale) {
-    anchorItemId = null
-    for (const item of items) {
-      scale = scaleFrom(item)
-      if (scale) {
-        anchorItemId = item.id
-        break
-      }
-    }
-  }
-  const frameX = (frame: number) => (scale ? scale.origin + frame * scale.perFrame : null)
-
-  return {
-    timelineBox,
-    itemBox,
-    trackBox,
-    frameX,
-    previewBox: toBox(document.querySelector('[data-player-container]')),
-  }
-}
-
-type Measured = ReturnType<typeof measure>
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-
-function cursorPoint(cursor: PresenceCursor, m: Measured): { x: number; y: number } | null {
-  if (cursor.preview && m.previewBox) {
-    return {
-      x: m.previewBox.left + cursor.preview.x * m.previewBox.width,
-      y: m.previewBox.top + cursor.preview.y * m.previewBox.height,
-    }
-  }
-  const lane = m.timelineBox
-  if (!lane) return null
-  if (cursor.item) {
-    const box = m.itemBox(cursor.item)
-    if (!box) return null
-    return {
-      x: clamp(box.left + Math.min(24, box.width / 2), lane.left, lane.left + lane.width),
-      y: box.top + box.height / 2,
-    }
-  }
-  if (cursor.frame !== undefined) {
-    const x = m.frameX(cursor.frame)
-    if (x === null) return null
-    const track = cursor.trackId ? m.trackBox(cursor.trackId) : null
-    return {
-      x: clamp(x, lane.left, lane.left + lane.width),
-      y: track ? track.top + track.height / 2 : lane.top + 28,
-    }
-  }
-  return null
-}
-
-function highlightBox(highlight: PresenceHighlight, m: Measured): Box | null {
-  const lane = m.timelineBox
-  if (!lane) return null
-  let box: Box | null = null
-  if (highlight.item) box = m.itemBox(highlight.item)
-  else if (highlight.trackId && highlight.from !== undefined && highlight.to !== undefined) {
-    const track = m.trackBox(highlight.trackId)
-    const x1 = m.frameX(highlight.from)
-    const x2 = m.frameX(highlight.to)
-    if (track && x1 !== null && x2 !== null) {
-      box = { left: x1, top: track.top, width: Math.max(2, x2 - x1), height: track.height }
-    }
-  }
-  if (!box) return null
-  const left = Math.max(box.left, lane.left)
-  const right = Math.min(box.left + box.width, lane.left + lane.width)
-  return right > left ? { ...box, left, width: right - left } : null
-}
+  gestureDuration,
+  layoutGesture,
+  movesCursor,
+  type GestureElements,
+} from './presence-gesture-layout'
+import { CursorGestureParts, GestureLayer, PRESENCE_KEYFRAMES } from './presence-gestures'
+import { cursorPoint, highlightBox, measure, type Measured } from './presence-measure'
 
 /** Dark text on a light hex color, light text on everything else. */
 function labelInk(color: string): string {
@@ -133,34 +21,87 @@ function labelInk(color: string): string {
 
 const ARROW = 'M1.5 1.5 L1.5 13.5 L4.9 10.3 L7.4 15 L9.7 14 L7.2 9.3 L12 9.3 Z'
 
+const prefersReducedMotion = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+/** When each cursor's current gesture began, so a repeated message continues it. */
+type GestureClock = Map<string, { key: string; at: number }>
+
+function gestureProgress(cursor: PresenceCursor, clock: GestureClock, now: number, still: boolean) {
+  const gesture = cursor.gesture
+  if (!gesture) {
+    // Gone from the message: the same gesture sent again later plays again.
+    clock.delete(cursor.id)
+    return 1
+  }
+  const started = clock.get(cursor.id)
+  const at = started?.key === gesture.key ? started.at : now
+  if (started?.key !== gesture.key) clock.set(cursor.id, { key: gesture.key, at })
+  const duration = gestureDuration(gesture)
+  return still || duration <= 0 ? 1 : Math.min(1, (now - at) / duration)
+}
+
+interface Frame {
+  readonly m: Measured
+  readonly now: number
+  readonly glide: string
+  readonly still: boolean
+}
+
+function placeCursor(
+  cursor: PresenceCursor,
+  el: HTMLDivElement,
+  frame: Frame,
+  clock: GestureClock,
+  elements: GestureElements | undefined,
+): void {
+  const base = cursorPoint(cursor, frame.m)
+  const gesture = cursor.gesture
+  const t = gestureProgress(cursor, clock, frame.now, frame.still)
+  const point = gesture ? layoutGesture(cursor, gesture, base, t, frame.m, elements ?? {}) : base
+  // The gesture moves the cursor itself frame by frame; a glide would lag behind it.
+  const moving = gesture !== undefined && movesCursor(gesture) && t < 1
+  el.style.transition = moving ? 'opacity 200ms' : `${frame.glide}, opacity 200ms`
+  el.style.opacity = point ? '1' : '0'
+  if (point) el.style.transform = `translate(${point.x}px, ${point.y}px)`
+}
+
 /**
  * The parent's collaborators, drawn over the editor (NODARO_PRESENCE): a named
- * cursor for each, gliding to what it works on, and tinted spans of the
- * timeline. It never takes a click, and it follows zoom and scroll every frame.
+ * cursor for each, gliding to what it works on (a named target, an item, a
+ * frame or a point of the preview), its gesture if it has one, and tinted
+ * spans of the timeline. It never takes a click, and it follows zoom and scroll
+ * every frame.
  */
 export function PresenceOverlay() {
   const cursors = usePresenceStore((s) => s.cursors)
   const highlights = usePresenceStore((s) => s.highlights)
   const cursorRefs = useRef(new Map<string, HTMLDivElement>())
   const highlightRefs = useRef(new Map<string, HTMLDivElement>())
+  const gestureRefs = useRef(new Map<string, GestureElements>())
+  const clock = useRef<GestureClock>(new Map())
   const active = cursors.length > 0 || highlights.length > 0
+  const reduceMotion = prefersReducedMotion()
 
   useEffect(() => {
+    // Forget the cursors the parent no longer sends.
+    const ids = new Set(cursors.map((cursor) => cursor.id))
+    for (const map of [clock.current, gestureRefs.current]) {
+      for (const id of map.keys()) if (!ids.has(id)) map.delete(id)
+    }
     if (!active) return
     let frameId = 0
+    const glide = reduceMotion ? 'none' : 'transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1)'
     const tick = () => {
-      const m = measure()
+      const frame: Frame = { m: measure(), now: performance.now(), glide, still: reduceMotion }
       for (const cursor of cursors) {
         const el = cursorRefs.current.get(cursor.id)
-        if (!el) continue
-        const point = cursorPoint(cursor, m)
-        el.style.opacity = point ? '1' : '0'
-        if (point) el.style.transform = `translate(${point.x}px, ${point.y}px)`
+        if (el) placeCursor(cursor, el, frame, clock.current, gestureRefs.current.get(cursor.id))
       }
       for (const highlight of highlights) {
         const el = highlightRefs.current.get(highlight.id)
         if (!el) continue
-        const box = highlightBox(highlight, m)
+        const box = highlightBox(highlight, frame.m)
         el.style.opacity = box ? '1' : '0'
         if (box) {
           el.style.transform = `translate(${box.left}px, ${box.top}px)`
@@ -172,11 +113,11 @@ export function PresenceOverlay() {
     }
     frameId = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frameId)
-  }, [active, cursors, highlights])
+  }, [active, cursors, highlights, reduceMotion])
 
   if (!active) return null
-  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-  const glide = reduceMotion ? 'none' : 'transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1)'
+  const register = (id: string) => (patch: GestureElements) =>
+    gestureRefs.current.set(id, { ...gestureRefs.current.get(id), ...patch })
 
   return createPortal(
     <div
@@ -184,6 +125,7 @@ export function PresenceOverlay() {
       data-embedded-presence
       style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483000 }}
     >
+      <style>{PRESENCE_KEYFRAMES}</style>
       {highlights.map((highlight) => (
         <div
           key={highlight.id}
@@ -202,6 +144,17 @@ export function PresenceOverlay() {
           }}
         />
       ))}
+      {cursors.map((cursor) =>
+        cursor.gesture ? (
+          <GestureLayer
+            key={`${cursor.id}:${cursor.gesture.key}`}
+            gesture={cursor.gesture}
+            color={cursor.color}
+            reduceMotion={reduceMotion}
+            register={register(cursor.id)}
+          />
+        ) : null,
+      )}
       {cursors.map((cursor) => (
         <div
           key={cursor.id}
@@ -215,10 +168,19 @@ export function PresenceOverlay() {
             left: 0,
             top: 0,
             opacity: 0,
-            transition: `${glide}, opacity 200ms`,
+            transition: 'opacity 200ms',
             willChange: 'transform',
           }}
         >
+          {cursor.gesture ? (
+            <CursorGestureParts
+              key={cursor.gesture.key}
+              gesture={cursor.gesture}
+              color={cursor.color}
+              reduceMotion={reduceMotion}
+              register={register(cursor.id)}
+            />
+          ) : null}
           <svg
             width="18"
             height="18"

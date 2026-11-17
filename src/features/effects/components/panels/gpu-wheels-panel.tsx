@@ -988,6 +988,7 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
       <div
         key={key}
         className="grid min-w-0 grid-cols-[minmax(3.75rem,1fr)_3.75rem_1rem] items-center gap-x-0.5"
+        data-presence-target={key === 'temperature' ? 'prop.warmth' : undefined}
       >
         <span
           className="min-w-0 whitespace-nowrap text-right text-[10px] text-muted-foreground"
@@ -1153,7 +1154,10 @@ export const GpuWheelsPanel = memo(function GpuWheelsPanel({
       const label = getEffectParamLabel(t, definition, key)
       return (
         <PropertyRow key={key} label={label} className={tonalRowClass}>
-          <div className="flex items-center gap-1 min-w-0 w-full">
+          <div
+            className="flex items-center gap-1 min-w-0 w-full"
+            data-presence-target={key === 'temperature' ? 'prop.warmth' : undefined}
+          >
             <SliderInput
               value={value}
               onChange={(v) => emitCommitParam(key, v)}

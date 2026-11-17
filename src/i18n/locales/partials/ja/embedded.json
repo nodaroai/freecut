@@ -1,0 +1,12 @@
+{
+  "embedded": {
+    "compare": {
+      "label": "元の映像と比較",
+      "original": "元の映像",
+      "split": "分割",
+      "edited": "編集後",
+      "viewOnly": "元の映像 · 表示のみ",
+      "divider": "分割位置"
+    }
+  }
+}

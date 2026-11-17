@@ -110,6 +110,22 @@ export function parseSubtitleCueText(raw: string): ParsedSubtitleCue {
   }
 }
 
+/**
+ * How a parsed cue's spans flow when rendered. Spans that differ only in color
+ * or underline (one highlighted word, say) flow `inline`, so the word stays in
+ * its place on the line. A single span, or spans that change the font style or
+ * weight (which inline flow cannot show), keep the default one-line-per-span
+ * stacking.
+ */
+export function subtitleSpanLayout(spans: readonly TextSpan[]): 'inline' | undefined {
+  const [first, ...rest] = spans
+  if (!first || rest.length === 0) return undefined
+  const sameFont = rest.every(
+    (span) => span.fontStyle === first.fontStyle && span.fontWeight === first.fontWeight,
+  )
+  return sameFont ? 'inline' : undefined
+}
+
 interface TextToken {
   kind: 'text'
   value: string

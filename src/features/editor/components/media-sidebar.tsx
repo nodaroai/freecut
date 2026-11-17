@@ -436,8 +436,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const { fps } = useTimelineSettingsStore.getState()
     const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState()
     const currentProject = useProjectStore.getState().currentProject
-    const activeCompositionId =
-      useCompositionNavigationStore.getState().activeCompositionId
+    const activeCompositionId = useCompositionNavigationStore.getState().activeCompositionId
     const activeComposition = activeCompositionId
       ? useCompositionsStore.getState().getComposition(activeCompositionId)
       : undefined
@@ -647,6 +646,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
               `}
               data-tooltip={label}
               data-tooltip-side="right"
+              data-presence-target={`rail.${id}`}
             >
               <Icon className="w-4 h-4" />
             </button>
@@ -725,6 +725,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
             {/* Media Tab - Full Media Library */}
             <div
               className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'media' ? 'block' : 'hidden'}`}
+              data-presence-target="panel.media"
             >
               <MediaLibrary />
             </div>
