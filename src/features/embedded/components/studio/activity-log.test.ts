@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { newLines, watchActivity, useActivityLog } from './activity-log'
+import {
+  handleActivity,
+  newLines,
+  readActivityLines,
+  useActivityLog,
+  watchActivity,
+} from './activity-log'
 import { usePresenceStore } from '../../stores/presence-store'
 
 const cursor = (id: string, note?: string) => ({ id, name: id.split('#')[0]!, color: '#f00', note })
@@ -18,7 +24,7 @@ describe('the agents activity log', () => {
   })
 
   it('keeps the log as presence changes', () => {
-    useActivityLog.setState({ entries: [] })
+    useActivityLog.setState({ entries: [], fed: false })
     const stop = watchActivity(() => 1000)
     usePresenceStore.getState().setPresence([cursor('snip', 'cut a pause')], [])
     usePresenceStore.getState().setPresence([cursor('snip', 'cut a pause')], [])
@@ -28,5 +34,34 @@ describe('the agents activity log', () => {
       'cut a pause',
       'tightened the start',
     ])
+  })
+})
+
+describe('lines the parent writes', () => {
+  it('reads each line and refuses what is not one', () => {
+    expect(
+      readActivityLines({
+        lines: [
+          { agent: 'Echo', color: '#ff8fc0', text: 'Heard 71 words' },
+          { agent: 'Bass', color: 'red; background:url(x)', text: 'Music under the voice' },
+          { agent: '', color: '#fff', text: 'no one said this' },
+          'not a line',
+        ],
+      }),
+    ).toEqual([
+      { agent: 'Echo', color: '#ff8fc0', text: 'Heard 71 words' },
+      { agent: 'Bass', color: '#a3a3b8', text: 'Music under the voice' },
+    ])
+    expect(readActivityLines(null)).toEqual([])
+  })
+
+  it('takes over the log from the cursors once the parent writes it', () => {
+    useActivityLog.setState({ entries: [], fed: false })
+    const stop = watchActivity(() => 5)
+    const lines = [{ agent: 'Inky', color: '#f5b942', text: 'Two titles' }]
+    handleActivity(new MessageEvent('message', { data: { payload: { lines } } }), () => 5)
+    usePresenceStore.getState().setPresence([cursor('snip', 'a note the parent also logged')], [])
+    stop()
+    expect(useActivityLog.getState().entries.map((e) => e.text)).toEqual(['Two titles'])
   })
 })

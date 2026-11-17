@@ -450,3 +450,19 @@ html[data-nodaro-studio] .nodaro-studio-scopes [class*='w-[160px]'] {
   height: 170px !important;
   border-radius: 50%;
 }
+
+/* ---------- track headers: the lane's name, its controls on hover ---------- */
+
+html[data-nodaro-studio] [data-track-kind][data-track-id] > div > div:first-child {
+  opacity: 0;
+  border-bottom-color: transparent;
+  transition: opacity 0.15s ease;
+}
+html[data-nodaro-studio] [data-track-kind][data-track-id]:hover > div > div:first-child,
+html[data-nodaro-studio] [data-track-kind][data-track-id]:focus-within > div > div:first-child {
+  opacity: 1;
+}
+html[data-nodaro-studio] [data-track-kind][data-track-id] .font-mono {
+  font-size: 11px;
+  font-weight: 700;
+}
