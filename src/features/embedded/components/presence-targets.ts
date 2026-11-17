@@ -80,9 +80,14 @@ function laneBox(kind: string): Box | null {
   const own = trackId ? headers.find((h) => h.getAttribute('data-track-id') === trackId) : null
   const side = kind === 'audio' ? 'audio' : 'video'
   const sameSide = headers.filter((h) => h.getAttribute('data-track-kind') === side)
+  // Only a header the track list shows: one scrolled out of it is no home.
+  const list = boxOf(document.querySelector(TIMELINE))
+  const shown = (box: Box) =>
+    !list ||
+    Math.min(box.top + box.height, list.top + list.height) - Math.max(box.top, list.top) >= 30
   for (const header of [own, ...sameSide, ...headers]) {
     const box = boxOf(header)
-    if (box) return box
+    if (box && shown(box)) return box
   }
   return null
 }
