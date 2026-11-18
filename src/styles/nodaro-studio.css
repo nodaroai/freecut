@@ -45,6 +45,10 @@ html[data-nodaro-studio] [role='application'] [role='toolbar'] {
   overflow: hidden;
 }
 html[data-nodaro-studio] [role='application'] [role='toolbar']::after {
+  content: none;
+}
+/* The sweep runs only while agents work, so it means something. */
+html[data-nodaro-studio][data-nodaro-live] [role='application'] [role='toolbar']::after {
   content: '';
   position: absolute;
   left: 0;
@@ -785,4 +789,46 @@ html[data-nodaro-studio] [role='tooltip'][data-visible] {
   color: #ececf3;
   border: 1px solid var(--studio-line);
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+}
+
+/* ---------- while agents work ---------- */
+
+/* The timeline's bar carries a lit edge and a moving glow. */
+html[data-nodaro-studio][data-nodaro-live] [data-editor-pane='timeline'] > :first-child {
+  box-shadow: inset 0 2px 0 var(--studio-pink), inset 0 14px 18px -14px rgb(255 0 115 / 0.55);
+  animation: nodaro-studio-live-glow 1.8s ease-in-out infinite;
+}
+@keyframes nodaro-studio-live-glow {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgb(255 0 115 / 0.06); }
+}
+/* What the agents do right now, beside the timecode, as a pill. */
+html[data-nodaro-studio] .nodaro-studio-editing {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #1f6b4f;
+  background: #0b2a1f;
+  max-width: 46vw;
+}
+.nodaro-studio-editing-now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #d6f5e8;
+  font-family: var(--font-sans, inherit);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-nodaro-studio][data-nodaro-live] [data-editor-pane='timeline'] > :first-child {
+    animation: none;
+  }
+}
+
+/* ---------- the timeline's bar, off the edge above it ---------- */
+
+html[data-nodaro-studio] [data-editor-pane='timeline'] {
+  padding-top: 6px;
+  box-sizing: border-box;
 }
