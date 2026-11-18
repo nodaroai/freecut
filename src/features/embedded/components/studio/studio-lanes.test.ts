@@ -19,18 +19,22 @@ describe('the studio lanes', () => {
     expect(hasChosenTrackSize(blocked)).toBe(true)
   })
 
-  it('tightens the lanes at the preset height and keeps a lane the person resized', () => {
+  it('tightens a new lane at the preset height and keeps a lane the person resized', () => {
     const tracks = [
       { id: 'v1', height: 72 },
       { id: 'a1', height: 110 },
     ]
-    expect(tightLanes(tracks, 72, 48)).toEqual([
+    expect(tightLanes(tracks, new Set(), 72, 48)).toEqual([
       { id: 'v1', height: 48 },
       { id: 'a1', height: 110 },
     ])
   })
 
+  it('leaves a lane it has seen, even one the person set back to the preset height', () => {
+    expect(tightLanes([{ id: 'v1', height: 72 }], new Set(['v1']), 72, 48)).toBeNull()
+  })
+
   it('changes nothing once every lane is tight', () => {
-    expect(tightLanes([{ id: 'v1', height: 48 }], 72, 48)).toBeNull()
+    expect(tightLanes([{ id: 'v1', height: 48 }], new Set(), 72, 48)).toBeNull()
   })
 })

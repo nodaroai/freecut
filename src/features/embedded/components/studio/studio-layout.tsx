@@ -55,6 +55,9 @@ function StudioMounted() {
     const root = document.documentElement
     if (sideOpen) root.dataset.nodaroSideOpen = ''
     else delete root.dataset.nodaroSideOpen
+    return () => {
+      delete root.dataset.nodaroSideOpen
+    }
   }, [sideOpen])
 
   return (

@@ -622,3 +622,8 @@ html[data-nodaro-studio] :has(> [data-studio-host='effects']) > [data-editor-pan
   background: var(--lane);
   box-shadow: 0 0 6px var(--lane);
 }
+
+/* The studio source always shows the original: nothing to close. */
+html[data-nodaro-studio] .nodaro-studio-source [aria-label='Close source monitor'] {
+  display: none;
+}
