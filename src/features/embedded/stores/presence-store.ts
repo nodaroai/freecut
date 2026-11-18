@@ -83,6 +83,12 @@ export interface PresenceRect {
  * - a frame of the timeline (`frame`, on the track `trackId` when given), or
  * - a point of the preview (`preview`, x and y as fractions of its width and height).
  */
+/**
+ * What a collaborator is doing, shown on its character: at work (the default),
+ * waiting its turn, done, or stopped until the person answers.
+ */
+export type PresenceMood = 'working' | 'waiting' | 'done' | 'needs-you'
+
 export interface PresenceCursor {
   readonly id: string
   readonly name: string
@@ -95,6 +101,8 @@ export interface PresenceCursor {
   /** A short line shown under the name, such as what the collaborator is doing. */
   readonly note?: string
   readonly gesture?: PresenceGesture
+  /** What it is doing; absent means at work. */
+  readonly mood?: PresenceMood
 }
 
 /** A tinted span of the timeline: one item, or frames `from`..`to` on a track. */
