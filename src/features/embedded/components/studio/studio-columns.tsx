@@ -135,10 +135,22 @@ export function StudioSideSlot() {
     const observer = new ResizeObserver(schedule)
     observer.observe(el)
     window.addEventListener('resize', schedule)
+    // A slot that only moves (the split dragged, a bar above it grown) keeps its
+    // size, which a ResizeObserver does not see: its place is checked as well.
+    let last = ''
+    const watch = window.setInterval(() => {
+      const r = el.getBoundingClientRect()
+      const now = [r.left, r.top, r.width, r.height].join(',')
+      if (now !== last) {
+        last = now
+        schedule()
+      }
+    }, 300)
     schedule()
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', schedule)
+      window.clearInterval(watch)
       cancelAnimationFrame(frame)
     }
   }, [sideOpen, sideWidth])

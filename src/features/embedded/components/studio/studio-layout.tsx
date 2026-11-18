@@ -10,6 +10,7 @@ import { StudioMonitorColumn, StudioScopesColumn, StudioSideSlot } from './studi
 import { useStudioHosts } from './studio-hosts'
 import { settleSplitOnce } from './studio-split'
 import { keepLanesTight } from './studio-lanes'
+import { keepTooltipsBelow } from './studio-tooltips'
 import { StudioEffects } from './studio-effects'
 import { StudioMenuBar } from './studio-menu'
 import { StudioBrand, StudioCrewBar } from './studio-topbar'
@@ -40,6 +41,7 @@ function StudioMounted() {
     const stopActivity = watchActivity()
     const stopLanes = followNewLanes()
     const stopTight = keepLanesTight()
+    const stopTooltips = keepTooltipsBelow()
     // After the columns are in, so the split is measured with them.
     const frame = requestAnimationFrame(() => settleSplitOnce())
     return () => {
@@ -47,6 +49,7 @@ function StudioMounted() {
       stopActivity()
       stopLanes()
       stopTight()
+      stopTooltips()
       cancelAnimationFrame(frame)
     }
   }, [])

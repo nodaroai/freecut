@@ -671,9 +671,9 @@ html[data-nodaro-studio] :is(
     .nodaro-studio-source
   )
   button.bg-primary {
-  background: rgb(255 0 115 / 0.13) !important;
+  background: rgb(255 0 115 / 0.1) !important;
   color: var(--studio-pink-soft) !important;
-  box-shadow: inset 0 0 0 1px rgb(255 0 115 / 0.45);
+  box-shadow: none;
 }
 html[data-nodaro-studio] :is(
     [data-editor-pane='timeline'] > :first-child,
@@ -681,7 +681,7 @@ html[data-nodaro-studio] :is(
     .nodaro-studio-source
   )
   button.bg-primary:hover {
-  background: rgb(255 0 115 / 0.2) !important;
+  background: rgb(255 0 115 / 0.16) !important;
 }
 
 /* Play is the one strong button: round, lit, a little larger. */
@@ -725,7 +725,7 @@ html[data-nodaro-studio] :is(
     [aria-label='Program monitor'],
     .nodaro-studio-source
   )
-  button[style*='width']:has(> svg),
+  button:has(> svg):not(:has(> span)),
 html[data-nodaro-studio] .nodaro-studio-source button[aria-label$='source patch'] {
   width: 20px !important;
   height: 22px !important;
@@ -740,7 +740,7 @@ html[data-nodaro-studio] :is(
     [aria-label='Program monitor'],
     .nodaro-studio-source
   )
-  button[style*='width']:has(> svg)
+  button:has(> svg):not(:has(> span))
   > svg {
   width: 13px;
   height: 13px;
@@ -753,4 +753,36 @@ html[data-nodaro-studio] [aria-label='Program monitor'] button[aria-label^='Zoom
   padding-block: 0;
   display: inline-flex;
   align-items: center;
+}
+
+/* The program's transport sits beside its timecode, not over it: on a narrow
+   monitor the two never touch. */
+html[data-nodaro-studio] [aria-label='Program monitor'] .panel-header > .absolute.inset-0 {
+  position: static;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+html[data-nodaro-studio] [aria-label='Program monitor'] .panel-header:has(> .absolute.inset-0) {
+  gap: 8px;
+  padding-inline: 8px;
+}
+
+/* The source's transport row wraps when its monitor is narrow, instead of
+   pushing its last controls out of sight. */
+html[data-nodaro-studio] .nodaro-studio-source .panel-header:has(button[aria-label^='Play (']) {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 8px;
+  height: auto !important;
+  min-height: 32px;
+  padding: 3px 8px;
+}
+
+/* A tooltip reads on one line, and in the studio's own surface. */
+html[data-nodaro-studio] [role='tooltip'][data-visible] {
+  white-space: nowrap;
+  background: #1b1b25;
+  color: #ececf3;
+  border: 1px solid var(--studio-line);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
 }
