@@ -8,6 +8,7 @@ import { StudioStatusBar, StudioTimecode } from './studio-bars'
 import { StudioMonitorColumn, StudioScopesColumn, StudioSideSlot } from './studio-columns'
 import { useStudioHosts } from './studio-hosts'
 import { settleSplitOnce } from './studio-split'
+import { settleCompactLanesOnce } from './studio-lanes'
 import { StudioBrand, StudioCrewBar } from './studio-topbar'
 
 /**
@@ -29,6 +30,7 @@ function StudioMounted() {
     root.dataset.nodaroStudio = ''
     // Media and properties share the work row; the timeline gets the full width.
     useEditorStore.setState({ mediaFullColumn: false, propertiesFullColumn: false })
+    settleCompactLanesOnce()
     const stopActivity = watchActivity()
     const stopLanes = followNewLanes()
     // After the columns are in, so the split is measured with them.
