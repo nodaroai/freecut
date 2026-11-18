@@ -688,8 +688,8 @@ html[data-nodaro-studio] :is(
 html[data-nodaro-studio] body button.bg-primary[data-presence-target='transport.play'][data-tooltip],
 html[data-nodaro-studio] body .nodaro-studio-source button.bg-primary:has(> svg.lucide-play),
 html[data-nodaro-studio] body .nodaro-studio-source button.bg-primary:has(> svg.lucide-pause) {
-  width: 30px !important;
-  height: 30px !important;
+  width: 22px !important;
+  height: 22px !important;
   border-radius: 50% !important;
   color: #fff !important;
   background: radial-gradient(circle at 35% 30%, #ff4f9a, #e00066) !important;
@@ -716,4 +716,41 @@ html[data-nodaro-studio] :is(
   )
   [data-orientation='vertical'] {
   background: rgb(255 255 255 / 0.08);
+}
+
+/* One size for every icon button in a bar, so their centres sit on one line
+   (the editor's own buttons are 20px, its patch toggles 24px). */
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  button[style*='width']:has(> svg),
+html[data-nodaro-studio] .nodaro-studio-source button[aria-label$='source patch'] {
+  width: 20px !important;
+  height: 22px !important;
+  min-width: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  button[style*='width']:has(> svg)
+  > svg {
+  width: 13px;
+  height: 13px;
+}
+html[data-nodaro-studio] .nodaro-studio-source button[aria-label$='source patch destination'] {
+  height: 22px !important;
+}
+html[data-nodaro-studio] [aria-label='Program monitor'] button[aria-label^='Zoom level'] {
+  height: 22px !important;
+  padding-block: 0;
+  display: inline-flex;
+  align-items: center;
 }
