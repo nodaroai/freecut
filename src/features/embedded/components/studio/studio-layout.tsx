@@ -9,6 +9,7 @@ import { StudioMonitorColumn, StudioScopesColumn, StudioSideSlot } from './studi
 import { useStudioHosts } from './studio-hosts'
 import { settleSplitOnce } from './studio-split'
 import { keepLanesTight } from './studio-lanes'
+import { StudioMenuBar } from './studio-menu'
 import { StudioBrand, StudioCrewBar } from './studio-topbar'
 
 /**
@@ -18,7 +19,9 @@ import { StudioBrand, StudioCrewBar } from './studio-topbar'
  */
 export function StudioLayout() {
   const on = useStudioStore((s) => s.on)
-  return on ? <StudioMounted /> : null
+  // Laid out for the Edit workspace only: Color and Motion keep the editor's own layout.
+  const editing = useEditorStore((s) => s.workspace === 'edit')
+  return on && editing ? <StudioMounted /> : null
 }
 
 function StudioMounted() {
@@ -52,7 +55,13 @@ function StudioMounted() {
 
   return (
     <>
-      {createPortal(<StudioBrand />, hosts.brand)}
+      {createPortal(
+        <>
+          <StudioBrand />
+          <StudioMenuBar />
+        </>,
+        hosts.brand,
+      )}
       {createPortal(<StudioCrewBar />, hosts.crew)}
       {createPortal(<StudioMonitorColumn />, hosts.monitor)}
       {createPortal(<StudioScopesColumn />, hosts.scopes)}

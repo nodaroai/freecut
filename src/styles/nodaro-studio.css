@@ -511,3 +511,51 @@ html[data-nodaro-studio] :has(> div > [data-editor-pane='timeline']) > aside > d
 html[data-nodaro-studio] :has(> div > [data-editor-pane='timeline']) > aside > div:nth-child(2) > div > div:first-child {
   margin-bottom: 4px !important;
 }
+
+/* ---------- the menu bar, after the brand ---------- */
+
+.nodaro-studio-menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: 10px;
+  flex: none;
+}
+.nodaro-studio-menu-trigger {
+  font-size: 12px;
+  color: #b9b9cb;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: transparent;
+  border: 0;
+  cursor: default;
+}
+.nodaro-studio-menu-trigger:hover,
+.nodaro-studio-menu-trigger[data-state='open'] {
+  color: #ececf3;
+  background: rgb(255 255 255 / 0.06);
+}
+.nodaro-studio-menu-trigger:focus-visible {
+  outline: 1px solid var(--studio-pink-soft);
+}
+.nodaro-studio-menu {
+  min-width: 220px;
+  background: #15151d;
+  border: 1px solid var(--studio-line);
+  font-size: 12px;
+}
+.nodaro-studio-menu [role='menuitem'] {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+.nodaro-studio-menu-key {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: #7c7c92;
+}
+[data-studio-host='brand'] {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
