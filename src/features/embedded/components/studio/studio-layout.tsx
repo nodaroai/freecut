@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useEditorStore } from '../../deps/studio-contract'
+import { useCompareStore } from '../../stores/compare-store'
 import { useStudioStore } from '../../stores/studio-store'
 import { watchActivity } from './activity-log'
 import { followNewLanes } from './lane-follow'
@@ -34,6 +35,8 @@ function StudioMounted() {
     root.dataset.nodaroStudio = ''
     // Media and properties share the work row; the timeline gets the full width.
     useEditorStore.setState({ mediaFullColumn: false, propertiesFullColumn: false })
+    // Original | Split | Edited under the program, from the start, as in a pro editor.
+    if (!useCompareStore.getState().offered) useCompareStore.getState().setMode('program')
     const stopActivity = watchActivity()
     const stopLanes = followNewLanes()
     const stopTight = keepLanesTight()

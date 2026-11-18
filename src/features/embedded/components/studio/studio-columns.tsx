@@ -3,6 +3,7 @@ import {
   ColorScopesView,
   SourceMonitor,
   useEditorStore,
+  useItemsStore,
   useMediaLibraryStore,
 } from '../../deps/studio-contract'
 import { useStudioStore } from '../../stores/studio-store'
@@ -18,13 +19,25 @@ function clock(at: number): string {
     .join(':')
 }
 
-/** The source being looked at: the one opened, else the first video in Media. */
+/**
+ * The source, always the original as it was shot: the media of the timeline's
+ * first video clip, untouched by the edit. Before there is one, the media
+ * opened, else the first video in Media.
+ */
 function useSourceId(): string | null {
+  const original = useItemsStore((s) => {
+    let first: { from: number; mediaId: string } | null = null
+    for (const item of s.items) {
+      if (item.type !== 'video' || !item.mediaId) continue
+      if (!first || item.from < first.from) first = { from: item.from, mediaId: item.mediaId }
+    }
+    return first?.mediaId ?? null
+  })
   const opened = useEditorStore((s) => s.sourcePreviewMediaId)
   const firstVideo = useMediaLibraryStore(
     (s) => s.mediaItems.find((m) => m.mimeType.startsWith('video/'))?.id ?? null,
   )
-  return opened ?? firstVideo
+  return original ?? opened ?? firstVideo
 }
 
 function ActivityLog() {
