@@ -8,6 +8,7 @@ import {
 import { useStudioStore } from '../../stores/studio-store'
 import { postToParent } from '../../services/studio-message'
 import { useActivityLog } from './activity-log'
+import { StudioMeterSlot } from './meter-slot'
 import { studioWord } from './studio-strings'
 
 function clock(at: number): string {
@@ -87,6 +88,7 @@ export function StudioScopesColumn() {
   return (
     <div className="nodaro-studio-column nodaro-studio-scopes">
       <ColorScopesView open />
+      <StudioMeterSlot />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useEditorStore } from '../../deps/studio-contract'
 import { useStudioStore } from '../../stores/studio-store'
 import { watchActivity } from './activity-log'
+import { followNewLanes } from './lane-follow'
 import { StudioStatusBar, StudioTimecode } from './studio-bars'
 import { StudioMonitorColumn, StudioScopesColumn, StudioSideSlot } from './studio-columns'
 import { useStudioHosts } from './studio-hosts'
@@ -29,11 +30,13 @@ function StudioMounted() {
     // Media and properties share the work row; the timeline gets the full width.
     useEditorStore.setState({ mediaFullColumn: false, propertiesFullColumn: false })
     const stopActivity = watchActivity()
+    const stopLanes = followNewLanes()
     // After the columns are in, so the split is measured with them.
     const frame = requestAnimationFrame(() => settleSplitOnce())
     return () => {
       delete root.dataset.nodaroStudio
       stopActivity()
+      stopLanes()
       cancelAnimationFrame(frame)
     }
   }, [])

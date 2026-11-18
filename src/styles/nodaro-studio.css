@@ -199,7 +199,7 @@ html[data-nodaro-studio] [data-editor-pane='media'],
 html[data-nodaro-studio] [data-editor-pane='preview'],
 html[data-nodaro-studio] [data-editor-pane='properties'],
 .nodaro-studio-panel,
-html[data-nodaro-studio] .nodaro-studio-scopes > div {
+html[data-nodaro-studio] .nodaro-studio-scopes > div:first-child {
   background: linear-gradient(180deg, var(--studio-panel-top), var(--studio-panel-bottom)) !important;
   border: 1px solid var(--studio-line) !important;
   border-radius: 7px;
@@ -332,7 +332,7 @@ html[data-nodaro-side-open] :has(> [data-editor-pane='properties']) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-html[data-nodaro-studio] .nodaro-studio-scopes > div {
+html[data-nodaro-studio] .nodaro-studio-scopes > div:first-child {
   padding: 10px !important;
 }
 
@@ -427,27 +427,27 @@ html[data-nodaro-studio] :has(> [data-editor-pane='preview']) > :has([data-edito
 
 /* The upstream scopes float over the program; here they fill their column,
    the waveform over the vectorscope. */
-html[data-nodaro-studio] .nodaro-studio-scopes > div {
+html[data-nodaro-studio] .nodaro-studio-scopes > div:first-child {
   position: static !important;
   inset: auto !important;
   pointer-events: auto !important;
   backdrop-filter: none;
-  height: 100%;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
 }
 html[data-nodaro-studio] .nodaro-studio-scopes .grid {
   grid-template-columns: minmax(0, 1fr) !important;
-  gap: 12px;
+  gap: 6px;
 }
 html[data-nodaro-studio] .nodaro-studio-scopes [class*='w-[220px]'] {
   width: 100% !important;
-  height: 132px !important;
+  height: 104px !important;
 }
 html[data-nodaro-studio] .nodaro-studio-scopes [class*='w-[160px]'] {
   margin: 0 auto;
-  width: 170px !important;
-  height: 170px !important;
+  width: 132px !important;
+  height: 132px !important;
   border-radius: 50%;
 }
 
@@ -465,4 +465,41 @@ html[data-nodaro-studio] [data-track-kind][data-track-id]:focus-within > div > d
 html[data-nodaro-studio] [data-track-kind][data-track-id] .font-mono {
   font-size: 11px;
   font-weight: 700;
+}
+
+/* ---------- loudness, under the scopes ---------- */
+
+/* The column: the scopes, then the meter's slot filling the rest. */
+html[data-nodaro-studio] .nodaro-studio-scopes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.nodaro-studio-meter-slot {
+  flex: 1 1 0;
+  min-height: 120px;
+}
+/* The editor's own meter, beside the timeline, laid over that slot. */
+html[data-nodaro-studio] :has(> div > [data-editor-pane='timeline']) > aside {
+  position: fixed;
+  z-index: 20;
+  left: var(--nodaro-meter-left, 0);
+  top: var(--nodaro-meter-top, 0);
+  width: var(--nodaro-meter-width, 0) !important;
+  height: var(--nodaro-meter-height, 0) !important;
+  background: linear-gradient(180deg, var(--studio-panel-top), var(--studio-panel-bottom)) !important;
+  border: 1px solid var(--studio-line) !important;
+  border-radius: 7px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+/* Room for the bars: less air around them than beside the timeline. */
+html[data-nodaro-studio] :has(> div > [data-editor-pane='timeline']) > aside > div:nth-child(2) {
+  padding: 6px 8px !important;
+}
+html[data-nodaro-studio] :has(> div > [data-editor-pane='timeline']) > aside > div:nth-child(2) > div {
+  padding: 6px 8px !important;
+}
+html[data-nodaro-studio] :has(> div > [data-editor-pane='timeline']) > aside > div:nth-child(2) > div > div:first-child {
+  margin-bottom: 4px !important;
 }
