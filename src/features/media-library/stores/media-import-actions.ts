@@ -284,6 +284,34 @@ function showImportNotifications(
   get().showNotification({ type, message })
 }
 
+// Inline check avoids importing from the embedded feature (circular dep risk).
+function isEmbedded(): boolean {
+  try {
+    return window.self !== window.top
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Ask the parent window to import (FREECUT_REQUEST_IMPORT). With a `link`, the
+ * person pasted one in the editor: the parent opens its own link import on it.
+ * A parent that does not read `link` opens its usual picker instead.
+ */
+function requestImportFromParent(link?: string): void {
+  window.parent.postMessage(
+    {
+      type: 'FREECUT_REQUEST_IMPORT',
+      payload: {
+        accept: 'video/*,audio/*,image/*',
+        multiple: true,
+        ...(link ? { link } : {}),
+      },
+    },
+    '*',
+  )
+}
+
 export function createImportActions(
   set: Set,
   get: Get,
@@ -431,25 +459,8 @@ export function createImportActions(
       }
 
       // In embedded mode, delegate file picking to the parent window.
-      // Inline check avoids importing from embedded feature (circular dep risk).
-      const embedded = (() => {
-        try {
-          return window.self !== window.top
-        } catch {
-          return true
-        }
-      })()
-      if (embedded) {
-        window.parent.postMessage(
-          {
-            type: 'FREECUT_REQUEST_IMPORT',
-            payload: {
-              accept: 'video/*,audio/*,image/*',
-              multiple: true,
-            },
-          },
-          '*',
-        )
+      if (isEmbedded()) {
+        requestImportFromParent()
         return []
       }
 
@@ -539,6 +550,14 @@ export function createImportActions(
       }
 
       set({ error: null, errorLink: null })
+
+      // In embedded mode the parent imports links: it asks the person to confirm
+      // they may use the video, and can fetch a page link (a video site) that a
+      // browser cannot. The file comes back like any other import.
+      if (isEmbedded()) {
+        requestImportFromParent(trimmedUrl)
+        return []
+      }
 
       const opId = createOperationId()
       const event = logger.startEvent('import', opId)
