@@ -8,6 +8,7 @@ import { useEffect, useMemo } from 'react'
  * - `monitor`, `scopes`, `side`: in the row that holds the program monitor.
  * - `timecode`: first in the timeline's own toolbar.
  * - `status`: last in the editor, under the timeline.
+ * - `effects`: under the media panel, in its column.
  * Each is a plain element we own; React portals render into it. When the
  * editor redraws a part, the element is put back.
  */
@@ -19,6 +20,7 @@ export type StudioHostName =
   | 'side'
   | 'timecode'
   | 'status'
+  | 'effects'
 
 const NAMES: readonly StudioHostName[] = [
   'brand',
@@ -28,6 +30,7 @@ const NAMES: readonly StudioHostName[] = [
   'side',
   'timecode',
   'status',
+  'effects',
 ]
 
 function ownChildren(parent: Element): Element[] {
@@ -70,6 +73,9 @@ export function placeHosts(
   place(hosts.timecode, timelineBar, timelineBar ? (ownChildren(timelineBar)[1] ?? null) : null)
 
   place(hosts.status, app, null)
+
+  const media = root.querySelector('[data-editor-pane="media"]')
+  place(hosts.effects, media?.parentElement, null)
 }
 
 /** The studio's host elements, kept in place while the editor changes. */

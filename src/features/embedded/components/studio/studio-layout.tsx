@@ -9,6 +9,7 @@ import { StudioMonitorColumn, StudioScopesColumn, StudioSideSlot } from './studi
 import { useStudioHosts } from './studio-hosts'
 import { settleSplitOnce } from './studio-split'
 import { keepLanesTight } from './studio-lanes'
+import { StudioEffects } from './studio-effects'
 import { StudioMenuBar } from './studio-menu'
 import { StudioBrand, StudioCrewBar } from './studio-topbar'
 
@@ -68,6 +69,7 @@ function StudioMounted() {
       {createPortal(<StudioSideSlot />, hosts.side)}
       {createPortal(<StudioTimecode />, hosts.timecode)}
       {createPortal(<StudioStatusBar />, hosts.status)}
+      {createPortal(<StudioEffects />, hosts.effects)}
     </>
   )
 }

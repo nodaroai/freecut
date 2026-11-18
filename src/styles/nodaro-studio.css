@@ -559,3 +559,66 @@ html[data-nodaro-studio] :has(> div > [data-editor-pane='timeline']) > aside > d
   align-items: center;
   flex: none;
 }
+
+/* ---------- effects, under the media ---------- */
+
+html[data-nodaro-studio] :has(> [data-studio-host='effects']) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--studio-gap);
+}
+html[data-nodaro-studio] :has(> [data-studio-host='effects']) > [data-editor-pane='media'] {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto !important;
+}
+[data-studio-host='effects'] {
+  flex: none;
+}
+.nodaro-studio-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+.nodaro-studio-effects-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.nodaro-studio-effect {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #d6d6e2;
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid var(--studio-line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.nodaro-studio-effect:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--lane) 60%, transparent);
+  background: color-mix(in srgb, var(--lane) 10%, transparent);
+}
+.nodaro-studio-effect:focus-visible {
+  outline: 1px solid var(--lane);
+}
+.nodaro-studio-effect:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.nodaro-studio-effect-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lane);
+  box-shadow: 0 0 6px var(--lane);
+}
