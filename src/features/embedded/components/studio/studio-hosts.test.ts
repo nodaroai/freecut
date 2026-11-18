@@ -10,6 +10,7 @@ function hostsFor(doc: Document): Record<StudioHostName, HTMLElement> {
     'side',
     'timecode',
     'status',
+    'effects',
   ]
   return Object.fromEntries(
     names.map((name) => {
@@ -25,7 +26,7 @@ describe('where the studio puts its panels', () => {
     document.body.innerHTML = `
       <div role="application">
         <div><div role="toolbar"><div id="left"></div><div id="center"></div><div id="right"></div></div></div>
-        <div id="row"><div id="media"></div><div data-editor-pane="preview"></div><div id="props"></div></div>
+        <div id="row"><div id="media"><div data-editor-pane="media"></div></div><div data-editor-pane="preview"></div><div id="props"></div></div>
         <div data-editor-pane="timeline"><div id="tbar"><span id="label"></span><span id="tools"></span></div></div>
       </div>`
     const hosts = hostsFor(document)
@@ -51,6 +52,7 @@ describe('where the studio puts its panels', () => {
     ])
     expect(ids(document.getElementById('tbar')!)).toEqual(['label', 'timecode', 'tools'])
     expect(hosts.status.parentElement?.getAttribute('role')).toBe('application')
+    expect(hosts.effects.parentElement?.id).toBe('media')
   })
 
   it('takes a panel out when its place is gone, and puts it back once it returns', () => {
