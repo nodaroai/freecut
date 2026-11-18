@@ -24,7 +24,7 @@ interface Menu {
 }
 
 /** The menus, each line something the editor really does. */
-export const STUDIO_MENUS: readonly Menu[] = [
+const STUDIO_MENUS: readonly Menu[] = [
   {
     word: 'file',
     entries: [
