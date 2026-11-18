@@ -48,10 +48,13 @@ export function PresenceCharacter({
   color,
   mood,
   walking,
+  home = false,
 }: {
   readonly color: string
   readonly mood: PresenceMood
   readonly walking: boolean
+  /** At its home on a lane: it points at nothing, so it has no tip. */
+  readonly home?: boolean
 }) {
   const asleep = mood === 'waiting'
   const done = mood === 'done'
@@ -61,9 +64,14 @@ export function PresenceCharacter({
       data-presence-character
       data-mood={mood}
       data-walking={walking ? 'true' : 'false'}
-      style={{ position: 'relative', width: 56, height: 50, opacity: asleep ? 0.7 : 1 }}
+      style={{
+        position: 'relative',
+        width: 56,
+        height: 50,
+        opacity: asleep ? 0.7 : 1,
+      }}
     >
-      <Tip color={color} />
+      {home ? null : <Tip color={color} />}
       <svg
         className="nodaro-char-body"
         width="44"

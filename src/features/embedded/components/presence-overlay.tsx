@@ -61,6 +61,41 @@ function gestureProgress(cursor: PresenceCursor, clock: GestureClock, now: numbe
   return still || duration <= 0 ? 1 : Math.min(1, (now - at) / duration)
 }
 
+/** An agent at its home on a lane, waiting or done: drawn smaller, with no name tag. */
+const isAtHome = (cursor: PresenceCursor) =>
+  !cursor.gesture &&
+  (cursor.target?.startsWith('lane.') ?? false) &&
+  (cursor.mood === 'waiting' || cursor.mood === 'done')
+
+/** How far a home's agents sit from its first one: four to a row, right to left. */
+const SEAT_STEP_X = 32
+const SEAT_STEP_Y = 34
+const SEATS_PER_ROW = 4
+
+/**
+ * Where each agent sits among the others at the same home, so a crowded lane
+ * shows them side by side instead of one on top of the other.
+ */
+function seatOffsets(
+  cursors: readonly PresenceCursor[],
+  homeOf: (cursor: PresenceCursor) => string | null,
+): Map<string, { dx: number; dy: number }> {
+  const taken = new Map<string, number>()
+  const offsets = new Map<string, { dx: number; dy: number }>()
+  for (const cursor of cursors) {
+    // Two lanes can share one home (no lane of their own yet): seat by where it is.
+    const home = isAtHome(cursor) ? homeOf(cursor) : null
+    if (home === null) continue
+    const seat = taken.get(home) ?? 0
+    taken.set(home, seat + 1)
+    offsets.set(cursor.id, {
+      dx: -(seat % SEATS_PER_ROW) * SEAT_STEP_X,
+      dy: Math.floor(seat / SEATS_PER_ROW) * SEAT_STEP_Y,
+    })
+  }
+  return offsets
+}
+
 interface Frame {
   readonly m: Measured
   readonly now: number
@@ -75,8 +110,10 @@ function placeCursor(
   clock: GestureClock,
   elements: GestureElements | undefined,
   steps: Steps,
+  seat: { dx: number; dy: number } | undefined,
 ): void {
-  const base = cursorPoint(cursor, frame.m)
+  const at = cursorPoint(cursor, frame.m)
+  const base = at && seat ? { x: at.x + seat.dx, y: at.y + seat.dy } : at
   const gesture = cursor.gesture
   const t = gestureProgress(cursor, clock, frame.now, frame.still)
   const point = gesture ? layoutGesture(cursor, gesture, base, t, frame.m, elements ?? {}) : base
@@ -118,7 +155,16 @@ export function PresenceOverlay() {
     let frameId = 0
     const glide = reduceMotion ? 'none' : 'transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1)'
     const tick = () => {
-      const frame: Frame = { m: measure(), now: performance.now(), glide, still: reduceMotion }
+      const frame: Frame = {
+        m: measure(),
+        now: performance.now(),
+        glide,
+        still: reduceMotion,
+      }
+      const seats = seatOffsets(cursors, (cursor) => {
+        const point = cursorPoint(cursor, frame.m)
+        return point ? `${Math.round(point.x)}:${Math.round(point.y)}` : null
+      })
       for (const cursor of cursors) {
         const el = cursorRefs.current.get(cursor.id)
         if (el) {
@@ -129,6 +175,7 @@ export function PresenceOverlay() {
             clock.current,
             gestureRefs.current.get(cursor.id),
             steps.current,
+            seats.get(cursor.id),
           )
         }
       }
@@ -157,7 +204,12 @@ export function PresenceOverlay() {
     <div
       aria-hidden="true"
       data-embedded-presence
-      style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483000 }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 2147483000,
+      }}
     >
       <style>{PRESENCE_KEYFRAMES + CHARACTER_KEYFRAMES}</style>
       {highlights.map((highlight) => (
@@ -215,8 +267,20 @@ export function PresenceOverlay() {
               register={register(cursor.id)}
             />
           ) : null}
-          <PresenceCharacter color={cursor.color} mood={cursor.mood ?? 'working'} walking={false} />
           <div
+            style={
+              isAtHome(cursor) ? { transform: 'scale(0.72)', transformOrigin: '0 0' } : undefined
+            }
+          >
+            <PresenceCharacter
+              color={cursor.color}
+              mood={cursor.mood ?? 'working'}
+              walking={false}
+              home={isAtHome(cursor)}
+            />
+          </div>
+          <div
+            hidden={isAtHome(cursor)}
             style={{
               position: 'absolute',
               left: 56,

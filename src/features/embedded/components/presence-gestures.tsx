@@ -16,7 +16,12 @@ export const PRESENCE_KEYFRAMES = `
 const FONT = '600 12px/1.2 "IBM Plex Sans", system-ui, sans-serif'
 
 /** Everything a gesture draws away from its cursor starts hidden, until the overlay places it. */
-const FLOATING: CSSProperties = { position: 'absolute', left: 0, top: 0, opacity: 0 }
+const FLOATING: CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  top: 0,
+  opacity: 0,
+}
 
 type Register = (patch: GestureElements) => void
 
@@ -171,13 +176,32 @@ export function GestureLayer({ gesture, color, reduceMotion, register }: Gesture
             overflow: 'hidden',
           }}
         >
-          <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <span
+            style={{
+              display: 'block',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+            }}
+          >
             {gesture.label ?? `${Math.round(gesture.value * 100)}%`}
           </span>
-          <div style={{ position: 'absolute', left: 0, bottom: 0, right: 0, height: 3 }}>
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              right: 0,
+              height: 3,
+            }}
+          >
             <div
               ref={(bar) => register({ bar })}
-              style={{ height: '100%', width: 0, background: color, transition: 'width 300ms' }}
+              style={{
+                height: '100%',
+                width: 0,
+                background: color,
+                transition: 'width 300ms',
+              }}
             />
           </div>
         </div>
