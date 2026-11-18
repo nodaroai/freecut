@@ -25,3 +25,7 @@ export function crewOf(cursors: readonly PresenceCursor[]): CrewMember[] {
   }
   return [...crew.values()]
 }
+
+/** An agent at work now, or stopped until the person answers; one asleep or done is not. */
+export const isLive = (member: CrewMember): boolean =>
+  member.mood === 'working' || member.mood === 'needs-you'

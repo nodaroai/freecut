@@ -3,7 +3,7 @@ import { usePresenceStore } from '../../stores/presence-store'
 import { useStudioStore } from '../../stores/studio-store'
 import { postToParent } from '../../services/studio-message'
 import { CHARACTER_KEYFRAMES, PresenceCharacter } from '../presence-character'
-import { crewOf } from './studio-crew'
+import { crewOf, isLive } from './studio-crew'
 import { studioWord } from './studio-strings'
 
 /** The brand at the start of the top bar. */
@@ -27,7 +27,7 @@ export function StudioCrewBar() {
   const crew = useMemo(() => crewOf(cursors), [cursors])
   const sideOpen = useStudioStore((s) => s.sideOpen)
   const sideLabel = useStudioStore((s) => s.sideLabel)
-  const live = crew.filter((m) => m.mood !== 'done').length
+  const live = crew.filter(isLive).length
   return (
     <div className="nodaro-studio-crewbar">
       <style>{CHARACTER_KEYFRAMES}</style>

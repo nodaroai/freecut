@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useItemsStore, usePlaybackStore, useProjectStore } from '../../deps/studio-contract'
 import { usePresenceStore } from '../../stores/presence-store'
 import { useStudioStore } from '../../stores/studio-store'
-import { crewOf } from './studio-crew'
+import { crewOf, isLive } from './studio-crew'
 import { studioWord } from './studio-strings'
 import { timecode } from './timecode'
 
@@ -15,7 +15,7 @@ function useCrew() {
 export function StudioTimecode() {
   const frame = usePlaybackStore((s) => s.currentFrame)
   const fps = useProjectStore((s) => s.currentProject?.metadata.fps ?? 30)
-  const live = useCrew().filter((m) => m.mood !== 'done').length
+  const live = useCrew().filter(isLive).length
   return (
     <div className="nodaro-studio-timecode">
       <span className="nodaro-studio-timecode-now">{timecode(frame, fps)}</span>
@@ -34,7 +34,7 @@ export function StudioStatusBar() {
   const project = useProjectStore((s) => s.currentProject?.metadata)
   const clips = useItemsStore((s) => s.items.length)
   const crew = useCrew()
-  const live = crew.filter((m) => m.mood !== 'done').length
+  const live = crew.filter(isLive).length
   const sideLabel = useStudioStore((s) => s.sideLabel)
   return (
     <div className="nodaro-studio-status" role="status">
