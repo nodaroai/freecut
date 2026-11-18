@@ -32,3 +32,39 @@
   --color-orange-500: #ff0073;
   --color-orange-600: #d60061;
 }
+
+/*
+ * The pro look (decided 2026-11-17): near-black surfaces with a cool tint,
+ * layered by depth, and every kind of clip in its own colour, so a busy
+ * timeline reads at a glance — talk in slate, pictures in sky blue, titles in
+ * amber, sound in green. Same unlayered override as above: no upstream file
+ * changes, and the upstream token names keep their meaning.
+ */
+:root {
+  /* Surfaces: page, panels, headers, popovers, the timeline the deepest */
+  --background: #0b0b11;
+  --card: #121219;
+  --popover: #14141d;
+  --panel-bg: #121219;
+  --panel-header: #0e0e15;
+  --timeline-bg: #08080d;
+  --secondary: #1a1a24;
+  --muted: #16161f;
+  --muted-foreground: #8f8fa6;
+  --accent: #1f1f2b;
+  --border: #262633;
+  --input: #2a2a38;
+  --sidebar: #0e0e15;
+  --sidebar-accent: #1a1a24;
+  --sidebar-border: #22222d;
+
+  /* Clips by kind (upstream src/features/timeline/theme.css) */
+  --color-timeline-baseclip: #3a3a4f;
+  --color-timeline-video: #2c2c44; /* talk / footage: slate */
+  --color-timeline-audio: #0f3a2c; /* sound: deep green, its waveform reads on it */
+  --color-timeline-image: #38bdf8; /* pictures: sky blue (drawn at 30%) */
+  --color-timeline-text: #f5b942; /* titles and captions: amber (drawn at 30%) */
+  --color-timeline-motion-segment: #34344a;
+  --color-timeline-marker: #38bdf8;
+  --color-video-preview-background: #050508;
+}
