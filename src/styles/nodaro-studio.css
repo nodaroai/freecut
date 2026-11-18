@@ -627,3 +627,93 @@ html[data-nodaro-studio] :has(> [data-studio-host='effects']) > [data-editor-pan
 html[data-nodaro-studio] .nodaro-studio-source [aria-label='Close source monitor'] {
   display: none;
 }
+
+/* ---------- the transports and the timeline's tools, as a pro editor draws them ---------- */
+
+/* One quiet button everywhere: a soft grey glyph, a faint plate on hover. */
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  button {
+  border-radius: 6px;
+  color: #9b9bb2;
+  box-shadow: none;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  button:hover:not(:disabled) {
+  color: #f1f1f7;
+  background: rgb(255 255 255 / 0.07);
+}
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  button
+  svg {
+  stroke-width: 1.75;
+}
+
+/* A tool that is on: a tinted plate and a hairline in the brand colour, not a filled block. */
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  button.bg-primary {
+  background: rgb(255 0 115 / 0.13) !important;
+  color: var(--studio-pink-soft) !important;
+  box-shadow: inset 0 0 0 1px rgb(255 0 115 / 0.45);
+}
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  button.bg-primary:hover {
+  background: rgb(255 0 115 / 0.2) !important;
+}
+
+/* Play is the one strong button: round, lit, a little larger. */
+html[data-nodaro-studio] body button.bg-primary[data-presence-target='transport.play'][data-tooltip],
+html[data-nodaro-studio] body .nodaro-studio-source button.bg-primary:has(> svg.lucide-play),
+html[data-nodaro-studio] body .nodaro-studio-source button.bg-primary:has(> svg.lucide-pause) {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 50% !important;
+  color: #fff !important;
+  background: radial-gradient(circle at 35% 30%, #ff4f9a, #e00066) !important;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.12) inset,
+    0 0 14px rgb(255 0 115 / 0.45) !important;
+}
+html[data-nodaro-studio] body button.bg-primary[data-presence-target='transport.play'][data-tooltip]:hover,
+html[data-nodaro-studio] body .nodaro-studio-source button.bg-primary:has(> svg.lucide-play):hover {
+  filter: brightness(1.12);
+}
+
+/* Separators: a hairline, not a bar. */
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  [data-orientation='vertical'][role='none'],
+html[data-nodaro-studio] :is(
+    [data-editor-pane='timeline'] > :first-child,
+    [aria-label='Program monitor'],
+    .nodaro-studio-source
+  )
+  [data-orientation='vertical'] {
+  background: rgb(255 255 255 / 0.08);
+}
