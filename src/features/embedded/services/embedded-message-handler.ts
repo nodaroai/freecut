@@ -5,6 +5,7 @@ import { roundToNearestAllowedFps } from '../utils/codec-mapping'
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract'
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
+import { openOnEditWorkspace } from './embedded-start-workspace'
 import { addMediaToTimelineAtPlayhead } from './timeline-add'
 import {
   editOpsAvailable,
@@ -524,6 +525,7 @@ function handleMessage(event: MessageEvent) {
 export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
   openEditor = deps.openEditor
   setEditOpsLoader(deps.loadEditOps ?? null)
+  openOnEditWorkspace()
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.
   void ensureEmbeddedWorkspaceMounted()
   window.addEventListener('message', handleMessage)
