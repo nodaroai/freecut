@@ -56,9 +56,10 @@ export function StudioCrewBar() {
           type="button"
           className="nodaro-studio-host-button"
           data-host-button={button.id}
+          title={button.label}
           onClick={(event) => pressHostButton(button.id, event.currentTarget)}
         >
-          {button.label}
+          <span className="nodaro-studio-host-button-label">{button.label}</span>
         </button>
       ))}
       {sideLabel && (

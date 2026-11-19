@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useStudioStore } from '../stores/studio-store'
 import { handleStudio, pressHostButton } from './studio-message'
 import { parseHostButtons } from './studio-host-buttons'
+
+beforeEach(() => {
+  useStudioStore.setState({ hostButtons: [], origin: null, on: false })
+})
 
 function studio(payload: Record<string, unknown>, origin = 'https://parent.test'): void {
   handleStudio(new MessageEvent('message', { data: { type: 'NODARO_STUDIO', payload }, origin }))
@@ -46,6 +50,37 @@ describe('parseHostButtons', () => {
     expect(button?.label).toBe('x'.repeat(40))
   })
 
+  it('cuts labels by code points, never splitting a surrogate pair', () => {
+    const note = '\u{1F3B5}'
+    const [button] = parseHostButtons([{ id: 'a', label: note.repeat(45) }])
+    expect(button?.label).toBe(note.repeat(40))
+  })
+
+  it('drops a label with nothing visible in it', () => {
+    expect(
+      parseHostButtons([
+        { id: 'a', label: '​​' },
+        { id: 'b', label: ' ‍﻿ ' },
+      ]),
+    ).toEqual([])
+    expect(parseHostButtons([{ id: 'a', label: '​Music' }])).toEqual([{ id: 'a', label: '​Music' }])
+  })
+
+  it('keeps the first of a repeated id, before counting three', () => {
+    const list = [
+      { id: 'a', label: 'First' },
+      { id: 'a', label: 'Second' },
+      { id: 'b', label: 'B' },
+      { id: 'a', label: 'Third' },
+      { id: 'c', label: 'C' },
+    ]
+    expect(parseHostButtons(list)).toEqual([
+      { id: 'a', label: 'First' },
+      { id: 'b', label: 'B' },
+      { id: 'c', label: 'C' },
+    ])
+  })
+
   it('keeps at most three', () => {
     const many = ['a', 'b', 'c', 'd'].map((id) => ({ id, label: id }))
     expect(parseHostButtons(many).map((b) => b.id)).toEqual(['a', 'b', 'c'])
@@ -78,19 +113,27 @@ describe('NODARO_STUDIO hostButtons', () => {
 })
 
 describe('pressHostButton', () => {
-  let post: ReturnType<typeof vi.spyOn> | undefined
-  afterEach(() => post?.mockRestore())
+  const parent = { postMessage: vi.fn() }
+  let parentSpy: { mockRestore: () => void } | undefined
 
-  it('posts the id and the button rect to the parent origin', () => {
+  beforeEach(() => {
+    parent.postMessage.mockClear()
     // In the test page the window is its own parent; give it a distinct one.
-    const parent = { postMessage: vi.fn() }
-    const parentSpy = vi.spyOn(window, 'parent', 'get').mockReturnValue(parent as unknown as Window)
-    studio({ hostButtons: [{ id: 'soundtrack', label: 'Soundtrack' }] }, 'https://parent.test')
+    parentSpy = vi.spyOn(window, 'parent', 'get').mockReturnValue(parent as unknown as Window)
+  })
+  afterEach(() => parentSpy?.mockRestore())
+
+  function fakeButton(): HTMLButtonElement {
     const button = document.createElement('button')
     button.getBoundingClientRect = () =>
       ({ x: 10, y: 4, width: 90, height: 28, top: 4, left: 10, right: 100, bottom: 32 }) as DOMRect
+    return button
+  }
 
-    pressHostButton('soundtrack', button)
+  it('posts the id and the button rect to the parent origin', () => {
+    studio({ hostButtons: [{ id: 'soundtrack', label: 'Soundtrack' }] }, 'https://parent.test')
+
+    pressHostButton('soundtrack', fakeButton())
 
     expect(parent.postMessage).toHaveBeenCalledWith(
       {
@@ -103,6 +146,10 @@ describe('pressHostButton', () => {
       },
       'https://parent.test',
     )
-    parentSpy.mockRestore()
+  })
+
+  it('posts nothing before a parent has asked for the studio', () => {
+    pressHostButton('soundtrack', fakeButton())
+    expect(parent.postMessage).not.toHaveBeenCalled()
   })
 })

@@ -376,6 +376,8 @@ function handleResetProject() {
  *   side-panel button; a press comes back as FREECUT_STUDIO_ACTION
  *   { action: 'host-button', id, rect: { x, y, width, height } } (the button's
  *   rect in this frame, CSS px).
+ *   The rect is in this frame's viewport, so the parent adds its iframe's
+ *   getBoundingClientRect() to place a popover in its own page.
  * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
  *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
  *   passed the operations engine in).

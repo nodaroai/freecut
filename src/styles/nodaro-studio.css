@@ -175,6 +175,7 @@ html[data-nodaro-studio] [role='toolbar'] [role='tablist'] [role='tab'][aria-sel
 }
 .nodaro-studio-host-button {
   display: flex;
+  min-width: 0;
   align-items: center;
   padding: 6px 13px;
   border-radius: 999px;
@@ -186,8 +187,15 @@ html[data-nodaro-studio] [role='toolbar'] [role='tablist'] [role='tab'][aria-sel
   white-space: nowrap;
   cursor: pointer;
 }
-.nodaro-studio-host-button:hover {
+.nodaro-studio-host-button:hover,
+.nodaro-studio-host-button:focus-visible {
   border-color: var(--studio-pink);
+}
+/* Three long labels must not push New project and Close out of the bar. */
+.nodaro-studio-host-button-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .nodaro-studio-icon-button {
   width: 28px;
