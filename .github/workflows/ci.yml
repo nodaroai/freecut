@@ -10,6 +10,12 @@ on:
     # introduced via indirect deps that the PR path-filter would miss).
     - cron: '0 7 * * *'
 
+# The CPU build of onnxruntime-node is all CI uses. Its install script also
+# downloads the CUDA build, and that download now answers 404, which fails
+# the install before any check runs. The Vercel build skips it the same way.
+env:
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   quality:
     name: Quality Checks
