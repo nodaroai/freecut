@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { usePresenceStore } from '../../stores/presence-store'
 import { useStudioStore } from '../../stores/studio-store'
-import { postToParent } from '../../services/studio-message'
+import { postToParent, pressHostButton } from '../../services/studio-message'
 import { CHARACTER_KEYFRAMES, PresenceCharacter } from '../presence-character'
 import { crewOf, isLive } from './studio-crew'
 import { studioWord } from './studio-strings'
@@ -21,12 +21,16 @@ function action(name: 'toggle-side' | 'close' | 'new-project') {
   postToParent('FREECUT_STUDIO_ACTION', { action: name })
 }
 
-/** The crew, how many are at it, and the parent's buttons, before the bar's own. */
+/**
+ * The crew, how many are at it, and the parent's buttons (its own, then the
+ * side-panel toggle, new project and close), before the bar's own.
+ */
 export function StudioCrewBar() {
   const cursors = usePresenceStore((s) => s.cursors)
   const crew = useMemo(() => crewOf(cursors), [cursors])
   const sideOpen = useStudioStore((s) => s.sideOpen)
   const sideLabel = useStudioStore((s) => s.sideLabel)
+  const hostButtons = useStudioStore((s) => s.hostButtons)
   const live = crew.filter(isLive).length
   return (
     <div className="nodaro-studio-crewbar">
@@ -46,6 +50,17 @@ export function StudioCrewBar() {
           {live === 1 ? studioWord('agentLive') : studioWord('agentsLive', live)}
         </span>
       )}
+      {hostButtons.map((button) => (
+        <button
+          key={button.id}
+          type="button"
+          className="nodaro-studio-host-button"
+          data-host-button={button.id}
+          onClick={(event) => pressHostButton(button.id, event.currentTarget)}
+        >
+          {button.label}
+        </button>
+      ))}
       {sideLabel && (
         <button
           type="button"

@@ -371,6 +371,11 @@ function handleResetProject() {
  *   in FREECUT_STUDIO_SLOT), the timeline across the width, one top bar whose
  *   buttons come back as FREECUT_STUDIO_ACTION, and a status bar; NODARO_ACTIVITY
  *   { lines } adds what the agents did to its activity log.
+ * - `studio-host-buttons`: NODARO_STUDIO { hostButtons: [{ id, label }] } adds
+ *   up to three of the parent's own buttons to the top bar, before the
+ *   side-panel button; a press comes back as FREECUT_STUDIO_ACTION
+ *   { action: 'host-button', id, rect: { x, y, width, height } } (the button's
+ *   rect in this frame, CSS px).
  * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
  *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
  *   passed the operations engine in).
@@ -388,6 +393,7 @@ const EMBEDDED_CAPABILITIES = [
   'presence-targets',
   'compare',
   'studio-layout',
+  'studio-host-buttons',
 ] as const
 
 const EDIT_OPS_CAPABILITIES = ['edit-ops', 'edit-ops-2', 'captions-word-highlight'] as const
