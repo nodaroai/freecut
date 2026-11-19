@@ -4,11 +4,18 @@ import { useProjectStore } from '@/features/editor/deps/projects-contract'
 
 const log = createLogger('embedded-import')
 
+/** The videos being placed now. */
+const placing = new Set<string>()
+
 export async function consumePendingEmbeddedImport(): Promise<void> {
   const pending = useEmbeddedStore.getState().pendingVideoImport
   if (!pending) return
-
   const { mediaId } = pending
+  // The editor can ask again while the first placement is still loading: two
+  // placements put the same video on the timeline twice, one over the other
+  // (every cut then splits both and leaves gaps). One placement per video.
+  if (placing.has(mediaId)) return
+  placing.add(mediaId)
 
   try {
     // Lazy imports to avoid pulling into main bundle
@@ -37,6 +44,12 @@ export async function consumePendingEmbeddedImport(): Promise<void> {
 
     // Get thumbnail URL
     const thumbnailUrl = await mediaLibraryService.getThumbnailBlobUrl(mediaId)
+
+    // Already on the timeline (placed by an earlier request): nothing to add.
+    if (useItemsStore.getState().items.some((item) => item.mediaId === mediaId)) {
+      log.info('Embedded video already on the timeline', { mediaId })
+      return
+    }
 
     // Get track + project context
     const tracks = useItemsStore.getState().tracks
@@ -91,6 +104,7 @@ export async function consumePendingEmbeddedImport(): Promise<void> {
   } catch (error) {
     log.error('Failed to consume pending embedded import', { error })
   } finally {
+    placing.delete(mediaId)
     useEmbeddedStore.getState().setPendingVideoImport(null)
   }
 }

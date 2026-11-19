@@ -94,7 +94,7 @@ export function TimecodeDisplay({ fps, totalFrames }: TimecodeDisplayProps) {
       style={{ width: reservedDisplayWidth }}
       onClick={() => setShowFrames((prev) => !prev)}
     >
-      <span ref={currentTimeRef} className="text-primary font-semibold">
+      <span ref={currentTimeRef} data-timecode-current className="text-primary font-semibold">
         {showFrames
           ? formatFrameNumber(getVisibleFrame())
           : formatTimecodeCompact(getVisibleFrame(), fps)}

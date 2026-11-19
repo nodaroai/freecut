@@ -292,6 +292,7 @@ export const PropertiesSidebar = memo(function PropertiesSidebar() {
           (exit < entrance). During a resize-drag we snap (duration 0) so width
           tracks the pointer instead of easing behind it. */}
       <motion.div
+        data-editor-pane="properties"
         className="panel-bg border-l border-border shrink-0 relative h-full overflow-hidden"
         initial={false}
         animate={{ width: rightSidebarOpen ? rightSidebarWidth : 0 }}

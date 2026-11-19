@@ -1,12 +1,15 @@
-import { memo, type CSSProperties, type DragEventHandler, type ReactNode, type RefObject } from 'react'
+import {
+  memo,
+  type CSSProperties,
+  type DragEventHandler,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import { cn } from '@/shared/ui/cn'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { EffectDropOverlay } from './effect-drop-overlay'
 import { getTimelineItemShellStyle } from './get-shell-style'
-import {
-  getAudioVolumeCssVars,
-  type AudioVolumeCssVarsParams,
-} from './timeline-item-css-vars'
+import { getAudioVolumeCssVars, type AudioVolumeCssVarsParams } from './timeline-item-css-vars'
 import { getFramePositionStyle } from './timeline-item-geometry'
 import type { ContextMenuState } from './use-context-menu-state'
 import type { SmartTrimHoverHandle } from './use-smart-trim-hover'
@@ -100,6 +103,7 @@ export const TimelineItemShell = memo(function TimelineItemShell({
       ref={transformRef}
       data-timeline-item
       data-item-id={itemId}
+      data-item-type={itemType}
       data-timeline-start-frame={visualLeftFrame}
       data-timeline-duration-frames={visualWidthFrames}
       data-timeline-fps={fps}

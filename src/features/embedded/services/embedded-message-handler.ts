@@ -17,6 +17,8 @@ import {
 import { claimImportedRef, mediaIdForRef, type SettleImportedRef } from './imported-refs'
 import { handlePlayback } from './playback-control'
 import { handlePresence } from './presence-message'
+import { handleStudio } from './studio-message'
+import { handleActivity } from '../components/studio/activity-log'
 import {
   updateProject as updateProjectDB,
   getProject as getProjectDB,
@@ -364,6 +366,11 @@ function handleResetProject() {
  *   slide, progress).
  * - `compare`: NODARO_PLAYBACK { action: 'compare', mode, split? } shows the
  *   original media beside the edit, with an Original | Split | Edited control.
+ * - `studio-layout`: NODARO_STUDIO lays the editor out as one studio: a work
+ *   row of panels with a slot for the parent's side panel (its rect sent back
+ *   in FREECUT_STUDIO_SLOT), the timeline across the width, one top bar whose
+ *   buttons come back as FREECUT_STUDIO_ACTION, and a status bar; NODARO_ACTIVITY
+ *   { lines } adds what the agents did to its activity log.
  * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
  *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
  *   passed the operations engine in).
@@ -380,6 +387,7 @@ const EMBEDDED_CAPABILITIES = [
   'presence',
   'presence-targets',
   'compare',
+  'studio-layout',
 ] as const
 
 const EDIT_OPS_CAPABILITIES = ['edit-ops', 'edit-ops-2', 'captions-word-highlight'] as const
@@ -482,6 +490,8 @@ const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | 
   NODARO_PLAYBACK: handlePlayback,
   NODARO_UNDO_EDIT: handleUndoEdit,
   NODARO_PRESENCE: handlePresence,
+  NODARO_STUDIO: handleStudio,
+  NODARO_ACTIVITY: (event) => handleActivity(event),
 }
 
 function handleMessage(event: MessageEvent) {

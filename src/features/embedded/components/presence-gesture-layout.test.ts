@@ -20,12 +20,22 @@ const gesture = (g: object) => ({ key: 'k', ...g }) as PresenceGesture
 
 describe('gesture layout', () => {
   it('moves a dragging cursor from its place to the drop, eased', () => {
-    const drag = gesture({ kind: 'drag', to: { frame: 50, trackId: 'v1' }, durationMs: 900 })
+    const drag = gesture({
+      kind: 'drag',
+      to: { frame: 50, trackId: 'v1' },
+      durationMs: 900,
+    })
     const base = { x: 100, y: 100 }
 
     expect(layoutGesture(cursor, drag, base, 0, m, {})).toEqual(base)
-    expect(layoutGesture(cursor, drag, base, 0.5, m, {})).toEqual({ x: 300, y: 285 })
-    expect(layoutGesture(cursor, drag, base, 1, m, {})).toEqual({ x: 500, y: 470 })
+    expect(layoutGesture(cursor, drag, base, 0.5, m, {})).toEqual({
+      x: 300,
+      y: 285,
+    })
+    expect(layoutGesture(cursor, drag, base, 1, m, {})).toEqual({
+      x: 500,
+      y: 470,
+    })
   })
 
   it('reveals typed text as it plays', () => {
@@ -52,7 +62,10 @@ describe('gesture layout', () => {
       durationMs: 1000,
     })
 
-    expect(layoutGesture(cursor, lasso, null, 0.25, m, els)).toEqual({ x: 200, y: 0 })
+    expect(layoutGesture(cursor, lasso, null, 0.25, m, els)).toEqual({
+      x: 200,
+      y: 0,
+    })
     expect(els.lassoLine!.style.strokeDashoffset).toBe('0.75')
     expect(els.lasso!.style.transform).toBe('translate(100px, 0px)')
   })
@@ -61,7 +74,10 @@ describe('gesture layout', () => {
     const marquee = document.createElement('div')
     const span = gesture({ kind: 'marquee', trackId: 'v1', from: 10, to: 30 })
 
-    expect(layoutGesture(cursor, span, null, 1, m, { marquee })).toEqual({ x: 300, y: 470 })
+    expect(layoutGesture(cursor, span, null, 1, m, { marquee })).toEqual({
+      x: 300,
+      y: 470,
+    })
     expect(marquee.style.width).toBe('200px')
     expect(marquee.style.transform).toBe('translate(100px, 450px)')
   })

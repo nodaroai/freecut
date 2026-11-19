@@ -9,6 +9,7 @@ import {
 } from './presence-gesture-layout'
 import { CursorGestureParts, GestureLayer, PRESENCE_KEYFRAMES } from './presence-gestures'
 import { cursorPoint, highlightBox, measure, type Measured } from './presence-measure'
+import { CHARACTER_KEYFRAMES, PresenceCharacter } from './presence-character'
 
 /** Dark text on a light hex color, light text on everything else. */
 function labelInk(color: string): string {
@@ -19,10 +20,29 @@ function labelInk(color: string): string {
   return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! > 0.55 ? '#111111' : '#ffffff'
 }
 
-const ARROW = 'M1.5 1.5 L1.5 13.5 L4.9 10.3 L7.4 15 L9.7 14 L7.2 9.3 L12 9.3 Z'
-
 const prefersReducedMotion = () =>
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+/** Where each character last stood and when it last moved: it walks while it moves. */
+type Steps = Map<string, { x: number; y: number; movedAt: number }>
+
+/** How long a character keeps walking after its last move (its glide is 420 ms). */
+const WALK_TAIL_MS = 450
+
+function noteWalking(
+  id: string,
+  point: { x: number; y: number },
+  el: HTMLDivElement,
+  steps: Steps,
+  now: number,
+) {
+  const last = steps.get(id)
+  const moved = !last || Math.hypot(point.x - last.x, point.y - last.y) > 0.5
+  const movedAt = moved && last ? now : (last?.movedAt ?? -Infinity)
+  steps.set(id, { x: point.x, y: point.y, movedAt })
+  const character = el.querySelector<HTMLElement>('[data-presence-character]')
+  if (character) character.dataset.walking = now - movedAt < WALK_TAIL_MS ? 'true' : 'false'
+}
 
 /** When each cursor's current gesture began, so a repeated message continues it. */
 type GestureClock = Map<string, { key: string; at: number }>
@@ -41,6 +61,41 @@ function gestureProgress(cursor: PresenceCursor, clock: GestureClock, now: numbe
   return still || duration <= 0 ? 1 : Math.min(1, (now - at) / duration)
 }
 
+/** An agent at its home on a lane, waiting or done: drawn smaller, with no name tag. */
+const isAtHome = (cursor: PresenceCursor) =>
+  !cursor.gesture &&
+  (cursor.target?.startsWith('lane.') ?? false) &&
+  (cursor.mood === 'waiting' || cursor.mood === 'done')
+
+/** How far a home's agents sit from its first one: four to a row, right to left. */
+const SEAT_STEP_X = 32
+const SEAT_STEP_Y = 34
+const SEATS_PER_ROW = 4
+
+/**
+ * Where each agent sits among the others at the same home, so a crowded lane
+ * shows them side by side instead of one on top of the other.
+ */
+function seatOffsets(
+  cursors: readonly PresenceCursor[],
+  homeOf: (cursor: PresenceCursor) => string | null,
+): Map<string, { dx: number; dy: number }> {
+  const taken = new Map<string, number>()
+  const offsets = new Map<string, { dx: number; dy: number }>()
+  for (const cursor of cursors) {
+    // Two lanes can share one home (no lane of their own yet): seat by where it is.
+    const home = isAtHome(cursor) ? homeOf(cursor) : null
+    if (home === null) continue
+    const seat = taken.get(home) ?? 0
+    taken.set(home, seat + 1)
+    offsets.set(cursor.id, {
+      dx: -(seat % SEATS_PER_ROW) * SEAT_STEP_X,
+      dy: Math.floor(seat / SEATS_PER_ROW) * SEAT_STEP_Y,
+    })
+  }
+  return offsets
+}
+
 interface Frame {
   readonly m: Measured
   readonly now: number
@@ -54,8 +109,11 @@ function placeCursor(
   frame: Frame,
   clock: GestureClock,
   elements: GestureElements | undefined,
+  steps: Steps,
+  seat: { dx: number; dy: number } | undefined,
 ): void {
-  const base = cursorPoint(cursor, frame.m)
+  const at = cursorPoint(cursor, frame.m)
+  const base = at && seat ? { x: at.x + seat.dx, y: at.y + seat.dy } : at
   const gesture = cursor.gesture
   const t = gestureProgress(cursor, clock, frame.now, frame.still)
   const point = gesture ? layoutGesture(cursor, gesture, base, t, frame.m, elements ?? {}) : base
@@ -63,7 +121,10 @@ function placeCursor(
   const moving = gesture !== undefined && movesCursor(gesture) && t < 1
   el.style.transition = moving ? 'opacity 200ms' : `${frame.glide}, opacity 200ms`
   el.style.opacity = point ? '1' : '0'
-  if (point) el.style.transform = `translate(${point.x}px, ${point.y}px)`
+  if (point) {
+    el.style.transform = `translate(${point.x}px, ${point.y}px)`
+    noteWalking(cursor.id, point, el, steps, frame.now)
+  }
 }
 
 /**
@@ -80,23 +141,43 @@ export function PresenceOverlay() {
   const highlightRefs = useRef(new Map<string, HTMLDivElement>())
   const gestureRefs = useRef(new Map<string, GestureElements>())
   const clock = useRef<GestureClock>(new Map())
+  const steps = useRef<Steps>(new Map())
   const active = cursors.length > 0 || highlights.length > 0
   const reduceMotion = prefersReducedMotion()
 
   useEffect(() => {
     // Forget the cursors the parent no longer sends.
     const ids = new Set(cursors.map((cursor) => cursor.id))
-    for (const map of [clock.current, gestureRefs.current]) {
+    for (const map of [clock.current, gestureRefs.current, steps.current]) {
       for (const id of map.keys()) if (!ids.has(id)) map.delete(id)
     }
     if (!active) return
     let frameId = 0
     const glide = reduceMotion ? 'none' : 'transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1)'
     const tick = () => {
-      const frame: Frame = { m: measure(), now: performance.now(), glide, still: reduceMotion }
+      const frame: Frame = {
+        m: measure(),
+        now: performance.now(),
+        glide,
+        still: reduceMotion,
+      }
+      const seats = seatOffsets(cursors, (cursor) => {
+        const point = cursorPoint(cursor, frame.m)
+        return point ? `${Math.round(point.x)}:${Math.round(point.y)}` : null
+      })
       for (const cursor of cursors) {
         const el = cursorRefs.current.get(cursor.id)
-        if (el) placeCursor(cursor, el, frame, clock.current, gestureRefs.current.get(cursor.id))
+        if (el) {
+          placeCursor(
+            cursor,
+            el,
+            frame,
+            clock.current,
+            gestureRefs.current.get(cursor.id),
+            steps.current,
+            seats.get(cursor.id),
+          )
+        }
       }
       for (const highlight of highlights) {
         const el = highlightRefs.current.get(highlight.id)
@@ -123,9 +204,14 @@ export function PresenceOverlay() {
     <div
       aria-hidden="true"
       data-embedded-presence
-      style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483000 }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 2147483000,
+      }}
     >
-      <style>{PRESENCE_KEYFRAMES}</style>
+      <style>{PRESENCE_KEYFRAMES + CHARACTER_KEYFRAMES}</style>
       {highlights.map((highlight) => (
         <div
           key={highlight.id}
@@ -181,24 +267,29 @@ export function PresenceOverlay() {
               register={register(cursor.id)}
             />
           ) : null}
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 16 16"
-            style={{ display: 'block', filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.55))' }}
-          >
-            <path d={ARROW} fill={cursor.color} stroke="rgba(0,0,0,0.75)" strokeWidth="1.2" />
-          </svg>
           <div
+            style={
+              isAtHome(cursor) ? { transform: 'scale(0.72)', transformOrigin: '0 0' } : undefined
+            }
+          >
+            <PresenceCharacter
+              color={cursor.color}
+              mood={cursor.mood ?? 'working'}
+              walking={false}
+              home={isAtHome(cursor)}
+            />
+          </div>
+          <div
+            hidden={isAtHome(cursor)}
             style={{
               position: 'absolute',
-              left: 15,
-              top: 16,
+              left: 56,
+              top: 18,
               padding: '4px 7px',
               borderRadius: 4,
               background: cursor.color,
               color: labelInk(cursor.color),
-              font: '600 12px/1.2 "IBM Plex Sans", system-ui, sans-serif',
+              font: '600 12px/1.2 Inter, "IBM Plex Sans", system-ui, sans-serif',
               whiteSpace: 'nowrap',
               boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
             }}

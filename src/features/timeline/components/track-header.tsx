@@ -95,6 +95,7 @@ export const TrackHeader = memo(function TrackHeader({
             containIntrinsicSize: `${TIMELINE_SIDEBAR_WIDTH}px ${track.height}px`,
           }}
           data-track-id={track.id}
+          data-track-kind={track.kind ?? 'video'}
           data-track-disabled={trackDisabled ? 'true' : undefined}
         >
           <div
