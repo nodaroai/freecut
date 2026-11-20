@@ -588,7 +588,7 @@ describe('MediaCard', () => {
     expect(mediaStoreState.openMissingMediaDialog).toHaveBeenCalledTimes(1)
     expect(mediaStoreState.showNotification).toHaveBeenCalledWith({
       type: 'error',
-      message: 'NodarCut needs permission to read "movie.mkv" before extracting subtitles.',
+      message: 'NodaroCut needs permission to read "movie.mkv" before extracting subtitles.',
     })
   })
 
@@ -616,7 +616,7 @@ describe('MediaCard', () => {
       expect(mediaStoreState.showNotification).toHaveBeenCalledWith({
         type: 'error',
         message:
-          'NodarCut could not read "movie.mkv" right now. Close any app using it and try again.',
+          'NodaroCut could not read "movie.mkv" right now. Close any app using it and try again.',
       })
     })
     expect(embeddedSubtitlePickerStoreMocks.open).not.toHaveBeenCalled()

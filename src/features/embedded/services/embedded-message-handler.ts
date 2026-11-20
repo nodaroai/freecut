@@ -309,7 +309,7 @@ async function handleLoadVideo(event: MessageEvent) {
 
     // Always create fresh project and import media first
     const project = await useProjectStore.getState().createProject({
-      name: 'NodarCut Edit',
+      name: 'NodaroCut Edit',
       width,
       height,
       fps,

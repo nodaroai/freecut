@@ -1,6 +1,6 @@
 {
-  "name": "NodarCut",
-  "short_name": "NodarCut",
+  "name": "NodaroCut",
+  "short_name": "NodaroCut",
   "id": "/",
   "description": "A browser-based video editor.",
   "start_url": "/",
@@ -36,7 +36,7 @@
       "sizes": "2048x1536",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "NodarCut video editor timeline"
+      "label": "NodaroCut video editor timeline"
     }
   ]
 }
