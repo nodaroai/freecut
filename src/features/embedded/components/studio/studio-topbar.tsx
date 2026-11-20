@@ -11,7 +11,7 @@ export function StudioBrand() {
   return (
     <div className="nodaro-studio-brand">
       <span aria-hidden="true" className="nodaro-studio-brand-mark" />
-      <span className="nodaro-studio-brand-name">NodarCut</span>
+      <span className="nodaro-studio-brand-name">NodaroCut</span>
       <span className="nodaro-studio-brand-ai">AI</span>
     </div>
   )
