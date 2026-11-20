@@ -39,6 +39,7 @@ describe('FREECUT_READY capabilities', () => {
     expect(capabilities).toContain('timeline-read')
     expect(capabilities).toContain('presence-targets')
     expect(capabilities).toContain('compare')
+    expect(capabilities).toContain('studio-host-buttons')
     expect(capabilities).not.toContain('edit-ops')
     expect(capabilities).not.toContain('edit-ops-2')
     expect(capabilities).not.toContain('captions-word-highlight')

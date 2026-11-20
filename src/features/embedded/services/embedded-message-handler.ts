@@ -5,6 +5,7 @@ import { roundToNearestAllowedFps } from '../utils/codec-mapping'
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, mediaProcessorService } from '../deps/media-library-contract'
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
+import { openOnEditWorkspace } from './embedded-start-workspace'
 import { addMediaToTimelineAtPlayhead } from './timeline-add'
 import {
   editOpsAvailable,
@@ -371,6 +372,13 @@ function handleResetProject() {
  *   in FREECUT_STUDIO_SLOT), the timeline across the width, one top bar whose
  *   buttons come back as FREECUT_STUDIO_ACTION, and a status bar; NODARO_ACTIVITY
  *   { lines } adds what the agents did to its activity log.
+ * - `studio-host-buttons`: NODARO_STUDIO { hostButtons: [{ id, label }] } adds
+ *   up to three of the parent's own buttons to the top bar, before the
+ *   side-panel button; a press comes back as FREECUT_STUDIO_ACTION
+ *   { action: 'host-button', id, rect: { x, y, width, height } } (the button's
+ *   rect in this frame, CSS px).
+ *   The rect is in this frame's viewport, so the parent adds its iframe's
+ *   getBoundingClientRect() to place a popover in its own page.
  * - `edit-ops`: NODARO_APPLY_OPS applies edit operations as one undo step, and
  *   NODARO_UNDO_EDIT undoes the newest such step (only when the app shell
  *   passed the operations engine in).
@@ -388,6 +396,7 @@ const EMBEDDED_CAPABILITIES = [
   'presence-targets',
   'compare',
   'studio-layout',
+  'studio-host-buttons',
 ] as const
 
 const EDIT_OPS_CAPABILITIES = ['edit-ops', 'edit-ops-2', 'captions-word-highlight'] as const
@@ -516,6 +525,7 @@ function handleMessage(event: MessageEvent) {
 export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
   openEditor = deps.openEditor
   setEditOpsLoader(deps.loadEditOps ?? null)
+  openOnEditWorkspace()
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.
   void ensureEmbeddedWorkspaceMounted()
   window.addEventListener('message', handleMessage)

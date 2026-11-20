@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { StudioHostButton } from '../services/studio-host-buttons'
 
 /**
  * The studio layout a parent can ask for (NODARO_STUDIO): every panel in one
@@ -15,12 +16,15 @@ interface StudioState {
   readonly sideWidth: number
   /** What the top bar's side-panel button says. */
   readonly sideLabel: string
+  /** The parent's own top-bar buttons, pressed back as FREECUT_STUDIO_ACTION host-button. */
+  readonly hostButtons: readonly StudioHostButton[]
   /** The origin of the page that asked, the only one told what happens here. */
   readonly origin: string | null
   setStudio: (next: {
     sideOpen: boolean
     sideWidth: number
     sideLabel: string
+    hostButtons: readonly StudioHostButton[]
     origin: string
   }) => void
 }
@@ -30,6 +34,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   sideOpen: false,
   sideWidth: 0,
   sideLabel: '',
+  hostButtons: [],
   origin: null,
   setStudio: (next) => set({ on: true, ...next }),
 }))
