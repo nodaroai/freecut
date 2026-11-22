@@ -67,7 +67,7 @@ export function StudioStatusBar() {
           {sideLabel} · {live > 0 ? studioWord('working') : studioWord('ready')}
         </span>
       )}
-      <span className="nodaro-studio-status-brand">NodarCut</span>
+      <span className="nodaro-studio-status-brand">NodaroCut</span>
     </div>
   )
 }

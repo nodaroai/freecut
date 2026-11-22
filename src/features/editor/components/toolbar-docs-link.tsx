@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 
 /**
- * Toolbar link to the built-in NodarCut documentation. Rendered in both
+ * Toolbar link to the built-in NodaroCut documentation. Rendered in both
  * standalone and embedded modes; opens in a new tab so it also works from
  * inside the studio iframe.
  */
