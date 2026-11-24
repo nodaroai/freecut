@@ -1,32 +1,16 @@
 import { useMediaLibraryStore } from '../deps/media-library-contract'
+import { mediaToSnapshotReference } from '../deps/project-bundle-contract'
 
 type LibraryState = ReturnType<typeof useMediaLibraryStore.getState>
 type Media = LibraryState['mediaItems'][number]
 
 /**
- * What the project file says of each media item (its `mediaReferences`, see
- * `mediaToSnapshotReference` in project-bundle): a change to any of these is a
- * change to the project file.
+ * What the project file says of the media: its `mediaReferences`, each made by
+ * `mediaToSnapshotReference`. A change to any of it is a change to the file.
  */
-const REFERENCE_FIELDS = [
-  'id',
-  'fileName',
-  'fileSize',
-  'mimeType',
-  'duration',
-  'width',
-  'height',
-  'fps',
-  'codec',
-  'bitrate',
-  'contentHash',
-] as const satisfies ReadonlyArray<keyof Media>
-
 function signature(items: readonly Media[]): string {
   return JSON.stringify(
-    items
-      .map((item) => REFERENCE_FIELDS.map((field) => item[field] ?? null))
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    items.map(mediaToSnapshotReference).sort((a, b) => String(a.id).localeCompare(String(b.id))),
   )
 }
 

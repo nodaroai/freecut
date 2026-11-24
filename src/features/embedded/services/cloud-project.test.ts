@@ -436,3 +436,65 @@ describe('FREECUT_PROJECT_CHANGED for the media library', () => {
     expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
   })
 })
+
+describe('FREECUT_PROJECT_CHANGED for the project record', () => {
+  // The editor mounts a project as it does: its media library moves to the
+  // project, then the project store holds a skeleton of it.
+  function mount(id: string) {
+    library.setState({ currentProjectId: null })
+    openProject(null)
+    library.setState({ currentProjectId: id })
+    openProject(id, { description: '', duration: 0, createdAt: 2 })
+  }
+
+  it('a rename announces once', () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+    mount('p1')
+    vi.advanceTimersByTime(500)
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
+    const start = currentRevision()
+
+    // The store's rename: the new name at once, then the record as stored.
+    openProject('p1', { name: 'Renamed', description: '', duration: 0, createdAt: 2 })
+    openProject('p1', { name: 'Renamed', description: '', duration: 120, createdAt: 1 })
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload)).toEqual([
+      { revision: start + 1, projectId: 'p1' },
+    ])
+  })
+
+  it('opening, loading or switching to a project announces nothing', () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+    mount('p1')
+
+    // A load or an open makes p2 the open project, with its full record, while
+    // the editor is still on p1; then the editor mounts p2.
+    openProject('p2', { description: 'saved', duration: 300, createdAt: 1, timeline: {} })
+    mount('p2')
+    // A cold start: nothing mounted, then the record, then the editor.
+    library.setState({ currentProjectId: null })
+    openProject(null)
+    openProject('p3', { description: 'saved', duration: 300, createdAt: 1 })
+    library.setState({ currentProjectId: 'p3' })
+    openProject('p3', { description: '', duration: 0, createdAt: 2 })
+    vi.advanceTimersByTime(600)
+
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
+  })
+
+  it("the person's own import announces: the placeholder, then the imported media", () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+    loadLibrary('p1', [clip('a')])
+
+    library.setState({ mediaItems: [clip('a'), { ...clip('temp-1'), codec: 'importing...' }] })
+    vi.advanceTimersByTime(500)
+    library.setState({ mediaItems: [clip('a'), clip('real-1')] })
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(2)
+  })
+})

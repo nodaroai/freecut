@@ -104,6 +104,39 @@ export function beginProjectOpen(): (replaced: boolean) => void {
 }
 
 type CommandState = ReturnType<typeof useTimelineCommandStore.getState>
+type OpenProject = NonNullable<ReturnType<typeof useProjectStore.getState>['currentProject']>
+
+/**
+ * What the project file carries of the project record itself. The file holds
+ * the whole stored record (exportProjectJson), so this is every field but the
+ * timeline, whose changes go through the command history, and the time it was
+ * last written, which every save moves.
+ */
+function ownFields(project: OpenProject): string {
+  const { timeline: _timeline, updatedAt: _updatedAt, ...own } = project
+  return JSON.stringify(own)
+}
+
+/**
+ * Calls `listener` when the open project's own fields change (a rename, a new
+ * description or canvas), however that happened. Only writes made while the
+ * editor is on the project count: the record a load or an open writes before
+ * the editor reaches the project, and the skeleton the editor writes as it
+ * mounts it, are its starting point.
+ */
+function onProjectRecordChange(listener: () => void): () => void {
+  let known: { id: string; fields: string } | null = null
+  return useProjectStore.subscribe((state) => {
+    const project = state.currentProject
+    if (!project || heldProjectId() !== project.id) {
+      known = null
+      return
+    }
+    const fields = ownFields(project)
+    if (known?.id === project.id && known.fields !== fields) listener()
+    known = { id: project.id, fields }
+  })
+}
 
 /**
  * Whether a history update is an edit, an undo or a redo: a new top of either
@@ -125,8 +158,9 @@ function historyMoved(state: CommandState, prev: CommandState): boolean {
  * the project named changed, so it knows to ask for the project file again. A
  * change is the timeline turning dirty, an edit, an undo or a redo (including
  * one made while the timeline is already dirty and one made once the history
- * is full), an edit request applied without history, and a change to the media
- * the project file lists (media imported, removed, renamed or relinked).
+ * is full), an edit request applied without history, a change to the media
+ * the project file lists (media imported, removed, renamed or relinked), and a
+ * change to the project's own fields (a rename, say).
  * Changes made before the parent set its origin are told once, when it does.
  * When the open project changes, a change of the project left that is still
  * waiting is dropped and the revision restarts at 0.
@@ -154,6 +188,7 @@ export function startProjectChangeAnnouncements(): () => void {
     }),
     onHistoryFreeEdit(projectChanged),
     onMediaLibraryChange(projectChanged),
+    onProjectRecordChange(projectChanged),
     useEmbeddedStore.subscribe((state, prev) => {
       if (unannounced && state.parentOrigin && !prev.parentOrigin) projectChanged()
     }),
