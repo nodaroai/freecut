@@ -22,7 +22,7 @@ import {
   type SettleImportedRef,
 } from './imported-refs'
 import { handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
-import { handleOpenProject, setOpenProjectEditor } from './cloud-project-open'
+import { handleOpenProject, openInProgress, setOpenProjectEditor } from './cloud-project-open'
 import { handlePlayback } from './playback-control'
 import { handlePresence } from './presence-message'
 import { handleStudio } from './studio-message'
@@ -406,6 +406,10 @@ function handleResetProject() {
  *   name, type }] } opens a saved project in a fresh one, fetching each media
  *   item from its url, and answers FREECUT_PROJECT_OPENED { requestId, ok,
  *   missing, revision }: the media ids that did not arrive, at revision 0.
+ *   A successful open discards any change of the previous project not yet
+ *   announced, so a parent reads and saves the current project
+ *   (NODARO_GET_PROJECT) before it sends NODARO_OPEN_PROJECT. `ok: false` leaves
+ *   the previous project open, unchanged, with its revision.
  */
 const EMBEDDED_CAPABILITIES = [
   'timeline-add',
@@ -456,6 +460,10 @@ async function importFile(file: ImportFile, projectId: string): Promise<string |
 async function handleImportFiles(event: MessageEvent) {
   const files: ImportFile[] | undefined = event.data.payload?.files
   if (!files?.length) return
+  // Files sent while a project is being opened go into the project opened, and
+  // their refs are claimed once its refs replaced the previous project's.
+  const opening = openInProgress()
+  if (opening) await opening
   const settlers = claimRefs(files)
 
   try {

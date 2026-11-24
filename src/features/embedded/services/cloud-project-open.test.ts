@@ -37,6 +37,14 @@ vi.mock('../deps/projects-contract', async () => {
         return project
       },
     ),
+    deleteProject: vi.fn(async (id: string) => {
+      if (useProjectStore.getState().currentProject?.id === id) {
+        useProjectStore.setState({ currentProject: null })
+      }
+    }),
+    permanentlyDeleteProject: vi.fn(async (id: string) => {
+      db.delete(id)
+    }),
   }))
   return { useProjectStore }
 })
@@ -49,7 +57,10 @@ vi.mock('../deps/media-library-contract', async () => {
       })),
     },
     mediaProcessorService: {},
-    useMediaLibraryStore: create(() => ({ currentProjectId: null as string | null })),
+    useMediaLibraryStore: create(() => ({
+      currentProjectId: null as string | null,
+      loadMediaItems: async () => {},
+    })),
   }
 })
 vi.mock('../deps/timeline-contract', async () => {
@@ -71,20 +82,34 @@ vi.mock('../deps/timeline-contract', async () => {
     useTimelineCommandStore,
     useCompositionNavigationStore: { getState: () => ({ breadcrumbs: [] }) },
     getActiveTabId: () => null,
+    saveTimeline: vi.fn(async () => {}),
   }
 })
 vi.mock('./embedded-workspace', () => ({ ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}) }))
-vi.mock('./studio-export-bridge', () => ({ collectProjectJson: vi.fn(async () => null) }))
+// The project file handed over is the project the store holds as current.
+vi.mock('./studio-export-bridge', async () => {
+  const { useProjectStore } = await import('../deps/projects-contract')
+  return {
+    collectProjectJson: vi.fn(async () => ({
+      project: { id: useProjectStore.getState().currentProject?.id },
+    })),
+  }
+})
 vi.mock('./edit-readiness', () => ({ waitUntilEditable: vi.fn(async () => 'p1') }))
 vi.mock('./timeline-report', () => ({ readTimeline: () => ({}) }))
 
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, useMediaLibraryStore } from '../deps/media-library-contract'
-import { useTimelineCommandStore, useTimelineSettingsStore } from '../deps/timeline-contract'
+import {
+  saveTimeline,
+  useTimelineCommandStore,
+  useTimelineSettingsStore,
+} from '../deps/timeline-contract'
 import { updateProject } from '@/infrastructure/storage'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { currentRevision, handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
 import { handleOpenProject, setOpenProjectEditor } from './cloud-project-open'
+import { initEmbeddedMessageHandler } from './embedded-message-handler'
 import { claimImportedRef, mediaIdForRef, refsByMediaId } from './imported-refs'
 
 type Item = Record<string, unknown> & { id: string }
@@ -114,14 +139,26 @@ const library = useMediaLibraryStore as unknown as {
 
 // The editor mounting the project: it reads it from storage, loads its
 // timeline (which marks the timeline dirty along the way) and settles.
-const openEditor = vi.fn((projectId: string) => {
+const showInEditor = (projectId: string) => {
   setTimeout(() => {
     settings.setState({ isTimelineLoading: true, isDirty: true })
     library.setState({ currentProjectId: projectId })
     useProjectStore.setState({ currentProject: db.get(projectId) as never })
     setTimeout(() => settings.setState({ isTimelineLoading: false }), 20)
   }, 20)
-})
+}
+const openEditor = vi.fn(showInEditor)
+
+/** Runs the fake clock until `promise` settles. */
+async function drive<T>(promise: Promise<T>): Promise<T> {
+  let done = false
+  promise.then(
+    () => (done = true),
+    () => (done = true),
+  )
+  for (let i = 0; !done && i < 10_000; i++) await vi.advanceTimersByTimeAsync(250)
+  return promise
+}
 
 const media = (id: string, ref = `ref-${id}`) => ({
   mediaId: id,
@@ -153,10 +190,22 @@ function savedProject(timeline: Partial<Timeline> & Record<string, unknown>, ext
   }
 }
 
-const open = (payload: Record<string, unknown>, origin = ORIGIN) =>
+const startOpen = (payload: Record<string, unknown>, origin = ORIGIN) =>
   handleOpenProject(
     new MessageEvent('message', { data: { type: 'NODARO_OPEN_PROJECT', payload }, origin }),
   )
+const open = (payload: Record<string, unknown>, origin = ORIGIN) =>
+  drive(startOpen(payload, origin))
+const getProject = (requestId: string) =>
+  drive(
+    handleGetProject(
+      new MessageEvent('message', {
+        data: { type: 'NODARO_GET_PROJECT', payload: { requestId } },
+        origin: ORIGIN,
+      }),
+    ),
+  )
+const sleep = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 
 const opened = () => posted('FREECUT_PROJECT_OPENED').at(-1)!.payload
 const written = () => {
@@ -167,6 +216,7 @@ const okFetch = () =>
   vi.fn(async (url: string) => new Response(new Blob([url], { type: 'video/mp4' })))
 
 beforeEach(() => {
+  vi.useFakeTimers()
   post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
   useEmbeddedStore.setState({
     isEmbedded: true,
@@ -176,13 +226,16 @@ beforeEach(() => {
   })
   settings.setState({ isDirty: false, isTimelineLoading: false })
   history.setState({ undoStack: [], redoStack: [] })
-  useProjectStore.setState({ currentProject: { id: 'current' } as never })
-  library.setState({ currentProjectId: 'current' })
   db.clear()
+  db.set('current', { id: 'current', name: 'Open now' })
+  useProjectStore.setState({ currentProject: db.get('current') as never })
+  library.setState({ currentProjectId: 'current' })
   vi.mocked(updateProject).mockClear()
   vi.mocked(useProjectStore.getState().createProject).mockClear()
   vi.mocked(mediaLibraryService.importMediaBlob).mockClear()
-  openEditor.mockClear()
+  openEditor.mockReset()
+  openEditor.mockImplementation(showInEditor)
+  vi.mocked(saveTimeline).mockClear()
   setOpenProjectEditor(openEditor)
   vi.stubGlobal('fetch', okFetch())
 })
@@ -190,6 +243,7 @@ afterEach(() => {
   stop()
   post.mockRestore()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('NODARO_OPEN_PROJECT', () => {
@@ -241,9 +295,12 @@ describe('NODARO_OPEN_PROJECT', () => {
     expect(useProjectStore.getState().currentProject?.id).toBe(freshId)
     expect(refsByMediaId()).toEqual({ 'new-m1.mp4': 'ref-m1', 'new-m2.mp4': 'ref-m2' })
     // Fetched by the editor itself, without credentials.
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith('https://cdn.example/m1.mp4', {
-      credentials: 'omit',
-    })
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      'https://cdn.example/m1.mp4',
+      expect.objectContaining({ credentials: 'omit' }),
+    )
+    // What the project open before had unsaved is saved before the editor moves.
+    expect(saveTimeline).toHaveBeenCalledWith('current')
   })
 
   it('open reports a media whose fetch fails in missing and still restores the timeline', async () => {
@@ -368,7 +425,7 @@ describe('NODARO_OPEN_PROJECT', () => {
     useEmbeddedStore.setState({ parentOrigin: null })
     settings.setState({ isDirty: true })
     history.setState({ undoStack: [{ command: { type: 'MOVE_ITEM' } }] })
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await sleep(600)
     expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
 
     // ...and the open (which sets the origin, and whose load marks the timeline dirty) replaces it.
@@ -377,7 +434,7 @@ describe('NODARO_OPEN_PROJECT', () => {
       projectJson: savedProject({ items: [{ id: 'i1', mediaId: 'm1' }] }),
       media: [media('m1')],
     })
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await sleep(600)
 
     expect(opened()).toMatchObject({ ok: true, revision: 0 })
     expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
@@ -389,7 +446,7 @@ describe('NODARO_OPEN_PROJECT', () => {
     // A change after the open is announced, from revision 1.
     settings.setState({ isDirty: false })
     settings.setState({ isDirty: true })
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await sleep(600)
     expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload.revision)).toEqual([1])
   })
 
@@ -406,9 +463,9 @@ describe('NODARO_OPEN_PROJECT', () => {
     settleLate('late-media-of-the-old-project')
 
     expect(refsByMediaId()).toEqual({ 'new-m1.mp4': 'ref-m1' })
-    expect(await mediaIdForRef('ref-old', 10)).toBeNull()
-    expect(await mediaIdForRef('ref-late', 10)).toBeNull()
-    expect(await mediaIdForRef('ref-m1', 10)).toBe('new-m1.mp4')
+    expect(await drive(mediaIdForRef('ref-old', 10))).toBeNull()
+    expect(await drive(mediaIdForRef('ref-late', 10))).toBeNull()
+    expect(await drive(mediaIdForRef('ref-m1', 10))).toBe('new-m1.mp4')
   })
 
   it('two media sharing one ref both map to it', async () => {
@@ -461,12 +518,7 @@ describe('NODARO_OPEN_PROJECT', () => {
       projectJson: savedProject({ items: [{ id: 'i1', mediaId: 'm1' }] }),
       media: [media('m1')],
     })
-    const get = handleGetProject(
-      new MessageEvent('message', {
-        data: { type: 'NODARO_GET_PROJECT', payload: { requestId: 'g1' } },
-        origin: ORIGIN,
-      }),
-    )
+    const get = getProject('g1')
     await Promise.all([opening, get])
 
     const order = post.mock.calls.map((call) => (call[0] as Posted).type)
@@ -516,7 +568,7 @@ describe('NODARO_OPEN_PROJECT', () => {
   it('an open that fails before replacing the project keeps its refs, revision and changes', async () => {
     stop = startProjectChangeAnnouncements()
     settings.setState({ isDirty: true })
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await sleep(600)
     const before = currentRevision()
     claimImportedRef('ref-kept')('media-kept')
     vi.mocked(useProjectStore.getState().createProject).mockRejectedValueOnce(
@@ -525,12 +577,211 @@ describe('NODARO_OPEN_PROJECT', () => {
     history.setState({ undoStack: [{ command: { type: 'MOVE_ITEM' } }] })
 
     await open({ requestId: 'o17', projectJson: savedProject({}), media: [] })
-    await new Promise((resolve) => setTimeout(resolve, 600))
+    await sleep(600)
 
     expect(opened()).toEqual({ requestId: 'o17', ok: false, missing: [], revision: before })
     expect(refsByMediaId()).toEqual({ 'media-kept': 'ref-kept' })
     expect(openEditor).not.toHaveBeenCalled()
     // The edit made while the open ran is still told.
     expect(currentRevision()).toBe(before + 1)
+  })
+
+  describe('a failed open leaves the editor as it was', () => {
+    // A change is waiting to be announced when the open starts.
+    async function withHeldChange() {
+      stop = startProjectChangeAnnouncements()
+      settings.setState({ isDirty: true })
+      await sleep(600)
+      const before = currentRevision()
+      claimImportedRef('ref-kept')('media-kept')
+      history.setState({ undoStack: [{ command: { type: 'MOVE_ITEM' } }] })
+      return before
+    }
+
+    async function expectAsBefore(before: number, requestId: string) {
+      expect(opened()).toEqual({ requestId, ok: false, missing: [], revision: before })
+      expect(useProjectStore.getState().currentProject?.id).toBe('current')
+      expect(useMediaLibraryStore.getState().currentProjectId).toBe('current')
+      expect(refsByMediaId()).toEqual({ 'media-kept': 'ref-kept' })
+      expect([...db.keys()]).toEqual(['current'])
+      // The held change is told, as the previous project's next revision.
+      await sleep(600)
+      expect(posted('FREECUT_PROJECT_CHANGED').at(-1)!.payload.revision).toBe(before + 1)
+      await getProject('g-after')
+      expect(posted('FREECUT_PROJECT').at(-1)!.payload).toMatchObject({
+        revision: before + 1,
+        projectJson: { project: { id: 'current' } },
+      })
+      // A change made afterwards follows on.
+      history.setState({ undoStack: [{ command: { type: 'TRIM_ITEM' } }] })
+      await sleep(600)
+      expect(posted('FREECUT_PROJECT_CHANGED').at(-1)!.payload.revision).toBe(before + 2)
+    }
+
+    it('when the project fails to be made', async () => {
+      const before = await withHeldChange()
+      vi.mocked(useProjectStore.getState().createProject).mockRejectedValueOnce(
+        new Error('disk full'),
+      )
+
+      await open({ requestId: 'f1', projectJson: savedProject({}), media: [] })
+
+      expect(openEditor).not.toHaveBeenCalled()
+      await expectAsBefore(before, 'f1')
+    })
+
+    it('when storage fails after the fresh project was made', async () => {
+      const before = await withHeldChange()
+      vi.mocked(updateProject).mockRejectedValueOnce(new Error('disk full'))
+
+      await open({ requestId: 'f2', projectJson: savedProject({}), media: [media('m1')] })
+
+      expect(openEditor).not.toHaveBeenCalled()
+      await expectAsBefore(before, 'f2')
+    })
+
+    it('when the editor never shows the opened project', async () => {
+      const before = await withHeldChange()
+      openEditor.mockImplementation((id: string) => {
+        if (id === 'current') showInEditor(id)
+      })
+
+      await open({ requestId: 'f3', projectJson: savedProject({}), media: [] })
+
+      // The editor was sent back to the project open before.
+      expect(openEditor.mock.calls.map(([id]) => id)).toEqual([
+        expect.stringMatching(/^fresh-/),
+        'current',
+      ])
+      await expectAsBefore(before, 'f3')
+    })
+  })
+
+  describe('fetching', () => {
+    it('gives up on an address that does not answer within 60 s', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => new Promise(() => {})),
+      )
+      const start = Date.now()
+
+      await open({
+        requestId: 't1',
+        projectJson: savedProject({ items: [{ id: 'i1', mediaId: 'm1' }] }),
+        media: [media('m1')],
+      })
+
+      expect(opened()).toMatchObject({ ok: true, missing: ['m1'] })
+      expect(Date.now() - start).toBeGreaterThanOrEqual(60_000)
+      expect(Date.now() - start).toBeLessThan(120_000)
+    })
+
+    it('gives up on a file whose body takes more than 10 minutes', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          blob: () => new Promise<Blob>(() => {}),
+        })),
+      )
+      const start = Date.now()
+
+      await open({ requestId: 't2', projectJson: savedProject({}), media: [media('m1')] })
+
+      expect(opened()).toMatchObject({ ok: true, missing: ['m1'] })
+      expect(Date.now() - start).toBeGreaterThanOrEqual(600_000)
+    })
+
+    it('does not download a file larger than 4 GB', async () => {
+      const blob = vi.fn(async () => new Blob(['x']))
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-length': String(5 * 1024 ** 3) }),
+          blob,
+        })),
+      )
+
+      await open({ requestId: 't3', projectJson: savedProject({}), media: [media('m1')] })
+
+      expect(opened()).toMatchObject({ ok: true, missing: ['m1'] })
+      expect(blob).not.toHaveBeenCalled()
+    })
+
+    it('fetches only https addresses, and http on this machine', async () => {
+      const at = (id: string, url: string) => ({ ...media(id), url })
+
+      await open({
+        requestId: 't4',
+        projectJson: savedProject({}),
+        media: [
+          at('m1', 'data:video/mp4;base64,AAAA'),
+          at('m2', 'blob:https://app.nodaro.ai/x'),
+          at('m3', 'http://cdn.example/m3.mp4'),
+          at('m4', 'not an address'),
+          at('m5', 'http://localhost:9000/m5.mp4'),
+          at('m6', 'http://127.0.0.1:9000/m6.mp4'),
+        ],
+      })
+
+      expect(opened()).toMatchObject({ ok: true, missing: ['m1', 'm2', 'm3', 'm4'] })
+      expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+        'http://localhost:9000/m5.mp4',
+        'http://127.0.0.1:9000/m6.mp4',
+      ])
+    })
+
+    it('a malformed media entry is missing, not fetched', async () => {
+      const projectJson = savedProject({
+        items: [
+          { id: 'i1', mediaId: 'm1' },
+          { id: 'i2', mediaId: 'm2' },
+        ],
+      })
+
+      await open({
+        requestId: 't5',
+        projectJson,
+        media: [{ ...media('m1'), type: 7 }, { ...media('m2'), ref: null }, 'junk', null],
+      })
+
+      expect(opened()).toMatchObject({ ok: true, missing: ['m1', 'm2'] })
+      expect(fetch).not.toHaveBeenCalled()
+      expect(written().timeline.items.map((item) => item.mediaId)).toEqual(['m1', 'm2'])
+    })
+  })
+
+  it('files imported while an open runs go into the opened project, with their refs', async () => {
+    initEmbeddedMessageHandler({ openEditor })
+    const opening = startOpen({ requestId: 'i1', projectJson: savedProject({}), media: [] })
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: ORIGIN,
+        source: window,
+        data: {
+          type: 'NODARO_IMPORT_FILES',
+          payload: {
+            files: [
+              { name: 'late.mp4', type: 'video/mp4', buffer: new ArrayBuffer(1), ref: 'r-late' },
+            ],
+          },
+        },
+      }),
+    )
+    await drive(opening)
+    await drive(new Promise((resolve) => setTimeout(resolve, 1000)))
+
+    const freshId = useProjectStore.getState().currentProject?.id
+    expect(freshId).toMatch(/^fresh-/)
+    expect(mediaLibraryService.importMediaBlob).toHaveBeenCalledWith(
+      expect.any(Blob),
+      freshId,
+      'late.mp4',
+    )
+    expect(refsByMediaId()).toEqual({ 'new-late.mp4': 'r-late' })
   })
 })

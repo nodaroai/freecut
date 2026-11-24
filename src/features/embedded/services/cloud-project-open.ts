@@ -4,12 +4,17 @@ import {
   updateProject as updateProjectDB,
   getProject as getProjectDB,
 } from '@/infrastructure/storage'
-import type { Project, ProjectTimeline } from '@/types/project'
+import type { Project } from '@/types/project'
 import { useProjectStore } from '../deps/projects-contract'
-import { mediaLibraryService, useMediaLibraryStore } from '../deps/media-library-contract'
-import { useTimelineCommandStore, useTimelineSettingsStore } from '../deps/timeline-contract'
+import { useMediaLibraryStore } from '../deps/media-library-contract'
+import {
+  saveTimeline,
+  useTimelineCommandStore,
+  useTimelineSettingsStore,
+} from '../deps/timeline-contract'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { beginProjectOpen, currentRevision } from './cloud-project'
+import { importMedia, readMedia, remapTimeline, type OpenMedia } from './cloud-project-media'
 import { enqueueRequest } from './edit-ops-bridge'
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
 import { claimImportedRef, clearImportedRefs } from './imported-refs'
@@ -18,20 +23,9 @@ const log = createLogger('embedded-cloud-project-open')
 
 const PROJECT_OPENED = 'FREECUT_PROJECT_OPENED'
 
-/** How many media the editor fetches at once. */
-const FETCH_CONCURRENCY = 4
-/** How long an open waits for the editor to show the opened project, or for a video import to end. */
+/** How long an open waits for the editor to show a project, or for a video import to end. */
 const WAIT_MS = 30_000
 const POLL_MS = 50
-
-/** One media item of the saved project, and where the editor fetches it. */
-interface OpenMedia {
-  readonly mediaId: string
-  readonly ref: string
-  readonly url: string
-  readonly name: string
-  readonly type: string
-}
 
 type OpenEditor = (projectId: string) => void
 
@@ -42,6 +36,14 @@ let openEditor: OpenEditor = (projectId) => {
 /** How to show a project in the editor; the message handler passes the app shell's in. */
 export function setOpenProjectEditor(open: OpenEditor): void {
   openEditor = open
+}
+
+// The newest open accepted and not yet answered.
+let pendingOpen: Promise<void> | null = null
+
+/** Settles once every open accepted so far has been answered; null when none is waiting. */
+export function openInProgress(): Promise<void> | null {
+  return pendingOpen
 }
 
 /** The saved project in `projectJson`, brought to the current schema; null when there is none. */
@@ -62,116 +64,6 @@ function readSavedProject(projectJson: unknown): Project | null {
   }
 }
 
-function readMedia(media: unknown): OpenMedia[] {
-  if (!Array.isArray(media)) return []
-  return media.filter(
-    (entry): entry is OpenMedia =>
-      !!entry &&
-      typeof entry.mediaId === 'string' &&
-      typeof entry.url === 'string' &&
-      typeof entry.name === 'string',
-  )
-}
-
-/** Runs `run` on every entry, at most `limit` at a time. */
-async function eachLimited<T>(
-  entries: readonly T[],
-  limit: number,
-  run: (entry: T) => Promise<void>,
-) {
-  let next = 0
-  const worker = async () => {
-    while (next < entries.length) await run(entries[next++]!)
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, entries.length) }, worker))
-}
-
-/**
- * Fetches and imports each media item into the project, claiming its ref first
- * (once per entry: two items may share a ref). Answers the new media id of each
- * saved one that arrived; one that did not is left out.
- */
-async function importMedia(media: readonly OpenMedia[], projectId: string) {
-  const imported = new Map<string, string>()
-  const settlers = media.map((entry) =>
-    typeof entry.ref === 'string' && entry.ref ? claimImportedRef(entry.ref) : () => {},
-  )
-  try {
-    await eachLimited(
-      media.map((entry, index) => ({ entry, settle: settlers[index]! })),
-      FETCH_CONCURRENCY,
-      async ({ entry, settle }) => {
-        try {
-          const response = await fetch(entry.url, { credentials: 'omit' })
-          if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
-          const fetched = await response.blob()
-          const blob = new Blob([fetched], { type: entry.type || fetched.type })
-          const { id } = await mediaLibraryService.importMediaBlob(blob, projectId, entry.name)
-          imported.set(entry.mediaId, id)
-          settle(id)
-        } catch (e) {
-          log.warn(`NODARO_OPEN_PROJECT: could not bring in ${entry.name}`, { error: e })
-          settle(null)
-        }
-      },
-    )
-  } finally {
-    settlers.forEach((settle) => settle(null))
-  }
-  return imported
-}
-
-type TimelineItem = ProjectTimeline['items'][number]
-
-/** The item fields holding an object that names a media id. */
-const MEDIA_SOURCE_FIELDS = ['captionSource', 'transcriptCaptions', 'source'] as const
-
-/**
- * Points each item at its imported media. An item whose media did not arrive
- * keeps its saved id, and that id is added to `missing`.
- */
-function remapItems(
-  items: readonly TimelineItem[] | undefined,
-  imported: ReadonlyMap<string, string>,
-  missing: Set<string>,
-): TimelineItem[] {
-  return (items ?? []).map((item) => {
-    let next: Record<string, unknown> = item
-    if (item.mediaId) {
-      const mediaId = imported.get(item.mediaId)
-      if (mediaId) next = { ...next, mediaId, src: undefined, thumbnailUrl: undefined }
-      else missing.add(item.mediaId)
-    }
-    // What else on an item names its media: the clip captions came from, the
-    // transcript captions follow, the media a subtitle segment was read from.
-    for (const field of MEDIA_SOURCE_FIELDS) {
-      const source = next[field] as { mediaId?: unknown } | undefined
-      if (typeof source?.mediaId !== 'string' || !source.mediaId) continue
-      const mediaId = imported.get(source.mediaId)
-      if (mediaId) next = { ...next, [field]: { ...source, mediaId } }
-      else missing.add(source.mediaId)
-    }
-    return next as TimelineItem
-  })
-}
-
-function remapTimeline(
-  timeline: ProjectTimeline,
-  imported: ReadonlyMap<string, string>,
-  missing: Set<string>,
-): ProjectTimeline {
-  return {
-    ...timeline,
-    items: remapItems(timeline.items, imported, missing),
-    ...(timeline.compositions && {
-      compositions: timeline.compositions.map((composition) => ({
-        ...composition,
-        items: remapItems(composition.items, imported, missing),
-      })),
-    }),
-  }
-}
-
 /** Waits until `done` holds; false when it still does not after a while. */
 async function waitFor(done: () => boolean): Promise<boolean> {
   const end = Date.now() + WAIT_MS
@@ -188,23 +80,32 @@ const editorShows = (projectId: string) => () =>
   useProjectStore.getState().currentProject?.id === projectId &&
   !useTimelineSettingsStore.getState().isTimelineLoading
 
-function createFreshProject(saved: Project) {
-  return useProjectStore.getState().createProject({
+/** What was open when an open began: what a failed open puts back. */
+interface Before {
+  readonly project: Project | null
+  readonly pendingVideoImport: { mediaId: string } | null
+}
+
+/** Makes the fresh project, without showing it: the project that is open stays the open one. */
+async function createFresh(saved: Project, before: Before): Promise<Project> {
+  const project = await useProjectStore.getState().createProject({
     name: saved.name || 'NodaroCut Edit',
     width: saved.metadata.width,
     height: saved.metadata.height,
     fps: saved.metadata.fps,
     backgroundColor: saved.metadata.backgroundColor ?? '#000000',
   })
+  // Making it sets it as the current project; it becomes that only when shown.
+  useProjectStore.setState({ currentProject: before.project })
+  return project
 }
 
-/** Fills the fresh project with the saved one, and opens it in the editor. Answers `missing`. */
-async function fillProject(
-  project: Project,
-  saved: Project,
-  media: readonly OpenMedia[],
-): Promise<string[]> {
-  const imported = await importMedia(media, project.id)
+/**
+ * Fills the fresh project with the saved one and its media. Answers the stored
+ * project, the media ids that did not arrive, and the refs of the media that did.
+ */
+async function fillFresh(projectId: string, saved: Project, media: readonly OpenMedia[]) {
+  const { imported, refs } = await importMedia(media, projectId)
   // The saved media first, in the order given; then ids the project names with no entry at all.
   const missing = new Set(media.map((entry) => entry.mediaId).filter((id) => !imported.has(id)))
   const timeline = saved.timeline && remapTimeline(saved.timeline, imported, missing)
@@ -220,39 +121,102 @@ async function fillProject(
     rootFolderName: _rootFolderName,
     ...content
   } = saved
-  await updateProjectDB(project.id, { ...content, timeline, updatedAt: Date.now() })
-  const restored = await getProjectDB(project.id)
-  if (restored) {
-    useProjectStore.setState({
-      currentProject: restored,
-      projects: useProjectStore
-        .getState()
-        .projects.map((p) => (p.id === project.id ? restored : p)),
-    })
-  }
+  await updateProjectDB(projectId, { ...content, timeline, updatedAt: Date.now() })
+  const restored = await getProjectDB(projectId)
+  if (!restored) throw new Error('The opened project was not stored')
+  return { project: restored, missing, refs }
+}
 
+/** Shows the fresh project in the editor, keeping what the open project had unsaved. */
+async function showProject(project: Project, before: Before): Promise<void> {
+  const shown = before.project && editorShows(before.project.id)()
+  if (before.project && shown) await saveTimeline(before.project.id)
+  useEmbeddedStore.getState().setPendingVideoImport(null)
+  useProjectStore.setState({
+    currentProject: project,
+    projects: useProjectStore.getState().projects.map((p) => (p.id === project.id ? project : p)),
+  })
   openEditor(project.id)
   if (!(await waitFor(editorShows(project.id)))) {
     throw new Error('The editor did not open the project')
   }
+}
+
+/**
+ * Puts back what was open before a failed open: the editor shows the previous
+ * project again (when it had moved), the store holds it, and the fresh project
+ * and the media imported for it are removed.
+ */
+async function rollBack(before: Before, freshId: string | null, navigated: boolean) {
+  const store = useProjectStore.getState()
+  if (navigated && before.project) {
+    openEditor(before.project.id)
+    if (!(await waitFor(editorShows(before.project.id)))) {
+      log.error('NODARO_OPEN_PROJECT: the editor did not show the previous project again')
+    }
+  } else {
+    useProjectStore.setState({ currentProject: before.project })
+  }
+  useEmbeddedStore.getState().setPendingVideoImport(before.pendingVideoImport)
+  if (!freshId) return
+  try {
+    await store.deleteProject(freshId)
+    await store.permanentlyDeleteProject(freshId)
+  } catch (e) {
+    log.warn('NODARO_OPEN_PROJECT: the fresh project could not be removed', { error: e })
+  }
+  if (useProjectStore.getState().currentProject?.id === freshId) {
+    useProjectStore.setState({ currentProject: before.project })
+  }
+}
+
+/** The opened project is the open one: its refs replace the previous project's, and its history starts empty. */
+function commitOpen(origin: string, refs: ReadonlyArray<{ ref: string; mediaId: string }>) {
+  // The parent that opens a project is the one told about its changes.
+  useEmbeddedStore.getState().setParentOrigin(origin)
+  clearImportedRefs()
+  refs.forEach(({ ref, mediaId }) => claimImportedRef(ref)(mediaId))
   // The editor's load already starts the history afresh and leaves the timeline
   // clean; the open makes sure of it.
   useTimelineCommandStore.getState().clearHistory()
   useTimelineSettingsStore.getState().markClean()
-  return [...missing]
+}
+
+/** Opens the saved project; answers `missing`, or throws after putting back what was open. */
+async function openProject(saved: Project, media: unknown, origin: string): Promise<string[]> {
+  const before: Before = {
+    project: useProjectStore.getState().currentProject,
+    pendingVideoImport: useEmbeddedStore.getState().pendingVideoImport,
+  }
+  const { entries, malformed } = readMedia(media)
+  let freshId: string | null = null
+  let navigated = false
+  try {
+    await ensureEmbeddedWorkspaceMounted()
+    freshId = (await createFresh(saved, before)).id
+    const built = await fillFresh(freshId, saved, entries)
+    navigated = true
+    await showProject(built.project, before)
+    commitOpen(origin, built.refs)
+    return [...new Set([...built.missing, ...malformed])]
+  } catch (e) {
+    await rollBack(before, freshId, navigated)
+    throw e
+  }
 }
 
 /**
  * NODARO_OPEN_PROJECT { requestId, projectJson, media } → FREECUT_PROJECT_OPENED
  * { requestId, ok, missing, revision }. Replaces the open project with a fresh
  * one holding the saved project file; the editor fetches each media item from
- * its `url` (4 at a time, without credentials) and points the items at it.
- * `missing` names the media ids that did not arrive or have no entry: their
- * items keep the saved id. The opened project is revision 0, with an empty
- * history, and the open itself is not announced as a change. Queued with the
- * edit and read requests, so none runs against a half-opened project. A file
- * with no project answers `ok: false` and leaves the open project as it is. An
- * open sent while a video is being imported (NODARO_LOAD_VIDEO) waits for it.
+ * its `url` (https only, 4 at a time, without credentials) and points the items
+ * at it. `missing` names the media ids that did not arrive, are malformed or
+ * have no entry: their items keep the saved id. The opened project is revision
+ * 0, with an empty history, and the open itself is not announced as a change.
+ * Queued with the edit and read requests, so none runs against a half-opened
+ * project; an open sent while a video is being imported waits for it.
+ * `ok: false` means the project open before is still open, unchanged, with its
+ * revision and any change waiting to be announced.
  */
 export function handleOpenProject(event: MessageEvent): Promise<void> {
   const { requestId, projectJson, media } = (event.data?.payload ?? {}) as {
@@ -267,41 +231,36 @@ export function handleOpenProject(event: MessageEvent): Promise<void> {
       event.origin,
     )
 
-  return enqueueRequest(async () => {
+  const done = enqueueRequest(async () => {
     const saved = readSavedProject(projectJson)
     if (!saved) {
       reply(false, [])
       return
     }
-    const store = useEmbeddedStore.getState()
     if (!(await waitFor(() => !useEmbeddedStore.getState().isImporting))) {
       log.warn('NODARO_OPEN_PROJECT refused: a video is still being imported')
       reply(false, [])
       return
     }
 
-    store.setIsImporting(true)
+    useEmbeddedStore.getState().setIsImporting(true)
     const endOpen = beginProjectOpen()
-    let replaced = false
     let ok = false
     let missing: string[] = []
     try {
-      await ensureEmbeddedWorkspaceMounted()
-      const project = await createFreshProject(saved)
-      replaced = true
-      // The parent that opens a project is the one told about its changes; what
-      // was waiting for the project it replaced is not for this one.
-      store.setParentOrigin(event.origin)
-      store.setPendingVideoImport(null)
-      clearImportedRefs()
-      missing = await fillProject(project, saved, readMedia(media))
+      missing = await openProject(saved, media, event.origin)
       ok = true
     } catch (e) {
       log.error('NODARO_OPEN_PROJECT failed:', e)
     } finally {
       useEmbeddedStore.getState().setIsImporting(false)
-      endOpen(replaced)
+      endOpen(ok)
     }
     reply(ok, missing)
   })
+  pendingOpen = done
+  void done.then(() => {
+    if (pendingOpen === done) pendingOpen = null
+  })
+  return done
 }

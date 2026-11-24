@@ -11,6 +11,7 @@ const cloud = vi.hoisted(() => ({
 vi.mock('./cloud-project', () => cloud)
 const opening = vi.hoisted(() => ({
   handleOpenProject: vi.fn(async () => {}),
+  openInProgress: vi.fn(() => null),
   setOpenProjectEditor: vi.fn(),
 }))
 vi.mock('./cloud-project-open', () => opening)
