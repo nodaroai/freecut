@@ -38,6 +38,15 @@ vi.mock('../deps/media-library-contract', async () => {
     })),
   }
 })
+// The project store: the open project the revision counts for.
+vi.mock('../deps/projects-contract', async () => {
+  const { create } = await import('zustand')
+  return {
+    useProjectStore: create(() => ({
+      currentProject: null as Record<string, unknown> | null,
+    })),
+  }
+})
 vi.mock('./studio-export-bridge', () => ({
   collectProjectJson: vi.fn(async () => ({ project: { id: 'p1' } })),
 }))
@@ -46,6 +55,7 @@ vi.mock('./timeline-report', () => ({ readTimeline: () => ({}) }))
 
 import { useTimelineCommandStore, useTimelineSettingsStore } from '../deps/timeline-contract'
 import { useMediaLibraryStore } from '../deps/media-library-contract'
+import { useProjectStore } from '../deps/projects-contract'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { currentRevision, handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
 import { handleApplyOps, setEditOpsLoader, type EditOp } from './edit-ops-bridge'
@@ -102,7 +112,17 @@ function loadLibrary(id: string, items: Array<Record<string, unknown>>) {
   library.setState({ isLoading: false, mediaItems: items })
 }
 
+const projects = useProjectStore as unknown as {
+  setState: (s: { currentProject: Record<string, unknown> | null }) => void
+}
+/** The project store holding project `id` as the open one. */
+const openProject = (id: string | null, fields: Record<string, unknown> = {}) =>
+  projects.setState({
+    currentProject: id === null ? null : { id, name: `Project ${id}`, ...fields },
+  })
+
 beforeEach(() => {
+  openProject('p1')
   library.setState({ currentProjectId: null, isLoading: false, mediaItems: [] })
   post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
   useEmbeddedStore.setState({ isEmbedded: true, parentOrigin: ORIGIN })
@@ -130,7 +150,7 @@ describe('FREECUT_PROJECT_CHANGED', () => {
     vi.advanceTimersByTime(300)
 
     expect(posted('FREECUT_PROJECT_CHANGED')).toEqual([
-      { type: 'FREECUT_PROJECT_CHANGED', payload: { revision: start + 1 } },
+      { type: 'FREECUT_PROJECT_CHANGED', payload: { revision: start + 1, projectId: 'p1' } },
     ])
     expect(post.mock.calls[0]![1]).toBe(ORIGIN)
 
@@ -174,7 +194,7 @@ describe('FREECUT_PROJECT_CHANGED', () => {
     vi.advanceTimersByTime(500)
 
     expect(posted('FREECUT_PROJECT_CHANGED')).toEqual([
-      { type: 'FREECUT_PROJECT_CHANGED', payload: { revision: start + 1 } },
+      { type: 'FREECUT_PROJECT_CHANGED', payload: { revision: start + 1, projectId: 'p1' } },
     ])
     expect(post.mock.calls[0]![1]).toBe(ORIGIN)
   })
@@ -251,6 +271,47 @@ describe('FREECUT_PROJECT_CHANGED', () => {
     expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(2)
   })
 
+  it('a change waiting when the open project changes is dropped, and the revision restarts', () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+    markDirty()
+    vi.advanceTimersByTime(500)
+    expect(currentRevision()).toBeGreaterThan(0)
+
+    // A change to p1 is waiting when a load makes p2 the open project.
+    history.setState({ undoStack: [{ command: { type: 'MOVE_ITEM' } }] })
+    openProject('p2')
+    vi.advanceTimersByTime(600)
+    expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload.projectId)).toEqual(['p1'])
+    expect(currentRevision()).toBe(0)
+
+    // The new project's first change is its revision 1.
+    markDirty()
+    vi.advanceTimersByTime(500)
+    expect(posted('FREECUT_PROJECT_CHANGED').at(-1)!.payload).toEqual({
+      revision: 1,
+      projectId: 'p2',
+    })
+  })
+
+  it('the editor leaving and coming back to the same project is not a switch', () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+    markDirty()
+    vi.advanceTimersByTime(500)
+    const before = currentRevision()
+
+    history.setState({ undoStack: [{ command: { type: 'MOVE_ITEM' } }] })
+    openProject(null)
+    openProject('p1')
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_PROJECT_CHANGED').at(-1)!.payload).toEqual({
+      revision: before + 1,
+      projectId: 'p1',
+    })
+  })
+
   it('stops announcing once stopped, and starting twice announces once', () => {
     vi.useFakeTimers()
     const stopFirst = startProjectChangeAnnouncements()
@@ -269,6 +330,9 @@ describe('FREECUT_PROJECT_CHANGED', () => {
 })
 
 describe('NODARO_GET_PROJECT', () => {
+  // The editor shows p1.
+  beforeEach(() => library.setState({ currentProjectId: 'p1' }))
+
   it('GET_PROJECT answers the project file, the current revision and the refs', async () => {
     claimImportedRef('r1')('m1')
 
@@ -279,6 +343,7 @@ describe('NODARO_GET_PROJECT', () => {
     expect(replies[0]!.payload).toEqual({
       requestId: 'g1',
       revision: currentRevision(),
+      projectId: 'p1',
       projectJson: { project: { id: 'p1' } },
       refs: { m1: 'r1' },
     })

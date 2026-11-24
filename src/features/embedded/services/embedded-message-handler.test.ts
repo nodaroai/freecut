@@ -17,7 +17,11 @@ vi.mock('./embedded-workspace', () => ({
   ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}),
 }))
 vi.mock('../deps/projects-contract', () => ({
-  useProjectStore: { getState: () => ({ createProject: vi.fn(async () => ({ id: 'p1' })) }) },
+  useProjectStore: {
+    getState: () => ({ createProject: vi.fn(async () => ({ id: 'p1' })) }),
+    setState: () => {},
+    subscribe: () => () => {},
+  },
 }))
 
 describe('isAllowedOrigin', () => {

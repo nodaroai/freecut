@@ -28,6 +28,7 @@ import {
   setOpenProjectEditor,
   type SaveLocation,
 } from './cloud-project-open'
+import { projectLoadInProgress, trackProjectLoad } from './project-load'
 import { handlePlayback } from './playback-control'
 import { handlePresence } from './presence-message'
 import { handleStudio } from './studio-message'
@@ -208,19 +209,22 @@ function remapTimelineItems(
   return { items: remapped, remappedCount: oldMediaIds.size }
 }
 
+type StoredProject = NonNullable<Awaited<ReturnType<typeof getProjectDB>>>
+
 // Restore a saved project snapshot's timeline onto the fresh project, remapping
-// old media ids to the newly imported media. Returns true when restored.
+// old media ids to the newly imported media. Answers the restored project, or
+// null when there was nothing to restore. It does not make it the open project.
 async function restoreTimelineSnapshot(
   event: MessageEvent,
   projectId: string,
   mediaId: string,
-): Promise<boolean> {
+): Promise<StoredProject | null> {
   const { projectJson } = event.data.payload
-  if (!projectJson) return false
+  if (!projectJson) return null
 
   try {
     const parsed = typeof projectJson === 'string' ? JSON.parse(projectJson) : projectJson
-    if (!parsed?.project) return false
+    if (!parsed?.project) return null
 
     // Snapshots can predate schema bumps (saved by an older editor build). Bring
     // them to the current schema before grafting the timeline onto the fresh
@@ -229,7 +233,7 @@ async function restoreTimelineSnapshot(
     const snapshot = { ...parsed, project: migrateProject(parsed.project).project }
 
     const savedTimeline = snapshot.project?.timeline
-    if (!savedTimeline?.items) return false
+    if (!savedTimeline?.items) return null
 
     const { items, remappedCount } = remapTimelineItems(savedTimeline.items, mediaId)
     const restoredTimeline = { ...savedTimeline, items }
@@ -239,7 +243,6 @@ async function restoreTimelineSnapshot(
     const updatedProject = await getProjectDB(projectId)
     if (updatedProject) {
       useProjectStore.setState({
-        currentProject: updatedProject,
         projects: useProjectStore
           .getState()
           .projects.map((p) => (p.id === projectId ? updatedProject : p)),
@@ -249,11 +252,30 @@ async function restoreTimelineSnapshot(
       projectId,
       remappedMediaIds: remappedCount,
     })
-    return true
+    return updatedProject ?? null
   } catch (e) {
     log.warn('Failed to restore timeline from snapshot, using fresh project', { error: e })
-    return false
+    return null
   }
+}
+
+// Makes the fresh project a load built without making it the open one: the
+// project open now stays open until the load opens the new one.
+async function createLoadedProject(
+  data: Parameters<ReturnType<typeof useProjectStore.getState>['createProject']>[0],
+) {
+  const previous = useProjectStore.getState().currentProject
+  const project = await useProjectStore.getState().createProject(data)
+  useProjectStore.setState({ currentProject: previous })
+  return project
+}
+
+// The load's project becomes the open one, and the editor opens it: the refs
+// of the project left name nothing in it.
+function openLoadedProject(project: StoredProject | { id: string }) {
+  clearImportedRefs()
+  useProjectStore.setState({ currentProject: project as StoredProject })
+  openEditor(project.id)
 }
 
 // Import additional connected assets into the media library (e.g. manual-edit multi-input)
@@ -280,18 +302,18 @@ async function importAdditionalAssets(event: MessageEvent, projectId: string) {
   }
 }
 
-async function handleLoadVideo(event: MessageEvent) {
-  const store = useEmbeddedStore.getState()
-
+function handleLoadVideo(event: MessageEvent): Promise<void> {
   // Guard: already importing
-  if (store.isImporting) {
+  if (useEmbeddedStore.getState().isImporting) {
     log.warn('Import already in progress, ignoring duplicate NODARO_LOAD_VIDEO')
-    return
+    return Promise.resolve()
   }
+  return trackProjectLoad(loadVideo(event))
+}
 
+async function loadVideo(event: MessageEvent) {
+  const store = useEmbeddedStore.getState()
   store.setIsImporting(true)
-  // A fresh project is made below: the refs of the one open now name nothing in it.
-  clearImportedRefs()
 
   try {
     // Embedded has no folder picker — mount OPFS as the workspace root before any storage op.
@@ -308,7 +330,7 @@ async function handleLoadVideo(event: MessageEvent) {
       // EMPTY BOOT — no primary video: a standalone host opens the editor on a
       // fresh empty project (media bin fills via the parent-bridged Import).
       // Was a hard error before standalone hosts existed.
-      const project = await useProjectStore.getState().createProject({
+      const project = await createLoadedProject({
         name: 'Nodaro Edit',
         width: 1920,
         height: 1080,
@@ -316,7 +338,7 @@ async function handleLoadVideo(event: MessageEvent) {
         backgroundColor: '#000000',
       })
       await importAdditionalAssets(event, project.id)
-      openEditor(project.id)
+      openLoadedProject(project)
       log.info('Empty-boot: opened a fresh project with no primary video', {
         projectId: project.id,
       })
@@ -328,7 +350,7 @@ async function handleLoadVideo(event: MessageEvent) {
     const { width, height, fps, inputMeta } = await probeInputMetadata(blob, primaryName)
 
     // Always create fresh project and import media first
-    const project = await useProjectStore.getState().createProject({
+    const project = await createLoadedProject({
       name: 'NodaroCut Edit',
       width,
       height,
@@ -339,15 +361,15 @@ async function handleLoadVideo(event: MessageEvent) {
     const media = await mediaLibraryService.importMediaBlob(blob, project.id, primaryName)
 
     // Only add video to timeline for fresh projects (restored ones already have it)
-    const timelineRestored = await restoreTimelineSnapshot(event, project.id, media.id)
-    if (!timelineRestored) {
+    const restored = await restoreTimelineSnapshot(event, project.id, media.id)
+    if (!restored) {
       store.setPendingVideoImport({ mediaId: media.id })
     }
     store.setInputMetadata(inputMeta)
 
     await importAdditionalAssets(event, project.id)
 
-    openEditor(project.id)
+    openLoadedProject(restored ?? project)
 
     log.info('Video import complete, navigating to editor', {
       projectId: project.id,
@@ -368,7 +390,7 @@ function handleResetProject() {
   // Re-import with the original video but no project JSON
   // The parent will re-send NODARO_LOAD_VIDEO without projectJson
   log.info('Reset project requested, waiting for fresh NODARO_LOAD_VIDEO')
-  clearImportedRefs()
+  // The project open stays open (and keeps its refs) until that load opens another.
 
   // Clear the importing flag so the next NODARO_LOAD_VIDEO is accepted
   store.setIsImporting(false)
@@ -408,23 +430,36 @@ function handleResetProject() {
  *   fitItem, applyLook and removeEffects), with edit-ops.
  * - `captions-word-highlight`: addTranscriptCaptions lights up the spoken word
  *   (`highlight` and per-cue `words`), with edit-ops.
- * - `cloud-project`: FREECUT_PROJECT_CHANGED { revision } says the project
- *   changed (at most every 500 ms; the revision counts up from 1 per session),
- *   and NODARO_GET_PROJECT { requestId } answers FREECUT_PROJECT { requestId,
- *   revision, projectJson, refs }: the project file and the parent's ref for
- *   each media id it imported, so the parent can save the project.
- *   NODARO_OPEN_PROJECT { requestId, projectJson, media: [{ mediaId, ref, url,
- *   name, type }] } opens a saved project in a fresh one, fetching each media
- *   item from its url, and answers FREECUT_PROJECT_OPENED { requestId, ok,
- *   missing, revision }: the media ids that did not arrive, at revision 0.
- *   A successful open discards any change of the previous project not yet
- *   announced, so a parent reads and saves the current project
- *   (NODARO_GET_PROJECT) before it sends NODARO_OPEN_PROJECT. `ok: false` leaves
- *   the previous project open with its content, playhead and revision, and
- *   announces a change once afterwards when one was waiting as the open began or
- *   any was made while it ran (possibly when nothing changed); when the
- *   editor had already moved, it reloads that project, so its undo history, open
- *   tab, selection, zoom and scroll start afresh.
+ * - `cloud-project`: the parent saves the project to the person's account and
+ *   reopens it on any device.
+ *   - FREECUT_PROJECT_CHANGED { revision, projectId } says the project changed
+ *     (at most every 500 ms). `projectId` is the editor's own id of the project
+ *     the change was made to. The revision counts up from 1 for each open
+ *     project and restarts at 0 whenever the open project changes (an open, a
+ *     NODARO_LOAD_VIDEO, or the editor sent to another project); a change of
+ *     the project left that was not yet announced is then not announced. So a
+ *     parent reads and saves the current project before it sends
+ *     NODARO_OPEN_PROJECT, NODARO_LOAD_VIDEO or NODARO_RESET_PROJECT.
+ *   - NODARO_GET_PROJECT { requestId } answers FREECUT_PROJECT { requestId,
+ *     revision, projectId, projectJson, refs }: the project file, the revision
+ *     it is current with, and the parent's ref for each media id it imported.
+ *   - NODARO_OPEN_PROJECT { requestId, projectJson, media: [{ mediaId, ref,
+ *     url, name, type }] } opens a saved project in a fresh one, fetching each
+ *     media item from its url, and answers FREECUT_PROJECT_OPENED { requestId,
+ *     ok, missing, revision, projectId }: the media ids that did not arrive,
+ *     at revision 0, and the id the open produced. A successful open discards
+ *     any change of the previous project not yet announced. `ok: false` leaves
+ *     the previous project open with its content, playhead and revision, and
+ *     `projectId` names it (null when the editor holds no project); a change
+ *     waiting as the open began, or made while it ran, is announced once
+ *     afterwards (possibly when nothing changed). When the editor had already
+ *     moved, it reloads that project, so its undo history, open tab,
+ *     selection, zoom and scroll start afresh.
+ *   - `projectId` is null whenever the editor holds no project. A parent
+ *     refuses to save a project file whose `projectId` is not the one its last
+ *     open or load produced: the editor is then on another project.
+ *   - The editor never adds an entry to the browser history, so the parent's
+ *     Back and Forward buttons never move it between projects.
  */
 const EMBEDDED_CAPABILITIES = [
   'timeline-add',
@@ -477,10 +512,13 @@ async function handleImportFiles(event: MessageEvent) {
   if (!files?.length) return
   // Files sent while a project is being opened go into the project opened, and
   // their refs are claimed once its refs replaced the previous project's.
-  try {
-    await openInProgress()
-  } catch {
-    // A failed open answered for itself; the files still go into the open project.
+  // Likewise for files sent while a NODARO_LOAD_VIDEO runs: they go into the loaded project.
+  for (const running of [openInProgress(), projectLoadInProgress()]) {
+    try {
+      await running
+    } catch {
+      // A failed open or load answered for itself; the files still go into the open project.
+    }
   }
   const settlers = claimRefs(files)
 

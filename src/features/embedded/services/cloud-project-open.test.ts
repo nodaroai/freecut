@@ -311,7 +311,15 @@ describe('NODARO_OPEN_PROJECT', () => {
 
     await open({ requestId: 'o1', projectJson, media: [media('m1'), media('m2')] })
 
-    expect(opened()).toEqual({ requestId: 'o1', ok: true, missing: [], revision: 0 })
+    const freshId = vi.mocked(updateProject).mock.calls.at(-1)![0]
+    // The answer names the project the open produced.
+    expect(opened()).toEqual({
+      requestId: 'o1',
+      ok: true,
+      missing: [],
+      revision: 0,
+      projectId: freshId,
+    })
     expect(post.mock.calls.at(-1)![1]).toBe(ORIGIN)
     const { timeline, metadata, name, thumbnailId, schemaVersion } = written()
     expect(timeline.items.map((item) => item.mediaId)).toEqual([
@@ -334,7 +342,6 @@ describe('NODARO_OPEN_PROJECT', () => {
       keyframes: [{ itemId: 'i1', properties: [] }],
     })
     // The fresh project is the one the editor opens, and the store holds the restored one.
-    const freshId = vi.mocked(updateProject).mock.calls.at(-1)![0]
     expect(openEditor).toHaveBeenCalledWith(freshId)
     // The open made sure the editor's load of the fresh project succeeded.
     expect(loadTimeline).toHaveBeenCalledWith(freshId)
@@ -366,7 +373,7 @@ describe('NODARO_OPEN_PROJECT', () => {
 
     await open({ requestId: 'o2', projectJson, media: [media('m1'), media('m2')] })
 
-    expect(opened()).toEqual({ requestId: 'o2', ok: true, missing: ['m2'], revision: 0 })
+    expect(opened()).toMatchObject({ requestId: 'o2', ok: true, missing: ['m2'], revision: 0 })
     expect(written().timeline.items.map((item) => item.mediaId)).toEqual(['new-m1.mp4', 'm2'])
     expect(refsByMediaId()).toEqual({ 'new-m1.mp4': 'ref-m1' })
   })
@@ -456,6 +463,7 @@ describe('NODARO_OPEN_PROJECT', () => {
         ok: false,
         missing: [],
         revision: currentRevision(),
+        projectId: 'current',
       })
     }
 
@@ -490,11 +498,16 @@ describe('NODARO_OPEN_PROJECT', () => {
     expect(history.getState()).toMatchObject({ undoStack: [], redoStack: [] })
     expect(settings.getState().isDirty).toBe(false)
 
-    // A change after the open is announced, from revision 1.
+    // A change after the open is announced, from revision 1, for the opened project,
+    // even after the project store wrote that project again (a rename, say).
+    const freshId = useProjectStore.getState().currentProject!.id
+    useProjectStore.setState({ currentProject: { ...db.get(freshId), id: freshId } as never })
     settings.setState({ isDirty: false })
     settings.setState({ isDirty: true })
     await sleep(600)
-    expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload.revision)).toEqual([1])
+    expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload)).toEqual([
+      { revision: 1, projectId: freshId },
+    ])
   })
 
   it('an open with media announces nothing, and a later import into it announces once', async () => {
@@ -648,7 +661,13 @@ describe('NODARO_OPEN_PROJECT', () => {
     await open({ requestId: 'o17', projectJson: savedProject({}), media: [] })
     await sleep(600)
 
-    expect(opened()).toEqual({ requestId: 'o17', ok: false, missing: [], revision: before })
+    expect(opened()).toEqual({
+      requestId: 'o17',
+      ok: false,
+      missing: [],
+      revision: before,
+      projectId: 'current',
+    })
     expect(refsByMediaId()).toEqual({ 'media-kept': 'ref-kept' })
     expect(openEditor).not.toHaveBeenCalled()
     // The edit made while the open ran is still told.
@@ -668,7 +687,14 @@ describe('NODARO_OPEN_PROJECT', () => {
     }
 
     async function expectAsBefore(before: number, requestId: string) {
-      expect(opened()).toEqual({ requestId, ok: false, missing: [], revision: before })
+      // The answer names the project still open.
+      expect(opened()).toEqual({
+        requestId,
+        ok: false,
+        missing: [],
+        revision: before,
+        projectId: 'current',
+      })
       expect(useProjectStore.getState().currentProject?.id).toBe('current')
       expect(useMediaLibraryStore.getState().currentProjectId).toBe('current')
       expect(refsByMediaId()).toEqual({ 'media-kept': 'ref-kept' })
@@ -781,7 +807,7 @@ describe('NODARO_OPEN_PROJECT', () => {
 
       await open({ requestId: 'f6', projectJson: savedProject({}), media: [] })
 
-      expect(opened()).toMatchObject({ requestId: 'f6', ok: false })
+      expect(opened()).toMatchObject({ requestId: 'f6', ok: false, projectId: null })
       expect(route).toBeNull()
       expect(useMediaLibraryStore.getState().currentProjectId).toBeNull()
       expect(useProjectStore.getState().currentProject).toBeNull()

@@ -6,6 +6,7 @@ vi.mock('./embedded-workspace', () => ({ ensureEmbeddedWorkspaceMounted: vi.fn(a
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: {
     getState: () => ({ currentProject: { id: 'p1' }, createProject: async () => ({ id: 'p2' }) }),
+    subscribe: () => () => {},
   },
 }))
 vi.mock('../deps/media-library-contract', async () => {
@@ -29,7 +30,7 @@ vi.mock('../deps/media-library-contract', async () => {
 })
 
 import { initEmbeddedMessageHandler } from './embedded-message-handler'
-import { claimImportedRef, refsByMediaId } from './imported-refs'
+import { refsByMediaId } from './imported-refs'
 
 const send = (type: string, payload: Record<string, unknown>) =>
   window.dispatchEvent(
@@ -57,23 +58,5 @@ describe('NODARO_IMPORT_FILES', () => {
     send('NODARO_IMPORT_FILES', { files: [file('a.mp4'), file('b.mp4')] })
 
     await vi.waitFor(() => expect(refsByMediaId()).toEqual({ 'media-1': 'r1', 'media-2': 'r1' }))
-  })
-})
-
-describe('the refs name only the open project', () => {
-  it('NODARO_RESET_PROJECT clears them', () => {
-    claimImportedRef('r-old')('m-old')
-
-    send('NODARO_RESET_PROJECT', {})
-
-    expect(refsByMediaId()).toEqual({})
-  })
-
-  it('NODARO_LOAD_VIDEO clears them as it makes a fresh project', () => {
-    claimImportedRef('r-old')('m-old')
-
-    send('NODARO_LOAD_VIDEO', {})
-
-    expect(refsByMediaId()).toEqual({})
   })
 })

@@ -18,6 +18,7 @@ import { beginProjectOpen, currentRevision } from './cloud-project'
 import { importMedia, readMedia, remapTimeline, type OpenMedia } from './cloud-project-media'
 import { enqueueRequest } from './edit-ops-bridge'
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
+import { editorShows, heldProjectId } from './held-project'
 import { claimImportedRef, clearImportedRefs } from './imported-refs'
 
 const log = createLogger('embedded-cloud-project-open')
@@ -81,12 +82,6 @@ async function waitFor(done: () => boolean): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS))
   }
 }
-
-/** The editor shows the project, with its timeline loaded. */
-const editorShows = (projectId: string) => () =>
-  useMediaLibraryStore.getState().currentProjectId === projectId &&
-  useProjectStore.getState().currentProject?.id === projectId &&
-  !useTimelineSettingsStore.getState().isTimelineLoading
 
 /** What was open when an open began: what a failed open puts back. */
 interface Before {
@@ -260,7 +255,16 @@ export function handleOpenProject(event: MessageEvent): Promise<void> {
   if (typeof requestId !== 'string') return Promise.resolve()
   const reply = (ok: boolean, missing: string[]) =>
     window.parent.postMessage(
-      { type: PROJECT_OPENED, payload: { requestId, ok, missing, revision: currentRevision() } },
+      {
+        type: PROJECT_OPENED,
+        payload: {
+          requestId,
+          ok,
+          missing,
+          revision: currentRevision(),
+          projectId: heldProjectId(),
+        },
+      },
       event.origin,
     )
 
