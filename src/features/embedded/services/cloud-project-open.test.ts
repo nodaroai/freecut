@@ -889,7 +889,7 @@ describe('NODARO_OPEN_PROJECT', () => {
 
   it('files imported while an open runs go into the opened project, with their refs', async () => {
     const listen = vi.spyOn(window, 'addEventListener')
-    initEmbeddedMessageHandler({ openEditor })
+    initEmbeddedMessageHandler({ openEditor, saveLocation })
     const added = listen.mock.calls.filter(([type]) => type === 'message')
     listen.mockRestore()
     onTestFinished(() =>

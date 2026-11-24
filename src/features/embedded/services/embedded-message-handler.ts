@@ -54,8 +54,9 @@ export interface EmbeddedMessageHandlerDeps {
   /**
    * Remembers where the app is and answers how to go back there: a failed
    * NODARO_OPEN_PROJECT goes back, so the editor never stays on a project it removed.
+   * Required: without it a failed open can leave the editor on the removed project.
    */
-  readonly saveLocation?: SaveLocation
+  readonly saveLocation: SaveLocation
 }
 
 let openEditor: EmbeddedMessageHandlerDeps['openEditor'] = (projectId) => {
@@ -568,7 +569,7 @@ function handleMessage(event: MessageEvent) {
 
 export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
   openEditor = deps.openEditor
-  setOpenProjectEditor(deps.openEditor, deps.saveLocation ?? null)
+  setOpenProjectEditor(deps.openEditor, deps.saveLocation)
   setEditOpsLoader(deps.loadEditOps ?? null)
   openOnEditWorkspace()
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.

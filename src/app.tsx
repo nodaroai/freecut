@@ -8,6 +8,7 @@ import { WorkspaceGate } from '@/features/workspace-gate/workspace-gate'
 import { router } from '@/app/router'
 import { isEmbedded } from '@/features/embedded/stores/embedded-store'
 import { initEmbeddedMessageHandler } from '@/features/embedded/services/embedded-message-handler'
+import { embeddedNavigation } from '@/app/embedded-navigation'
 
 const LazyToaster = lazy(async () => {
   const { Toaster } = await import('@/components/ui/sonner')
@@ -27,14 +28,9 @@ const LazyEmbeddedOverlays = lazy(async () => {
 // for this fork.
 if (isEmbedded()) {
   initEmbeddedMessageHandler({
-    openEditor: (projectId) => {
-      void router.navigate({ to: '/editor/$projectId', params: { projectId } })
-    },
-    // Where a failed project open sends the app back to.
-    saveLocation: () => {
-      const { href } = router.state.location
-      return () => router.history.push(href)
-    },
+    // Opening a project, and going back to where the app was after a failed
+    // open, without adding history entries (see embeddedNavigation).
+    ...embeddedNavigation(),
     // The edit-operations engine is loaded the first time a parent sends edits.
     loadEditOps: () => import('@/app/embedded-edit-ops').then((m) => m.embeddedEditOpEngine),
   })

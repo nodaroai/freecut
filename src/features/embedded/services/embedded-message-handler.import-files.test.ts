@@ -42,7 +42,7 @@ const send = (type: string, payload: Record<string, unknown>) =>
 
 beforeAll(() => {
   vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
-  initEmbeddedMessageHandler({ openEditor: vi.fn() })
+  initEmbeddedMessageHandler({ openEditor: vi.fn(), saveLocation: () => () => {} })
 })
 
 describe('NODARO_IMPORT_FILES', () => {

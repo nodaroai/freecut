@@ -24,7 +24,11 @@ describe('FREECUT_READY capabilities', () => {
   it('announces the edit operations and caption highlighting with an operations engine', () => {
     post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
     const engine: EditOpEngine = { prepare: async (op) => op, apply: () => null }
-    initEmbeddedMessageHandler({ openEditor: vi.fn(), loadEditOps: async () => engine })
+    initEmbeddedMessageHandler({
+      openEditor: vi.fn(),
+      saveLocation: () => () => {},
+      loadEditOps: async () => engine,
+    })
 
     expect(announced(post)).toEqual(
       expect.arrayContaining(['edit-ops', 'edit-ops-2', 'captions-word-highlight']),
@@ -33,7 +37,7 @@ describe('FREECUT_READY capabilities', () => {
 
   it('announces none of them without one', () => {
     post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
-    initEmbeddedMessageHandler({ openEditor: vi.fn() })
+    initEmbeddedMessageHandler({ openEditor: vi.fn(), saveLocation: () => () => {} })
 
     const capabilities = announced(post)
     expect(capabilities).toContain('timeline-read')

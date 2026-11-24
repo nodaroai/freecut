@@ -31,7 +31,7 @@ afterEach(() => post.mockRestore())
 
 describe('cloud-project wiring', () => {
   it('announces the capability and starts the change announcements with the handler', () => {
-    initEmbeddedMessageHandler({ openEditor: vi.fn() })
+    initEmbeddedMessageHandler({ openEditor: vi.fn(), saveLocation: () => () => {} })
 
     const ready = post.mock.calls
       .map((call) => call[0] as { type?: string; capabilities?: string[] })
@@ -41,7 +41,7 @@ describe('cloud-project wiring', () => {
   })
 
   it('routes NODARO_GET_PROJECT from the parent, behind the origin check', () => {
-    initEmbeddedMessageHandler({ openEditor: vi.fn() })
+    initEmbeddedMessageHandler({ openEditor: vi.fn(), saveLocation: () => () => {} })
     const send = (origin: string) =>
       window.dispatchEvent(
         new MessageEvent('message', {

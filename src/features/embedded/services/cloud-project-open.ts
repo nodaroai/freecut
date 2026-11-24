@@ -41,7 +41,7 @@ let saveLocation: SaveLocation | null = null
  * How to show a project in the editor, and how to come back to where the app
  * was when an open fails; the message handler passes the app shell's in.
  */
-export function setOpenProjectEditor(open: OpenEditor, save: SaveLocation | null = null): void {
+export function setOpenProjectEditor(open: OpenEditor, save: SaveLocation): void {
   openEditor = open
   saveLocation = save
 }

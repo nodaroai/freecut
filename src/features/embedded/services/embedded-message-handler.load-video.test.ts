@@ -32,7 +32,7 @@ import { initEmbeddedMessageHandler } from './embedded-message-handler'
 describe('NODARO_LOAD_VIDEO opens the editor through the app shell', () => {
   it('an empty boot opens the new project with the openEditor the app passed in', async () => {
     const openEditor = vi.fn()
-    initEmbeddedMessageHandler({ openEditor })
+    initEmbeddedMessageHandler({ openEditor, saveLocation: () => () => {} })
 
     window.dispatchEvent(
       new MessageEvent('message', {

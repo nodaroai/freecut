@@ -170,7 +170,7 @@ describe('saveExit on the wire', () => {
   const PARENT = 'http://localhost:5173'
 
   beforeAll(() => {
-    initEmbeddedMessageHandler({ openEditor: vi.fn() })
+    initEmbeddedMessageHandler({ openEditor: vi.fn(), saveLocation: () => () => {} })
   })
 
   // The framing page is the sender; under jsdom the window is its own parent.
