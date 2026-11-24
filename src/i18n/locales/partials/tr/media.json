@@ -251,6 +251,11 @@
     },
     "orphanedClips": {
       "autoMatch": "Otomatik eşleştir",
+      "clipMediaDeleted": {
+        "audio": "Ses klibi · medya bulunamadı",
+        "image": "Görsel klibi · medya bulunamadı",
+        "video": "Video klibi · medya bulunamadı"
+      },
       "description": "{{count}} klip artık bulunamayan medyaya başvuruyor. Devam etmek için değiştirin veya kaldırın.",
       "keepAsBroken": "Bozuk olarak tut",
       "removeAll": "Tümünü kaldır",

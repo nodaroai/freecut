@@ -251,6 +251,11 @@
     },
     "orphanedClips": {
       "autoMatch": "Automatisch zuordnen",
+      "clipMediaDeleted": {
+        "audio": "Audioclip · Medium nicht gefunden",
+        "image": "Bildclip · Medium nicht gefunden",
+        "video": "Videoclip · Medium nicht gefunden"
+      },
       "description": "{{count}} Clip(s) verweisen auf Medien, die nicht mehr gefunden werden können. Ersetze oder entferne sie, um fortzufahren.",
       "keepAsBroken": "Als defekt behalten",
       "removeAll": "Alle entfernen",

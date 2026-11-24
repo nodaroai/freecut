@@ -2,16 +2,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sendExportToStudio } from './studio-export-bridge'
 import { useEmbeddedStore } from '../stores/embedded-store'
 
-const { saveTimeline, exportProjectJson } = vi.hoisted(() => ({
+const { saveTimeline, exportProjectJson, shown } = vi.hoisted(() => ({
   saveTimeline: vi.fn(async (_projectId: string) => {}),
   exportProjectJson: vi.fn(async () => ({ version: 2, items: [] })),
+  // The project the editor is on (its media library's project).
+  shown: { id: 'p1' as string | null },
 }))
 
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ currentProject: { id: 'p1' } }) },
 }))
+vi.mock('../deps/media-library-contract', () => ({
+  useMediaLibraryStore: { getState: () => ({ currentProjectId: shown.id }) },
+}))
 vi.mock('../deps/project-bundle-contract', () => ({ exportProjectJson }))
-vi.mock('../deps/timeline-contract', () => ({ saveTimeline }))
+vi.mock('../deps/timeline-contract', () => ({
+  saveTimeline,
+  useTimelineSettingsStore: { getState: () => ({ isTimelineLoading: false }) },
+}))
 
 /** jsdom's Blob lacks arrayBuffer(); a minimal stand-in carries the bytes. */
 function blobOf(bytes: number[]): Blob {
@@ -23,6 +31,7 @@ function blobOf(bytes: number[]): Blob {
 
 describe('sendExportToStudio', () => {
   beforeEach(() => {
+    shown.id = 'p1'
     useEmbeddedStore.setState({ isEmbedded: false, parentOrigin: null })
     saveTimeline.mockClear()
     exportProjectJson.mockClear()
@@ -56,6 +65,24 @@ describe('sendExportToStudio', () => {
     const [read] = exportProjectJson.mock.invocationCallOrder
     expect(saved).toBeLessThan(read!)
     postSpy.mockRestore()
+  })
+
+  it('saves no timeline while the editor is not yet on the open project, and hands over no project', async () => {
+    vi.useFakeTimers()
+    useEmbeddedStore.setState({ isEmbedded: true, parentOrigin: 'http://localhost:8123' })
+    const postSpy = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
+    // An open made p1 the open project; the editor still shows the previous one.
+    shown.id = 'previous'
+
+    const sending = sendExportToStudio(blobOf([1]))
+    await vi.advanceTimersByTimeAsync(11_000)
+    await sending
+
+    expect(saveTimeline).not.toHaveBeenCalled()
+    const [message] = postSpy.mock.calls[0] as unknown as [{ payload: { projectJson: unknown } }]
+    expect(message.payload.projectJson).toBeNull()
+    postSpy.mockRestore()
+    vi.useRealTimers()
   })
 
   it('is a no-op outside embedded mode', async () => {
