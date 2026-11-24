@@ -414,7 +414,8 @@ export function handleOpenProject(event: MessageEvent): Promise<void> {
       missing = await openProject(saved, media, event.origin, control, discardPrevious === true)
       ok = true
     } catch (e) {
-      log.error('NODARO_OPEN_PROJECT failed:', e)
+      if (e instanceof OpenCancelled) log.info('NODARO_OPEN_PROJECT cancelled by the parent')
+      else log.error('NODARO_OPEN_PROJECT failed:', e)
       why = failure(e)
     } finally {
       useEmbeddedStore.getState().setIsImporting(false)
