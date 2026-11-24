@@ -90,7 +90,7 @@ async function readBody(response: Response): Promise<Blob> {
 }
 
 /** An open's media import ran out of local storage: the open fails. */
-export class StorageFull extends Error {
+class StorageFull extends Error {
   constructor(cause: unknown) {
     super('There is not enough storage for the media', { cause })
   }

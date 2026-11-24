@@ -536,19 +536,20 @@ async function importFile(file: ImportFile, projectId: string): Promise<string |
   }
 }
 
+// Files sent while a project is being opened (NODARO_OPEN_PROJECT) or loaded
+// (NODARO_LOAD_VIDEO) go into the project that brings in, and their refs are
+// claimed once its refs replaced the previous project's. A failed open or load
+// answered for itself; the files then go into the project still open.
+async function waitForProjectSwitch() {
+  for (const running of [openInProgress(), projectLoadInProgress()]) {
+    await running?.catch(() => {})
+  }
+}
+
 async function handleImportFiles(event: MessageEvent) {
   const files: ImportFile[] | undefined = event.data.payload?.files
   if (!files?.length) return
-  // Files sent while a project is being opened go into the project opened, and
-  // their refs are claimed once its refs replaced the previous project's.
-  // Likewise for files sent while a NODARO_LOAD_VIDEO runs: they go into the loaded project.
-  for (const running of [openInProgress(), projectLoadInProgress()]) {
-    try {
-      await running
-    } catch {
-      // A failed open or load answered for itself; the files still go into the open project.
-    }
-  }
+  await waitForProjectSwitch()
   const settlers = claimRefs(files)
 
   try {
