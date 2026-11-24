@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Stand-ins for the timeline stores the announcements watch: a dirty flag and
-// an undo history, as small live stores so a change notifies subscribers.
+// an undo history, as small live stores so a change notifies subscribers. The
+// snapshot stand-ins let an edit request without history (which may only add or
+// remove timeline tabs) pass its check.
 vi.mock('../deps/timeline-contract', async () => {
   const { create } = await import('zustand')
   type Entry = { command: { type: string } }
@@ -9,6 +11,9 @@ vi.mock('../deps/timeline-contract', async () => {
   const useTimelineCommandStore = create(() => ({
     undoStack: [] as Entry[],
     redoStack: [] as Entry[],
+    stacksByContext: {},
+    canUndo: false,
+    canRedo: false,
     activeContextKey: '__root__',
     executeBatch: (_command: unknown, action: () => unknown) => action(),
   }))
@@ -17,6 +22,9 @@ vi.mock('../deps/timeline-contract', async () => {
     useTimelineCommandStore,
     useCompositionNavigationStore: { getState: () => ({ breadcrumbs: [] }) },
     getActiveTabId: () => null,
+    captureSnapshot: () => ({ compositions: [], topLevelSequenceIds: [] }),
+    restoreSnapshot: () => {},
+    snapshotsEqual: () => true,
   }
 })
 vi.mock('./studio-export-bridge', () => ({
@@ -34,12 +42,16 @@ import { claimImportedRef } from './imported-refs'
 // The stand-in history holds entries with a command alone.
 type Entry = { command: { type: string } }
 const history = useTimelineCommandStore as unknown as {
-  setState: (state: { undoStack?: Entry[]; redoStack?: Entry[] }) => void
+  setState: (state: {
+    undoStack?: Entry[]
+    redoStack?: Entry[]
+    stacksByContext?: Record<string, unknown>
+  }) => void
 }
 
 const ORIGIN = 'http://localhost:5173'
-const message = (type: string, payload: Record<string, unknown>) =>
-  new MessageEvent('message', { data: { type, payload }, origin: ORIGIN })
+const message = (type: string, payload: Record<string, unknown>, origin = ORIGIN) =>
+  new MessageEvent('message', { data: { type, payload }, origin })
 
 type Posted = { type: string; payload: Record<string, unknown> }
 let post: { mock: { calls: unknown[][] }; mockRestore: () => void }
@@ -102,6 +114,55 @@ describe('FREECUT_PROJECT_CHANGED', () => {
     vi.advanceTimersByTime(500)
     useEmbeddedStore.setState({ isEmbedded: true, parentOrigin: null })
     markDirty()
+    vi.advanceTimersByTime(500)
+
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('announces changes made before the parent origin was set once, when it is set', () => {
+    vi.useFakeTimers()
+    useEmbeddedStore.setState({ parentOrigin: null })
+    stop = startProjectChangeAnnouncements()
+    const start = currentRevision()
+
+    markDirty()
+    vi.advanceTimersByTime(500)
+    history.setState({ undoStack: [{ command: { type: 'MOVE_ITEM' } }] })
+    vi.advanceTimersByTime(500)
+    expect(post).not.toHaveBeenCalled()
+
+    useEmbeddedStore.setState({ parentOrigin: ORIGIN })
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_PROJECT_CHANGED')).toEqual([
+      { type: 'FREECUT_PROJECT_CHANGED', payload: { revision: start + 1 } },
+    ])
+    expect(post.mock.calls[0]![1]).toBe(ORIGIN)
+  })
+
+  it('announces an edit request applied without history while the timeline is already dirty', async () => {
+    useTimelineSettingsStore.setState({ isDirty: true })
+    setEditOpsLoader(async () => ({ prepare: async (op: EditOp) => op, apply: () => null }))
+    stop = startProjectChangeAnnouncements()
+    vi.useFakeTimers()
+
+    await handleApplyOps(
+      message('NODARO_APPLY_OPS', { requestId: 'e0', history: false, ops: [{ op: 'x' }] }),
+    )
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_OPS_RESULT')[0]!.payload).toMatchObject({ ok: true, recorded: false })
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(1)
+  })
+
+  it('does not announce the history being cleared when a project loads', () => {
+    vi.useFakeTimers()
+    const entry = { command: { type: 'MOVE_ITEM' } }
+    history.setState({ undoStack: [entry], redoStack: [entry] })
+    useTimelineSettingsStore.setState({ isDirty: true })
+    stop = startProjectChangeAnnouncements()
+
+    history.setState({ undoStack: [], redoStack: [], stacksByContext: {} })
     vi.advanceTimersByTime(500)
 
     expect(post).not.toHaveBeenCalled()
@@ -183,6 +244,17 @@ describe('NODARO_GET_PROJECT', () => {
       refs: { m1: 'r1' },
     })
     expect(post.mock.calls.at(-1)![1]).toBe(ORIGIN)
+  })
+
+  it('GET_PROJECT replies to the origin that asked', async () => {
+    useEmbeddedStore.setState({ parentOrigin: null })
+
+    await handleGetProject(
+      message('NODARO_GET_PROJECT', { requestId: 'g3' }, 'https://studio.nodaro.ai'),
+    )
+
+    expect(posted('FREECUT_PROJECT')).toHaveLength(1)
+    expect(post.mock.calls.at(-1)![1]).toBe('https://studio.nodaro.ai')
   })
 
   it('GET_PROJECT is queued behind a running edit request', async () => {

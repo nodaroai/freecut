@@ -10,6 +10,15 @@ type Entry = CommandState['undoStack'][number]
 type Snapshot = Entry['beforeSnapshot']
 type Command = Entry['command']
 
+// Told after each request applied without history: it changed the project but left no undo entry.
+const appliedListeners = new Set<() => void>()
+
+/** Calls `listener` after every request applied without history; the answer stops it. */
+export function onHistoryFreeEdit(listener: () => void): () => void {
+  appliedListeners.add(listener)
+  return () => appliedListeners.delete(listener)
+}
+
 /** A request that ran without history changed more than whole timeline tabs. */
 export class HistoryFreeRefusal extends Error {}
 
@@ -111,5 +120,6 @@ export function executeWithoutHistory<T>(command: Command, action: () => T): T {
       ]),
     ),
   })
+  appliedListeners.forEach((listener) => listener())
   return result
 }
