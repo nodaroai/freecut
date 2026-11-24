@@ -11,8 +11,11 @@ const IMPORT_WAIT_MS = 120_000
 /** Settles one claimed ref with the media id it was imported as, or null when the import failed. */
 export type SettleImportedRef = (mediaId: string | null) => void
 
-/** The media id each ref's import settled to, for the refs whose import succeeded. */
-const settledByRef = new Map<string, string>()
+/**
+ * The ref each successfully imported media id came from. Every import is kept:
+ * a ref imported twice is two media items, and both may be in the project.
+ */
+const refByMediaId = new Map<string, string>()
 
 /** Claim a ref before its (async) import starts, and answer how to settle it. */
 export function claimImportedRef(ref: string): SettleImportedRef {
@@ -21,15 +24,12 @@ export function claimImportedRef(ref: string): SettleImportedRef {
     resolve = done
   })
   importedByRef.set(ref, pending)
-  // A ref claimed again names whatever its new import settles to.
-  settledByRef.delete(ref)
   let settled = false
   return (mediaId) => {
     if (settled) return
     settled = true
     resolve(mediaId)
-    // A newer claim of the same ref owns it now.
-    if (mediaId && importedByRef.get(ref) === pending) settledByRef.set(ref, mediaId)
+    if (mediaId) refByMediaId.set(mediaId, ref)
   }
 }
 
@@ -38,9 +38,7 @@ export function claimImportedRef(ref: string): SettleImportedRef {
  * settled: how a parent recognises its own files in the project it saves.
  */
 export function refsByMediaId(): Record<string, string> {
-  const refs: Record<string, string> = {}
-  for (const [ref, mediaId] of settledByRef) refs[mediaId] = ref
-  return refs
+  return Object.fromEntries(refByMediaId)
 }
 
 /**
