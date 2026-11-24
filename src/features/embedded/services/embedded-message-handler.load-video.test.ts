@@ -133,7 +133,10 @@ describe('NODARO_LOAD_VIDEO replaces the open project only when it opens the new
     useEmbeddedStore.setState({ isEmbedded: true, parentOrigin: ORIGIN })
     useTimelineSettingsStore.setState({ isDirty: false })
     useTimelineSettingsStore.setState({ isDirty: true })
-    await vi.waitFor(() => expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(1))
+    // The announcement timer is 500 ms: wait well past it, so a loaded machine cannot race it.
+    await vi.waitFor(() => expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(1), {
+      timeout: 3000,
+    })
     const before = currentRevision()
     // A change of the previous project is waiting when the load starts, and the load fails.
     useTimelineSettingsStore.setState({ isDirty: false })
@@ -142,9 +145,9 @@ describe('NODARO_LOAD_VIDEO replaces the open project only when it opens the new
 
     send('NODARO_LOAD_VIDEO', { videoUrl: 'https://cdn.example/broken.mp4' })
 
-    await vi.waitFor(() => expect(posted('FREECUT_ERROR')).toHaveLength(1))
+    await vi.waitFor(() => expect(posted('FREECUT_ERROR')).toHaveLength(1), { timeout: 3000 })
     await vi.waitFor(() => expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(2), {
-      timeout: 2000,
+      timeout: 3000,
     })
     expect(posted('FREECUT_PROJECT_CHANGED').at(-1)!.payload).toEqual({
       revision: before + 1,

@@ -461,7 +461,7 @@ function handleResetProject() {
  *   - NODARO_OPEN_PROJECT { requestId, projectJson, media: [{ mediaId, ref,
  *     url, name, type }], discardPrevious? } opens a saved project in a fresh
  *     one, fetching each media item from its url (https, or plain http on
- *     localhost only in a development build; 4 at a time; without credentials;
+ *     localhost or 127.0.0.1 only in a development build; 4 at a time; without credentials;
  *     at most 4 GB each, counted as the file arrives), and answers
  *     FREECUT_PROJECT_OPENED { requestId, ok,
  *     missing, revision, projectId }: the media ids that did not arrive, at
@@ -496,10 +496,13 @@ function handleResetProject() {
  *     refuses to save a project file whose `projectId` is not the one its last
  *     open or load produced: the editor is then on another project. An open
  *     names its id in FREECUT_PROJECT_OPENED. A NODARO_LOAD_VIDEO has no
- *     answer: its id is the one the first FREECUT_PROJECT_CHANGED, or the
- *     first FREECUT_PROJECT that is not `notReady`, names after the load
- *     (a load that restores a `projectJson` may announce nothing, so ask
- *     with NODARO_GET_PROJECT).
+ *     answer. The id of the project it produced is the `projectId` of the
+ *     first FREECUT_PROJECT_CHANGED whose `projectId` differs from the project
+ *     open before the load (its revision is 1), or of the first FREECUT_PROJECT
+ *     that is not `notReady` and was asked for after the load was sent. A
+ *     change of the previous project can still be announced, under the
+ *     previous id, before the loaded project opens. A load that restores a
+ *     `projectJson` may announce nothing, so ask with NODARO_GET_PROJECT.
  *   - The editor never adds an entry to the browser history, so the parent's
  *     Back and Forward buttons never move it between projects.
  */
