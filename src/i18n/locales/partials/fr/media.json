@@ -251,6 +251,11 @@
     },
     "orphanedClips": {
       "autoMatch": "Correspondance automatique",
+      "clipMediaDeleted": {
+        "audio": "Clip audio · média introuvable",
+        "image": "Clip image · média introuvable",
+        "video": "Clip vidéo · média introuvable"
+      },
       "description": "{{count}} clip(s) référencent des médias introuvables. Remplacez-les ou supprimez-les pour continuer.",
       "keepAsBroken": "Conserver comme cassés",
       "removeAll": "Tout supprimer",

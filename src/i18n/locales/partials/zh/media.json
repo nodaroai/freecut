@@ -251,6 +251,11 @@
     },
     "orphanedClips": {
       "autoMatch": "自动匹配",
+      "clipMediaDeleted": {
+        "audio": "音频片段 · 找不到媒体",
+        "image": "图片片段 · 找不到媒体",
+        "video": "视频片段 · 找不到媒体"
+      },
       "description": "{{count}} 个片段引用的媒体已找不到。请替换或删除以继续。",
       "keepAsBroken": "保留为损坏",
       "removeAll": "全部删除",
