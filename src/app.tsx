@@ -30,6 +30,11 @@ if (isEmbedded()) {
     openEditor: (projectId) => {
       void router.navigate({ to: '/editor/$projectId', params: { projectId } })
     },
+    // Where a failed project open sends the app back to.
+    saveLocation: () => {
+      const { href } = router.state.location
+      return () => router.history.push(href)
+    },
     // The edit-operations engine is loaded the first time a parent sends edits.
     loadEditOps: () => import('@/app/embedded-edit-ops').then((m) => m.embeddedEditOpEngine),
   })

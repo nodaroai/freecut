@@ -62,8 +62,9 @@ describe('cloud-project wiring', () => {
 
   it('routes NODARO_OPEN_PROJECT from the parent, behind the origin check', () => {
     const openEditor = vi.fn()
-    initEmbeddedMessageHandler({ openEditor })
-    expect(opening.setOpenProjectEditor).toHaveBeenCalledWith(openEditor)
+    const saveLocation = vi.fn(() => () => {})
+    initEmbeddedMessageHandler({ openEditor, saveLocation })
+    expect(opening.setOpenProjectEditor).toHaveBeenCalledWith(openEditor, saveLocation)
     const send = (origin: string) =>
       window.dispatchEvent(
         new MessageEvent('message', {

@@ -19,8 +19,6 @@ let unannounced = false
 let stopAnnouncements: (() => void) | null = null
 // True while a project is being opened: nothing it changes is a change to announce.
 let opening = false
-// A change was waiting, or was made, when an open began: told if the open fails.
-let heldChange = false
 
 /** The revision of the newest change announced to the parent. */
 export function currentRevision(): number {
@@ -45,10 +43,7 @@ function announce() {
 }
 
 function projectChanged() {
-  if (opening) {
-    heldChange = true
-    return
-  }
+  if (opening) return
   if (announceTimer === undefined) announceTimer = setTimeout(announce, ANNOUNCE_INTERVAL_MS)
 }
 
@@ -56,20 +51,20 @@ function projectChanged() {
  * Holds the announcements while a project is opened (NODARO_OPEN_PROJECT), and
  * answers how to end the open. Once the open project was replaced, the opened
  * one is revision 0, with nothing waiting to be announced, neither from during
- * the open nor from before it. An open that replaced nothing leaves the
- * revision as it was and tells what was held back.
+ * the open nor from before it. A failed open leaves things exactly as they
+ * were before it: the revision unchanged, and a change that was waiting to be
+ * announced still announced, once; what the failed open itself moved (the
+ * editor reloading the previous project) is not a change.
  */
 export function beginProjectOpen(): (replaced: boolean) => void {
   opening = true
-  heldChange = announceTimer !== undefined
+  const waiting = announceTimer !== undefined
   clearTimeout(announceTimer)
   announceTimer = undefined
   return (replaced) => {
     opening = false
-    const held = heldChange
-    heldChange = false
     if (!replaced) {
-      if (held) projectChanged()
+      if (waiting) projectChanged()
       return
     }
     clearTimeout(announceTimer)

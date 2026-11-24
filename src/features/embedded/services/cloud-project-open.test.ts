@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 // Stand-ins for what an open touches: the project store and the storage it
 // writes the restored project to, the media library it imports into, and the
@@ -83,6 +83,7 @@ vi.mock('../deps/timeline-contract', async () => {
     useCompositionNavigationStore: { getState: () => ({ breadcrumbs: [] }) },
     getActiveTabId: () => null,
     saveTimeline: vi.fn(async () => {}),
+    loadTimeline: vi.fn(async () => {}),
   }
 })
 vi.mock('./embedded-workspace', () => ({ ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}) }))
@@ -101,6 +102,7 @@ vi.mock('./timeline-report', () => ({ readTimeline: () => ({}) }))
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService, useMediaLibraryStore } from '../deps/media-library-contract'
 import {
+  loadTimeline,
   saveTimeline,
   useTimelineCommandStore,
   useTimelineSettingsStore,
@@ -108,7 +110,7 @@ import {
 import { updateProject } from '@/infrastructure/storage'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { currentRevision, handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
-import { handleOpenProject, setOpenProjectEditor } from './cloud-project-open'
+import { handleOpenProject, openInProgress, setOpenProjectEditor } from './cloud-project-open'
 import { initEmbeddedMessageHandler } from './embedded-message-handler'
 import { claimImportedRef, mediaIdForRef, refsByMediaId } from './imported-refs'
 
@@ -137,17 +139,32 @@ const library = useMediaLibraryStore as unknown as {
   setState: (s: { currentProjectId: string | null }) => void
 }
 
-// The editor mounting the project: it reads it from storage, loads its
-// timeline (which marks the timeline dirty along the way) and settles.
-const showInEditor = (projectId: string) => {
+// The app's route, as the real router and editor behave: going to another
+// project unmounts the editor (clearing its project) and mounts it on the new
+// one, which reads it from storage, loads its timeline (marking the timeline
+// dirty along the way) and settles; going where the app already is does
+// nothing; going to no project leaves the editor unmounted.
+let route: string | null = 'current'
+let slowLoad = false
+function navigate(target: string | null) {
+  if (target === route) return
+  route = target
   setTimeout(() => {
+    library.setState({ currentProjectId: null })
+    useProjectStore.setState({ currentProject: null })
+    if (target === null) return
     settings.setState({ isTimelineLoading: true, isDirty: true })
-    library.setState({ currentProjectId: projectId })
-    useProjectStore.setState({ currentProject: db.get(projectId) as never })
-    setTimeout(() => settings.setState({ isTimelineLoading: false }), 20)
+    library.setState({ currentProjectId: target })
+    useProjectStore.setState({ currentProject: db.get(target) as never })
+    if (!slowLoad) setTimeout(() => settings.setState({ isTimelineLoading: false }), 20)
   }, 20)
 }
+const showInEditor = (projectId: string) => navigate(projectId)
 const openEditor = vi.fn(showInEditor)
+const saveLocation = () => {
+  const at = route
+  return () => navigate(at)
+}
 
 /** Runs the fake clock until `promise` settles. */
 async function drive<T>(promise: Promise<T>): Promise<T> {
@@ -235,8 +252,11 @@ beforeEach(() => {
   vi.mocked(mediaLibraryService.importMediaBlob).mockClear()
   openEditor.mockReset()
   openEditor.mockImplementation(showInEditor)
+  route = 'current'
+  slowLoad = false
   vi.mocked(saveTimeline).mockClear()
-  setOpenProjectEditor(openEditor)
+  vi.mocked(loadTimeline).mockReset()
+  setOpenProjectEditor(openEditor, saveLocation)
   vi.stubGlobal('fetch', okFetch())
 })
 afterEach(() => {
@@ -292,6 +312,9 @@ describe('NODARO_OPEN_PROJECT', () => {
     // The fresh project is the one the editor opens, and the store holds the restored one.
     const freshId = vi.mocked(updateProject).mock.calls.at(-1)![0]
     expect(openEditor).toHaveBeenCalledWith(freshId)
+    // The open made sure the editor's load of the fresh project succeeded.
+    expect(loadTimeline).toHaveBeenCalledWith(freshId)
+    expect(openInProgress()).toBeNull()
     expect(useProjectStore.getState().currentProject?.id).toBe(freshId)
     expect(refsByMediaId()).toEqual({ 'new-m1.mp4': 'ref-m1', 'new-m2.mp4': 'ref-m2' })
     // Fetched by the editor itself, without credentials.
@@ -640,20 +663,58 @@ describe('NODARO_OPEN_PROJECT', () => {
       await expectAsBefore(before, 'f2')
     })
 
-    it('when the editor never shows the opened project', async () => {
+    it('when the editor never moves to the opened project, without a second wait', async () => {
       const before = await withHeldChange()
-      openEditor.mockImplementation((id: string) => {
-        if (id === 'current') showInEditor(id)
-      })
+      openEditor.mockImplementation(() => {})
+      const start = Date.now()
 
       await open({ requestId: 'f3', projectJson: savedProject({}), media: [] })
 
-      // The editor was sent back to the project open before.
-      expect(openEditor.mock.calls.map(([id]) => id)).toEqual([
-        expect.stringMatching(/^fresh-/),
-        'current',
-      ])
+      expect(Date.now() - start).toBeLessThan(35_000)
+      expect(route).toBe('current')
       await expectAsBefore(before, 'f3')
+    })
+
+    it("when the editor's load of the opened project fails", async () => {
+      const before = await withHeldChange()
+      vi.mocked(loadTimeline).mockImplementation(async (id: string) => {
+        if (id.startsWith('fresh-')) throw new Error('Failed to load timeline')
+      })
+
+      await open({ requestId: 'f4', projectJson: savedProject({}), media: [] })
+
+      // The editor had moved to the opened project, and was sent back.
+      expect(openEditor).toHaveBeenCalledWith(expect.stringMatching(/^fresh-/))
+      expect(route).toBe('current')
+      await expectAsBefore(before, 'f4')
+    })
+
+    it('announces nothing when no change was waiting', async () => {
+      stop = startProjectChangeAnnouncements()
+      const before = currentRevision()
+      vi.mocked(loadTimeline).mockRejectedValueOnce(new Error('Failed to load timeline'))
+
+      await open({ requestId: 'f5', projectJson: savedProject({}), media: [] })
+      await sleep(600)
+
+      expect(opened()).toMatchObject({ ok: false, revision: before })
+      expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
+      expect(currentRevision()).toBe(before)
+    })
+
+    it('when no project was open and the opened one is slow to load, the editor is left on none', async () => {
+      route = null
+      library.setState({ currentProjectId: null })
+      useProjectStore.setState({ currentProject: null })
+      slowLoad = true
+
+      await open({ requestId: 'f6', projectJson: savedProject({}), media: [] })
+
+      expect(opened()).toMatchObject({ requestId: 'f6', ok: false })
+      expect(route).toBeNull()
+      expect(useMediaLibraryStore.getState().currentProjectId).toBeNull()
+      expect(useProjectStore.getState().currentProject).toBeNull()
+      expect([...db.keys()]).toEqual(['current'])
     })
   })
 
@@ -756,7 +817,13 @@ describe('NODARO_OPEN_PROJECT', () => {
   })
 
   it('files imported while an open runs go into the opened project, with their refs', async () => {
+    const listen = vi.spyOn(window, 'addEventListener')
     initEmbeddedMessageHandler({ openEditor })
+    const added = listen.mock.calls.filter(([type]) => type === 'message')
+    listen.mockRestore()
+    onTestFinished(() =>
+      added.forEach(([type, listener]) => window.removeEventListener(type, listener)),
+    )
     const opening = startOpen({ requestId: 'i1', projectJson: savedProject({}), media: [] })
     window.dispatchEvent(
       new MessageEvent('message', {

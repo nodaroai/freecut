@@ -8,6 +8,7 @@ import type { Project } from '@/types/project'
 import { useProjectStore } from '../deps/projects-contract'
 import { useMediaLibraryStore } from '../deps/media-library-contract'
 import {
+  loadTimeline,
   saveTimeline,
   useTimelineCommandStore,
   useTimelineSettingsStore,
@@ -28,14 +29,21 @@ const WAIT_MS = 30_000
 const POLL_MS = 50
 
 type OpenEditor = (projectId: string) => void
+/** Remembers where the app is, and answers how to go back there. */
+export type SaveLocation = () => () => void
 
 let openEditor: OpenEditor = (projectId) => {
   log.error('Cannot open the editor: no openEditor was set', { projectId })
 }
+let saveLocation: SaveLocation | null = null
 
-/** How to show a project in the editor; the message handler passes the app shell's in. */
-export function setOpenProjectEditor(open: OpenEditor): void {
+/**
+ * How to show a project in the editor, and how to come back to where the app
+ * was when an open fails; the message handler passes the app shell's in.
+ */
+export function setOpenProjectEditor(open: OpenEditor, save: SaveLocation | null = null): void {
   openEditor = open
+  saveLocation = save
 }
 
 // The newest open accepted and not yet answered.
@@ -83,7 +91,11 @@ const editorShows = (projectId: string) => () =>
 /** What was open when an open began: what a failed open puts back. */
 interface Before {
   readonly project: Project | null
+  /** The project the editor showed (its media library's project), if any. */
+  readonly shownId: string | null
   readonly pendingVideoImport: { mediaId: string } | null
+  /** Goes back to where the app was; null when the app shell cannot say. */
+  readonly goBack: (() => void) | null
 }
 
 /** Makes the fresh project, without showing it: the project that is open stays the open one. */
@@ -137,37 +149,53 @@ async function showProject(project: Project, before: Before): Promise<void> {
     projects: useProjectStore.getState().projects.map((p) => (p.id === project.id ? project : p)),
   })
   openEditor(project.id)
+  const mounted = () => useMediaLibraryStore.getState().currentProjectId === project.id
+  if (!(await waitFor(mounted))) throw new Error('The editor did not open the project')
+  // The editor's own load of the project (joined while it runs): it fails
+  // quietly in the editor, and a failed load is a failed open.
+  await loadTimeline(project.id)
   if (!(await waitFor(editorShows(project.id)))) {
     throw new Error('The editor did not open the project')
   }
 }
 
+/** Sends the app back to where it was before the open, and waits for the editor to settle there. */
+async function goBack(before: Before, freshId: string | null) {
+  const moved = useMediaLibraryStore.getState().currentProjectId !== before.shownId
+  // Going back also cancels a navigation to the fresh project not yet taken.
+  if (before.goBack) before.goBack()
+  else if (before.project) openEditor(before.project.id)
+  if (!moved) {
+    // The editor never left: a same-place navigation does not reload it.
+    useProjectStore.setState({ currentProject: before.project })
+    return
+  }
+  const settled = before.project
+    ? editorShows(before.project.id)
+    : () => useMediaLibraryStore.getState().currentProjectId !== freshId
+  if (!(await waitFor(settled))) {
+    log.error('NODARO_OPEN_PROJECT: the editor did not go back to where it was')
+  }
+}
+
 /**
  * Puts back what was open before a failed open: the editor shows the previous
- * project again (when it had moved), the store holds it, and the fresh project
- * and the media imported for it are removed.
+ * project again, or no project when none was open (when it had moved), the
+ * store holds it, and the fresh project and the media imported for it are removed.
  */
 async function rollBack(before: Before, freshId: string | null, navigated: boolean) {
-  const store = useProjectStore.getState()
-  if (navigated && before.project) {
-    openEditor(before.project.id)
-    if (!(await waitFor(editorShows(before.project.id)))) {
-      log.error('NODARO_OPEN_PROJECT: the editor did not show the previous project again')
-    }
-  } else {
-    useProjectStore.setState({ currentProject: before.project })
-  }
+  if (navigated) await goBack(before, freshId)
   useEmbeddedStore.getState().setPendingVideoImport(before.pendingVideoImport)
-  if (!freshId) return
-  try {
-    await store.deleteProject(freshId)
-    await store.permanentlyDeleteProject(freshId)
-  } catch (e) {
-    log.warn('NODARO_OPEN_PROJECT: the fresh project could not be removed', { error: e })
+  if (freshId) {
+    const store = useProjectStore.getState()
+    try {
+      await store.deleteProject(freshId)
+      await store.permanentlyDeleteProject(freshId)
+    } catch (e) {
+      log.warn('NODARO_OPEN_PROJECT: the fresh project could not be removed', { error: e })
+    }
   }
-  if (useProjectStore.getState().currentProject?.id === freshId) {
-    useProjectStore.setState({ currentProject: before.project })
-  }
+  useProjectStore.setState({ currentProject: before.project })
 }
 
 /** The opened project is the open one: its refs replace the previous project's, and its history starts empty. */
@@ -186,7 +214,9 @@ function commitOpen(origin: string, refs: ReadonlyArray<{ ref: string; mediaId: 
 async function openProject(saved: Project, media: unknown, origin: string): Promise<string[]> {
   const before: Before = {
     project: useProjectStore.getState().currentProject,
+    shownId: useMediaLibraryStore.getState().currentProjectId,
     pendingVideoImport: useEmbeddedStore.getState().pendingVideoImport,
+    goBack: saveLocation?.() ?? null,
   }
   const { entries, malformed } = readMedia(media)
   let freshId: string | null = null
@@ -215,8 +245,10 @@ async function openProject(saved: Project, media: unknown, origin: string): Prom
  * 0, with an empty history, and the open itself is not announced as a change.
  * Queued with the edit and read requests, so none runs against a half-opened
  * project; an open sent while a video is being imported waits for it.
- * `ok: false` means the project open before is still open, unchanged, with its
- * revision and any change waiting to be announced.
+ * `ok: false` means the project open before is still open, with its content,
+ * playhead, revision and any change waiting to be announced; when the editor
+ * had already moved to the opened project, it reloads the previous one, which
+ * starts its undo history, open tab, selection, zoom and scroll afresh.
  */
 export function handleOpenProject(event: MessageEvent): Promise<void> {
   const { requestId, projectJson, media } = (event.data?.payload ?? {}) as {
@@ -259,8 +291,9 @@ export function handleOpenProject(event: MessageEvent): Promise<void> {
     reply(ok, missing)
   })
   pendingOpen = done
-  void done.then(() => {
+  const settle = () => {
     if (pendingOpen === done) pendingOpen = null
-  })
+  }
+  done.then(settle, settle)
   return done
 }

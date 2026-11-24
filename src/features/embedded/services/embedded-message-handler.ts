@@ -22,7 +22,12 @@ import {
   type SettleImportedRef,
 } from './imported-refs'
 import { handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
-import { handleOpenProject, openInProgress, setOpenProjectEditor } from './cloud-project-open'
+import {
+  handleOpenProject,
+  openInProgress,
+  setOpenProjectEditor,
+  type SaveLocation,
+} from './cloud-project-open'
 import { handlePlayback } from './playback-control'
 import { handlePresence } from './presence-message'
 import { handleStudio } from './studio-message'
@@ -46,6 +51,11 @@ export interface EmbeddedMessageHandlerDeps {
    * out of the first paint). Without it the editor does not offer `edit-ops`.
    */
   readonly loadEditOps?: LoadEditOps
+  /**
+   * Remembers where the app is and answers how to go back there: a failed
+   * NODARO_OPEN_PROJECT goes back, so the editor never stays on a project it removed.
+   */
+  readonly saveLocation?: SaveLocation
 }
 
 let openEditor: EmbeddedMessageHandlerDeps['openEditor'] = (projectId) => {
@@ -409,7 +419,9 @@ function handleResetProject() {
  *   A successful open discards any change of the previous project not yet
  *   announced, so a parent reads and saves the current project
  *   (NODARO_GET_PROJECT) before it sends NODARO_OPEN_PROJECT. `ok: false` leaves
- *   the previous project open, unchanged, with its revision.
+ *   the previous project open with its content, playhead and revision; when the
+ *   editor had already moved, it reloads that project, so its undo history, open
+ *   tab, selection, zoom and scroll start afresh.
  */
 const EMBEDDED_CAPABILITIES = [
   'timeline-add',
@@ -462,8 +474,11 @@ async function handleImportFiles(event: MessageEvent) {
   if (!files?.length) return
   // Files sent while a project is being opened go into the project opened, and
   // their refs are claimed once its refs replaced the previous project's.
-  const opening = openInProgress()
-  if (opening) await opening
+  try {
+    await openInProgress()
+  } catch {
+    // A failed open answered for itself; the files still go into the open project.
+  }
   const settlers = claimRefs(files)
 
   try {
@@ -551,7 +566,7 @@ function handleMessage(event: MessageEvent) {
 
 export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
   openEditor = deps.openEditor
-  setOpenProjectEditor(deps.openEditor)
+  setOpenProjectEditor(deps.openEditor, deps.saveLocation ?? null)
   setEditOpsLoader(deps.loadEditOps ?? null)
   openOnEditWorkspace()
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.
