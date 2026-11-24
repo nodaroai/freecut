@@ -17,8 +17,10 @@ let announceTimer: ReturnType<typeof setTimeout> | undefined
 // A change was made while there was no parent to tell: it is told once one is set.
 let unannounced = false
 let stopAnnouncements: (() => void) | null = null
-// True while a project is being opened: nothing it changes is a change to announce.
+// True while a project is being opened: what changes meanwhile is told only if the open fails.
 let opening = false
+// A change was waiting when an open began, or was signalled while it ran.
+let heldChange = false
 
 /** The revision of the newest change announced to the parent. */
 export function currentRevision(): number {
@@ -43,7 +45,10 @@ function announce() {
 }
 
 function projectChanged() {
-  if (opening) return
+  if (opening) {
+    heldChange = true
+    return
+  }
   if (announceTimer === undefined) announceTimer = setTimeout(announce, ANNOUNCE_INTERVAL_MS)
 }
 
@@ -51,20 +56,23 @@ function projectChanged() {
  * Holds the announcements while a project is opened (NODARO_OPEN_PROJECT), and
  * answers how to end the open. Once the open project was replaced, the opened
  * one is revision 0, with nothing waiting to be announced, neither from during
- * the open nor from before it. A failed open leaves things exactly as they
- * were before it: the revision unchanged, and a change that was waiting to be
- * announced still announced, once; what the failed open itself moved (the
- * editor reloading the previous project) is not a change.
+ * the open nor from before it. A failed open leaves the revision as it was and
+ * announces once when a change was waiting as it began or any change was
+ * signalled while it ran (the person editing, or the editor reloading the
+ * previous project): a change never goes untold, at the cost of an
+ * announcement that may not change anything.
  */
 export function beginProjectOpen(): (replaced: boolean) => void {
   opening = true
-  const waiting = announceTimer !== undefined
+  heldChange = announceTimer !== undefined
   clearTimeout(announceTimer)
   announceTimer = undefined
   return (replaced) => {
     opening = false
+    const held = heldChange
+    heldChange = false
     if (!replaced) {
-      if (waiting) projectChanged()
+      if (held) projectChanged()
       return
     }
     clearTimeout(announceTimer)

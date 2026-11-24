@@ -246,7 +246,8 @@ async function openProject(saved: Project, media: unknown, origin: string): Prom
  * Queued with the edit and read requests, so none runs against a half-opened
  * project; an open sent while a video is being imported waits for it.
  * `ok: false` means the project open before is still open, with its content,
- * playhead, revision and any change waiting to be announced; when the editor
+ * playhead and revision; a change waiting as the open began, or made while it
+ * ran, is announced once afterwards (possibly when nothing changed). When the editor
  * had already moved to the opened project, it reloads the previous one, which
  * starts its undo history, open tab, selection, zoom and scroll afresh.
  */

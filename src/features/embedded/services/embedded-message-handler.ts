@@ -419,7 +419,9 @@ function handleResetProject() {
  *   A successful open discards any change of the previous project not yet
  *   announced, so a parent reads and saves the current project
  *   (NODARO_GET_PROJECT) before it sends NODARO_OPEN_PROJECT. `ok: false` leaves
- *   the previous project open with its content, playhead and revision; when the
+ *   the previous project open with its content, playhead and revision, and
+ *   announces a change once afterwards when one was waiting as the open began or
+ *   any was made while it ran (possibly when nothing changed); when the
  *   editor had already moved, it reloads that project, so its undo history, open
  *   tab, selection, zoom and scroll start afresh.
  */

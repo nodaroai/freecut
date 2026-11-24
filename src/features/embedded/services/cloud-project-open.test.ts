@@ -87,12 +87,21 @@ vi.mock('../deps/timeline-contract', async () => {
   }
 })
 vi.mock('./embedded-workspace', () => ({ ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}) }))
-// The project file handed over is the project the store holds as current.
+// The project file handed over is the project the store holds as current,
+// with the newest edit in its history.
 vi.mock('./studio-export-bridge', async () => {
   const { useProjectStore } = await import('../deps/projects-contract')
+  const { useTimelineCommandStore } = await import('../deps/timeline-contract')
   return {
     collectProjectJson: vi.fn(async () => ({
-      project: { id: useProjectStore.getState().currentProject?.id },
+      project: {
+        id: useProjectStore.getState().currentProject?.id,
+        lastEdit: (
+          useTimelineCommandStore.getState().undoStack.at(-1) as
+            | { command: { type: string } }
+            | undefined
+        )?.command.type,
+      },
     })),
   }
 })
@@ -689,10 +698,10 @@ describe('NODARO_OPEN_PROJECT', () => {
       await expectAsBefore(before, 'f4')
     })
 
-    it('announces nothing when no change was waiting', async () => {
+    it('announces nothing when no change was waiting and none was made', async () => {
       stop = startProjectChangeAnnouncements()
       const before = currentRevision()
-      vi.mocked(loadTimeline).mockRejectedValueOnce(new Error('Failed to load timeline'))
+      vi.mocked(updateProject).mockRejectedValueOnce(new Error('disk full'))
 
       await open({ requestId: 'f5', projectJson: savedProject({}), media: [] })
       await sleep(600)
@@ -700,6 +709,31 @@ describe('NODARO_OPEN_PROJECT', () => {
       expect(opened()).toMatchObject({ ok: false, revision: before })
       expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
       expect(currentRevision()).toBe(before)
+    })
+
+    it('announces once an edit made to the previous project while the open ran', async () => {
+      stop = startProjectChangeAnnouncements()
+      const before = currentRevision()
+      // The person edits the project still on screen while its media is fetched.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          history.setState({ undoStack: [{ command: { type: 'EDIT_DURING_OPEN' } }] })
+          return new Response(new Blob(['x']))
+        }),
+      )
+      vi.mocked(updateProject).mockRejectedValueOnce(new Error('disk full'))
+
+      await open({ requestId: 'f7', projectJson: savedProject({}), media: [media('m1')] })
+      await sleep(600)
+
+      expect(opened()).toMatchObject({ ok: false, revision: before })
+      expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload.revision)).toEqual([before + 1])
+      await getProject('g-edit')
+      expect(posted('FREECUT_PROJECT').at(-1)!.payload).toMatchObject({
+        revision: before + 1,
+        projectJson: { project: { id: 'current', lastEdit: 'EDIT_DURING_OPEN' } },
+      })
     })
 
     it('when no project was open and the opened one is slow to load, the editor is left on none', async () => {
