@@ -137,7 +137,8 @@ async function fetchFile(entry: OpenMedia, signal: AbortSignal): Promise<Blob> {
       throw new Error('The file is too large')
     }
     const fetched = await Promise.race([readBody(response), aborted])
-    return new Blob([fetched], { type: entry.type || fetched.type })
+    const type = entry.type || fetched.type || (response.headers.get('content-type') ?? '')
+    return new Blob([fetched], { type })
   } finally {
     signal.removeEventListener('abort', stop)
     clearTimeout(firstByte)

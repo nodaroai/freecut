@@ -997,6 +997,23 @@ describe('NODARO_OPEN_PROJECT', () => {
       expect(imported.type).toBe('video/mp4')
     })
 
+    it('an entry with no type takes the type the response names', async () => {
+      const blob = vi.mocked(mediaLibraryService.importMediaBlob)
+      blob.mockClear()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response('x', { headers: { 'content-type': 'audio/wav' } })),
+      )
+
+      await open({
+        requestId: 't9',
+        projectJson: savedProject({}),
+        media: [{ ...media('m1'), type: '' }],
+      })
+
+      expect(blob.mock.calls[0]![0].type).toBe('audio/wav')
+    })
+
     it('a malformed media entry is missing, not fetched', async () => {
       const projectJson = savedProject({
         items: [
