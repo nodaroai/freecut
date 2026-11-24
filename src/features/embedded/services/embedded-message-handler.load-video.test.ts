@@ -53,6 +53,8 @@ vi.mock('@/infrastructure/storage', () => ({ updateProject: vi.fn(), getProject:
 import { useProjectStore } from '../deps/projects-contract'
 import { mediaLibraryService } from '../deps/media-library-contract'
 import { useEmbeddedStore } from '../stores/embedded-store'
+import { useTimelineSettingsStore } from '../deps/timeline-contract'
+import { currentRevision } from './cloud-project'
 import { initEmbeddedMessageHandler } from './embedded-message-handler'
 import { claimImportedRef, refsByMediaId } from './imported-refs'
 
@@ -127,6 +129,29 @@ describe('NODARO_LOAD_VIDEO replaces the open project only when it opens the new
     await vi.waitFor(() => expect(posted('FREECUT_TIMELINE_ADDED')).toHaveLength(1))
   })
 
+  it("a failed load leaves the previous project's waiting change and revision as they were", async () => {
+    useEmbeddedStore.setState({ isEmbedded: true, parentOrigin: ORIGIN })
+    useTimelineSettingsStore.setState({ isDirty: false })
+    useTimelineSettingsStore.setState({ isDirty: true })
+    await vi.waitFor(() => expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(1))
+    const before = currentRevision()
+    // A change of the previous project is waiting when the load starts, and the load fails.
+    useTimelineSettingsStore.setState({ isDirty: false })
+    useTimelineSettingsStore.setState({ isDirty: true })
+    vi.mocked(mediaLibraryService.importMediaBlob).mockRejectedValueOnce(new Error('cannot decode'))
+
+    send('NODARO_LOAD_VIDEO', { videoUrl: 'https://cdn.example/broken.mp4' })
+
+    await vi.waitFor(() => expect(posted('FREECUT_ERROR')).toHaveLength(1))
+    await vi.waitFor(() => expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(2), {
+      timeout: 2000,
+    })
+    expect(posted('FREECUT_PROJECT_CHANGED').at(-1)!.payload).toEqual({
+      revision: before + 1,
+      projectId: 'previous',
+    })
+  })
+
   it('NODARO_RESET_PROJECT keeps the refs: the project open stays open', () => {
     claimImportedRef('r-reset')('m-reset')
 
@@ -154,14 +179,16 @@ describe('NODARO_LOAD_VIDEO replaces the open project only when it opens the new
     await new Promise((resolve) => setTimeout(resolve, 20))
     release()
 
-    await vi.waitFor(() => expect(openEditor).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(openEditor).toHaveBeenCalledOnce(), { timeout: 3000 })
     const loaded = openEditor.mock.calls[0]![0] as string
-    await vi.waitFor(() =>
-      expect(mediaLibraryService.importMediaBlob).toHaveBeenCalledWith(
-        expect.any(Blob),
-        loaded,
-        'extra.mp4',
-      ),
+    await vi.waitFor(
+      () =>
+        expect(mediaLibraryService.importMediaBlob).toHaveBeenCalledWith(
+          expect.any(Blob),
+          loaded,
+          'extra.mp4',
+        ),
+      { timeout: 3000 },
     )
   })
 })

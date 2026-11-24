@@ -21,7 +21,11 @@ import {
   mediaIdForRef,
   type SettleImportedRef,
 } from './imported-refs'
-import { handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
+import {
+  handleGetProject,
+  startProjectChangeAnnouncements,
+  withoutProjectSwitch,
+} from './cloud-project'
 import {
   handleCancelOpen,
   handleOpenProject,
@@ -265,10 +269,14 @@ async function restoreTimelineSnapshot(
 async function createLoadedProject(
   data: Parameters<ReturnType<typeof useProjectStore.getState>['createProject']>[0],
 ) {
-  const previous = useProjectStore.getState().currentProject
-  const project = await useProjectStore.getState().createProject(data)
-  useProjectStore.setState({ currentProject: previous })
-  return project
+  return withoutProjectSwitch(async () => {
+    const previous = useProjectStore.getState().currentProject
+    try {
+      return await useProjectStore.getState().createProject(data)
+    } finally {
+      useProjectStore.setState({ currentProject: previous })
+    }
+  })
 }
 
 // The load's project becomes the open one, and the editor opens it: the refs
@@ -486,7 +494,12 @@ function handleResetProject() {
  *     keeps a new local copy, with its media downloaded again.
  *   - `projectId` is null whenever the editor holds no project. A parent
  *     refuses to save a project file whose `projectId` is not the one its last
- *     open or load produced: the editor is then on another project.
+ *     open or load produced: the editor is then on another project. An open
+ *     names its id in FREECUT_PROJECT_OPENED. A NODARO_LOAD_VIDEO has no
+ *     answer: its id is the one the first FREECUT_PROJECT_CHANGED, or the
+ *     first FREECUT_PROJECT that is not `notReady`, names after the load
+ *     (a load that restores a `projectJson` may announce nothing, so ask
+ *     with NODARO_GET_PROJECT).
  *   - The editor never adds an entry to the browser history, so the parent's
  *     Back and Forward buttons never move it between projects.
  */

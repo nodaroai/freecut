@@ -26,6 +26,8 @@ let stopAnnouncements: (() => void) | null = null
 let opening = false
 // A change was waiting when an open began, or was signalled while it ran.
 let heldChange = false
+// How many projects are being made without becoming the open one (a NODARO_LOAD_VIDEO).
+let building = 0
 
 /** The revision of the newest change announced to the parent. */
 export function currentRevision(): number {
@@ -63,6 +65,20 @@ function projectSwitched(projectId: string | null) {
   unannounced = false
   revision = 0
   revisionProjectId = projectId
+}
+
+/**
+ * Runs `make`, which makes a project and puts the open one back as current: a
+ * load makes its project that way, and it becomes the open one only when the
+ * load opens it. Meanwhile the project store's current project is not a switch.
+ */
+export async function withoutProjectSwitch<T>(make: () => Promise<T>): Promise<T> {
+  building += 1
+  try {
+    return await make()
+  } finally {
+    building -= 1
+  }
 }
 
 /** The open project, as the project store names it; null while none is. */
@@ -178,7 +194,7 @@ export function startProjectChangeAnnouncements(): () => void {
     // is not one, and an open settles the switch itself when it ends.
     useProjectStore.subscribe((state) => {
       const id = state.currentProject?.id ?? null
-      if (id !== null && id !== revisionProjectId && !opening) projectSwitched(id)
+      if (id !== null && id !== revisionProjectId && !opening && building === 0) projectSwitched(id)
     }),
     useTimelineSettingsStore.subscribe((state, prev) => {
       if (state.isDirty && !prev.isDirty) projectChanged()
