@@ -83,7 +83,7 @@ import { mediaLibraryService, useMediaLibraryStore } from '../deps/media-library
 import { useTimelineCommandStore, useTimelineSettingsStore } from '../deps/timeline-contract'
 import { updateProject } from '@/infrastructure/storage'
 import { useEmbeddedStore } from '../stores/embedded-store'
-import { currentRevision, startProjectChangeAnnouncements } from './cloud-project'
+import { currentRevision, handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
 import { handleOpenProject, setOpenProjectEditor } from './cloud-project-open'
 import { claimImportedRef, mediaIdForRef, refsByMediaId } from './imported-refs'
 
@@ -431,5 +431,106 @@ describe('NODARO_OPEN_PROJECT', () => {
 
     expect(useEmbeddedStore.getState().pendingVideoImport).toBeNull()
     expect(useEmbeddedStore.getState().isImporting).toBe(false)
+  })
+
+  it('points the captions and subtitles of an item at the imported media too', async () => {
+    const projectJson = savedProject({
+      items: [
+        {
+          id: 'i1',
+          mediaId: 'm1',
+          transcriptCaptions: { type: 'transcript', mediaId: 'm1', enabled: true, updatedAt: 1 },
+        },
+        { id: 's1', type: 'subtitle', source: { type: 'transcript', mediaId: 'm2', clipId: 'i1' } },
+        { id: 's2', type: 'subtitle', source: { type: 'subtitle-import', fileName: 'a.srt' } },
+      ],
+    })
+
+    await open({ requestId: 'o11', projectJson, media: [media('m1')] })
+
+    const [video, subtitle, imported] = written().timeline.items
+    expect(video!.transcriptCaptions).toMatchObject({ mediaId: 'new-m1.mp4', enabled: true })
+    expect(subtitle!.source).toEqual({ type: 'transcript', mediaId: 'm2', clipId: 'i1' })
+    expect(imported!.source).toEqual({ type: 'subtitle-import', fileName: 'a.srt' })
+    expect(opened()).toMatchObject({ ok: true, missing: ['m2'] })
+  })
+
+  it('a request sent during the open runs once the open has answered', async () => {
+    const opening = open({
+      requestId: 'o12',
+      projectJson: savedProject({ items: [{ id: 'i1', mediaId: 'm1' }] }),
+      media: [media('m1')],
+    })
+    const get = handleGetProject(
+      new MessageEvent('message', {
+        data: { type: 'NODARO_GET_PROJECT', payload: { requestId: 'g1' } },
+        origin: ORIGIN,
+      }),
+    )
+    await Promise.all([opening, get])
+
+    const order = post.mock.calls.map((call) => (call[0] as Posted).type)
+    expect(order.indexOf('FREECUT_PROJECT_OPENED')).toBeGreaterThanOrEqual(0)
+    expect(order.indexOf('FREECUT_PROJECT_OPENED')).toBeLessThan(order.indexOf('FREECUT_PROJECT'))
+    expect(posted('FREECUT_PROJECT')[0]!.payload).toMatchObject({ requestId: 'g1', revision: 0 })
+  })
+
+  it('answers the origin that asked, and makes it the parent told about changes', async () => {
+    const studio = 'https://studio.nodaro.ai'
+
+    await open({ requestId: 'o13', projectJson: {}, media: [] }, studio)
+    expect(post.mock.calls.at(-1)![1]).toBe(studio)
+    expect(useEmbeddedStore.getState().parentOrigin).toBe(ORIGIN)
+
+    await open({ requestId: 'o14', projectJson: savedProject({}), media: [] }, studio)
+    expect(opened()).toMatchObject({ requestId: 'o14', ok: true })
+    expect(post.mock.calls.at(-1)![1]).toBe(studio)
+    expect(useEmbeddedStore.getState().parentOrigin).toBe(studio)
+  })
+
+  it('waits for a video import that is still running, then opens', async () => {
+    useEmbeddedStore.setState({ isImporting: true })
+    setTimeout(() => useEmbeddedStore.setState({ isImporting: false }), 100)
+
+    await open({ requestId: 'o15', projectJson: savedProject({}), media: [] })
+
+    expect(opened()).toMatchObject({ requestId: 'o15', ok: true })
+    expect(openEditor).toHaveBeenCalledTimes(1)
+  })
+
+  it('a project without a canvas size answers ok: false and leaves the current project untouched', async () => {
+    const projectJson = savedProject({})
+    const { metadata: _metadata, ...withoutSize } = projectJson.project
+
+    await open({
+      requestId: 'o16',
+      projectJson: { ...projectJson, project: withoutSize },
+      media: [],
+    })
+
+    expect(opened()).toMatchObject({ requestId: 'o16', ok: false })
+    expect(useProjectStore.getState().createProject).not.toHaveBeenCalled()
+    expect(useProjectStore.getState().currentProject?.id).toBe('current')
+  })
+
+  it('an open that fails before replacing the project keeps its refs, revision and changes', async () => {
+    stop = startProjectChangeAnnouncements()
+    settings.setState({ isDirty: true })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    const before = currentRevision()
+    claimImportedRef('ref-kept')('media-kept')
+    vi.mocked(useProjectStore.getState().createProject).mockRejectedValueOnce(
+      new Error('disk full'),
+    )
+    history.setState({ undoStack: [{ command: { type: 'MOVE_ITEM' } }] })
+
+    await open({ requestId: 'o17', projectJson: savedProject({}), media: [] })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+
+    expect(opened()).toEqual({ requestId: 'o17', ok: false, missing: [], revision: before })
+    expect(refsByMediaId()).toEqual({ 'media-kept': 'ref-kept' })
+    expect(openEditor).not.toHaveBeenCalled()
+    // The edit made while the open ran is still told.
+    expect(currentRevision()).toBe(before + 1)
   })
 })
