@@ -16,6 +16,7 @@ import {
   type LoadEditOps,
 } from './edit-ops-bridge'
 import { claimImportedRef, mediaIdForRef, type SettleImportedRef } from './imported-refs'
+import { handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
 import { handlePlayback } from './playback-control'
 import { handlePresence } from './presence-message'
 import { handleStudio } from './studio-message'
@@ -387,6 +388,11 @@ function handleResetProject() {
  *   fitItem, applyLook and removeEffects), with edit-ops.
  * - `captions-word-highlight`: addTranscriptCaptions lights up the spoken word
  *   (`highlight` and per-cue `words`), with edit-ops.
+ * - `cloud-project`: FREECUT_PROJECT_CHANGED { revision } says the project
+ *   changed (at most every 500 ms; the revision counts up from 1 per session),
+ *   and NODARO_GET_PROJECT { requestId } answers FREECUT_PROJECT { requestId,
+ *   revision, projectJson, refs }: the project file and the parent's ref for
+ *   each media id it imported, so the parent can save the project.
  */
 const EMBEDDED_CAPABILITIES = [
   'timeline-add',
@@ -397,6 +403,7 @@ const EMBEDDED_CAPABILITIES = [
   'compare',
   'studio-layout',
   'studio-host-buttons',
+  'cloud-project',
 ] as const
 
 const EDIT_OPS_CAPABILITIES = ['edit-ops', 'edit-ops-2', 'captions-word-highlight'] as const
@@ -496,6 +503,7 @@ const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | 
   NODARO_ADD_TO_TIMELINE: handleAddToTimeline,
   NODARO_APPLY_OPS: handleApplyOps,
   NODARO_GET_TIMELINE: handleGetTimeline,
+  NODARO_GET_PROJECT: handleGetProject,
   NODARO_PLAYBACK: handlePlayback,
   NODARO_UNDO_EDIT: handleUndoEdit,
   NODARO_PRESENCE: handlePresence,
@@ -529,6 +537,7 @@ export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.
   void ensureEmbeddedWorkspaceMounted()
   window.addEventListener('message', handleMessage)
+  startProjectChangeAnnouncements()
   // Signal readiness to parent (uses '*' because parent origin unknown yet, no sensitive payload)
   // — with what this editor can do beyond the basics (EMBEDDED_CAPABILITIES).
   window.parent.postMessage({ type: 'FREECUT_READY', capabilities: readyCapabilities() }, '*')
