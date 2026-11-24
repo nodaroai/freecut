@@ -126,7 +126,12 @@ import {
 import { updateProject } from '@/infrastructure/storage'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { currentRevision, handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
-import { handleOpenProject, openInProgress, setOpenProjectEditor } from './cloud-project-open'
+import {
+  handleCancelOpen,
+  handleOpenProject,
+  openInProgress,
+  setOpenProjectEditor,
+} from './cloud-project-open'
 import { initEmbeddedMessageHandler } from './embedded-message-handler'
 import { claimImportedRef, mediaIdForRef, refsByMediaId } from './imported-refs'
 
@@ -248,6 +253,23 @@ const getProject = (requestId: string) =>
     ),
   )
 const sleep = (ms: number) => vi.advanceTimersByTimeAsync(ms)
+const cancel = (requestId: string, origin = ORIGIN) =>
+  handleCancelOpen(
+    new MessageEvent('message', {
+      data: { type: 'NODARO_CANCEL_OPEN', payload: { requestId } },
+      origin,
+    }),
+  )
+/** A fetch that answers only when its request is aborted (and then fails). */
+const hangingFetch = () =>
+  vi.fn(
+    (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('aborted', 'AbortError')),
+        )
+      }),
+  )
 
 const opened = () => posted('FREECUT_PROJECT_OPENED').at(-1)!.payload
 const written = () => {
@@ -915,6 +937,243 @@ describe('NODARO_OPEN_PROJECT', () => {
       expect(opened()).toMatchObject({ ok: true, missing: ['m1', 'm2'] })
       expect(fetch).not.toHaveBeenCalled()
       expect(written().timeline.items.map((item) => item.mediaId)).toEqual(['m1', 'm2'])
+    })
+  })
+
+  describe('progress', () => {
+    it('tells the parent how many media files have settled, missing ones included', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string) =>
+          url.includes('m2')
+            ? new Response('nope', { status: 404 })
+            : new Response(new Blob(['x'])),
+        ),
+      )
+
+      await open({
+        requestId: 'p1',
+        projectJson: savedProject({}),
+        media: [media('m1'), media('m2'), media('m3')],
+      })
+
+      const progress = posted('FREECUT_OPEN_PROGRESS').map((m) => m.payload)
+      expect(progress).toEqual([
+        { requestId: 'p1', fetched: 0, total: 3 },
+        { requestId: 'p1', fetched: 1, total: 3 },
+        { requestId: 'p1', fetched: 2, total: 3 },
+        { requestId: 'p1', fetched: 3, total: 3 },
+      ])
+      const order = post.mock.calls.map((call) => (call[0] as Posted).type)
+      expect(order.lastIndexOf('FREECUT_OPEN_PROGRESS')).toBeLessThan(
+        order.indexOf('FREECUT_PROJECT_OPENED'),
+      )
+    })
+  })
+
+  describe('NODARO_CANCEL_OPEN', () => {
+    // The refs of the project open when the open began.
+    let refsBefore: Record<string, string> = {}
+    beforeEach(() => {
+      refsBefore = refsByMediaId()
+    })
+
+    async function expectPreviousOpen(requestId: string) {
+      expect(opened()).toEqual({
+        requestId,
+        ok: false,
+        cancelled: true,
+        missing: [],
+        revision: currentRevision(),
+        projectId: 'current',
+      })
+      expect(useProjectStore.getState().currentProject?.id).toBe('current')
+      expect(useMediaLibraryStore.getState().currentProjectId).toBe('current')
+      expect(route).toBe('current')
+      expect([...db.keys()]).toEqual(['current'])
+      expect(refsByMediaId()).toEqual(refsBefore)
+    }
+
+    it('a cancel while the media is fetched rolls the open back', async () => {
+      vi.stubGlobal('fetch', hangingFetch())
+      const start = Date.now()
+
+      const opening = startOpen({
+        requestId: 'c1',
+        projectJson: savedProject({ items: [{ id: 'i1', mediaId: 'm1' }] }),
+        media: [media('m1'), media('m2')],
+      })
+      await sleep(1_000)
+      expect(posted('FREECUT_PROJECT_OPENED')).toHaveLength(0)
+      cancel('c1')
+      await drive(opening)
+
+      await expectPreviousOpen('c1')
+      expect(openEditor).not.toHaveBeenCalled()
+      expect(Date.now() - start).toBeLessThan(60_000)
+    })
+
+    it('a cancel after the editor moved to the opened project sends it back', async () => {
+      openEditor.mockImplementation((id: string) => {
+        showInEditor(id)
+        cancel('c2')
+      })
+
+      await open({ requestId: 'c2', projectJson: savedProject({}), media: [] })
+
+      expect(openEditor).toHaveBeenCalledWith(expect.stringMatching(/^fresh-/))
+      await expectPreviousOpen('c2')
+    })
+
+    it('a cancel of an open still waiting its turn answers cancelled without starting it', async () => {
+      useEmbeddedStore.setState({ isImporting: true })
+      const opening = startOpen({ requestId: 'c3', projectJson: savedProject({}), media: [] })
+      await sleep(100)
+      cancel('c3')
+      await drive(opening)
+
+      await expectPreviousOpen('c3')
+      expect(useProjectStore.getState().createProject).not.toHaveBeenCalled()
+      useEmbeddedStore.setState({ isImporting: false })
+    })
+
+    it('a cancel from another origin, or of another open, does nothing', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          cancel('c4', 'https://studio.nodaro.ai')
+          cancel('other')
+          return new Response(new Blob(['x']))
+        }),
+      )
+
+      await open({ requestId: 'c4', projectJson: savedProject({}), media: [media('m1')] })
+
+      expect(opened()).toMatchObject({ requestId: 'c4', ok: true })
+      expect(opened()).not.toHaveProperty('cancelled')
+    })
+
+    it('a cancel after the open answered does nothing', async () => {
+      await open({ requestId: 'c5', projectJson: savedProject({}), media: [] })
+      const freshId = useProjectStore.getState().currentProject!.id
+
+      cancel('c5')
+      await sleep(1_000)
+
+      expect(posted('FREECUT_PROJECT_OPENED')).toHaveLength(1)
+      expect(opened()).toMatchObject({ ok: true, projectId: freshId })
+      expect(useProjectStore.getState().currentProject?.id).toBe(freshId)
+    })
+  })
+
+  describe('discardPrevious', () => {
+    const { deleteProject, permanentlyDeleteProject } = useProjectStore.getState()
+    beforeEach(() => {
+      vi.mocked(deleteProject).mockClear()
+      vi.mocked(permanentlyDeleteProject).mockClear()
+    })
+
+    it('with it, a successful open removes the previous project and the media only it used', async () => {
+      await open({
+        requestId: 'd1',
+        projectJson: savedProject({}),
+        media: [media('m1')],
+        discardPrevious: true,
+      })
+
+      const freshId = useProjectStore.getState().currentProject!.id
+      expect(opened()).toMatchObject({ ok: true, projectId: freshId })
+      expect(deleteProject).toHaveBeenCalledWith('current')
+      expect(permanentlyDeleteProject).toHaveBeenCalledWith('current')
+      expect([...db.keys()]).toEqual([freshId])
+    })
+
+    it('with it, a failed open keeps the previous project', async () => {
+      vi.mocked(updateProject).mockRejectedValueOnce(new Error('disk full'))
+
+      await open({
+        requestId: 'd2',
+        projectJson: savedProject({}),
+        media: [],
+        discardPrevious: true,
+      })
+
+      expect(opened()).toMatchObject({ ok: false, projectId: 'current' })
+      expect([...db.keys()]).toEqual(['current'])
+      expect(permanentlyDeleteProject).not.toHaveBeenCalledWith('current')
+    })
+
+    it('without it, nothing is removed', async () => {
+      for (const discardPrevious of [undefined, false, 'yes']) {
+        await open({ requestId: 'd3', projectJson: savedProject({}), media: [], discardPrevious })
+      }
+
+      expect(deleteProject).not.toHaveBeenCalled()
+      expect(db.has('current')).toBe(true)
+    })
+
+    it('a cancel while the previous project is being removed does nothing: the open committed', async () => {
+      vi.mocked(deleteProject).mockImplementationOnce(async () => {
+        cancel('d4')
+        return undefined as never
+      })
+
+      await open({
+        requestId: 'd4',
+        projectJson: savedProject({}),
+        media: [],
+        discardPrevious: true,
+      })
+
+      expect(opened()).toMatchObject({ ok: true })
+      expect(opened()).not.toHaveProperty('cancelled')
+    })
+  })
+
+  describe('storage', () => {
+    it('an open whose media import runs out of storage fails, rolled back, with reason storage', async () => {
+      claimImportedRef('ref-kept')('media-kept')
+      const refsBefore = refsByMediaId()
+      vi.mocked(mediaLibraryService.importMediaBlob).mockImplementation(
+        async (_blob: Blob, _projectId: string, name: string) => {
+          if (name === 'm2.mp4') throw new Error('Insufficient storage: 1 GB needed')
+          return { id: `new-${name}` } as never
+        },
+      )
+      onTestFinished(() => {
+        vi.mocked(mediaLibraryService.importMediaBlob).mockImplementation(
+          async (_blob: Blob, _projectId: string, name: string) => ({ id: `new-${name}` }) as never,
+        )
+      })
+
+      await open({
+        requestId: 's1',
+        projectJson: savedProject({ items: [{ id: 'i1', mediaId: 'm1' }] }),
+        media: [media('m1'), media('m2'), media('m3')],
+      })
+
+      expect(opened()).toEqual({
+        requestId: 's1',
+        ok: false,
+        reason: 'storage',
+        missing: [],
+        revision: currentRevision(),
+        projectId: 'current',
+      })
+      expect([...db.keys()]).toEqual(['current'])
+      expect(useProjectStore.getState().currentProject?.id).toBe('current')
+      expect(refsByMediaId()).toEqual(refsBefore)
+      expect(openEditor).not.toHaveBeenCalled()
+    })
+
+    it('a write the browser refuses for its quota is a storage failure too', async () => {
+      vi.mocked(mediaLibraryService.importMediaBlob).mockRejectedValueOnce(
+        new DOMException('The quota has been exceeded.', 'QuotaExceededError'),
+      )
+
+      await open({ requestId: 's2', projectJson: savedProject({}), media: [media('m1')] })
+
+      expect(opened()).toMatchObject({ ok: false, reason: 'storage' })
     })
   })
 

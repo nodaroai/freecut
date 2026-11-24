@@ -11,6 +11,7 @@ const cloud = vi.hoisted(() => ({
 vi.mock('./cloud-project', () => cloud)
 const opening = vi.hoisted(() => ({
   handleOpenProject: vi.fn(async () => {}),
+  handleCancelOpen: vi.fn(),
   openInProgress: vi.fn(() => null),
   setOpenProjectEditor: vi.fn(),
 }))
@@ -26,6 +27,7 @@ beforeEach(() => {
   cloud.handleGetProject.mockClear()
   cloud.startProjectChangeAnnouncements.mockClear()
   opening.handleOpenProject.mockClear()
+  opening.handleCancelOpen.mockClear()
 })
 afterEach(() => post.mockRestore())
 
@@ -81,5 +83,23 @@ describe('cloud-project wiring', () => {
     expect(opening.handleOpenProject).toHaveBeenCalledTimes(1)
     const [event] = opening.handleOpenProject.mock.calls[0] as unknown as [MessageEvent]
     expect(event.origin).toBe(ORIGIN)
+  })
+
+  it('routes NODARO_CANCEL_OPEN from the parent, behind the origin check', () => {
+    initEmbeddedMessageHandler({ openEditor: vi.fn(), saveLocation: () => () => {} })
+    const send = (origin: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'NODARO_CANCEL_OPEN', payload: { requestId: 'o1' } },
+          origin,
+          source: window,
+        }),
+      )
+
+    send('https://evil.example.com')
+    expect(opening.handleCancelOpen).not.toHaveBeenCalled()
+
+    send(ORIGIN)
+    expect(opening.handleCancelOpen).toHaveBeenCalledTimes(1)
   })
 })

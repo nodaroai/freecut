@@ -15,7 +15,13 @@ import {
 } from '../deps/timeline-contract'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { beginProjectOpen, currentRevision } from './cloud-project'
-import { importMedia, readMedia, remapTimeline, type OpenMedia } from './cloud-project-media'
+import {
+  importMedia,
+  isStorageFull,
+  readMedia,
+  remapTimeline,
+  type OpenMedia,
+} from './cloud-project-media'
 import { enqueueRequest } from './edit-ops-bridge'
 import { ensureEmbeddedWorkspaceMounted } from './embedded-workspace'
 import { editorShows, heldProjectId } from './held-project'
@@ -24,6 +30,7 @@ import { claimImportedRef, clearImportedRefs } from './imported-refs'
 const log = createLogger('embedded-cloud-project-open')
 
 const PROJECT_OPENED = 'FREECUT_PROJECT_OPENED'
+const OPEN_PROGRESS = 'FREECUT_OPEN_PROGRESS'
 
 /** How long an open waits for the editor to show a project, or for a video import to end. */
 const WAIT_MS = 30_000
@@ -50,6 +57,40 @@ export function setOpenProjectEditor(open: OpenEditor, save: SaveLocation): void
 // The newest open accepted and not yet answered.
 let pendingOpen: Promise<void> | null = null
 
+/** The parent cancelled the open (NODARO_CANCEL_OPEN). */
+class OpenCancelled extends Error {
+  constructor() {
+    super('The open was cancelled')
+  }
+}
+
+/** An open from the moment it is accepted until it is answered: what a cancel reaches. */
+interface RunningOpen {
+  readonly origin: string
+  readonly controller: AbortController
+  /** Set once the opened project is the open one: a cancel then does nothing. */
+  committed: boolean
+}
+const runningOpens = new Map<string, RunningOpen>()
+
+/**
+ * NODARO_CANCEL_OPEN { requestId }: stops the open with that requestId, sent
+ * from the same origin, and rolls it back as a failed open; it then answers
+ * `ok: false, cancelled: true`. Not queued: the open holds the request queue.
+ * A cancel that arrives once the open has committed, or names no running
+ * open, does nothing.
+ */
+export function handleCancelOpen(event: MessageEvent): void {
+  const { requestId } = (event.data?.payload ?? {}) as { requestId?: unknown }
+  const open = typeof requestId === 'string' ? runningOpens.get(requestId) : undefined
+  if (!open || open.origin !== event.origin) return
+  if (open.committed) {
+    log.info('NODARO_CANCEL_OPEN ignored: the project is already open', { requestId })
+    return
+  }
+  open.controller.abort(new OpenCancelled())
+}
+
 /** Settles once every open accepted so far has been answered; null when none is waiting. */
 export function openInProgress(): Promise<void> | null {
   return pendingOpen
@@ -73,10 +114,14 @@ function readSavedProject(projectJson: unknown): Project | null {
   }
 }
 
-/** Waits until `done` holds; false when it still does not after a while. */
-async function waitFor(done: () => boolean): Promise<boolean> {
+/**
+ * Waits until `done` holds; false when it still does not after a while.
+ * Throws the signal's reason as soon as it aborts.
+ */
+async function waitFor(done: () => boolean, signal?: AbortSignal): Promise<boolean> {
   const end = Date.now() + WAIT_MS
   for (;;) {
+    signal?.throwIfAborted()
     if (done()) return true
     if (Date.now() >= end) return false
     await new Promise((resolve) => setTimeout(resolve, POLL_MS))
@@ -111,8 +156,18 @@ async function createFresh(saved: Project, before: Before): Promise<Project> {
  * Fills the fresh project with the saved one and its media. Answers the stored
  * project, the media ids that did not arrive, and the refs of the media that did.
  */
-async function fillFresh(projectId: string, saved: Project, media: readonly OpenMedia[]) {
-  const { imported, refs } = await importMedia(media, projectId)
+async function fillFresh(
+  projectId: string,
+  saved: Project,
+  media: readonly OpenMedia[],
+  control: OpenControl,
+) {
+  let fetched = 0
+  const { imported, refs } = await importMedia(media, projectId, {
+    signal: control.signal,
+    onSettled: () => control.progress((fetched += 1)),
+  })
+  control.signal.throwIfAborted()
   // The saved media first, in the order given; then ids the project names with no entry at all.
   const missing = new Set(media.map((entry) => entry.mediaId).filter((id) => !imported.has(id)))
   const timeline = saved.timeline && remapTimeline(saved.timeline, imported, missing)
@@ -135,9 +190,10 @@ async function fillFresh(projectId: string, saved: Project, media: readonly Open
 }
 
 /** Shows the fresh project in the editor, keeping what the open project had unsaved. */
-async function showProject(project: Project, before: Before): Promise<void> {
+async function showProject(project: Project, before: Before, signal: AbortSignal): Promise<void> {
   const shown = before.project && editorShows(before.project.id)()
   if (before.project && shown) await saveTimeline(before.project.id)
+  signal.throwIfAborted()
   useEmbeddedStore.getState().setPendingVideoImport(null)
   useProjectStore.setState({
     currentProject: project,
@@ -145,11 +201,11 @@ async function showProject(project: Project, before: Before): Promise<void> {
   })
   openEditor(project.id)
   const mounted = () => useMediaLibraryStore.getState().currentProjectId === project.id
-  if (!(await waitFor(mounted))) throw new Error('The editor did not open the project')
+  if (!(await waitFor(mounted, signal))) throw new Error('The editor did not open the project')
   // The editor's own load of the project (joined while it runs): it fails
   // quietly in the editor, and a failed load is a failed open.
   await loadTimeline(project.id)
-  if (!(await waitFor(editorShows(project.id)))) {
+  if (!(await waitFor(editorShows(project.id), signal))) {
     throw new Error('The editor did not open the project')
   }
 }
@@ -205,8 +261,38 @@ function commitOpen(origin: string, refs: ReadonlyArray<{ ref: string; mediaId: 
   useTimelineSettingsStore.getState().markClean()
 }
 
+/** What runs an open: its cancel signal, how it reports progress, and its commit. */
+interface OpenControl {
+  readonly signal: AbortSignal
+  /** Tells the parent how many of the media files have settled. */
+  readonly progress: (fetched: number) => void
+  /** Marks the open committed: from then on a cancel does nothing. */
+  readonly commit: () => void
+}
+
+/**
+ * Removes the project open before a successful open, and the media only it
+ * used (NODARO_OPEN_PROJECT `discardPrevious`): the parent has it saved. A
+ * failure leaves it in local storage and does not change the open's answer.
+ */
+async function discardPrevious(projectId: string) {
+  const store = useProjectStore.getState()
+  try {
+    await store.deleteProject(projectId)
+    await store.permanentlyDeleteProject(projectId)
+  } catch (e) {
+    log.warn('NODARO_OPEN_PROJECT: the previous project could not be removed', { error: e })
+  }
+}
+
 /** Opens the saved project; answers `missing`, or throws after putting back what was open. */
-async function openProject(saved: Project, media: unknown, origin: string): Promise<string[]> {
+async function openProject(
+  saved: Project,
+  media: unknown,
+  origin: string,
+  control: OpenControl,
+  discard: boolean,
+): Promise<string[]> {
   const before: Before = {
     project: useProjectStore.getState().currentProject,
     shownId: useMediaLibraryStore.getState().currentProjectId,
@@ -214,86 +300,135 @@ async function openProject(saved: Project, media: unknown, origin: string): Prom
     goBack: saveLocation?.() ?? null,
   }
   const { entries, malformed } = readMedia(media)
+  const { signal } = control
+  control.progress(0)
   let freshId: string | null = null
   let navigated = false
+  let missing: string[]
   try {
     await ensureEmbeddedWorkspaceMounted()
+    signal.throwIfAborted()
     freshId = (await createFresh(saved, before)).id
-    const built = await fillFresh(freshId, saved, entries)
+    signal.throwIfAborted()
+    const built = await fillFresh(freshId, saved, entries, control)
     navigated = true
-    await showProject(built.project, before)
+    await showProject(built.project, before, signal)
+    // No await from this check to the commit: a cancel either lands before it or does nothing.
+    signal.throwIfAborted()
+    control.commit()
     commitOpen(origin, built.refs)
-    return [...new Set([...built.missing, ...malformed])]
+    missing = [...new Set([...built.missing, ...malformed])]
   } catch (e) {
     await rollBack(before, freshId, navigated)
     throw e
   }
+  if (discard && before.project && before.project.id !== freshId) {
+    await discardPrevious(before.project.id)
+  }
+  return missing
+}
+
+/** What a failed open's answer adds: why it failed, when the parent can act on it. */
+function failure(error: unknown): Record<string, unknown> {
+  if (error instanceof OpenCancelled) return { cancelled: true }
+  if (isStorageFull(error)) return { reason: 'storage' }
+  return {}
 }
 
 /**
- * NODARO_OPEN_PROJECT { requestId, projectJson, media } → FREECUT_PROJECT_OPENED
- * { requestId, ok, missing, revision }. Replaces the open project with a fresh
- * one holding the saved project file; the editor fetches each media item from
- * its `url` (https only, 4 at a time, without credentials) and points the items
- * at it. `missing` names the media ids that did not arrive, are malformed or
- * have no entry: their items keep the saved id. The opened project is revision
- * 0, with an empty history, and the open itself is not announced as a change.
- * Queued with the edit and read requests, so none runs against a half-opened
- * project; an open sent while a video is being imported waits for it.
+ * NODARO_OPEN_PROJECT { requestId, projectJson, media, discardPrevious? } →
+ * FREECUT_PROJECT_OPENED { requestId, ok, missing, revision, projectId }.
+ * Replaces the open project with a fresh one holding the saved project file;
+ * the editor fetches each media item from its `url` (https only, 4 at a time,
+ * without credentials) and points the items at it, telling the parent its
+ * progress in FREECUT_OPEN_PROGRESS { requestId, fetched, total }. `missing`
+ * names the media ids that did not arrive, are malformed or have no entry:
+ * their items keep the saved id. The opened project is revision 0, with an
+ * empty history, and the open itself is not announced as a change. Queued with
+ * the edit and read requests, so none runs against a half-opened project; an
+ * open sent while a video is being imported waits for it.
  * `ok: false` means the project open before is still open, with its content,
  * playhead and revision; a change waiting as the open began, or made while it
- * ran, is announced once afterwards (possibly when nothing changed). When the editor
- * had already moved to the opened project, it reloads the previous one, which
- * starts its undo history, open tab, selection, zoom and scroll afresh.
+ * ran, is announced once afterwards (possibly when nothing changed). When the
+ * editor had already moved to the opened project, it reloads the previous
+ * one, which starts its undo history, open tab, selection, zoom and scroll
+ * afresh. It carries `cancelled: true` after a NODARO_CANCEL_OPEN, and
+ * `reason: 'storage'` when the media did not fit in the browser's storage.
+ * With `discardPrevious: true`, a successful open then deletes the previous
+ * project and the media only it used.
  */
 export function handleOpenProject(event: MessageEvent): Promise<void> {
-  const { requestId, projectJson, media } = (event.data?.payload ?? {}) as {
+  const { requestId, projectJson, media, discardPrevious } = (event.data?.payload ?? {}) as {
     requestId?: unknown
     projectJson?: unknown
     media?: unknown
+    discardPrevious?: unknown
   }
   if (typeof requestId !== 'string') return Promise.resolve()
-  const reply = (ok: boolean, missing: string[]) =>
-    window.parent.postMessage(
-      {
-        type: PROJECT_OPENED,
-        payload: {
-          requestId,
-          ok,
-          missing,
-          revision: currentRevision(),
-          projectId: heldProjectId(),
-        },
-      },
-      event.origin,
-    )
+  const post = (type: string, payload: Record<string, unknown>) =>
+    window.parent.postMessage({ type, payload: { requestId, ...payload } }, event.origin)
+  // Read when sent: the answer names what the editor holds then.
+  const reply = (ok: boolean, missing: string[], why: Record<string, unknown> = {}) =>
+    post(PROJECT_OPENED, {
+      ok,
+      missing,
+      revision: currentRevision(),
+      projectId: heldProjectId(),
+      ...why,
+    })
 
-  const done = enqueueRequest(async () => {
+  // Known to a cancel from the moment it is accepted, while it waits its turn too.
+  const running: RunningOpen = {
+    origin: event.origin,
+    controller: new AbortController(),
+    committed: false,
+  }
+  runningOpens.set(requestId, running)
+  const { signal } = running.controller
+
+  const run = async () => {
+    if (signal.aborted) return reply(false, [], failure(signal.reason))
     const saved = readSavedProject(projectJson)
-    if (!saved) {
-      reply(false, [])
-      return
-    }
-    if (!(await waitFor(() => !useEmbeddedStore.getState().isImporting))) {
-      log.warn('NODARO_OPEN_PROJECT refused: a video is still being imported')
-      reply(false, [])
-      return
+    if (!saved) return reply(false, [])
+    try {
+      if (!(await waitFor(() => !useEmbeddedStore.getState().isImporting, signal))) {
+        log.warn('NODARO_OPEN_PROJECT refused: a video is still being imported')
+        return reply(false, [])
+      }
+    } catch (e) {
+      return reply(false, [], failure(e))
     }
 
+    const total = readMedia(media).entries.length
+    const control: OpenControl = {
+      signal,
+      progress: (fetched) => post(OPEN_PROGRESS, { fetched, total }),
+      commit: () => (running.committed = true),
+    }
     useEmbeddedStore.getState().setIsImporting(true)
     const endOpen = beginProjectOpen()
     let ok = false
     let missing: string[] = []
+    let why: Record<string, unknown> = {}
     try {
-      missing = await openProject(saved, media, event.origin)
+      missing = await openProject(saved, media, event.origin, control, discardPrevious === true)
       ok = true
     } catch (e) {
       log.error('NODARO_OPEN_PROJECT failed:', e)
+      why = failure(e)
     } finally {
       useEmbeddedStore.getState().setIsImporting(false)
       endOpen(ok)
     }
-    reply(ok, missing)
+    reply(ok, missing, why)
+  }
+
+  const done = enqueueRequest(async () => {
+    try {
+      await run()
+    } finally {
+      if (runningOpens.get(requestId) === running) runningOpens.delete(requestId)
+    }
   })
   pendingOpen = done
   const settle = () => {

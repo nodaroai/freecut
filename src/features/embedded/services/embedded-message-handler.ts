@@ -23,6 +23,7 @@ import {
 } from './imported-refs'
 import { handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
 import {
+  handleCancelOpen,
   handleOpenProject,
   openInProgress,
   setOpenProjectEditor,
@@ -450,17 +451,37 @@ function handleResetProject() {
  *     revision, projectId, projectJson: null, notReady: true }: nothing to
  *     save now; ask again after the next FREECUT_PROJECT_CHANGED.
  *   - NODARO_OPEN_PROJECT { requestId, projectJson, media: [{ mediaId, ref,
- *     url, name, type }] } opens a saved project in a fresh one, fetching each
- *     media item from its url, and answers FREECUT_PROJECT_OPENED { requestId,
- *     ok, missing, revision, projectId }: the media ids that did not arrive,
- *     at revision 0, and the id the open produced. A successful open discards
- *     any change of the previous project not yet announced. `ok: false` leaves
- *     the previous project open with its content, playhead and revision, and
- *     `projectId` names it (null when the editor holds no project); a change
- *     waiting as the open began, or made while it ran, is announced once
- *     afterwards (possibly when nothing changed). When the editor had already
- *     moved, it reloads that project, so its undo history, open tab,
- *     selection, zoom and scroll start afresh.
+ *     url, name, type }], discardPrevious? } opens a saved project in a fresh
+ *     one, fetching each media item from its url (https; 4 at a time; without
+ *     credentials), and answers FREECUT_PROJECT_OPENED { requestId, ok,
+ *     missing, revision, projectId }: the media ids that did not arrive, at
+ *     revision 0, and the id the open produced. A successful open discards any
+ *     change of the previous project not yet announced.
+ *   - While it runs, the editor sends FREECUT_OPEN_PROGRESS { requestId,
+ *     fetched, total }: once as it starts (fetched 0), then each time one of
+ *     the `total` media files it fetches has settled, arrived or missing.
+ *     Nothing in the editor stops the person editing meanwhile, so the parent
+ *     covers the editor from sending NODARO_OPEN_PROJECT until
+ *     FREECUT_PROJECT_OPENED.
+ *   - NODARO_CANCEL_OPEN { requestId } (the open's requestId, from the same
+ *     origin) stops a running or waiting open: its fetches are aborted, it is
+ *     rolled back as a failed open, and it answers `ok: false, cancelled:
+ *     true`. A cancel that arrives once the open has committed does nothing,
+ *     and the open answers `ok: true`.
+ *   - `ok: false` leaves the previous project open with its content, playhead
+ *     and revision, and `projectId` names it (null when the editor holds no
+ *     project); a change waiting as the open began, or made while it ran, is
+ *     announced once afterwards (possibly when nothing changed). When the
+ *     editor had already moved, it reloads that project, so its undo history,
+ *     open tab, selection, zoom and scroll start afresh. `reason: 'storage'`
+ *     says the browser ran out of storage for the media; the open then fails
+ *     rather than leave media missing.
+ *   - `discardPrevious: true` asks the editor to delete, once the open has
+ *     succeeded, the project that was open before and the media only it used,
+ *     from this browser. The parent sets it only when it has the previous
+ *     project's latest state saved; without it nothing is deleted, and a
+ *     failed open never deletes anything. Every successful open otherwise
+ *     keeps a new local copy, with its media downloaded again.
  *   - `projectId` is null whenever the editor holds no project. A parent
  *     refuses to save a project file whose `projectId` is not the one its last
  *     open or load produced: the editor is then on another project.
@@ -585,6 +606,8 @@ const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | 
   NODARO_GET_TIMELINE: handleGetTimeline,
   NODARO_GET_PROJECT: handleGetProject,
   NODARO_OPEN_PROJECT: handleOpenProject,
+  // Not queued behind the open it cancels: the open holds the request queue.
+  NODARO_CANCEL_OPEN: handleCancelOpen,
   NODARO_PLAYBACK: handlePlayback,
   NODARO_UNDO_EDIT: handleUndoEdit,
   NODARO_PRESENCE: handlePresence,

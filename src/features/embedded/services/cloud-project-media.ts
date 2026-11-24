@@ -48,16 +48,43 @@ function fetchable(address: string): boolean {
   return url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)
 }
 
-/** Fetches one file, giving up (by throwing) when it is slow, too large or refused. */
-async function fetchFile(entry: OpenMedia): Promise<Blob> {
+/** An open's media import ran out of local storage: the open fails. */
+export class StorageFull extends Error {
+  constructor(cause: unknown) {
+    super('There is not enough storage for the media', { cause })
+  }
+}
+
+/**
+ * Whether an error (or what caused it) is the browser's storage running out:
+ * the media library's own check before it writes, or the write refused.
+ */
+export function isStorageFull(error: unknown): boolean {
+  for (let at: unknown = error, depth = 0; at && depth < 5; depth++) {
+    if (at instanceof StorageFull) return true
+    if ((at as { name?: unknown }).name === 'QuotaExceededError') return true
+    if (at instanceof Error && /insufficient storage/i.test(at.message)) return true
+    at = (at as { cause?: unknown }).cause
+  }
+  return false
+}
+
+/**
+ * Fetches one file, giving up (by throwing) when it is slow, too large or
+ * refused, or when `signal` aborts.
+ */
+async function fetchFile(entry: OpenMedia, signal: AbortSignal): Promise<Blob> {
   if (!fetchable(entry.url)) throw new Error('Not an address the editor fetches')
+  signal.throwIfAborted()
   const controller = new AbortController()
   const aborted = new Promise<never>((_, reject) => {
-    controller.signal.addEventListener('abort', () => reject(new Error('Fetch timed out')))
+    controller.signal.addEventListener('abort', () => reject(new Error('Fetch stopped')))
   })
   aborted.catch(() => {})
-  const firstByte = setTimeout(() => controller.abort(), FIRST_BYTE_MS)
-  const whole = setTimeout(() => controller.abort(), FILE_MS)
+  const stop = () => controller.abort()
+  signal.addEventListener('abort', stop, { once: true })
+  const firstByte = setTimeout(stop, FIRST_BYTE_MS)
+  const whole = setTimeout(stop, FILE_MS)
   try {
     const response = await Promise.race([
       fetch(entry.url, { credentials: 'omit', signal: controller.signal }),
@@ -71,43 +98,78 @@ async function fetchFile(entry: OpenMedia): Promise<Blob> {
     const fetched = await Promise.race([response.blob(), aborted])
     return new Blob([fetched], { type: entry.type || fetched.type })
   } finally {
+    signal.removeEventListener('abort', stop)
     clearTimeout(firstByte)
     clearTimeout(whole)
     controller.abort()
   }
 }
 
-/** Runs `run` on every entry, at most `limit` at a time. */
+/** Runs `run` on every entry, at most `limit` at a time, taking no new one once `signal` aborts. */
 async function eachLimited<T>(
   entries: readonly T[],
   limit: number,
+  signal: AbortSignal,
   run: (entry: T) => Promise<void>,
 ) {
   let next = 0
   const worker = async () => {
-    while (next < entries.length) await run(entries[next++]!)
+    while (next < entries.length && !signal.aborted) await run(entries[next++]!)
   }
   await Promise.all(Array.from({ length: Math.min(limit, entries.length) }, worker))
 }
 
+interface ImportOptions {
+  /** Stops the import: no new file starts, and running fetches are aborted. */
+  readonly signal?: AbortSignal
+  /** Called each time one file has settled, arrived or missing. */
+  readonly onSettled?: () => void
+}
+
 /**
- * Fetches and imports each media item into the project, 4 at a time; one that
- * fails never stops the others. Answers the new media id of each saved one
- * that arrived, and the parent's ref of each new media id.
+ * Fetches and imports each media item into the project, 4 at a time; a file
+ * that fails to arrive never stops the others. Answers the new media id of
+ * each saved one that arrived, and the parent's ref of each new media id.
+ * Throws StorageFull when the browser's storage runs out (the other files are
+ * stopped), and the signal's reason when it aborts; either way only once every
+ * import already running has ended, so none lands after the caller cleans up.
  */
-export async function importMedia(media: readonly OpenMedia[], projectId: string) {
+export async function importMedia(
+  media: readonly OpenMedia[],
+  projectId: string,
+  { signal, onSettled }: ImportOptions = {},
+) {
   const imported = new Map<string, string>()
   const refs: Array<{ ref: string; mediaId: string }> = []
-  await eachLimited(media, FETCH_CONCURRENCY, async (entry) => {
-    try {
-      const blob = await fetchFile(entry)
-      const { id } = await mediaLibraryService.importMediaBlob(blob, projectId, entry.name)
-      imported.set(entry.mediaId, id)
-      if (entry.ref) refs.push({ ref: entry.ref, mediaId: id })
-    } catch (e) {
-      log.warn(`NODARO_OPEN_PROJECT: could not bring in ${entry.name}`, { error: e })
-    }
-  })
+  const stop = new AbortController()
+  const abort = () => stop.abort(signal?.reason)
+  if (signal?.aborted) abort()
+  signal?.addEventListener('abort', abort, { once: true })
+  let full: unknown = null
+  try {
+    await eachLimited(media, FETCH_CONCURRENCY, stop.signal, async (entry) => {
+      try {
+        const blob = await fetchFile(entry, stop.signal)
+        stop.signal.throwIfAborted()
+        const { id } = await mediaLibraryService.importMediaBlob(blob, projectId, entry.name)
+        imported.set(entry.mediaId, id)
+        if (entry.ref) refs.push({ ref: entry.ref, mediaId: id })
+      } catch (e) {
+        if (isStorageFull(e)) {
+          full ??= e
+          stop.abort(e)
+          return
+        }
+        if (stop.signal.aborted) return
+        log.warn(`NODARO_OPEN_PROJECT: could not bring in ${entry.name}`, { error: e })
+      }
+      if (!stop.signal.aborted) onSettled?.()
+    })
+  } finally {
+    signal?.removeEventListener('abort', abort)
+  }
+  if (full) throw new StorageFull(full)
+  signal?.throwIfAborted()
   return { imported, refs }
 }
 
