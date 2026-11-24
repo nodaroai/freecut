@@ -6,7 +6,7 @@ import { heldProjectId } from './held-project'
 import { onHistoryFreeEdit } from './history-free-batch'
 import { refsByMediaId } from './imported-refs'
 import { onMediaLibraryChange } from './media-library-changes'
-import { collectProjectJson } from './studio-export-bridge'
+import { readProjectFile } from './studio-export-bridge'
 
 const PROJECT_CHANGED = 'FREECUT_PROJECT_CHANGED'
 const PROJECT = 'FREECUT_PROJECT'
@@ -174,27 +174,21 @@ export function startProjectChangeAnnouncements(): () => void {
  * NODARO_GET_PROJECT { requestId } → FREECUT_PROJECT { requestId, revision,
  * projectId, projectJson, refs }: the project file, the revision it is current
  * with, the editor's id of the project, and the parent's ref for each media id
- * it imported. Queued behind any running
- * edit request, so it hands over what that request left.
+ * it imported. Queued behind any running edit request, so it hands over what
+ * that request left. It answers once the editor shows the open project fully
+ * loaded (waiting up to 10 s); otherwise it saves nothing and answers
+ * `projectJson: null, notReady: true`.
  */
 export function handleGetProject(event: MessageEvent): Promise<void> {
   const { requestId } = (event.data?.payload ?? {}) as { requestId?: unknown }
   if (typeof requestId !== 'string') return Promise.resolve()
   return enqueueRequest(async () => {
-    const at = revision
-    const projectJson = await collectProjectJson()
-    window.parent.postMessage(
-      {
-        type: PROJECT,
-        payload: {
-          requestId,
-          revision: at,
-          projectId: heldProjectId(),
-          projectJson,
-          refs: refsByMediaId(),
-        },
-      },
-      event.origin,
-    )
+    // The revision the file is current with: the one when the live stores are saved.
+    let at = revision
+    const file = await readProjectFile(() => (at = revision))
+    const payload = file
+      ? { requestId, revision: at, ...file, refs: refsByMediaId() }
+      : { requestId, revision, projectId: heldProjectId(), projectJson: null, notReady: true }
+    window.parent.postMessage({ type: PROJECT, payload }, event.origin)
   })
 }

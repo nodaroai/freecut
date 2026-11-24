@@ -443,6 +443,12 @@ function handleResetProject() {
  *   - NODARO_GET_PROJECT { requestId } answers FREECUT_PROJECT { requestId,
  *     revision, projectId, projectJson, refs }: the project file, the revision
  *     it is current with, and the parent's ref for each media id it imported.
+ *     It answers only once the editor shows the open project fully loaded,
+ *     waiting up to 10 s (for instance while a NODARO_LOAD_VIDEO runs or the
+ *     timeline loads). When it still does not, when no project is open, or
+ *     when the file cannot be read, it answers FREECUT_PROJECT { requestId,
+ *     revision, projectId, projectJson: null, notReady: true }: nothing to
+ *     save now; ask again after the next FREECUT_PROJECT_CHANGED.
  *   - NODARO_OPEN_PROJECT { requestId, projectJson, media: [{ mediaId, ref,
  *     url, name, type }] } opens a saved project in a fresh one, fetching each
  *     media item from its url, and answers FREECUT_PROJECT_OPENED { requestId,

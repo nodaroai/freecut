@@ -48,7 +48,10 @@ vi.mock('../deps/projects-contract', async () => {
   }
 })
 vi.mock('./studio-export-bridge', () => ({
-  collectProjectJson: vi.fn(async () => ({ project: { id: 'p1' } })),
+  readProjectFile: vi.fn(async (onSave?: () => void) => {
+    onSave?.()
+    return { projectId: 'p1', projectJson: { project: { id: 'p1' } } }
+  }),
 }))
 vi.mock('./edit-readiness', () => ({ waitUntilEditable: vi.fn(async () => 'p1') }))
 vi.mock('./timeline-report', () => ({ readTimeline: () => ({}) }))

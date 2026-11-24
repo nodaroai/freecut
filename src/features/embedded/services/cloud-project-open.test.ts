@@ -95,16 +95,21 @@ vi.mock('./studio-export-bridge', async () => {
   const { useProjectStore } = await import('../deps/projects-contract')
   const { useTimelineCommandStore } = await import('../deps/timeline-contract')
   return {
-    collectProjectJson: vi.fn(async () => ({
-      project: {
-        id: useProjectStore.getState().currentProject?.id,
-        lastEdit: (
-          useTimelineCommandStore.getState().undoStack.at(-1) as
-            | { command: { type: string } }
-            | undefined
-        )?.command.type,
-      },
-    })),
+    readProjectFile: vi.fn(async () => {
+      const projectId = useProjectStore.getState().currentProject?.id
+      if (!projectId) return null
+      const projectJson = {
+        project: {
+          id: projectId,
+          lastEdit: (
+            useTimelineCommandStore.getState().undoStack.at(-1) as
+              | { command: { type: string } }
+              | undefined
+          )?.command.type,
+        },
+      }
+      return { projectId, projectJson }
+    }),
   }
 })
 vi.mock('./edit-readiness', () => ({ waitUntilEditable: vi.fn(async () => 'p1') }))
