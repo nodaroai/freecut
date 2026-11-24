@@ -19,7 +19,14 @@ vi.mock('../deps/projects-contract', () => ({
 vi.mock('../deps/project-bundle-contract', () => ({
   exportProjectJson: vi.fn(async () => ({ version: 2, items: [] })),
 }))
-vi.mock('../deps/timeline-contract', () => ({ saveTimeline }))
+vi.mock('../deps/timeline-contract', () => ({
+  saveTimeline,
+  useTimelineSettingsStore: { getState: () => ({ isTimelineLoading: false }) },
+}))
+// The editor shows p1, so Save & Exit saves it.
+vi.mock('../deps/media-library-contract', () => ({
+  useMediaLibraryStore: { getState: () => ({ currentProjectId: 'p1' }) },
+}))
 
 // The client render as Save & Exit's renderer sees it. Tests move it through
 // its states the way a real render would.

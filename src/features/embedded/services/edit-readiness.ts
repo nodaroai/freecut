@@ -22,13 +22,23 @@ function watchPointers(): void {
   window.addEventListener('blur', () => pressed.clear())
 }
 
-/** Why the editor cannot take an edit right now, or null when it can. */
-export function editBlocker(): string | null {
+/**
+ * Why the open project is not settled right now, or null when it is: a
+ * project is open, its timeline is loaded and no video import is running.
+ */
+export function projectBlocker(): string | null {
   if (!useProjectStore.getState().currentProject?.id) return 'No project is open'
   if (useTimelineSettingsStore.getState().isTimelineLoading) return 'The timeline is still loading'
   const embedded = useEmbeddedStore.getState()
   if (embedded.isImporting || embedded.pendingVideoImport)
     return 'The video is still being imported'
+  return null
+}
+
+/** Why the editor cannot take an edit right now, or null when it can. */
+export function editBlocker(): string | null {
+  const blocker = projectBlocker()
+  if (blocker) return blocker
   if (pressed.size > 0) return 'The person is dragging on the timeline'
   return null
 }

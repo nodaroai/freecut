@@ -40,6 +40,16 @@ let queue: Promise<void> = Promise.resolve()
 // Edit requests accepted and not yet answered.
 let pendingEdits = 0
 
+/**
+ * Runs `run` once every request accepted before it has been answered, so it
+ * reads what those requests left. Every request that reads or changes the
+ * timeline goes through here.
+ */
+export function enqueueRequest(run: () => void | Promise<void>): Promise<void> {
+  queue = queue.then(run, run)
+  return queue
+}
+
 /** True while an edit request is waiting or being applied: the open tab must not change under it. */
 export function editRequestPending(): boolean {
   return pendingEdits > 0
@@ -210,8 +220,7 @@ export function handleApplyOps(event: MessageEvent): Promise<void> {
     }
   }
   pendingEdits += 1
-  queue = queue.then(run, run)
-  return queue
+  return enqueueRequest(run)
 }
 
 /** The label a parent gave the edit request on top of the undo history, or null when the top is not one. */
@@ -240,8 +249,7 @@ export function handleUndoEdit(event: MessageEvent): Promise<void> {
     if (undone) useTimelineCommandStore.getState().undo()
     replyTo(event, requestId)('FREECUT_UNDO_RESULT', { undone, timeline: readTimeline() })
   }
-  queue = queue.then(run, run)
-  return queue
+  return enqueueRequest(run)
 }
 
 /**
@@ -252,6 +260,5 @@ export function handleGetTimeline(event: MessageEvent): Promise<void> {
   const { requestId } = (event.data?.payload ?? {}) as { requestId?: unknown }
   if (typeof requestId !== 'string') return Promise.resolve()
   const run = () => replyTo(event, requestId)('FREECUT_TIMELINE', { timeline: readTimeline() })
-  queue = queue.then(run, run)
-  return queue
+  return enqueueRequest(run)
 }
