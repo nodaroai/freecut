@@ -59,6 +59,8 @@ vi.mock('../deps/media-library-contract', async () => {
     mediaProcessorService: {},
     useMediaLibraryStore: create(() => ({
       currentProjectId: null as string | null,
+      isLoading: false,
+      mediaItems: [] as Array<{ id: string }>,
       loadMediaItems: async () => {},
     })),
   }
@@ -145,7 +147,11 @@ const history = useTimelineCommandStore as unknown as {
   getState: () => { undoStack: unknown[]; redoStack: unknown[] }
 }
 const library = useMediaLibraryStore as unknown as {
-  setState: (s: { currentProjectId: string | null }) => void
+  setState: (s: {
+    currentProjectId?: string | null
+    isLoading?: boolean
+    mediaItems?: Array<{ id: string }>
+  }) => void
 }
 
 // The app's route, as the real router and editor behave: going to another
@@ -159,11 +165,16 @@ function navigate(target: string | null) {
   if (target === route) return
   route = target
   setTimeout(() => {
-    library.setState({ currentProjectId: null })
+    library.setState({ currentProjectId: null, isLoading: false, mediaItems: [] })
     useProjectStore.setState({ currentProject: null })
     if (target === null) return
     settings.setState({ isTimelineLoading: true, isDirty: true })
-    library.setState({ currentProjectId: target })
+    // The editor loads the project's media library alongside its timeline.
+    library.setState({ currentProjectId: target, isLoading: true, mediaItems: [] })
+    setTimeout(
+      () => library.setState({ isLoading: false, mediaItems: [{ id: `${target}-media` }] }),
+      10,
+    )
     useProjectStore.setState({ currentProject: db.get(target) as never })
     if (!slowLoad) setTimeout(() => settings.setState({ isTimelineLoading: false }), 20)
   }, 20)
@@ -255,7 +266,11 @@ beforeEach(() => {
   db.clear()
   db.set('current', { id: 'current', name: 'Open now' })
   useProjectStore.setState({ currentProject: db.get('current') as never })
-  library.setState({ currentProjectId: 'current' })
+  library.setState({
+    currentProjectId: 'current',
+    isLoading: false,
+    mediaItems: [{ id: 'current-media' }],
+  })
   vi.mocked(updateProject).mockClear()
   vi.mocked(useProjectStore.getState().createProject).mockClear()
   vi.mocked(mediaLibraryService.importMediaBlob).mockClear()
@@ -478,6 +493,28 @@ describe('NODARO_OPEN_PROJECT', () => {
     // A change after the open is announced, from revision 1.
     settings.setState({ isDirty: false })
     settings.setState({ isDirty: true })
+    await sleep(600)
+    expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload.revision)).toEqual([1])
+  })
+
+  it('an open with media announces nothing, and a later import into it announces once', async () => {
+    stop = startProjectChangeAnnouncements()
+
+    await open({
+      requestId: 'o-media',
+      projectJson: savedProject({ items: [{ id: 'i1', mediaId: 'm1' }] }),
+      media: [media('m1'), media('m2')],
+    })
+    await sleep(600)
+    expect(opened()).toMatchObject({ ok: true, revision: 0 })
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
+
+    const freshId = useProjectStore.getState().currentProject!.id
+    library.setState({ isLoading: true })
+    library.setState({
+      isLoading: false,
+      mediaItems: [{ id: `${freshId}-media` }, { id: 'imported-after' }],
+    })
     await sleep(600)
     expect(posted('FREECUT_PROJECT_CHANGED').map((m) => m.payload.revision)).toEqual([1])
   })

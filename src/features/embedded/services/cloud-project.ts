@@ -3,6 +3,7 @@ import { isEmbedded, useEmbeddedStore } from '../stores/embedded-store'
 import { enqueueRequest } from './edit-ops-bridge'
 import { onHistoryFreeEdit } from './history-free-batch'
 import { refsByMediaId } from './imported-refs'
+import { onMediaLibraryChange } from './media-library-changes'
 import { collectProjectJson } from './studio-export-bridge'
 
 const PROJECT_CHANGED = 'FREECUT_PROJECT_CHANGED'
@@ -104,7 +105,8 @@ function historyMoved(state: CommandState, prev: CommandState): boolean {
  * changed, so it knows to ask for the project file again. A change is the
  * timeline turning dirty, an edit, an undo or a redo (including one made while
  * the timeline is already dirty and one made once the history is full), and an
- * edit request applied without history. Changes made before the parent set its
+ * edit request applied without history, and a change to the media the project
+ * file lists (media imported, removed, renamed or relinked). Changes made before the parent set its
  * origin are told once, when it does. Starting again while started does
  * nothing; the answer stops the announcements.
  */
@@ -119,6 +121,7 @@ export function startProjectChangeAnnouncements(): () => void {
       if (historyMoved(state, prev)) projectChanged()
     }),
     onHistoryFreeEdit(projectChanged),
+    onMediaLibraryChange(projectChanged),
     useEmbeddedStore.subscribe((state, prev) => {
       if (unannounced && state.parentOrigin && !prev.parentOrigin) projectChanged()
     }),

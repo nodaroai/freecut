@@ -11,10 +11,18 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../deps/projects-contract', () => ({
   useProjectStore: { getState: () => ({ createProject: mocks.createProject }) },
 }))
-vi.mock('../deps/media-library-contract', () => ({
-  mediaLibraryService: { importMediaBlob: vi.fn() },
-  mediaProcessorService: {},
-}))
+vi.mock('../deps/media-library-contract', async () => {
+  const { create } = await import('zustand')
+  return {
+    mediaLibraryService: { importMediaBlob: vi.fn() },
+    mediaProcessorService: {},
+    useMediaLibraryStore: create(() => ({
+      currentProjectId: null,
+      isLoading: false,
+      mediaItems: [],
+    })),
+  }
+})
 vi.mock('./embedded-workspace', () => ({ ensureEmbeddedWorkspaceMounted: vi.fn(async () => {}) }))
 vi.mock('./timeline-add', () => ({ addMediaToTimelineAtPlayhead: vi.fn() }))
 vi.mock('@/infrastructure/storage', () => ({ updateProject: vi.fn(), getProject: vi.fn() }))

@@ -8,7 +8,8 @@ vi.mock('../deps/projects-contract', () => ({
     getState: () => ({ currentProject: { id: 'p1' }, createProject: async () => ({ id: 'p2' }) }),
   },
 }))
-vi.mock('../deps/media-library-contract', () => {
+vi.mock('../deps/media-library-contract', async () => {
+  const { create } = await import('zustand')
   let next = 0
   return {
     mediaLibraryService: {
@@ -18,7 +19,12 @@ vi.mock('../deps/media-library-contract', () => {
       }),
     },
     mediaProcessorService: {},
-    useMediaLibraryStore: { getState: () => ({ loadMediaItems: async () => {} }) },
+    useMediaLibraryStore: create(() => ({
+      currentProjectId: null,
+      isLoading: false,
+      mediaItems: [],
+      loadMediaItems: async () => {},
+    })),
   }
 })
 

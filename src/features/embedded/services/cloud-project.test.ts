@@ -27,6 +27,17 @@ vi.mock('../deps/timeline-contract', async () => {
     snapshotsEqual: () => true,
   }
 })
+// The media library the project file lists its media from.
+vi.mock('../deps/media-library-contract', async () => {
+  const { create } = await import('zustand')
+  return {
+    useMediaLibraryStore: create(() => ({
+      currentProjectId: null as string | null,
+      isLoading: false,
+      mediaItems: [] as Array<Record<string, unknown>>,
+    })),
+  }
+})
 vi.mock('./studio-export-bridge', () => ({
   collectProjectJson: vi.fn(async () => ({ project: { id: 'p1' } })),
 }))
@@ -34,6 +45,7 @@ vi.mock('./edit-readiness', () => ({ waitUntilEditable: vi.fn(async () => 'p1') 
 vi.mock('./timeline-report', () => ({ readTimeline: () => ({}) }))
 
 import { useTimelineCommandStore, useTimelineSettingsStore } from '../deps/timeline-contract'
+import { useMediaLibraryStore } from '../deps/media-library-contract'
 import { useEmbeddedStore } from '../stores/embedded-store'
 import { currentRevision, handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
 import { handleApplyOps, setEditOpsLoader, type EditOp } from './edit-ops-bridge'
@@ -64,7 +76,34 @@ function markDirty() {
   useTimelineSettingsStore.setState({ isDirty: true })
 }
 
+const library = useMediaLibraryStore as unknown as {
+  setState: (s: {
+    currentProjectId?: string | null
+    isLoading?: boolean
+    mediaItems?: Array<Record<string, unknown>>
+  }) => void
+}
+const clip = (id: string, fileName = `${id}.mp4`) => ({
+  id,
+  fileName,
+  fileSize: 10,
+  mimeType: 'video/mp4',
+  duration: 2,
+  width: 320,
+  height: 180,
+  fps: 30,
+  codec: 'avc',
+  bitrate: 1,
+  thumbnailId: `thumb-${id}`,
+})
+/** The library of project `id` loading, then holding `items`. */
+function loadLibrary(id: string, items: Array<Record<string, unknown>>) {
+  library.setState({ currentProjectId: id, isLoading: true, mediaItems: [] })
+  library.setState({ isLoading: false, mediaItems: items })
+}
+
 beforeEach(() => {
+  library.setState({ currentProjectId: null, isLoading: false, mediaItems: [] })
   post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
   useEmbeddedStore.setState({ isEmbedded: true, parentOrigin: ORIGIN })
   useTimelineSettingsStore.setState({ isDirty: false })
@@ -282,5 +321,50 @@ describe('NODARO_GET_PROJECT', () => {
 
     const order = post.mock.calls.map((call) => (call[0] as Posted).type)
     expect(order.indexOf('FREECUT_OPS_RESULT')).toBeLessThan(order.indexOf('FREECUT_PROJECT'))
+  })
+})
+
+describe('FREECUT_PROJECT_CHANGED for the media library', () => {
+  it('an import announces once', () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+    loadLibrary('p1', [clip('a')])
+    vi.advanceTimersByTime(500)
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
+
+    // NODARO_IMPORT_FILES, or the person's own import: the library reloads with one more.
+    library.setState({ isLoading: true })
+    library.setState({ isLoading: false, mediaItems: [clip('a'), clip('b')] })
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(1)
+  })
+
+  it('a delete, a rename and a relink each announce', () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+    loadLibrary('p1', [clip('a'), clip('b')])
+
+    library.setState({ mediaItems: [clip('a')] })
+    vi.advanceTimersByTime(500)
+    library.setState({ mediaItems: [clip('a', 'renamed.mp4')] })
+    vi.advanceTimersByTime(500)
+    library.setState({ mediaItems: [{ ...clip('a', 'renamed.mp4'), fileSize: 99 }] })
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(3)
+  })
+
+  it('loading or switching a project, or what the file does not list, announces nothing', () => {
+    vi.useFakeTimers()
+    stop = startProjectChangeAnnouncements()
+
+    loadLibrary('p1', [clip('a')])
+    loadLibrary('p2', [clip('x'), clip('y')])
+    library.setState({ mediaItems: [{ ...clip('x'), thumbnailId: 'new-thumb' }, clip('y')] })
+    library.setState({ currentProjectId: null, mediaItems: [] })
+    vi.advanceTimersByTime(500)
+
+    expect(posted('FREECUT_PROJECT_CHANGED')).toHaveLength(0)
   })
 })
