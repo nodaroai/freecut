@@ -452,8 +452,10 @@ function handleResetProject() {
  *     save now; ask again after the next FREECUT_PROJECT_CHANGED.
  *   - NODARO_OPEN_PROJECT { requestId, projectJson, media: [{ mediaId, ref,
  *     url, name, type }], discardPrevious? } opens a saved project in a fresh
- *     one, fetching each media item from its url (https; 4 at a time; without
- *     credentials), and answers FREECUT_PROJECT_OPENED { requestId, ok,
+ *     one, fetching each media item from its url (https, or plain http on
+ *     localhost only in a development build; 4 at a time; without credentials;
+ *     at most 4 GB each, counted as the file arrives), and answers
+ *     FREECUT_PROJECT_OPENED { requestId, ok,
  *     missing, revision, projectId }: the media ids that did not arrive, at
  *     revision 0, and the id the open produced. A successful open discards any
  *     change of the previous project not yet announced.

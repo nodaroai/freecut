@@ -12,6 +12,8 @@ const FIRST_BYTE_MS = 60_000
 const FILE_MS = 10 * 60_000
 /** The largest file an open downloads. */
 const MAX_BYTES = 4 * 1024 ** 3
+/** How much of a body is held as loose pieces before they are folded into a Blob. */
+const FOLD_BYTES = 8 * 1024 ** 2
 
 /** One media item of a saved project, and where the editor fetches it. */
 export interface OpenMedia {
@@ -36,7 +38,7 @@ export function readMedia(media: unknown): { entries: OpenMedia[]; malformed: st
   return { entries, malformed }
 }
 
-/** An address the editor fetches: https, or plain http on this machine for development. */
+/** An address the editor fetches: https, or, in a development build, plain http on this machine. */
 function fetchable(address: string): boolean {
   let url: URL
   try {
@@ -45,7 +47,46 @@ function fetchable(address: string): boolean {
     return false
   }
   if (url.protocol === 'https:') return true
-  return url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)
+  return (
+    import.meta.env.DEV &&
+    url.protocol === 'http:' &&
+    ['localhost', '127.0.0.1'].includes(url.hostname)
+  )
+}
+
+/**
+ * Reads a response body, counting its bytes as they arrive and giving up (by
+ * throwing) once it passes MAX_BYTES, so a body without a length is capped
+ * too. The pieces are folded into Blobs as they come, so the file is not held
+ * in script memory.
+ */
+async function readBody(response: Response): Promise<Blob> {
+  if (!response.body) return response.blob()
+  const reader = response.body.getReader()
+  const folded: Blob[] = []
+  let loose: Uint8Array[] = []
+  let looseBytes = 0
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > MAX_BYTES) throw new Error('The file is too large')
+      loose.push(value)
+      looseBytes += value.byteLength
+      if (looseBytes >= FOLD_BYTES) {
+        folded.push(new Blob(loose as BlobPart[]))
+        loose = []
+        looseBytes = 0
+      }
+    }
+  } catch (e) {
+    void reader.cancel().catch(() => {})
+    throw e
+  }
+  folded.push(new Blob(loose as BlobPart[]))
+  return new Blob(folded)
 }
 
 /** An open's media import ran out of local storage: the open fails. */
@@ -95,7 +136,7 @@ async function fetchFile(entry: OpenMedia, signal: AbortSignal): Promise<Blob> {
     if (Number(response.headers.get('content-length') ?? 0) > MAX_BYTES) {
       throw new Error('The file is too large')
     }
-    const fetched = await Promise.race([response.blob(), aborted])
+    const fetched = await Promise.race([readBody(response), aborted])
     return new Blob([fetched], { type: entry.type || fetched.type })
   } finally {
     signal.removeEventListener('abort', stop)

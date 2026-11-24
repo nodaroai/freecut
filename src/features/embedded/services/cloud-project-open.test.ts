@@ -826,6 +826,19 @@ describe('NODARO_OPEN_PROJECT', () => {
       })
     })
 
+    it('when the editor cannot be sent back, the answer names no project: the editor is elsewhere', async () => {
+      vi.mocked(loadTimeline).mockImplementation(async (id: string) => {
+        if (id.startsWith('fresh-')) throw new Error('Failed to load timeline')
+      })
+      // Going back does nothing: the editor stays on the opened project.
+      setOpenProjectEditor(openEditor, () => () => {})
+
+      await open({ requestId: 'f8', projectJson: savedProject({}), media: [] })
+
+      expect(useMediaLibraryStore.getState().currentProjectId).toMatch(/^fresh-/)
+      expect(opened()).toMatchObject({ requestId: 'f8', ok: false, projectId: null })
+    })
+
     it('when no project was open and the opened one is slow to load, the editor is left on none', async () => {
       route = null
       library.setState({ currentProjectId: null })
@@ -918,6 +931,70 @@ describe('NODARO_OPEN_PROJECT', () => {
         'http://localhost:9000/m5.mp4',
         'http://127.0.0.1:9000/m6.mp4',
       ])
+    })
+
+    it('outside development builds, http on this machine is not fetched either', async () => {
+      vi.stubEnv('DEV', false)
+      onTestFinished(() => {
+        vi.unstubAllEnvs()
+      })
+      const at = (id: string, url: string) => ({ ...media(id), url })
+
+      await open({
+        requestId: 't6',
+        projectJson: savedProject({}),
+        media: [
+          at('m5', 'http://localhost:9000/m5.mp4'),
+          at('m6', 'http://127.0.0.1:9000/m6.mp4'),
+          at('m7', 'https://cdn.example/m7.mp4'),
+        ],
+      })
+
+      expect(opened()).toMatchObject({ ok: true, missing: ['m5', 'm6'] })
+      expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+        'https://cdn.example/m7.mp4',
+      ])
+    })
+
+    it('stops reading a body with no length once it passes 4 GB', async () => {
+      const cancelled = vi.fn(async () => {})
+      let reads = 0
+      // A chunked body that never ends, each piece a gigabyte (as far as length goes).
+      const body = {
+        getReader: () => ({
+          read: async () => {
+            reads += 1
+            return { done: false, value: { byteLength: 1024 ** 3 } }
+          },
+          cancel: cancelled,
+        }),
+      }
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, status: 200, headers: new Headers(), body })),
+      )
+
+      await open({ requestId: 't7', projectJson: savedProject({}), media: [media('m1')] })
+
+      expect(opened()).toMatchObject({ ok: true, missing: ['m1'] })
+      expect(reads).toBe(5)
+      expect(cancelled).toHaveBeenCalled()
+    })
+
+    it('reads a streamed body whole', async () => {
+      const blob = vi.mocked(mediaLibraryService.importMediaBlob)
+      blob.mockClear()
+      // A text body: the test environment's Response cannot carry its own Blob class.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string) => new Response(url)),
+      )
+
+      await open({ requestId: 't8', projectJson: savedProject({}), media: [media('m1')] })
+
+      const [imported] = blob.mock.calls[0]!
+      expect(imported.size).toBe('https://cdn.example/m1.mp4'.length)
+      expect(imported.type).toBe('video/mp4')
     })
 
     it('a malformed media entry is missing, not fetched', async () => {
