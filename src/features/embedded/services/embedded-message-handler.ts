@@ -15,8 +15,14 @@ import {
   setEditOpsLoader,
   type LoadEditOps,
 } from './edit-ops-bridge'
-import { claimImportedRef, mediaIdForRef, type SettleImportedRef } from './imported-refs'
+import {
+  claimImportedRef,
+  clearImportedRefs,
+  mediaIdForRef,
+  type SettleImportedRef,
+} from './imported-refs'
 import { handleGetProject, startProjectChangeAnnouncements } from './cloud-project'
+import { handleOpenProject, setOpenProjectEditor } from './cloud-project-open'
 import { handlePlayback } from './playback-control'
 import { handlePresence } from './presence-message'
 import { handleStudio } from './studio-message'
@@ -273,6 +279,8 @@ async function handleLoadVideo(event: MessageEvent) {
   }
 
   store.setIsImporting(true)
+  // A fresh project is made below: the refs of the one open now name nothing in it.
+  clearImportedRefs()
 
   try {
     // Embedded has no folder picker — mount OPFS as the workspace root before any storage op.
@@ -349,6 +357,7 @@ function handleResetProject() {
   // Re-import with the original video but no project JSON
   // The parent will re-send NODARO_LOAD_VIDEO without projectJson
   log.info('Reset project requested, waiting for fresh NODARO_LOAD_VIDEO')
+  clearImportedRefs()
 
   // Clear the importing flag so the next NODARO_LOAD_VIDEO is accepted
   store.setIsImporting(false)
@@ -393,6 +402,10 @@ function handleResetProject() {
  *   and NODARO_GET_PROJECT { requestId } answers FREECUT_PROJECT { requestId,
  *   revision, projectJson, refs }: the project file and the parent's ref for
  *   each media id it imported, so the parent can save the project.
+ *   NODARO_OPEN_PROJECT { requestId, projectJson, media: [{ mediaId, ref, url,
+ *   name, type }] } opens a saved project in a fresh one, fetching each media
+ *   item from its url, and answers FREECUT_PROJECT_OPENED { requestId, ok,
+ *   missing, revision }: the media ids that did not arrive, at revision 0.
  */
 const EMBEDDED_CAPABILITIES = [
   'timeline-add',
@@ -420,15 +433,12 @@ interface ImportFile {
 }
 
 // Claim each file's ref at once — before the (async) import — so a request
-// that arrives mid-import finds it. Answers how to settle each file's claim.
-function claimRefs(files: ReadonlyArray<ImportFile>): (file: ImportFile) => SettleImportedRef {
-  const settlers = new Map<string, SettleImportedRef>()
-  for (const file of files) {
-    const ref = file.ref
-    if (typeof ref !== 'string' || !ref) continue
-    settlers.set(ref, claimImportedRef(ref))
-  }
-  return (file) => (typeof file.ref === 'string' && settlers.get(file.ref)) || (() => {})
+// that arrives mid-import finds it. Answers how to settle each file's claim,
+// one claim per file: two files may carry the same ref.
+function claimRefs(files: ReadonlyArray<ImportFile>): SettleImportedRef[] {
+  return files.map((file) =>
+    typeof file.ref === 'string' && file.ref ? claimImportedRef(file.ref) : () => {},
+  )
 }
 
 // One file into the media library — its media id, or null when it failed.
@@ -446,7 +456,7 @@ async function importFile(file: ImportFile, projectId: string): Promise<string |
 async function handleImportFiles(event: MessageEvent) {
   const files: ImportFile[] | undefined = event.data.payload?.files
   if (!files?.length) return
-  const settleFor = claimRefs(files)
+  const settlers = claimRefs(files)
 
   try {
     await ensureEmbeddedWorkspaceMounted()
@@ -457,13 +467,13 @@ async function handleImportFiles(event: MessageEvent) {
       return
     }
 
-    for (const file of files) {
-      settleFor(file)(await importFile(file, projectId))
+    for (const [index, file] of files.entries()) {
+      settlers[index]!(await importFile(file, projectId))
     }
   } finally {
     // Every claim settles, whatever happened above: a request waiting on a ref
     // must never wait forever. Settling an already settled claim does nothing.
-    files.forEach((file) => settleFor(file)(null))
+    settlers.forEach((settle) => settle(null))
   }
 
   // Refresh the media library UI (lazy-import to avoid circular deps)
@@ -504,6 +514,7 @@ const EMBEDDED_MESSAGE_HANDLERS: Record<string, (event: MessageEvent) => void | 
   NODARO_APPLY_OPS: handleApplyOps,
   NODARO_GET_TIMELINE: handleGetTimeline,
   NODARO_GET_PROJECT: handleGetProject,
+  NODARO_OPEN_PROJECT: handleOpenProject,
   NODARO_PLAYBACK: handlePlayback,
   NODARO_UNDO_EDIT: handleUndoEdit,
   NODARO_PRESENCE: handlePresence,
@@ -532,6 +543,7 @@ function handleMessage(event: MessageEvent) {
 
 export function initEmbeddedMessageHandler(deps: EmbeddedMessageHandlerDeps) {
   openEditor = deps.openEditor
+  setOpenProjectEditor(deps.openEditor)
   setEditOpsLoader(deps.loadEditOps ?? null)
   openOnEditWorkspace()
   // Warm the OPFS workspace mount so it's ready before the parent sends a video.

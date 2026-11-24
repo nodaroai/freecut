@@ -17,6 +17,8 @@ let announceTimer: ReturnType<typeof setTimeout> | undefined
 // A change was made while there was no parent to tell: it is told once one is set.
 let unannounced = false
 let stopAnnouncements: (() => void) | null = null
+// True while a project is being opened: nothing it changes is a change to announce.
+let opening = false
 
 /** The revision of the newest change announced to the parent. */
 export function currentRevision(): number {
@@ -41,7 +43,26 @@ function announce() {
 }
 
 function projectChanged() {
+  if (opening) return
   if (announceTimer === undefined) announceTimer = setTimeout(announce, ANNOUNCE_INTERVAL_MS)
+}
+
+/**
+ * Holds the announcements while a project is opened (NODARO_OPEN_PROJECT), and
+ * answers how to end the open: the opened project is revision 0, with nothing
+ * waiting to be announced, neither from during the open nor from before it.
+ */
+export function beginProjectOpen(): () => void {
+  opening = true
+  clearTimeout(announceTimer)
+  announceTimer = undefined
+  return () => {
+    opening = false
+    clearTimeout(announceTimer)
+    announceTimer = undefined
+    unannounced = false
+    revision = 0
+  }
 }
 
 type CommandState = ReturnType<typeof useTimelineCommandStore.getState>

@@ -17,8 +17,23 @@ export type SettleImportedRef = (mediaId: string | null) => void
  */
 const refByMediaId = new Map<string, string>()
 
+// Counts the clears: a claim made before the newest clear settles to nothing,
+// so an import of a project that is no longer open is never recorded.
+let generation = 0
+
+/**
+ * Forget every ref, settled or not: the project they were imported into is no
+ * longer the open one (a project was opened or reset).
+ */
+export function clearImportedRefs(): void {
+  generation += 1
+  importedByRef.clear()
+  refByMediaId.clear()
+}
+
 /** Claim a ref before its (async) import starts, and answer how to settle it. */
 export function claimImportedRef(ref: string): SettleImportedRef {
+  const claimedIn = generation
   let resolve: (mediaId: string | null) => void = () => {}
   const pending = new Promise<string | null>((done) => {
     resolve = done
@@ -28,8 +43,9 @@ export function claimImportedRef(ref: string): SettleImportedRef {
   return (mediaId) => {
     if (settled) return
     settled = true
-    resolve(mediaId)
-    if (mediaId) refByMediaId.set(mediaId, ref)
+    const current = claimedIn === generation
+    resolve(current ? mediaId : null)
+    if (mediaId && current) refByMediaId.set(mediaId, ref)
   }
 }
 

@@ -9,6 +9,11 @@ const cloud = vi.hoisted(() => ({
   startProjectChangeAnnouncements: vi.fn(() => () => {}),
 }))
 vi.mock('./cloud-project', () => cloud)
+const opening = vi.hoisted(() => ({
+  handleOpenProject: vi.fn(async () => {}),
+  setOpenProjectEditor: vi.fn(),
+}))
+vi.mock('./cloud-project-open', () => opening)
 
 import { initEmbeddedMessageHandler } from './embedded-message-handler'
 
@@ -19,6 +24,7 @@ beforeEach(() => {
   post = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
   cloud.handleGetProject.mockClear()
   cloud.startProjectChangeAnnouncements.mockClear()
+  opening.handleOpenProject.mockClear()
 })
 afterEach(() => post.mockRestore())
 
@@ -51,5 +57,27 @@ describe('cloud-project wiring', () => {
     expect(cloud.handleGetProject).toHaveBeenCalled()
     const [event] = cloud.handleGetProject.mock.calls[0] as unknown as [MessageEvent]
     expect(event.data.payload).toEqual({ requestId: 'g1' })
+  })
+
+  it('routes NODARO_OPEN_PROJECT from the parent, behind the origin check', () => {
+    const openEditor = vi.fn()
+    initEmbeddedMessageHandler({ openEditor })
+    expect(opening.setOpenProjectEditor).toHaveBeenCalledWith(openEditor)
+    const send = (origin: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'NODARO_OPEN_PROJECT', payload: { requestId: 'o1' } },
+          origin,
+          source: window,
+        }),
+      )
+
+    send('https://evil.example.com')
+    expect(opening.handleOpenProject).not.toHaveBeenCalled()
+
+    send(ORIGIN)
+    expect(opening.handleOpenProject).toHaveBeenCalledTimes(1)
+    const [event] = opening.handleOpenProject.mock.calls[0] as unknown as [MessageEvent]
+    expect(event.origin).toBe(ORIGIN)
   })
 })
